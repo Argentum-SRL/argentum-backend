@@ -7,6 +7,7 @@ from app.core.database import get_db
 from app.models.usuario import Usuario
 from app.schemas.onboarding import (
     EstadoOnboardingResponse,
+    CotizacionesDolarResponse,
     DatosPersonalesRequest,
     CicloFinancieroRequest,
     MonedaRequest,
@@ -19,8 +20,17 @@ from app.services.onboarding_service import (
     validar_ciclo,
     crear_billeteras_onboarding
 )
+from app.services.dolar_service import get_cotizaciones_dolar
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
+
+
+@router.get("/cotizaciones-dolar", response_model=CotizacionesDolarResponse)
+def get_cotizaciones_onboarding(
+    current_user: Usuario = Depends(get_current_user),
+):
+    _ = current_user
+    return get_cotizaciones_dolar()
 
 @router.get("/estado", response_model=EstadoOnboardingResponse)
 def estado_onboarding(
@@ -110,7 +120,11 @@ def post_moneda(
     if (body.moneda_principal == "USD" or body.moneda_secundaria_activa) and not body.tipo_dolar:
         raise HTTPException(status_code=400, detail="El tipo de dólar es obligatorio.")
         
-    valid_dolares = ['oficial', 'blue', 'tarjeta', 'bolsa', 'cripto']
+    # Compatibilidad: "bolsa" historico se guarda como "mep"
+    if body.tipo_dolar == "bolsa":
+        body.tipo_dolar = "mep"
+
+    valid_dolares = ['oficial', 'blue', 'tarjeta', 'mep']
     if body.tipo_dolar and body.tipo_dolar not in valid_dolares:
         raise HTTPException(status_code=400, detail="Tipo de dólar no válido.")
 

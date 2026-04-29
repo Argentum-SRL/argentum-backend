@@ -17,6 +17,22 @@ class EstadoOnboardingResponse(BaseModel):
     pasos_pendientes: list[str]
     datos_actuales: DatosActuales
 
+
+class CotizacionDolar(BaseModel):
+    tipo: str
+    nombre: str
+    compra: float | None = None
+    venta: float | None = None
+    promedio: float | None = None
+    moneda: str
+    fecha_actualizacion: str | None = None
+
+
+class CotizacionesDolarResponse(BaseModel):
+    fuente: str
+    actualizado_en: str
+    cotizaciones: dict[str, CotizacionDolar]
+
 class DatosPersonalesRequest(BaseModel):
     nombre: str = Field(..., min_length=1)
     apellido: str = Field(..., min_length=1)
