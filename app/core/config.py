@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     # Twilio / WhatsApp
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_WHATSAPP_FROM: str = ""
+    # Compatibilidad hacia atras con implementaciones previas
     TWILIO_WHATSAPP_NUMBER: str = ""
 
     # Google

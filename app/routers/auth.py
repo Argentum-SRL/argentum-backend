@@ -43,14 +43,17 @@ from app.schemas.auth import (
     CompletarPerfilRequest,
     EnviarCodigoEmailRequest,
     EnviarCodigoRequest,
+    EnviarCodigoWhatsappRequest,
     GoogleLoginRequest,
     LoginRequest,
     LogoutRequest,
     MeResponse,
+    OkResponse,
     RecuperarPasswordRequest,
     RefreshRequest,
     RegisterRequest,
     TokenResponse,
+    VerificarCodigoRequest,
     VerificarCodigoEmailRequest,
     VerificarCodigoTelefonoRequest,
     VerificarRecuperacionRequest,
@@ -66,6 +69,7 @@ from app.services.email_service import (
     verificar_codigo_recuperacion,
 )
 from app.services.whatsapp_service import (
+    enviar_whatsapp,
     enviar_mensaje_whatsapp,
     generar_codigo,
     guardar_codigo,
@@ -73,6 +77,34 @@ from app.services.whatsapp_service import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.post("/enviar-codigo-whatsapp", response_model=OkResponse)
+def enviar_codigo_whatsapp(body: EnviarCodigoWhatsappRequest):
+    """Genera OTP de 6 digitos y lo envia por WhatsApp al telefono recibido."""
+    codigo = generar_codigo()
+    guardar_codigo(body.telefono, codigo)
+
+    mensaje = (
+        "*Argentum*\n"
+        f"Tu codigo de verificacion es: *{codigo}*\n"
+        "Expira en 10 minutos.\n"
+        "Si no lo pediste, ignora este mensaje."
+    )
+
+    if not enviar_whatsapp(body.telefono, mensaje):
+        raise HTTPException(status_code=500, detail="No se pudo enviar el codigo por WhatsApp.")
+
+    return OkResponse(ok=True)
+
+
+@router.post("/verificar-codigo", response_model=OkResponse)
+def verificar_codigo_whatsapp(body: VerificarCodigoRequest):
+    """Verifica OTP de WhatsApp guardado previamente."""
+    ok, error = verificar_codigo(body.telefono, body.codigo)
+    if not ok:
+        raise HTTPException(status_code=400, detail=error or "Codigo invalido o expirado.")
+    return OkResponse(ok=True)
 
 
 # ---------------------------------------------------------------------------
