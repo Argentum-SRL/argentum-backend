@@ -5,6 +5,10 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
 
+    # Supabase (API / client)
+    SUPABASE_URL: str = ""
+    SUPABASE_KEY: str = ""
+
     # Auth
     SECRET_KEY: str
     ALGORITHM: str = "HS256"

@@ -5,6 +5,7 @@ from alembic import context
 
 from app.core.config import settings
 from app.core.database import Base
+import app.models  # noqa: F401  # Ensure all SQLAlchemy models are registered for autogenerate.
 
 # Import all models here so Alembic can detect them for autogenerate
 # from app.models import user, wallet, transaction  # uncomment as you add models
