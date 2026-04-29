@@ -38,15 +38,18 @@ from app.core.database import get_db
 from app.core.security import get_password_hash, verify_password
 from app.models.usuario import AuthProvider, Usuario
 from app.schemas.auth import (
+    EnviarCodigoRequest,
     GoogleLoginRequest,
     LoginResponse,
     LogoutRequest,
     MeResponse,
     RefreshRequest,
     TokenResponse,
+    VerificarCodigoRequest,
 )
 from app.schemas.usuario import UsuarioRead
 from app.services.auth_service import verify_google_token
+from app.services.sms_service import enviar_sms, generar_codigo, guardar_codigo, verificar_codigo
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -174,6 +177,78 @@ def login_google(request_body: GoogleLoginRequest, request: Request, db: Session
             telefono=telefono_dummy,
             foto_url=foto_url,
             auth_provider=AuthProvider.GOOGLE,
+            onboarding_completo=False,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+    access_token = crear_access_token(user.id)
+    refresh_token = crear_refresh_token(user.id, db, device_info=_device_info_from_request(request))
+
+    return LoginResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+        usuario=UsuarioRead.model_validate(user),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Login con teléfono (verificación por SMS)
+# ---------------------------------------------------------------------------
+
+@router.post("/telefono/enviar-codigo")
+def enviar_codigo_telefono(body: EnviarCodigoRequest):
+    """
+    Envía un código de verificación de 6 dígitos al número de teléfono dado.
+    El código expira en 10 minutos. Si Twilio no está configurado, el código
+    se imprime en la consola del servidor (modo desarrollo).
+    """
+    codigo = generar_codigo()
+    guardar_codigo(body.telefono, codigo)
+
+    enviado = enviar_sms(body.telefono, codigo)
+    if not enviado:
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo enviar el SMS. Intentá de nuevo más tarde.",
+        )
+
+    return {"detail": "Código de verificación enviado", "telefono": body.telefono}
+
+
+@router.post("/telefono/verificar", response_model=LoginResponse)
+def verificar_codigo_telefono(
+    body: VerificarCodigoRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    Verifica el código SMS recibido.
+    - Si es correcto y el teléfono ya existe → login (devuelve JWT).
+    - Si es correcto y el teléfono no existe → crea usuario con
+      auth_provider='telefono', onboarding_completo=False, y devuelve JWT.
+    - Si el código es incorrecto o expiró → 400.
+    """
+    if not verificar_codigo(body.telefono, body.codigo):
+        raise HTTPException(
+            status_code=400,
+            detail="Código incorrecto o expirado",
+        )
+
+    # Buscar usuario por teléfono
+    user = db.execute(
+        select(Usuario).where(Usuario.telefono == body.telefono)
+    ).scalar_one_or_none()
+
+    if not user:
+        # Crear usuario nuevo — nombre y apellido se completan en el onboarding
+        user = Usuario(
+            nombre="",
+            apellido="",
+            telefono=body.telefono,
+            auth_provider=AuthProvider.TELEFONO,
             onboarding_completo=False,
         )
         db.add(user)

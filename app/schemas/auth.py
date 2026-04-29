@@ -25,6 +25,15 @@ class LogoutRequest(BaseModel):
     refresh_token: str
 
 
+class EnviarCodigoRequest(BaseModel):
+    telefono: str
+
+
+class VerificarCodigoRequest(BaseModel):
+    telefono: str
+    codigo: str
+
+
 # ---------------------------------------------------------------------------
 # Response schemas
 # ---------------------------------------------------------------------------
