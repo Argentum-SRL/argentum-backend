@@ -1,8 +1,5 @@
 """
-app/services/sms_service.py — Servicio de verificación por SMS con Twilio.
-
-Cache en memoria para códigos de verificación (dict con TTL de 10 minutos).
-Máximo 3 intentos fallidos; después el código se invalida y hay que pedir uno nuevo.
+app/services/whatsapp_service.py — Servicio de verificación por WhatsApp con Twilio Sandbox.
 """
 
 import logging
@@ -77,22 +74,48 @@ def verificar_codigo(telefono: str, codigo: str) -> tuple[bool, str | None]:
     return True, None
 
 
-def enviar_sms(telefono: str, codigo: str) -> bool:
+def formatear_numero_whatsapp(telefono: str) -> str:
     """
-    Envía el código de verificación por SMS usando Twilio.
-    En desarrollo sin credenciales, loguea en consola.
+    Formatea un número para Twilio WhatsApp.
+    - Si ya tiene 'whatsapp:': devolver como esta
+    - Si empieza con '+': agregar 'whatsapp:' adelante
+    - Si empieza con '0': reemplazar '0' por 'whatsapp:+549'
+    - Si empieza con '15': agregar 'whatsapp:+549' adelante
     """
-    mensaje = f"Tu código de verificación de Argentum es: {codigo}"
+    if telefono.startswith("whatsapp:"):
+        return telefono
+    if telefono.startswith("+"):
+        return f"whatsapp:{telefono}"
+    if telefono.startswith("0"):
+        return f"whatsapp:+549{telefono[1:]}"
+    if telefono.startswith("15"):
+        return f"whatsapp:+549{telefono}"
+    
+    # Caso por defecto si no cumple ninguno de los anteriores pero queremos ser seguros
+    return f"whatsapp:{telefono}"
+
+
+def enviar_mensaje_whatsapp(telefono: str, mensaje: str) -> bool:
+    """
+    Envía un mensaje por WhatsApp usando Twilio.
+    - Usar formatear_numero_whatsapp() para el to
+    - Usar 'whatsapp:+14155238886' como from_
+    - Manejar errores de Twilio con try/except
+    - Devolver True si se envio, False si fallo
+    """
+    to_whatsapp = formatear_numero_whatsapp(telefono)
+    from_whatsapp = f"whatsapp:{settings.TWILIO_WHATSAPP_NUMBER}"
 
     if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
         logger.warning(
-            "⚠️  Twilio no configurado — código de verificación para %s: %s",
-            telefono, codigo,
+            "⚠️  Twilio no configurado — mensaje de WhatsApp para %s: %s",
+            telefono, mensaje,
         )
         print(f"\n{'='*50}")
-        print(f"📱 CÓDIGO SMS (modo desarrollo)")
-        print(f"   Teléfono: {telefono}")
-        print(f"   Código:   {codigo}")
+        print(f"📱 WHATSAPP (modo desarrollo)")
+        print(f"   De:      {from_whatsapp}")
+        print(f"   Para:    {to_whatsapp}")
+        print(f"   Mensaje: {mensaje}")
         print(f"{'='*50}\n")
         return True
 
@@ -100,11 +123,11 @@ def enviar_sms(telefono: str, codigo: str) -> bool:
         client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
         client.messages.create(
             body=mensaje,
-            from_=settings.TWILIO_WHATSAPP_NUMBER,
-            to=telefono,
+            from_=from_whatsapp,
+            to=to_whatsapp,
         )
-        logger.info("SMS enviado exitosamente a %s", telefono)
+        logger.info("WhatsApp enviado exitosamente a %s", telefono)
         return True
     except TwilioRestException as e:
-        logger.error("Error al enviar SMS a %s: %s", telefono, e)
+        logger.error("Error al enviar WhatsApp a %s: %s", telefono, e)
         return False
