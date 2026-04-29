@@ -266,3 +266,34 @@ def get_current_admin(
             detail="Permisos insuficientes: se requiere rol admin",
         )
     return current_user
+
+
+def get_optional_user(
+    request: "Request",
+    db: Session = Depends(get_db),
+) -> Usuario | None:
+    """
+    Dependency opcional: devuelve el usuario si hay un Bearer token válido,
+    o None si no hay token o el token es inválido. No lanza excepciones.
+    Útil en endpoints que se comportan diferente según si el usuario está autenticado.
+    """
+    from fastapi import Request as _Request
+    from jose import JWTError
+
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+
+    token = auth_header[7:]
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        usuario_id_str: str | None = payload.get("sub")
+        token_type: str | None = payload.get("type")
+        if not usuario_id_str or token_type != "access":
+            return None
+        usuario = db.execute(
+            select(Usuario).where(Usuario.id == UUID(usuario_id_str))
+        ).scalar_one_or_none()
+        return usuario
+    except (JWTError, Exception):
+        return None

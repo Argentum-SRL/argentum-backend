@@ -25,6 +25,7 @@ class RolUsuario(str, Enum):
 class EstadoUsuario(str, Enum):
     ACTIVO = "activo"
     INACTIVO = "inactivo"
+    PENDIENTE_VERIFICACION = "pendiente_verificacion"
 
 
 class Moneda(str, Enum):
@@ -41,10 +42,10 @@ class Usuario(Base):
     __tablename__ = "usuarios"
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
-    nombre: Mapped[str] = mapped_column(String(100), nullable=False)
-    apellido: Mapped[str] = mapped_column(String(100), nullable=False)
+    nombre: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    apellido: Mapped[str | None] = mapped_column(String(100), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
-    telefono: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    telefono: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
     foto_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     auth_provider: Mapped[AuthProvider] = mapped_column(
@@ -66,6 +67,8 @@ class Usuario(Base):
     )
     ciclo_valor: Mapped[str | None] = mapped_column(String(50), nullable=True)
     onboarding_completo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    email_verificado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    telefono_verificado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     fecha_registro: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )

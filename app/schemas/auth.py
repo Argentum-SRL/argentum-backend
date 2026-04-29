@@ -29,9 +29,39 @@ class EnviarCodigoRequest(BaseModel):
     telefono: str
 
 
-class VerificarCodigoRequest(BaseModel):
+class VerificarCodigoTelefonoRequest(BaseModel):
     telefono: str
     codigo: str
+
+
+class EnviarCodigoEmailRequest(BaseModel):
+    email: str
+
+
+class VerificarCodigoEmailRequest(BaseModel):
+    email: str
+    codigo: str
+
+
+class CompletarPerfilRequest(BaseModel):
+    nombre: str
+    apellido: str
+    email: str
+    password: str
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        import re
+        if len(v) < 8:
+            raise ValueError("La contraseña debe tener al menos 8 caracteres.")
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("La contraseña debe incluir al menos una letra mayúscula.")
+        if not re.search(r"[a-z]", v):
+            raise ValueError("La contraseña debe incluir al menos una letra minúscula.")
+        if not re.search(r"[0-9]", v):
+            raise ValueError("La contraseña debe incluir al menos un número.")
+        return v
 
 
 class RecuperarPasswordRequest(BaseModel):
@@ -45,7 +75,7 @@ class VerificarRecuperacionRequest(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    name: str
+    nombre: str
     apellido: str
     email: str
     telefono: str
@@ -70,16 +100,21 @@ class RegisterRequest(BaseModel):
 # Response schemas
 # ---------------------------------------------------------------------------
 
-class LoginResponse(BaseModel):
+class AuthResponse(BaseModel):
     """
-    Respuesta estándar para todos los métodos de login
-    (email, Google, teléfono). El frontend debe guardar
-    access_token y refresh_token al recibirla.
+    Respuesta estándar para todos los endpoints de autenticación.
+    Los tokens son null cuando el usuario aún no completó la verificación.
+    El frontend debe leer los flags y redirigir según corresponda.
     """
-    access_token: str
-    refresh_token: str
+    access_token: str | None = None
+    refresh_token: str | None = None
     token_type: str = "bearer"
-    usuario: UsuarioRead
+    usuario: UsuarioRead | None = None
+    requiere_telefono: bool = False
+    requiere_datos: bool = False
+    requiere_verificacion_email: bool = False
+    requiere_verificacion_telefono: bool = False
+    requiere_onboarding: bool = False
 
 
 class TokenResponse(BaseModel):
