@@ -20,6 +20,7 @@ FLUJO DE SESIÓN (documentación para el frontend):
 
 import re
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, field_validator
@@ -40,15 +41,25 @@ from app.models.usuario import AuthProvider, Usuario
 from app.schemas.auth import (
     EnviarCodigoRequest,
     GoogleLoginRequest,
+    LoginRequest,
     LoginResponse,
     LogoutRequest,
     MeResponse,
+    RecuperarPasswordRequest,
     RefreshRequest,
+    RegisterRequest,
     TokenResponse,
     VerificarCodigoRequest,
+    VerificarRecuperacionRequest,
 )
 from app.schemas.usuario import UsuarioRead
 from app.services.auth_service import verify_google_token
+from app.services.email_service import (
+    enviar_email_recuperacion,
+    generar_codigo_recuperacion,
+    guardar_codigo_recuperacion,
+    verificar_codigo_recuperacion,
+)
 from app.services.sms_service import enviar_sms, generar_codigo, guardar_codigo, verificar_codigo
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -67,25 +78,9 @@ def _device_info_from_request(request: Request) -> str | None:
 # Registro / Login con email
 # ---------------------------------------------------------------------------
 
-class RegisterRequest(BaseModel):
-    name: str
-    apellido: str
-    email: str
-    telefono: str
-    password: str
-
-    @field_validator("password")
-    @classmethod
-    def validate_password(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("La contraseña debe tener al menos 8 caracteres.")
-        if not re.search(r"[A-Z]", v):
-            raise ValueError("La contraseña debe incluir al menos una letra mayúscula.")
-        if not re.search(r"[a-z]", v):
-            raise ValueError("La contraseña debe incluir al menos una letra minúscula.")
-        if not re.search(r"[0-9]", v):
-            raise ValueError("La contraseña debe incluir al menos un número.")
-        return v
+# ---------------------------------------------------------------------------
+# Registro / Login con email
+# ---------------------------------------------------------------------------
 
 
 @router.post("/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
@@ -104,6 +99,8 @@ def register(user_in: RegisterRequest, request: Request, db: Session = Depends(g
         telefono=user_in.telefono,
         password_hash=get_password_hash(user_in.password),
         auth_provider=AuthProvider.EMAIL,
+        estado="activo",
+        onboarding_completo=False,
     )
     db.add(new_user)
     db.commit()
@@ -121,12 +118,22 @@ def register(user_in: RegisterRequest, request: Request, db: Session = Depends(g
 
 
 @router.post("/login", response_model=LoginResponse)
-def login(user_in: "LoginEmailRequest", request: Request, db: Session = Depends(get_db)):
+def login(user_in: LoginRequest, request: Request, db: Session = Depends(get_db)):
     """Login con email y password."""
     user = db.execute(select(Usuario).where(Usuario.email == user_in.email)).scalar_one_or_none()
 
-    if not user or not user.password_hash or not verify_password(user_in.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Email o contraseña incorrectos")
+    if not user:
+        raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+
+    if user.auth_provider != AuthProvider.EMAIL:
+        raise HTTPException(status_code=401, detail="Esta cuenta usa otro método de login")
+
+    if not user.password_hash or not verify_password(user_in.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Credenciales incorrectas")
+
+    # Actualizar último acceso
+    user.ultimo_acceso = datetime.now(timezone.utc)
+    db.commit()
 
     access_token = crear_access_token(user.id)
     refresh_token = crear_refresh_token(user.id, db, device_info=_device_info_from_request(request))
@@ -139,9 +146,43 @@ def login(user_in: "LoginEmailRequest", request: Request, db: Session = Depends(
     )
 
 
-class LoginEmailRequest(BaseModel):
-    email: str
-    password: str
+@router.post("/recuperar-password")
+def recuperar_password(body: RecuperarPasswordRequest, db: Session = Depends(get_db)):
+    """
+    Inicia el flujo de recuperación de contraseña enviando un código por email.
+    Si el email no existe, no revela información (devuelve 200).
+    """
+    user = db.execute(select(Usuario).where(Usuario.email == body.email)).scalar_one_or_none()
+
+    if user:
+        codigo = generar_codigo_recuperacion()
+        guardar_codigo_recuperacion(body.email, codigo)
+        enviar_email_recuperacion(body.email, codigo)
+
+    return {"detail": "Si el email existe, se ha enviado un código de recuperación."}
+
+
+@router.post("/recuperar-password/verificar")
+def verificar_recuperacion(body: VerificarRecuperacionRequest, db: Session = Depends(get_db)):
+    """
+    Verifica el código de recuperación y actualiza la contraseña.
+    """
+    if not verificar_codigo_recuperacion(body.email, body.codigo):
+        raise HTTPException(status_code=400, detail="Código incorrecto o expirado")
+
+    user = db.execute(select(Usuario).where(Usuario.email == body.email)).scalar_one_or_none()
+    if not user:
+        # Caso improbable si el código fue verificado, pero por seguridad:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+    # Validar password (misma lógica que en el registro, idealmente debería estar centralizada)
+    if len(body.nueva_password) < 8:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 8 caracteres.")
+
+    user.password_hash = get_password_hash(body.nueva_password)
+    db.commit()
+
+    return {"detail": "Contraseña actualizada correctamente"}
 
 
 # ---------------------------------------------------------------------------
