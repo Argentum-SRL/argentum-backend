@@ -16,7 +16,7 @@ RESPUESTA ESTÁNDAR (AuthResponse) para todos los endpoints de auth:
 
 FLUJOS:
   1. Google → tokens inmediatos + requiere_telefono si no tiene teléfono verificado
-  2. Teléfono → SMS → si es usuario nuevo: requiere_datos → completar-perfil → verificar-email
+  2. Teléfono → WhatsApp → si es usuario nuevo: requiere_datos → completar-perfil → verificar-email
   3. Email/password → registro → verificar-email → verificar-teléfono → tokens
 """
 
@@ -65,7 +65,12 @@ from app.services.email_service import (
     verificar_codigo_email,
     verificar_codigo_recuperacion,
 )
-from app.services.sms_service import enviar_sms, generar_codigo, guardar_codigo, verificar_codigo
+from app.services.whatsapp_service import (
+    enviar_mensaje_whatsapp,
+    generar_codigo,
+    guardar_codigo,
+    verificar_codigo,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -231,12 +236,19 @@ def verificar_email(body: VerificarCodigoEmailRequest, request: Request, db: Ses
     user.email_verificado = True
 
     if user.auth_provider == AuthProvider.EMAIL:
-        # Enviar SMS al teléfono registrado para completar la verificación
-        codigo_sms = generar_codigo()
-        guardar_codigo(user.telefono, codigo_sms)
-        enviado = enviar_sms(user.telefono, codigo_sms)
+        # Enviar WhatsApp al teléfono registrado para completar la verificación
+        codigo_wa = generar_codigo()
+        guardar_codigo(user.telefono, codigo_wa)
+        
+        mensaje = (
+            f"*Argentum*\n"
+            f"Tu codigo de verificacion es: *{codigo_wa}*\n"
+            f"Expira en 10 minutos.\n"
+            f"Si no lo pediste, ignora este mensaje."
+        )
+        enviado = enviar_mensaje_whatsapp(user.telefono, mensaje)
         if not enviado:
-            raise HTTPException(status_code=500, detail="No se pudo enviar el SMS. Intentá de nuevo.")
+            raise HTTPException(status_code=500, detail="No se pudo enviar el mensaje de WhatsApp. Intentá de nuevo.")
 
         db.commit()
         return AuthResponse(
@@ -320,7 +332,7 @@ def login_google(body: GoogleLoginRequest, request: Request, db: Session = Depen
 
 
 # ---------------------------------------------------------------------------
-# Teléfono (SMS)
+# Teléfono (WhatsApp)
 # ---------------------------------------------------------------------------
 
 @router.post("/telefono/enviar-codigo")
@@ -329,9 +341,15 @@ def enviar_codigo_telefono(body: EnviarCodigoRequest):
     codigo = generar_codigo()
     guardar_codigo(body.telefono, codigo)
 
-    enviado = enviar_sms(body.telefono, codigo)
+    mensaje = (
+        f"*Argentum*\n"
+        f"Tu codigo de verificacion es: *{codigo}*\n"
+        f"Expira en 10 minutos.\n"
+        f"Si no lo pediste, ignora este mensaje."
+    )
+    enviado = enviar_mensaje_whatsapp(body.telefono, mensaje)
     if not enviado:
-        raise HTTPException(status_code=500, detail="No se pudo enviar el SMS. Intentá de nuevo.")
+        raise HTTPException(status_code=500, detail="No se pudo enviar el mensaje de WhatsApp. Intentá de nuevo.")
 
     return {"detail": "Código de verificación enviado.", "telefono": body.telefono}
 
@@ -344,7 +362,7 @@ def verificar_codigo_telefono(
     usuario_autenticado: Usuario | None = Depends(get_optional_user),
 ):
     """
-    Verifica el código SMS. Comportamiento según contexto:
+    Verifica el código de WhatsApp. Comportamiento según contexto:
 
     A) Usuario autenticado (Google sin teléfono):
        Vincula el teléfono a la cuenta existente.
