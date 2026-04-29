@@ -40,7 +40,7 @@ class MovimientoMeta(Base):
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
-    meta: Mapped["Meta"] = relationship("Meta")
+    meta: Mapped["Meta"] = relationship("Meta", back_populates="movimientos")
 
     def __repr__(self) -> str:
         return (

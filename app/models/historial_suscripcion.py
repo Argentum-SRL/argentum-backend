@@ -26,7 +26,7 @@ class HistorialSuscripcion(Base):
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
-    suscripcion: Mapped["Suscripcion"] = relationship("Suscripcion")
+    suscripcion: Mapped["Suscripcion"] = relationship("Suscripcion", back_populates="historial")
 
     def __repr__(self) -> str:
         return (

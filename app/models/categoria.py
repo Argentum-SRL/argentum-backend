@@ -41,7 +41,7 @@ class Categoria(Base):
         default=EstadoCategoria.ACTIVA,
     )
 
-    subcategorias: Mapped[list["Subcategoria"]] = relationship("Subcategoria")
+    subcategorias: Mapped[list["Subcategoria"]] = relationship("Subcategoria", back_populates="categoria")
     creador: Mapped[Usuario | None] = relationship("Usuario")
 
     def __repr__(self) -> str:

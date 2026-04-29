@@ -50,7 +50,7 @@ class Suscripcion(Base):
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
-    historial: Mapped[list["HistorialSuscripcion"]] = relationship("HistorialSuscripcion")
+    historial: Mapped[list["HistorialSuscripcion"]] = relationship("HistorialSuscripcion", back_populates="suscripcion")
 
     def __repr__(self) -> str:
         return (

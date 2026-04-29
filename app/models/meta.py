@@ -41,7 +41,7 @@ class Meta(Base):
     )
 
     # La meta no queda atada a una billetera fija; cada movimiento define origen/destino.
-    movimientos: Mapped[list["MovimientoMeta"]] = relationship("MovimientoMeta")
+    movimientos: Mapped[list["MovimientoMeta"]] = relationship("MovimientoMeta", back_populates="meta")
 
     def __repr__(self) -> str:
         return (

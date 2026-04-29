@@ -33,7 +33,7 @@ class Subcategoria(Base):
         default=EstadoSubcategoria.ACTIVA,
     )
 
-    categoria: Mapped["Categoria"] = relationship("Categoria")
+    categoria: Mapped["Categoria"] = relationship("Categoria", back_populates="subcategorias")
 
     def __repr__(self) -> str:
         return (
