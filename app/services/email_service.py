@@ -75,8 +75,9 @@ def _enviar_email(destinatario: str, asunto: str, cuerpo: str) -> bool:
         logger.info("Email enviado exitosamente a %s", destinatario)
         return True
     except Exception as e:
-        logger.error("Error al enviar email a %s: %s", destinatario, e)
-        return False
+        logger.error("Error crítico al enviar email a %s: %s", destinatario, e)
+        # Lanzamos la excepción para que el router pueda capturarla o FastAPI devuelva 500
+        raise RuntimeError(f"Error en el servidor de correo: {str(e)}")
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +138,7 @@ def generar_y_enviar_verificacion_email(destinatario: str) -> str:
         f"Este código expira en 15 minutos.\n"
         f"Si no creaste una cuenta en Argentum, ignorá este mensaje."
     )
+    # Si falla, lanzará RuntimeError y el endpoint devolverá 500
     _enviar_email(destinatario, asunto, cuerpo)
     return codigo
 
