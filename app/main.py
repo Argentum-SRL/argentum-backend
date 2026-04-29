@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(title="Argentum API", version="1.0.0")
 
 from app.core.config import settings
+from app.routers import auth
 
 _origins = [settings.FRONTEND_URL]
 if settings.ENVIRONMENT == "development":
@@ -16,6 +17,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth.router)
 
 @app.get("/")
 def root():
