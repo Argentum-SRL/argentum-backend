@@ -17,7 +17,7 @@ class UsuarioBase(BaseModel):
     auth_provider: AuthProvider
     rol: RolUsuario = RolUsuario.USUARIO
     estado: EstadoUsuario = EstadoUsuario.ACTIVO
-    moneda_principal: Moneda = Moneda.ARS
+    moneda_principal: Moneda | None = None
     moneda_secundaria_activa: bool = False
     tipo_dolar: str = "blue"
     ciclo_tipo: CicloTipo | None = None
