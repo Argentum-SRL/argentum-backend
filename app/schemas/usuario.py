@@ -9,10 +9,10 @@ from app.models.usuario import AuthProvider, CicloTipo, EstadoUsuario, Moneda, R
 
 
 class UsuarioBase(BaseModel):
-    nombre: str
-    apellido: str
+    nombre: str | None = None
+    apellido: str | None = None
     email: str | None = None
-    telefono: str
+    telefono: str | None = None
     foto_url: str | None = None
     auth_provider: AuthProvider
     rol: RolUsuario = RolUsuario.USUARIO
@@ -23,6 +23,8 @@ class UsuarioBase(BaseModel):
     ciclo_tipo: CicloTipo | None = None
     ciclo_valor: str | None = None
     onboarding_completo: bool = False
+    email_verificado: bool = False
+    telefono_verificado: bool = False
     ultimo_acceso: datetime | None = None
 
 
@@ -46,12 +48,13 @@ class UsuarioUpdate(BaseModel):
     ciclo_tipo: CicloTipo | None = None
     ciclo_valor: str | None = None
     onboarding_completo: bool | None = None
+    email_verificado: bool | None = None
+    telefono_verificado: bool | None = None
     ultimo_acceso: datetime | None = None
 
 
 class UsuarioRead(UsuarioBase):
     id: UUID
-    password_hash: str | None = None
     fecha_registro: datetime
 
     model_config = ConfigDict(from_attributes=True)
