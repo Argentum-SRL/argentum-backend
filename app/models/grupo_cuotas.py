@@ -33,7 +33,7 @@ class GrupoCuotas(Base):
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
-    cuotas: Mapped[list["Cuota"]] = relationship("Cuota")
+    cuotas: Mapped[list["Cuota"]] = relationship("Cuota", back_populates="grupo")
 
     def __repr__(self) -> str:
         return (

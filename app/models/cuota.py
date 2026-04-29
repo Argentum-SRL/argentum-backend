@@ -28,7 +28,7 @@ class Cuota(Base):
     ajustada_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     pagada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    grupo: Mapped["GrupoCuotas"] = relationship("GrupoCuotas")
+    grupo: Mapped["GrupoCuotas"] = relationship("GrupoCuotas", back_populates="cuotas")
 
     def __repr__(self) -> str:
         return (
