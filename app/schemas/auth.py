@@ -34,6 +34,15 @@ class VerificarCodigoTelefonoRequest(BaseModel):
     codigo: str
 
 
+class EnviarCodigoWhatsappRequest(BaseModel):
+    telefono: str
+
+
+class VerificarCodigoRequest(BaseModel):
+    telefono: str
+    codigo: str
+
+
 class EnviarCodigoEmailRequest(BaseModel):
     email: str
 
@@ -127,3 +136,7 @@ class TokenResponse(BaseModel):
 class MeResponse(BaseModel):
     """Respuesta de /auth/me."""
     usuario: UsuarioRead
+
+
+class OkResponse(BaseModel):
+    ok: bool = True

@@ -7,8 +7,8 @@ import random
 import time
 from dataclasses import dataclass, field
 
-from twilio.rest import Client
 from twilio.base.exceptions import TwilioRestException
+from twilio.rest import Client
 
 from app.core.config import settings
 
@@ -26,6 +26,7 @@ class EntradaCodigo:
 
 
 _codigo_cache: dict[str, EntradaCodigo] = {}
+_twilio_client: Client | None = None
 
 
 def _limpiar_expirados() -> None:
@@ -95,7 +96,29 @@ def formatear_numero_whatsapp(telefono: str) -> str:
     return f"whatsapp:{telefono}"
 
 
-def enviar_mensaje_whatsapp(telefono: str, mensaje: str) -> bool:
+def _from_whatsapp() -> str:
+    if settings.TWILIO_WHATSAPP_FROM:
+        return settings.TWILIO_WHATSAPP_FROM
+
+    if settings.TWILIO_WHATSAPP_NUMBER:
+        numero = settings.TWILIO_WHATSAPP_NUMBER
+        return numero if numero.startswith("whatsapp:") else f"whatsapp:{numero}"
+
+    return "whatsapp:+14155238886"
+
+
+def _get_twilio_client() -> Client | None:
+    global _twilio_client
+
+    if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
+        return None
+
+    if _twilio_client is None:
+        _twilio_client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+    return _twilio_client
+
+
+def enviar_whatsapp(numero: str, mensaje: str) -> bool:
     """
     Envía un mensaje por WhatsApp usando Twilio.
     - Usar formatear_numero_whatsapp() para el to
@@ -103,31 +126,31 @@ def enviar_mensaje_whatsapp(telefono: str, mensaje: str) -> bool:
     - Manejar errores de Twilio con try/except
     - Devolver True si se envio, False si fallo
     """
-    to_whatsapp = formatear_numero_whatsapp(telefono)
-    from_whatsapp = f"whatsapp:{settings.TWILIO_WHATSAPP_NUMBER}"
+    to_whatsapp = formatear_numero_whatsapp(numero)
+    from_whatsapp = _from_whatsapp()
+    client = _get_twilio_client()
 
-    if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
+    if client is None:
         logger.warning(
-            "⚠️  Twilio no configurado — mensaje de WhatsApp para %s: %s",
-            telefono, mensaje,
+            "Twilio no configurado; mensaje de WhatsApp simulado para %s",
+            numero,
         )
-        print(f"\n{'='*50}")
-        print(f"📱 WHATSAPP (modo desarrollo)")
-        print(f"   De:      {from_whatsapp}")
-        print(f"   Para:    {to_whatsapp}")
-        print(f"   Mensaje: {mensaje}")
-        print(f"{'='*50}\n")
+        logger.info("[WHATSAPP-DEV] from=%s to=%s body=%s", from_whatsapp, to_whatsapp, mensaje)
         return True
 
     try:
-        client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
         client.messages.create(
             body=mensaje,
             from_=from_whatsapp,
             to=to_whatsapp,
         )
-        logger.info("WhatsApp enviado exitosamente a %s", telefono)
+        logger.info("WhatsApp enviado exitosamente a %s", numero)
         return True
     except TwilioRestException as e:
-        logger.error("Error al enviar WhatsApp a %s: %s", telefono, e)
+        logger.error("Error al enviar WhatsApp a %s: %s", numero, e)
         return False
+
+
+def enviar_mensaje_whatsapp(telefono: str, mensaje: str) -> bool:
+    """Alias de compatibilidad."""
+    return enviar_whatsapp(telefono, mensaje)
