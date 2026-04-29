@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     TWILIO_AUTH_TOKEN: str = ""
     TWILIO_WHATSAPP_NUMBER: str = ""
 
+    # Google
+    GOOGLE_CLIENT_ID: str = ""
+
     # CORS
     FRONTEND_URL: str = "http://localhost:5173"
 
