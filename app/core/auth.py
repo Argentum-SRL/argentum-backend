@@ -20,7 +20,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -269,7 +269,7 @@ def get_current_admin(
 
 
 def get_optional_user(
-    request: "Request",
+    request: Request,
     db: Session = Depends(get_db),
 ) -> Usuario | None:
     """
@@ -277,7 +277,6 @@ def get_optional_user(
     o None si no hay token o el token es inválido. No lanza excepciones.
     Útil en endpoints que se comportan diferente según si el usuario está autenticado.
     """
-    from fastapi import Request as _Request
     from jose import JWTError
 
     auth_header = request.headers.get("authorization", "")
