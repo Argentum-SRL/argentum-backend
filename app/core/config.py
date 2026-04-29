@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     # OpenAI
     OPENAI_API_KEY: str = ""
 
+    # Dolar API
+    DOLAR_API_BASE_URL: str = "https://dolarapi.com"
+    DOLAR_API_TIMEOUT_SECONDS: int = 10
+
     # Twilio / WhatsApp
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
