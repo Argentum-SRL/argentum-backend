@@ -128,6 +128,7 @@ def register(user_in: RegisterRequest, db: Session = Depends(get_db)):
         email_verificado=False,
         telefono_verificado=False,
         onboarding_completo=False,
+        moneda_principal="ARS",
     )
     db.add(nuevo)
     db.commit()

@@ -41,7 +41,7 @@ app = FastAPI(title="Argentum API", version="1.0.0", lifespan=lifespan)
 
 _origins = [settings.FRONTEND_URL]
 if settings.ENVIRONMENT == "development":
-    _origins.append("http://localhost:5173")
+    _origins.extend(["http://localhost:5173", "http://localhost:5174"])
 
 app.add_middleware(
     CORSMiddleware,
@@ -51,7 +51,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from app.routers import auth, onboarding
+
 app.include_router(auth.router)
+app.include_router(onboarding.router)
 
 
 @app.get("/")

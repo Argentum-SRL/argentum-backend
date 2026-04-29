@@ -57,8 +57,8 @@ class Usuario(Base):
     estado: Mapped[EstadoUsuario] = mapped_column(
         SAEnum(EstadoUsuario, values_callable=lambda obj: [e.value for e in obj], name="estado_usuario_enum"), nullable=False, default=EstadoUsuario.ACTIVO
     )
-    moneda_principal: Mapped[Moneda] = mapped_column(
-        SAEnum(Moneda, values_callable=lambda obj: [e.value for e in obj], name="moneda_enum"), nullable=False, default=Moneda.ARS
+    moneda_principal: Mapped[Moneda | None] = mapped_column(
+        SAEnum(Moneda, values_callable=lambda obj: [e.value for e in obj], name="moneda_enum"), nullable=True
     )
     moneda_secundaria_activa: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     tipo_dolar: Mapped[str] = mapped_column(String(30), nullable=False, default="blue")
