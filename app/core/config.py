@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     # Supabase (API / client)
     SUPABASE_URL: str = ""
     SUPABASE_KEY: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
 
     # Auth
     SECRET_KEY: str
