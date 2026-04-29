@@ -13,6 +13,7 @@ from app.models.periodo_presupuesto import PeriodoPresupuesto
 from app.models.perfil_financiero import PerfilFinanciero
 from app.models.presupuesto import Presupuesto
 from app.models.presupuesto_categoria import PresupuestoCategoria
+from app.models.refresh_token import RefreshToken
 from app.models.subcategoria import Subcategoria
 from app.models.suscripcion import Suscripcion
 from app.models.transaccion import Transaccion
@@ -38,6 +39,7 @@ __all__ = [
 	"PerfilFinanciero",
 	"Presupuesto",
 	"PresupuestoCategoria",
+	"RefreshToken",
 	"Suscripcion",
 	"Transaccion",
 	"TransaccionRecurrente",
