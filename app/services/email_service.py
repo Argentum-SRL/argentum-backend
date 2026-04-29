@@ -74,10 +74,16 @@ def _enviar_email(destinatario: str, asunto: str, cuerpo: str) -> bool:
 
         logger.info("Email enviado exitosamente a %s", destinatario)
         return True
+    except smtplib.SMTPAuthenticationError as e:
+        logger.error(
+            "SMTPAuthenticationError enviando email a %s. Gmail suele requerir App Password o 2FA habilitado: %s",
+            destinatario,
+            e,
+        )
+        return False
     except Exception as e:
-        logger.error("Error crítico al enviar email a %s: %s", destinatario, e)
-        # Lanzamos la excepción para que el router pueda capturarla o FastAPI devuelva 500
-        raise RuntimeError(f"Error en el servidor de correo: {str(e)}")
+        logger.exception("Error crítico al enviar email a %s", destinatario)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -138,8 +144,12 @@ def generar_y_enviar_verificacion_email(destinatario: str) -> str:
         f"Este código expira en 15 minutos.\n"
         f"Si no creaste una cuenta en Argentum, ignorá este mensaje."
     )
-    # Si falla, lanzará RuntimeError y el endpoint devolverá 500
-    _enviar_email(destinatario, asunto, cuerpo)
+    enviado = _enviar_email(destinatario, asunto, cuerpo)
+    if not enviado:
+        logger.warning(
+            "Email de verificación no enviado a %s. La cuenta se creó igual y el código quedó guardado en memoria.",
+            destinatario,
+        )
     return codigo
 
 

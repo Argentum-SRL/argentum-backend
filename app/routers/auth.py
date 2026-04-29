@@ -312,14 +312,33 @@ def verificar_email(body: VerificarCodigoEmailRequest, request: Request, db: Ses
 @router.post("/google", response_model=AuthResponse)
 def login_google(body: GoogleLoginRequest, request: Request, db: Session = Depends(get_db)):
     """Login / registro con Google ID token."""
+    print('[Auth][Google][Backend] /auth/google recibido', {
+        'origin': request.headers.get('origin'),
+        'userAgent': request.headers.get('user-agent'),
+        'tokenPresent': bool(body.token),
+        'tokenLength': len(body.token),
+        'tokenPrefix': body.token[:12] + '...' if body.token else None,
+    })
+
     token_info = verify_google_token(body.token)
     email = token_info.get("email")
     if not email:
+        print('[Auth][Google][Backend] Token válido pero sin email')
         raise HTTPException(status_code=400, detail="El token de Google no contiene un email válido.")
 
     user = db.execute(select(Usuario).where(Usuario.email == email)).scalar_one_or_none()
 
+    print('[Auth][Google][Backend] Usuario buscado', {
+        'email': email,
+        'exists': bool(user),
+        'authProvider': getattr(user.auth_provider, 'value', None) if user else None,
+    })
+
     if user and user.auth_provider != AuthProvider.GOOGLE:
+        print('[Auth][Google][Backend] Email ya registrado con otro método', {
+            'email': email,
+            'authProvider': user.auth_provider.value,
+        })
         raise HTTPException(
             status_code=400,
             detail="Este email ya está registrado con otro método. Iniciá sesión con tu contraseña.",
@@ -332,6 +351,13 @@ def login_google(body: GoogleLoginRequest, request: Request, db: Session = Depen
             partes = token_info["name"].split(" ", 1)
             nombre = partes[0]
             apellido = partes[1] if len(partes) > 1 else ""
+
+        print('[Auth][Google][Backend] Creando usuario nuevo', {
+            'email': email,
+            'nombre': nombre,
+            'apellido': apellido,
+            'picture': bool(token_info.get('picture')),
+        })
 
         user = Usuario(
             nombre=nombre or None,
@@ -352,6 +378,13 @@ def login_google(body: GoogleLoginRequest, request: Request, db: Session = Depen
     # Emitir tokens siempre (ya sea login o registro)
     user.ultimo_acceso = datetime.now(timezone.utc)
     db.commit()
+
+    print('[Auth][Google][Backend] Tokens emitidos', {
+        'userId': user.id,
+        'email': user.email,
+        'requiereTelefono': not user.telefono_verificado,
+        'requiereOnboarding': _requiere_onboarding(user) if user.telefono_verificado else False,
+    })
 
     access, refresh = _tokens(user.id, request, db)
 
