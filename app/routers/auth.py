@@ -561,3 +561,52 @@ def logout_all(
 def me(current_user: Usuario = Depends(get_current_user)):
     """Devuelve el perfil del usuario autenticado."""
     return MeResponse(usuario=UsuarioRead.model_validate(current_user))
+
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_cuenta(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Elimina permanentemente la cuenta del usuario y todos sus datos relacionados.
+    Realiza una limpieza manual de las tablas dependientes para evitar errores de FK.
+    """
+    from sqlalchemy import text
+
+    # 1. Tablas dependientes indirectas (borrar antes que sus padres)
+    db.execute(text("DELETE FROM movimientos_meta WHERE meta_id IN (SELECT id FROM metas WHERE usuario_id = :uid)"), {"uid": current_user.id})
+    db.execute(text("DELETE FROM cuotas WHERE grupo_id IN (SELECT id FROM grupos_cuotas WHERE usuario_id = :uid)"), {"uid": current_user.id})
+    db.execute(text("DELETE FROM historial_suscripciones WHERE suscripcion_id IN (SELECT id FROM suscripciones WHERE usuario_id = :uid)"), {"uid": current_user.id})
+    db.execute(text("DELETE FROM periodos_presupuesto WHERE presupuesto_id IN (SELECT id FROM presupuestos WHERE usuario_id = :uid)"), {"uid": current_user.id})
+    db.execute(text("DELETE FROM presupuestos_categorias WHERE presupuesto_id IN (SELECT id FROM presupuestos WHERE usuario_id = :uid)"), {"uid": current_user.id})
+
+    # 2. Tablas con usuario_id (ordenadas por dependencias)
+    tablas_usuario = [
+        "transacciones",
+        "transferencias_internas",
+        "grupos_cuotas",
+        "transacciones_recurrentes",
+        "suscripciones",
+        "presupuestos",
+        "notificaciones",
+        "perfiles_financieros",
+        "metas",
+        "conversaciones_wpp",
+        "categorias_excluidas",
+        "configuraciones_notificacion",
+        "billeteras",
+        "refresh_tokens"
+    ]
+
+    for tabla in tablas_usuario:
+        db.execute(text(f"DELETE FROM {tabla} WHERE usuario_id = :uid"), {"uid": current_user.id})
+
+    # 3. Tablas con creador_id (en lugar de usuario_id)
+    db.execute(text("DELETE FROM subcategorias WHERE creador_id = :uid"), {"uid": current_user.id})
+    db.execute(text("DELETE FROM categorias WHERE creador_id = :uid"), {"uid": current_user.id})
+    
+    # 4. Finalmente borrar el usuario
+    db.delete(current_user)
+    db.commit()
+    return None
