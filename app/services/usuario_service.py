@@ -64,12 +64,12 @@ def actualizar_email(
         raise HTTPException(status_code=400, detail="El email ya está en uso")
     
     usuario.email = datos.email_nuevo
-    usuario.email_verificado = False
+    usuario.email_verificado = True # Auto-verificado temporalmente
     db.commit()
     
-    email_service.generar_y_enviar_verificacion_email(datos.email_nuevo)
+    # email_service.generar_y_enviar_verificacion_email(datos.email_nuevo)
     
-    return {"confirmacion": "Email actualizado. Se envió un código de verificación.", "requiere_verificacion_email": True}
+    return {"confirmacion": "Email actualizado exitosamente.", "requiere_verificacion_email": False}
 
 def actualizar_password(
     db: Session, usuario: Usuario, datos: EditarPassword

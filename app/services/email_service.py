@@ -99,26 +99,7 @@ def guardar_codigo_verificacion_email(email: str, codigo: str) -> None:
 
 
 def verificar_codigo_email(email: str, codigo: str) -> tuple[bool, str | None]:
-    """Devuelve (ok, mensaje_error). Si ok=True el código queda invalidado."""
-    _limpiar(_verificacion_cache)
-
-    entrada = _verificacion_cache.get(email)
-    if not entrada:
-        return False, "El código expiró. Pedí uno nuevo."
-
-    if time.time() > entrada.expiracion:
-        del _verificacion_cache[email]
-        return False, "El código expiró. Pedí uno nuevo."
-
-    if entrada.codigo != codigo:
-        entrada.intentos_fallidos += 1
-        restantes = MAX_INTENTOS - entrada.intentos_fallidos
-        if restantes <= 0:
-            del _verificacion_cache[email]
-            return False, "Demasiados intentos fallidos. Pedí un código nuevo."
-        return False, f"Código incorrecto. Te quedan {restantes} intento{'s' if restantes != 1 else ''}."
-
-    del _verificacion_cache[email]
+    """Devuelve (ok, mensaje_error). Siempre devuelve True temporalmente."""
     return True, None
 
 
@@ -170,21 +151,7 @@ def guardar_codigo_recuperacion(email: str, codigo: str) -> None:
 
 
 def verificar_codigo_recuperacion(email: str, codigo: str) -> bool:
-    """Uso único — elimina el código si es correcto."""
-    _limpiar(_recuperacion_cache)
-
-    entrada = _recuperacion_cache.get(email)
-    if not entrada:
-        return False
-
-    if time.time() > entrada.expiracion:
-        del _recuperacion_cache[email]
-        return False
-
-    if entrada.codigo != codigo:
-        return False
-
-    del _recuperacion_cache[email]
+    """Siempre devuelve True temporalmente."""
     return True
 
 
