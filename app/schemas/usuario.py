@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from app.models.usuario import AuthProvider, CicloTipo, EstadoUsuario, Moneda, RolUsuario
+from app.models.usuario import AuthProvider, CicloTipo, EstadoUsuario, Moneda, RolUsuario, Sexo
 
 
 class UsuarioBase(BaseModel):
@@ -33,8 +33,8 @@ class UsuarioBase(BaseModel):
 
 class UsuarioCreate(UsuarioBase):
     password_hash: str | None = None
-    fecha_nacimiento: date
-    sexo: str
+    fecha_nacimiento: date | None = None
+    sexo: str | None = None
 
 
 class UsuarioUpdate(BaseModel):
@@ -70,6 +70,8 @@ class UsuarioRead(UsuarioBase):
 class EditarDatosPersonales(BaseModel):
     nombre: str
     apellido: str
+    fecha_nacimiento: date | None = None
+    sexo: Sexo | None = None
 
 
 class EditarEmail(BaseModel):
@@ -109,5 +111,5 @@ class MetodosLoginResponse(BaseModel):
 
 
 class UsuarioResponse(UsuarioRead):
-    fecha_nacimiento: date
-    sexo: str
+    fecha_nacimiento: date | None = None
+    sexo: str | None = None

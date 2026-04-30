@@ -16,6 +16,17 @@ from app.models.notificacion import Notificacion
 from app.models.conversacion_wpp import ConversacionWpp
 from app.models.refresh_token import RefreshToken
 from app.models.perfil_financiero import PerfilFinanciero
+from app.models.grupo_cuotas import GrupoCuotas
+from app.models.transaccion_recurrente import TransaccionRecurrente
+from app.models.transferencia_interna import TransferenciaInterna
+from app.models.categoria_excluida import CategoriaExcluida
+from app.models.configuracion_notificacion import ConfiguracionNotificacion
+from app.models.historial_suscripcion import HistorialSuscripcion
+from app.models.categoria import Categoria
+from app.models.subcategoria import Subcategoria
+from app.models.movimiento_meta import MovimientoMeta
+from app.models.periodo_presupuesto import PeriodoPresupuesto
+from app.models.presupuesto_categoria import PresupuestoCategoria
 from app.core.security import get_password_hash, verify_password
 from app.services import email_service, whatsapp_service
 from app.schemas.usuario import (
@@ -43,6 +54,8 @@ def actualizar_datos_personales(
     
     usuario.nombre = datos.nombre
     usuario.apellido = datos.apellido
+    usuario.fecha_nacimiento = datos.fecha_nacimiento
+    usuario.sexo = datos.sexo
     db.commit()
     db.refresh(usuario)
     return usuario
@@ -222,14 +235,49 @@ def eliminar_usuario(db: Session, usuario: Usuario) -> dict:
             except Exception:
                 pass
 
-    modelos = [
+    # 1. Eliminar hijos sin usuario_id directo (dependencias de segundo nivel)
+    # Cuotas (vía GrupoCuotas)
+    db.execute(delete(Cuota).where(
+        Cuota.grupo_id.in_(select(GrupoCuotas.id).where(GrupoCuotas.usuario_id == usuario_id))
+    ))
+    
+    # Movimientos de Meta (vía Meta)
+    db.execute(delete(MovimientoMeta).where(
+        MovimientoMeta.meta_id.in_(select(Meta.id).where(Meta.usuario_id == usuario_id))
+    ))
+    
+    # Periodos de Presupuesto (vía Presupuesto)
+    db.execute(delete(PeriodoPresupuesto).where(
+        PeriodoPresupuesto.presupuesto_id.in_(select(Presupuesto.id).where(Presupuesto.usuario_id == usuario_id))
+    ))
+    
+    # Categorías de Presupuesto (vía Presupuesto)
+    db.execute(delete(PresupuestoCategoria).where(
+        PresupuestoCategoria.presupuesto_id.in_(select(Presupuesto.id).where(Presupuesto.usuario_id == usuario_id))
+    ))
+    
+    # Historial de Suscripciones (vía Suscripcion)
+    db.execute(delete(HistorialSuscripcion).where(
+        HistorialSuscripcion.suscripcion_id.in_(select(Suscripcion.id).where(Suscripcion.usuario_id == usuario_id))
+    ))
+
+    # 2. Modelos con usuario_id
+    modelos_usuario = [
         ConversacionWpp, Notificacion, RefreshToken, Suscripcion,
-        Presupuesto, Meta, Cuota, Transaccion, Billetera, PerfilFinanciero
+        Presupuesto, Meta, GrupoCuotas, TransaccionRecurrente, 
+        TransferenciaInterna, CategoriaExcluida, ConfiguracionNotificacion,
+        Transaccion, Billetera, PerfilFinanciero
     ]
     
-    for modelo in modelos:
+    for modelo in modelos_usuario:
         db.execute(delete(modelo).where(modelo.usuario_id == usuario_id))
     
+    # 3. Modelos con creador_id (Categorías y Subcategorías personalizadas)
+    modelos_creador = [Subcategoria, Categoria]
+    for modelo in modelos_creador:
+        db.execute(delete(modelo).where(modelo.creador_id == usuario_id))
+    
+    # 4. Finalmente el usuario
     db.delete(usuario)
     db.commit()
     
