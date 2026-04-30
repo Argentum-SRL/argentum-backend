@@ -131,6 +131,7 @@ def enviar_whatsapp(numero: str, mensaje: str) -> bool:
     client = _get_twilio_client()
 
     if client is None:
+        print(f"[DEBUG-WA] MODO SIMULADO - No hay credenciales de Twilio. Para: {to_whatsapp}")
         logger.warning(
             "Twilio no configurado; mensaje de WhatsApp simulado para %s",
             numero,
@@ -139,14 +140,17 @@ def enviar_whatsapp(numero: str, mensaje: str) -> bool:
         return True
 
     try:
-        client.messages.create(
+        print(f"[DEBUG-WA] USANDO TWILIO REAL - De: {from_whatsapp} Para: {to_whatsapp}")
+        msg = client.messages.create(
             body=mensaje,
             from_=from_whatsapp,
             to=to_whatsapp,
         )
-        logger.info("WhatsApp enviado exitosamente a %s", numero)
+        print(f"[DEBUG-WA] Twilio aceptó el mensaje. SID: {msg.sid}")
+        logger.info("WhatsApp enviado exitosamente a %s. SID: %s", numero, msg.sid)
         return True
     except TwilioRestException as e:
+        print(f"[DEBUG-WA] ERROR DE TWILIO: {e}")
         logger.error("Error al enviar WhatsApp a %s: %s", numero, e)
         return False
 

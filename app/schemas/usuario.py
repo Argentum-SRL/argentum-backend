@@ -58,3 +58,39 @@ class UsuarioRead(UsuarioBase):
     fecha_registro: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class EditarDatosPersonales(BaseModel):
+    nombre: str
+    apellido: str
+
+
+class EditarEmail(BaseModel):
+    email_nuevo: str
+    password_actual: str
+
+
+class EditarPassword(BaseModel):
+    password_actual: str | None = None
+    password_nueva: str
+    password_nueva_confirmacion: str
+
+
+class EditarTelefono(BaseModel):
+    telefono_nuevo: str
+    password_actual: str | None = None
+
+
+class EditarCicloFinanciero(BaseModel):
+    ciclo_tipo: CicloTipo
+    ciclo_valor: str
+
+
+class EditarMoneda(BaseModel):
+    moneda_principal: Moneda
+    moneda_secundaria_activa: bool
+    tipo_dolar: str | None = None
+
+
+class UsuarioResponse(UsuarioRead):
+    pass
