@@ -45,10 +45,11 @@ def post_datos_personales(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
+    from datetime import date
     if current_user.onboarding_completo:
         return OnboardingStepResponse(completado=True, siguiente_paso=None)
         
-    if current_user.nombre and current_user.apellido:
+    if current_user.nombre and current_user.apellido and current_user.fecha_nacimiento and current_user.sexo:
         estado = get_estado_onboarding(db, current_user)
         siguiente = estado.pasos_pendientes[0] if estado.pasos_pendientes else None
         return OnboardingStepResponse(completado=True, siguiente_paso=siguiente)
@@ -59,8 +60,20 @@ def post_datos_personales(
     if not nombre or not apellido:
         raise HTTPException(status_code=400, detail="Nombre y apellido son obligatorios.")
         
+    # Validaciones adicionales
+    if body.fecha_nacimiento > date.today():
+        raise HTTPException(status_code=400, detail="La fecha de nacimiento no puede ser futura.")
+    
+    # El sexo ya viene validado por el Enum en el schema (Pydantic devuelve 422)
+    # Pero si queremos forzar el 400 como pide el usuario:
+    from app.models.usuario import Sexo
+    if body.sexo not in Sexo:
+        raise HTTPException(status_code=400, detail="El valor de sexo no es valido.")
+
     current_user.nombre = nombre
     current_user.apellido = apellido
+    current_user.fecha_nacimiento = body.fecha_nacimiento
+    current_user.sexo = body.sexo
     db.commit()
     
     estado = get_estado_onboarding(db, current_user)

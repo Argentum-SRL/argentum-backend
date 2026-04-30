@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, String
+from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, String
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -38,6 +38,13 @@ class CicloTipo(str, Enum):
     REGLA = "regla"
 
 
+class Sexo(str, Enum):
+    MASCULINO = "masculino"
+    FEMENINO = "femenino"
+    NO_BINARIO = "no_binario"
+    PREFIERO_NO_DECIR = "prefiero_no_decir"
+
+
 class Usuario(Base):
     __tablename__ = "usuarios"
 
@@ -46,6 +53,13 @@ class Usuario(Base):
     apellido: Mapped[str | None] = mapped_column(String(100), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     telefono: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
+    fecha_nacimiento: Mapped[date] = mapped_column(
+        Date, nullable=False
+    )
+    sexo: Mapped[Sexo] = mapped_column(
+        SAEnum(Sexo, values_callable=lambda obj: [e.value for e in obj], name="sexo_enum"),
+        nullable=False
+    )
     foto_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     password_configurada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
