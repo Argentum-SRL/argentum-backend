@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
-from app.models.usuario import Usuario, CicloTipo, Moneda
+from app.models.usuario import Usuario, CicloTipo, Moneda, Sexo
 from app.models.billetera import Billetera
 from app.schemas.onboarding import (
     EstadoOnboardingResponse, 
@@ -17,7 +17,7 @@ def get_estado_onboarding(db: Session, user: Usuario) -> EstadoOnboardingRespons
     pasos_pendientes = []
     
     # 1. Datos personales
-    if not user.nombre or not user.apellido:
+    if not user.nombre or not user.apellido or not user.fecha_nacimiento or not user.sexo:
         pasos_pendientes.append("datos_personales")
     
     # 2. Ciclo financiero
@@ -73,7 +73,7 @@ def get_estado_onboarding(db: Session, user: Usuario) -> EstadoOnboardingRespons
     # Vamos a cambiar el modelo Usuario para que moneda_principal sea Mapped[Moneda | None] 
     # y nullable=True.
     
-    if not user.nombre or not user.apellido:
+    if not user.nombre or not user.apellido or not user.fecha_nacimiento or not user.sexo:
         if "datos_personales" not in pasos_pendientes: pasos_pendientes.append("datos_personales")
     if not user.ciclo_tipo or not user.ciclo_valor:
         if "ciclo_financiero" not in pasos_pendientes: pasos_pendientes.append("ciclo_financiero")
@@ -90,7 +90,9 @@ def get_estado_onboarding(db: Session, user: Usuario) -> EstadoOnboardingRespons
             apellido=user.apellido,
             moneda_principal=user.moneda_principal.value if user.moneda_principal else None,
             ciclo_tipo=user.ciclo_tipo.value if user.ciclo_tipo else None,
-            ciclo_valor=user.ciclo_valor
+            ciclo_valor=user.ciclo_valor,
+            fecha_nacimiento=user.fecha_nacimiento,
+            sexo=user.sexo.value if user.sexo else None
         )
     )
 

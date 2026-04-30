@@ -53,12 +53,12 @@ class Usuario(Base):
     apellido: Mapped[str | None] = mapped_column(String(100), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     telefono: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
-    fecha_nacimiento: Mapped[date] = mapped_column(
-        Date, nullable=False
+    fecha_nacimiento: Mapped[date | None] = mapped_column(
+        Date, nullable=True
     )
-    sexo: Mapped[Sexo] = mapped_column(
+    sexo: Mapped[Sexo | None] = mapped_column(
         SAEnum(Sexo, values_callable=lambda obj: [e.value for e in obj], name="sexo_enum"),
-        nullable=False
+        nullable=True
     )
     foto_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)

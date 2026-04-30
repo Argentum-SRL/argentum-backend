@@ -91,7 +91,7 @@ def post_ciclo_financiero(
         return OnboardingStepResponse(completado=True, siguiente_paso=None)
 
     # Validar paso anterior
-    if not current_user.nombre or not current_user.apellido:
+    if not current_user.nombre or not current_user.apellido or not current_user.fecha_nacimiento or not current_user.sexo:
         raise HTTPException(status_code=400, detail="Primero completá tus datos personales.")
 
     if current_user.ciclo_tipo and current_user.ciclo_valor:
