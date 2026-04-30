@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.models.usuario import Usuario
 from app.schemas.usuario import (
     UsuarioResponse,
+    MetodosLoginResponse,
     EditarDatosPersonales,
     EditarEmail,
     EditarPassword,
@@ -24,6 +25,20 @@ def get_me(
 ):
     """Devuelve el usuario autenticado completo."""
     return current_user
+
+@router.get("/me/metodos-login", response_model=MetodosLoginResponse)
+def get_metodos_login(
+    current_user: Usuario = Depends(get_current_user)
+):
+    """Devuelve los métodos de inicio de sesión disponibles y configurables."""
+    return {
+        "email_password": current_user.email_verificado and current_user.password_configurada,
+        "telefono": current_user.telefono_verificado,
+        "google": current_user.email_verificado,
+        "puede_agregar_password": not current_user.password_configurada and current_user.email_verificado,
+        "puede_agregar_email": not current_user.email_verificado,
+        "puede_agregar_telefono": not current_user.telefono_verificado
+    }
 
 @router.put("/me/datos-personales", response_model=UsuarioResponse)
 def update_datos_personales(

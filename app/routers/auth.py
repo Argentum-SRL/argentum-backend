@@ -176,20 +176,23 @@ def register(user_in: RegisterRequest, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=AuthResponse)
 def login(user_in: LoginRequest, request: Request, db: Session = Depends(get_db)):
-    """Login con email y password. Requiere email y teléfono verificados."""
+    """Login con email y password. Requiere email verificado y contraseña configurada."""
     user = db.execute(select(Usuario).where(Usuario.email == user_in.email)).scalar_one_or_none()
 
-    if not user or user.auth_provider != AuthProvider.EMAIL:
-        raise HTTPException(status_code=401, detail="Credenciales incorrectas.")
-
-    if not user.password_hash or not verify_password(user_in.password, user.password_hash):
+    if not user:
         raise HTTPException(status_code=401, detail="Credenciales incorrectas.")
 
     if not user.email_verificado:
         raise HTTPException(status_code=401, detail="Primero verificá tu email. Revisá tu casilla.")
 
-    if not user.telefono_verificado:
-        raise HTTPException(status_code=401, detail="Primero verificá tu teléfono.")
+    if not user.password_hash:
+        raise HTTPException(
+            status_code=400,
+            detail="Tu cuenta no tiene contraseña configurada. Ingresá con tu teléfono o configurá una contraseña desde tu perfil.",
+        )
+
+    if not verify_password(user_in.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Credenciales incorrectas.")
 
     user.ultimo_acceso = datetime.now(timezone.utc)
     db.commit()
@@ -334,17 +337,19 @@ def login_google(body: GoogleLoginRequest, request: Request, db: Session = Depen
         'authProvider': getattr(user.auth_provider, 'value', None) if user else None,
     })
 
-    if user and user.auth_provider != AuthProvider.GOOGLE:
-        print('[Auth][Google][Backend] Email ya registrado con otro método', {
-            'email': email,
-            'authProvider': user.auth_provider.value,
-        })
-        raise HTTPException(
-            status_code=400,
-            detail="Este email ya está registrado con otro método. Iniciá sesión con tu contraseña.",
-        )
-
-    if not user:
+    if user:
+        if not user.email_verificado:
+            raise HTTPException(
+                status_code=400,
+                detail="Primero verificá tu email para poder ingresar con Google.",
+            )
+        
+        # Si no tiene foto, actualizamos con la de Google
+        if not user.foto_url:
+            user.foto_url = token_info.get("picture")
+            db.commit()
+    else:
+        # No existe: crear usuario nuevo
         nombre = token_info.get("given_name", "")
         apellido = token_info.get("family_name", "")
         if not nombre and "name" in token_info:
@@ -492,35 +497,32 @@ def verificar_codigo_telefono(
             requiere_datos=True,
         )
 
-    # Caso B: completando registro email (estado pendiente, email ya verificado)
-    if user.auth_provider == AuthProvider.EMAIL and user.email_verificado and not user.telefono_verificado:
-        user.telefono_verificado = True
-        user.estado = EstadoUsuario.ACTIVO
-        db.commit()
-
-        access, refresh = _tokens(user.id, request, db)
-        return AuthResponse(
-            access_token=access,
-            refresh_token=refresh,
-            usuario=UsuarioRead.model_validate(user),
-            requiere_onboarding=_requiere_onboarding(user),
-        )
-
-    # Caso C: login por teléfono (usuario existente)
-    if not user.email_verificado and user.auth_provider == AuthProvider.EMAIL:
+    # Caso B/C: Usuario existente.
+    # Si es una cuenta de EMAIL que nunca verificó email, seguimos pidiendo verificación de email.
+    if user.auth_provider == AuthProvider.EMAIL and not user.email_verificado:
         raise HTTPException(status_code=401, detail="Primero verificá tu email. Revisá tu casilla.")
 
-    user.ultimo_acceso = datetime.now(timezone.utc)
+    # Marcamos como verificado y activo (por si venía de pendiente)
     user.telefono_verificado = True
+    if user.estado == EstadoUsuario.PENDIENTE_VERIFICACION and user.email_verificado:
+        user.estado = EstadoUsuario.ACTIVO
+    
+    user.ultimo_acceso = datetime.now(timezone.utc)
     db.commit()
 
     access, refresh = _tokens(user.id, request, db)
+    
+    # requiere_datos si no tiene nombre (usuarios de teléfono que no completaron perfil)
+    # requiere_onboarding si tiene nombre pero no completó onboarding
+    req_datos = not user.nombre
+    req_onboarding = _requiere_onboarding(user) if user.nombre else False
+
     return AuthResponse(
         access_token=access,
         refresh_token=refresh,
         usuario=UsuarioRead.model_validate(user),
-        requiere_datos=not user.nombre,
-        requiere_onboarding=_requiere_onboarding(user) if user.nombre else False,
+        requiere_datos=req_datos,
+        requiere_onboarding=req_onboarding,
     )
 
 
