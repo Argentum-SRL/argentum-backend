@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 from pydantic import BaseModel, Field
-from app.models.usuario import CicloTipo, Moneda
+from app.models.usuario import CicloTipo, Moneda, Sexo
 from app.schemas.usuario import UsuarioRead
 
 class DatosActuales(BaseModel):
@@ -11,6 +12,8 @@ class DatosActuales(BaseModel):
     moneda_principal: str | None = None
     ciclo_tipo: str | None = None
     ciclo_valor: str | None = None
+    fecha_nacimiento: date | None = None
+    sexo: str | None = None
 
 class EstadoOnboardingResponse(BaseModel):
     onboarding_completo: bool
@@ -36,6 +39,8 @@ class CotizacionesDolarResponse(BaseModel):
 class DatosPersonalesRequest(BaseModel):
     nombre: str = Field(..., min_length=1)
     apellido: str = Field(..., min_length=1)
+    fecha_nacimiento: date
+    sexo: Sexo
 
 class CicloFinancieroRequest(BaseModel):
     ciclo_tipo: CicloTipo

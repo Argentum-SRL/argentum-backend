@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, date
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -27,10 +27,14 @@ class UsuarioBase(BaseModel):
     email_verificado: bool = False
     telefono_verificado: bool = False
     ultimo_acceso: datetime | None = None
+    fecha_nacimiento: date | None = None
+    sexo: str | None = None
 
 
 class UsuarioCreate(UsuarioBase):
     password_hash: str | None = None
+    fecha_nacimiento: date
+    sexo: str
 
 
 class UsuarioUpdate(BaseModel):
@@ -52,6 +56,8 @@ class UsuarioUpdate(BaseModel):
     email_verificado: bool | None = None
     telefono_verificado: bool | None = None
     ultimo_acceso: datetime | None = None
+    fecha_nacimiento: date | None = None
+    sexo: str | None = None
 
 
 class UsuarioRead(UsuarioBase):
@@ -103,4 +109,5 @@ class MetodosLoginResponse(BaseModel):
 
 
 class UsuarioResponse(UsuarioRead):
-    pass
+    fecha_nacimiento: date
+    sexo: str
