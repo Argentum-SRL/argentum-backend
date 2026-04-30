@@ -156,8 +156,8 @@ def register(user_in: RegisterRequest, db: Session = Depends(get_db)):
         telefono=user_in.telefono,
         password_hash=get_password_hash(user_in.password),
         auth_provider=AuthProvider.EMAIL,
-        estado=EstadoUsuario.PENDIENTE_VERIFICACION,
-        email_verificado=False,
+        estado=EstadoUsuario.ACTIVO,  # Auto-aprobado
+        email_verificado=True,       # Auto-verificado
         telefono_verificado=False,
         onboarding_completo=False,
         moneda_principal="ARS",
@@ -166,11 +166,12 @@ def register(user_in: RegisterRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(nuevo)
 
-    generar_y_enviar_verificacion_email(nuevo.email)
+    # generar_y_enviar_verificacion_email(nuevo.email)  # Deshabilitado temporalmente
 
     return AuthResponse(
         usuario=UsuarioRead.model_validate(nuevo),
-        requiere_verificacion_email=True,
+        requiere_verificacion_email=False,
+        requiere_verificacion_telefono=True,
     )
 
 
@@ -241,15 +242,21 @@ def verificar_recuperacion(body: VerificarRecuperacionRequest, db: Session = Dep
 
 @router.post("/email/enviar-codigo")
 def enviar_codigo_email(body: EnviarCodigoEmailRequest, db: Session = Depends(get_db)):
-    """Reenvía el código de verificación de email."""
+    """Reenvía el código de verificación de email. AUTO-VERIFICA por bypass temporal."""
     user = db.execute(select(Usuario).where(Usuario.email == body.email)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="No existe una cuenta con ese email.")
-    if user.email_verificado:
-        raise HTTPException(status_code=400, detail="El email ya está verificado.")
+    
+    # if user.email_verificado:
+    #    raise HTTPException(status_code=400, detail="El email ya está verificado.")
 
-    generar_y_enviar_verificacion_email(body.email)
-    return {"detail": "Código enviado al email."}
+    # generar_y_enviar_verificacion_email(body.email)
+    
+    # Bypass temporal: auto-verificar al pedir el código
+    user.email_verificado = True
+    db.commit()
+    
+    return {"detail": "Email verificado automáticamente por bypass temporal.", "verificado": True}
 
 
 @router.post("/email/verificar", response_model=AuthResponse)
@@ -339,10 +346,9 @@ def login_google(body: GoogleLoginRequest, request: Request, db: Session = Depen
 
     if user:
         if not user.email_verificado:
-            raise HTTPException(
-                status_code=400,
-                detail="Primero verificá tu email para poder ingresar con Google.",
-            )
+            user.email_verificado = True
+            db.commit()
+            # print('[Auth][Google] Auto-verificando email por problemas con revision de cuenta')
         
         # Si no tiene foto, actualizamos con la de Google
         if not user.foto_url:
@@ -553,14 +559,14 @@ def completar_perfil(
     current_user.apellido = body.apellido
     current_user.email = body.email
     current_user.password_hash = get_password_hash(body.password)
-    current_user.email_verificado = False
+    current_user.email_verificado = True # Auto-verificado
     db.commit()
 
-    generar_y_enviar_verificacion_email(body.email)
+    # generar_y_enviar_verificacion_email(body.email) # Deshabilitado temporalmente
 
     return AuthResponse(
         usuario=UsuarioRead.model_validate(current_user),
-        requiere_verificacion_email=True,
+        requiere_verificacion_email=False,
     )
 
 
