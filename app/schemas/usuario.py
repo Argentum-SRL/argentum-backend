@@ -14,6 +14,7 @@ class UsuarioBase(BaseModel):
     email: str | None = None
     telefono: str | None = None
     foto_url: str | None = None
+    password_configurada: bool = False
     auth_provider: AuthProvider
     rol: RolUsuario = RolUsuario.USUARIO
     estado: EstadoUsuario = EstadoUsuario.ACTIVO
@@ -90,6 +91,15 @@ class EditarMoneda(BaseModel):
     moneda_principal: Moneda
     moneda_secundaria_activa: bool
     tipo_dolar: str | None = None
+
+
+class MetodosLoginResponse(BaseModel):
+    email_password: bool
+    telefono: bool
+    google: bool
+    puede_agregar_password: bool
+    puede_agregar_email: bool
+    puede_agregar_telefono: bool
 
 
 class UsuarioResponse(UsuarioRead):

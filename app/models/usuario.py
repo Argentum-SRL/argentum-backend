@@ -48,6 +48,7 @@ class Usuario(Base):
     telefono: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
     foto_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password_configurada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     auth_provider: Mapped[AuthProvider] = mapped_column(
         SAEnum(AuthProvider, values_callable=lambda obj: [e.value for e in obj], name="auth_provider_enum"), nullable=False
     )

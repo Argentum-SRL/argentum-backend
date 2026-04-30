@@ -97,6 +97,7 @@ def actualizar_password(
         )
     
     usuario.password_hash = get_password_hash(pw)
+    usuario.password_configurada = True
     db.commit()
     
     return {"confirmacion": "Contraseña actualizada exitosamente"}
