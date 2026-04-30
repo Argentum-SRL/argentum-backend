@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
-from app.routers import auth
 
 # ---------------------------------------------------------------------------
 # APScheduler — limpieza periódica de refresh tokens expirados/revocados
@@ -51,10 +50,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.routers import auth, onboarding
+from app.routers import auth, onboarding, usuarios
+from fastapi.staticfiles import StaticFiles
+import os
 
 app.include_router(auth.router)
 app.include_router(onboarding.router)
+app.include_router(usuarios.router)
+
+# Servir archivos estáticos de media (Ignorado por git)
+os.makedirs("media/fotos", exist_ok=True)
+app.mount("/media", StaticFiles(directory="media"), name="media")
 
 
 @app.get("/")
