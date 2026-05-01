@@ -145,13 +145,15 @@ def post_moneda(
     current_user.moneda_secundaria_activa = body.moneda_secundaria_activa
     if body.tipo_dolar:
         current_user.tipo_dolar = body.tipo_dolar
-        
+    
+    # Marcar onboarding como completo al terminar el paso de moneda
+    current_user.onboarding_completo = True
+    from datetime import datetime, timezone
+    current_user.ultimo_acceso = datetime.now(timezone.utc)
+    
     db.commit()
     
-    estado = get_estado_onboarding(db, current_user)
-    siguiente = estado.pasos_pendientes[0] if estado.pasos_pendientes else None
-    
-    return OnboardingStepResponse(completado=True, siguiente_paso=siguiente)
+    return OnboardingStepResponse(completado=True, siguiente_paso=None)
 
 @router.post("/primera-billetera", response_model=FinalizarOnboardingResponse)
 def post_primera_billetera(
