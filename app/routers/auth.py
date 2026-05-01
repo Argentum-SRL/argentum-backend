@@ -167,6 +167,9 @@ def register(user_in: RegisterRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(nuevo)
 
+    # Crear billeteras efectivo default
+    usuario_service.crear_billeteras_efectivo_default(db, nuevo.id)
+
     # generar_y_enviar_verificacion_email(nuevo.email)  # Deshabilitado temporalmente
 
     return AuthResponse(
@@ -198,6 +201,9 @@ def login(user_in: LoginRequest, request: Request, db: Session = Depends(get_db)
 
     user.ultimo_acceso = datetime.now(timezone.utc)
     db.commit()
+
+    # Asegurar que tenga las billeteras de efectivo default
+    usuario_service.crear_billeteras_efectivo_default(db, user.id)
 
     access, refresh = _tokens(user.id, request, db)
     return AuthResponse(
@@ -387,6 +393,9 @@ def login_google(body: GoogleLoginRequest, request: Request, db: Session = Depen
         db.commit()
         db.refresh(user)
 
+    # Asegurar que tenga las billeteras de efectivo default
+    usuario_service.crear_billeteras_efectivo_default(db, user.id)
+
     # Emitir tokens siempre (ya sea login o registro)
     user.ultimo_acceso = datetime.now(timezone.utc)
     db.commit()
@@ -495,6 +504,9 @@ def verificar_codigo_telefono(
         db.add(user)
         db.commit()
         db.refresh(user)
+
+        # Crear billeteras efectivo default
+        usuario_service.crear_billeteras_efectivo_default(db, user.id)
 
         access, refresh = _tokens(user.id, request, db)
         return AuthResponse(

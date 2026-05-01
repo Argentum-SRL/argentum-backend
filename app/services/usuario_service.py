@@ -282,3 +282,41 @@ def eliminar_usuario(db: Session, usuario: Usuario) -> dict:
     db.commit()
     
     return {"confirmacion": "Usuario y todos sus datos eliminados correctamente"}
+
+def crear_billeteras_efectivo_default(db: Session, usuario_id: UUID) -> None:
+    """
+    Crea las 2 billeteras de efectivo default (ARS y USD) para un usuario si no existen.
+    """
+    # Verificar si ya existen para no duplicar
+    existentes = db.execute(
+        select(Billetera.moneda).where(
+            Billetera.usuario_id == usuario_id, 
+            Billetera.es_efectivo == True
+        )
+    ).scalars().all()
+
+    if Moneda.ARS not in existentes:
+        b_ars = Billetera(
+            usuario_id=usuario_id,
+            nombre="Efectivo ARS",
+            moneda=Moneda.ARS,
+            saldo_inicial=0,
+            saldo_actual=0,
+            es_principal=False,
+            es_efectivo=True
+        )
+        db.add(b_ars)
+
+    if Moneda.USD not in existentes:
+        b_usd = Billetera(
+            usuario_id=usuario_id,
+            nombre="Efectivo USD",
+            moneda=Moneda.USD,
+            saldo_inicial=0,
+            saldo_actual=0,
+            es_principal=False,
+            es_efectivo=True
+        )
+        db.add(b_usd)
+    
+    db.commit()

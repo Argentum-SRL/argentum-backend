@@ -104,29 +104,9 @@ def crear_billeteras_onboarding(db: Session, user: Usuario, request: PrimeraBill
     )
     db.add(b_principal)
     
-    # 2. Efectivo ARS
-    b_efectivo_ars = Billetera(
-        usuario_id=user.id,
-        nombre="Efectivo ARS",
-        moneda=Moneda.ARS,
-        saldo_inicial=0,
-        saldo_actual=0,
-        es_principal=False,
-        es_efectivo=True
-    )
-    db.add(b_efectivo_ars)
-    
-    # 3. Efectivo USD
-    b_efectivo_usd = Billetera(
-        usuario_id=user.id,
-        nombre="Efectivo USD",
-        moneda=Moneda.USD,
-        saldo_inicial=0,
-        saldo_actual=0,
-        es_principal=False,
-        es_efectivo=True
-    )
-    db.add(b_efectivo_usd)
+    # 2 y 3. Billeteras de efectivo default
+    from app.services import usuario_service
+    usuario_service.crear_billeteras_efectivo_default(db, user.id)
     
     user.onboarding_completo = True
     user.ultimo_acceso = datetime.now(timezone.utc)
