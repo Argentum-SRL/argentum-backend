@@ -11,7 +11,10 @@ from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.models.usuario import Usuario, Moneda
 from app.models.billetera import Billetera, EstadoBilletera
+from app.models.transaccion import Transaccion
+from app.models.transferencia_interna import TransferenciaInterna
 from app.schemas.billetera import BilleteraRead, BilleteraUpdate
+from app.services import usuario_service
 
 router = APIRouter(prefix="/billeteras", tags=["billeteras"])
 
@@ -29,6 +32,9 @@ def list_billeteras(
     db: Session = Depends(get_db), current_user: Usuario = Depends(get_current_user)
 ):
     """Devuelve las billeteras del usuario autenticado."""
+    # Failsafe: asegurar que tenga las billeteras de efectivo default
+    usuario_service.crear_billeteras_efectivo_default(db, current_user.id)
+    
     results = db.execute(select(Billetera).where(Billetera.usuario_id == current_user.id)).scalars().all()
     return results
 
@@ -76,10 +82,17 @@ def update_billetera(
             update(Billetera).where(Billetera.usuario_id == current_user.id).values(es_principal=False)
         )
 
-    for attr in ('nombre', 'moneda', 'saldo_actual', 'saldo_inicial', 'es_principal', 'es_efectivo', 'estado'):
-        val = getattr(body, attr, None)
-        if val is not None:
-            setattr(billetera, attr, val)
+    if billetera.es_efectivo:
+        # Solo se permite cambiar el nombre y el estado
+        if body.nombre is not None:
+            billetera.nombre = body.nombre
+        if body.estado is not None:
+            billetera.estado = body.estado
+    else:
+        for attr in ('nombre', 'moneda', 'saldo_actual', 'saldo_inicial', 'es_principal', 'es_efectivo', 'estado'):
+            val = getattr(body, attr, None)
+            if val is not None:
+                setattr(billetera, attr, val)
 
     db.commit()
     db.refresh(billetera)
@@ -99,6 +112,33 @@ def delete_billetera(
 
     if billetera.es_efectivo:
         raise HTTPException(status_code=400, detail="Las billeteras de efectivo (ARS/USD) no pueden eliminarse")
+
+    # VERIFICACIÓN DE TRANSACCIONES ASOCIADAS
+    # NOTA: Este chequeo es crucial para la integridad de los datos financieros.
+    # Cuando se desarrolle el módulo de transacciones, esta validación asegurará que no queden registros huérfanos.
+    
+    # 1. Buscar transacciones manuales, recurrentes, etc.
+    stmt_tx = select(Transaccion.id).where(Transaccion.billetera_id == billetera_id).limit(1)
+    has_tx = db.execute(stmt_tx).scalar_one_or_none()
+    
+    if has_tx:
+        raise HTTPException(
+            status_code=400, 
+            detail="No se puede eliminar la billetera porque tiene transacciones asociadas. Por favor, archivala para mantener el historial."
+        )
+
+    # 2. Buscar transferencias internas (origen o destino)
+    stmt_tr = select(TransferenciaInterna.id).where(
+        (TransferenciaInterna.billetera_origen_id == billetera_id) | 
+        (TransferenciaInterna.billetera_destino_id == billetera_id)
+    ).limit(1)
+    has_tr = db.execute(stmt_tr).scalar_one_or_none()
+
+    if has_tr:
+        raise HTTPException(
+            status_code=400, 
+            detail="No se puede eliminar la billetera porque tiene transferencias internas asociadas. Por favor, archivala."
+        )
 
     res = db.execute(delete(Billetera).where(Billetera.id == billetera_id, Billetera.usuario_id == current_user.id))
     db.commit()
