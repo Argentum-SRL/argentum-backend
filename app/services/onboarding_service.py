@@ -40,33 +40,13 @@ def get_estado_onboarding(db: Session, user: Usuario) -> EstadoOnboardingRespons
     # Por ahora, si es el default y no tiene billeteras, asumimos que le falta elegir.
     # Pero mejor ser estrictos con lo que pide el usuario.
     
-    # 4. Primera billetera
-    billetera_count = db.execute(
-        select(func.count()).select_from(Billetera).where(Billetera.usuario_id == user.id)
-    ).scalar()
+    # El paso 'primera_billetera' ha sido removido por pedido del usuario.
+    # El onboarding termina en el paso 'moneda'.
     
-    # Ajuste de logica para Moneda:
-    # Si moneda_principal es ARS pero no ha pasado por el paso 3, lo pedimos.
-    # Como saberlo? Si onboarding_completo es False y aun no llegamos a la billetera.
-    # El orden es: datos -> ciclo -> moneda -> billetera.
-    
-    if user.moneda_principal == Moneda.ARS and not user.ciclo_tipo: # Simplificacion
-         # Si no tiene ciclo, todavia no llego a moneda
-         pass
-    
-    # Volvamos a los pasos basicos:
-    if not user.moneda_principal: # Si fuera nullable
-        pasos_pendientes.append("moneda")
-    elif user.onboarding_completo == False and "ciclo_financiero" not in pasos_pendientes:
-        # Si ya tiene ciclo pero no ha terminado onboarding, tal vez le falta confirmar moneda
-        # El usuario dice "falta si moneda_principal es null".
-        pass
-
     # Re-evaluando: El usuario pide exactamente estos criterios:
     # 1. "datos_personales": falta si nombre o apellido son null
     # 2. "ciclo_financiero": falta si ciclo_tipo o ciclo_valor son null
     # 3. "moneda": falta si moneda_principal es null
-    # 4. "primera_billetera": falta si el usuario no tiene ninguna billetera
     
     # Dado que el modelo tiene default para moneda_principal, nunca sera null 
     # a menos que cambiemos el modelo. 
@@ -79,8 +59,6 @@ def get_estado_onboarding(db: Session, user: Usuario) -> EstadoOnboardingRespons
         if "ciclo_financiero" not in pasos_pendientes: pasos_pendientes.append("ciclo_financiero")
     if not user.moneda_principal:
         if "moneda" not in pasos_pendientes: pasos_pendientes.append("moneda")
-    if billetera_count == 0:
-        if "primera_billetera" not in pasos_pendientes: pasos_pendientes.append("primera_billetera")
 
     return EstadoOnboardingResponse(
         onboarding_completo=user.onboarding_completo,
