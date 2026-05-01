@@ -50,13 +50,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.routers import auth, onboarding, usuarios
+from app.routers import auth, onboarding, usuarios, billeteras
 from fastapi.staticfiles import StaticFiles
 import os
 
 app.include_router(auth.router)
 app.include_router(onboarding.router)
 app.include_router(usuarios.router)
+app.include_router(billeteras.router)
 
 # Servir archivos estáticos de media (Ignorado por git)
 os.makedirs("media/fotos", exist_ok=True)
