@@ -9,7 +9,7 @@ from app.models.suscripcion import EstadoSuscripcion, FrecuenciaSuscripcion
 
 
 class SuscripcionBase(BaseModel):
-    usuario_id: UUID
+    usuario_id: UUID | None = None
     nombre: str
     categoria_id: UUID | None = None
     frecuencia: FrecuenciaSuscripcion

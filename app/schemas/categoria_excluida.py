@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class CategoriaExcluidaBase(BaseModel):
-    usuario_id: UUID
+    usuario_id: UUID | None = None
     categoria_id: UUID | None = None
     subcategoria_id: UUID | None = None
 

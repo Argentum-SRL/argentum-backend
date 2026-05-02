@@ -15,7 +15,7 @@ from app.models.usuario import Moneda
 
 
 class TransaccionRecurrenteBase(BaseModel):
-    usuario_id: UUID
+    usuario_id: UUID | None = None
     tipo: TipoTransaccionRecurrente
     monto: Decimal
     moneda: Moneda
