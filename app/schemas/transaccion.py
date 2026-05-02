@@ -15,6 +15,13 @@ from app.models.transaccion import (
 from app.models.usuario import Moneda
 
 
+class InfoCuotas(BaseModel):
+    cantidad_cuotas: int
+    tiene_interes: bool = False
+    tasa_interes: Decimal | None = None
+    monto_total: Decimal # El monto base sin interes (o el total si no hay interes)
+
+
 class TransaccionBase(BaseModel):
     usuario_id: UUID
     tipo: TipoTransaccion
@@ -36,7 +43,7 @@ class TransaccionBase(BaseModel):
 
 
 class TransaccionCreate(TransaccionBase):
-    pass
+    info_cuotas: InfoCuotas | None = None
 
 
 class TransaccionUpdate(BaseModel):
