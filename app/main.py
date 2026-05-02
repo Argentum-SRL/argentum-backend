@@ -12,6 +12,11 @@ from app.core.database import SessionLocal
 from app.core.auth import limpiar_tokens_expirados
 from app.services.recurrente_service import procesar_recurrentes
 
+# ---------------------------------------------------------------------------
+# Seed de categorías y subcategorías
+# ---------------------------------------------------------------------------
+from scripts.seed_categorias import seed_categorias_subcategorias
+
 def _job_limpiar_tokens():
     """Tarea programada: elimina refresh tokens viejos cada 6 horas."""
     db = SessionLocal()
@@ -49,6 +54,12 @@ async def lifespan(app: FastAPI):
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="Argentum API", version="1.0.0", lifespan=lifespan)
+
+
+@app.on_event("startup")
+def startup_seed():
+    """Ejecuta el seed de categorías al iniciar el servidor."""
+    seed_categorias_subcategorias()
 
 _origins = [settings.FRONTEND_URL]
 if settings.ENVIRONMENT == "development":
