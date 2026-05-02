@@ -10,7 +10,7 @@ from app.models.usuario import Moneda
 
 
 class TransferenciaInternaBase(BaseModel):
-    usuario_id: UUID
+    usuario_id: UUID | None = None
     billetera_origen_id: UUID
     billetera_destino_id: UUID
     monto: Decimal

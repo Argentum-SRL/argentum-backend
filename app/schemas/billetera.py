@@ -11,7 +11,7 @@ from app.models.usuario import Moneda
 
 
 class BilleteraBase(BaseModel):
-    usuario_id: UUID
+    usuario_id: UUID | None = None
     nombre: str
     moneda: Moneda
     saldo_actual: Decimal = Decimal("0")

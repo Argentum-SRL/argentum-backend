@@ -8,7 +8,7 @@ from app.models.notificacion import TipoNotificacion
 
 
 class ConfiguracionNotificacionBase(BaseModel):
-    usuario_id: UUID
+    usuario_id: UUID | None = None
     tipo: TipoNotificacion
     canal_wpp: bool = True
     canal_app: bool = True

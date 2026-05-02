@@ -23,7 +23,7 @@ class InfoCuotas(BaseModel):
 
 
 class TransaccionBase(BaseModel):
-    usuario_id: UUID
+    usuario_id: UUID | None = None
     tipo: TipoTransaccion
     monto: Decimal
     moneda: Moneda

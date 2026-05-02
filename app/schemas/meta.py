@@ -11,7 +11,7 @@ from app.models.usuario import Moneda
 
 
 class MetaBase(BaseModel):
-    usuario_id: UUID
+    usuario_id: UUID | None = None
     nombre: str
     monto_objetivo: Decimal
     moneda: Moneda
