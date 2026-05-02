@@ -5,7 +5,7 @@ from typing import Any
 from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.models.usuario import Usuario
-from app.services import dashboard_service
+from app.services import dashboard_service, proyeccion_service
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -33,3 +33,13 @@ def get_cotizacion(
     Retorna la cotizacion del dolar segun la preferencia del usuario.
     """
     return dashboard_service.get_cotizacion_usuario(current_user)
+
+@router.get("/proyeccion")
+def get_proyeccion(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+) -> Any:
+    """
+    Retorna la proyección financiera para el ciclo actual.
+    """
+    return proyeccion_service.calcular_proyeccion(db, current_user)
