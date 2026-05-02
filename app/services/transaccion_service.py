@@ -94,7 +94,7 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate) ->
         
         # Crear transaccion padre (no impacta saldo)
         nueva_transaccion = Transaccion(
-            **data.model_dump(exclude={"usuario_id", "info_cuotas"}),
+            **data.model_dump(exclude={"usuario_id", "info_cuotas", "monto"}),
             usuario_id=usuario_id,
             monto=data.info_cuotas.monto_total # Guardamos el total en el padre para registro
         )
