@@ -114,13 +114,27 @@ def get_ciclo_fechas(usuario: Usuario, hoy: date) -> tuple[date, date]:
     fin = (inicio + relativedelta(months=1)) - timedelta(days=1)
     return inicio, fin
 
-def get_dashboard_resumen(db: Session, usuario: Usuario) -> Dict[str, Any]:
+def get_dashboard_resumen(
+    db: Session, 
+    usuario: Usuario, 
+    fecha_desde_override: Optional[date] = None, 
+    fecha_hasta_override: Optional[date] = None
+) -> Dict[str, Any]:
     # Argentum usa UTC-3 para presentacion, pero las fechas en DB son Date (sin timezone)
     # o DateTime (con timezone). Transaccion.fecha es Date.
     # Usamos la fecha local de "hoy" en Argentina (UTC-3).
     hoy = (datetime.now(timezone.utc) - timedelta(hours=3)).date()
     
-    fecha_inicio, fecha_fin = get_ciclo_fechas(usuario, hoy)
+    if fecha_desde_override and fecha_hasta_override:
+        fecha_inicio, fecha_fin = fecha_desde_override, fecha_hasta_override
+    else:
+        fecha_inicio, fecha_fin = get_ciclo_fechas(usuario, hoy)
+    
+    # Obtener fecha de la primera transaccion para el limite inferior del frontend
+    primera_tx_fecha = db.execute(
+        select(func.min(Transaccion.fecha))
+        .where(Transaccion.usuario_id == usuario.id)
+    ).scalar()
     
     # Ciclo anterior
     # Para obtener el ciclo anterior, tomamos un dia antes del inicio del actual
@@ -202,13 +216,15 @@ def get_dashboard_resumen(db: Session, usuario: Usuario) -> Dict[str, Any]:
     
     disponible = total_billeteras - cuotas_comprometidas
     
-    # Ultimos movimientos
+    # Ultimos movimientos (del ciclo actual)
     ultimos_movimientos = db.execute(
         select(Transaccion)
         .options(joinedload(Transaccion.billetera), joinedload(Transaccion.categoria))
         .where(
             and_(
                 Transaccion.usuario_id == usuario.id,
+                Transaccion.fecha >= fecha_inicio,
+                Transaccion.fecha <= fecha_fin,
                 Transaccion.es_padre_cuotas == False
             )
         )
@@ -296,7 +312,8 @@ def get_dashboard_resumen(db: Session, usuario: Usuario) -> Dict[str, Any]:
     return {
         "periodo": {
             "fecha_inicio": fecha_inicio.isoformat(),
-            "fecha_fin": fecha_fin.isoformat()
+            "fecha_fin": fecha_fin.isoformat(),
+            "primera_transaccion": primera_tx_fecha.isoformat() if primera_tx_fecha else None
         },
         "balance": {
             "ingresos": float(ingresos),
