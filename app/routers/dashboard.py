@@ -11,13 +11,19 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 @router.get("/resumen")
 def get_resumen(
+    desde: str | None = None,
+    hasta: str | None = None,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ) -> Any:
     """
     Retorna el resumen del dashboard para el usuario autenticado.
     """
-    return dashboard_service.get_dashboard_resumen(db, current_user)
+    from datetime import date
+    fecha_desde = date.fromisoformat(desde) if desde else None
+    fecha_hasta = date.fromisoformat(hasta) if hasta else None
+    
+    return dashboard_service.get_dashboard_resumen(db, current_user, fecha_desde, fecha_hasta)
 
 @router.get("/cotizacion")
 def get_cotizacion(
