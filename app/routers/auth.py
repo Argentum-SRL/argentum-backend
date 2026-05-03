@@ -22,9 +22,10 @@ FLUJOS:
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from app.core.config import settings
 
 from app.core.auth import (
     crear_access_token,
@@ -133,7 +134,7 @@ def _requiere_onboarding(user: Usuario) -> bool:
 # ---------------------------------------------------------------------------
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-def register(user_in: RegisterRequest, db: Session = Depends(get_db)):
+def register(user_in: RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Registra un usuario con email/password.
     No devuelve tokens: primero debe verificar email y luego teléfono.
@@ -156,9 +157,10 @@ def register(user_in: RegisterRequest, db: Session = Depends(get_db)):
         email=user_in.email,
         telefono=user_in.telefono,
         password_hash=get_password_hash(user_in.password),
+        password_configurada=True, # Ya la puso en el registro
         auth_provider=AuthProvider.EMAIL,
-        estado=EstadoUsuario.ACTIVO,  # Auto-aprobado
-        email_verificado=True,       # Auto-verificado
+        estado=EstadoUsuario.PENDIENTE_VERIFICACION,
+        email_verificado=False,
         telefono_verificado=False,
         onboarding_completo=False,
         moneda_principal="ARS",
@@ -170,12 +172,13 @@ def register(user_in: RegisterRequest, db: Session = Depends(get_db)):
     # Crear billeteras efectivo default
     usuario_service.crear_billeteras_efectivo_default(db, nuevo.id)
 
-    # generar_y_enviar_verificacion_email(nuevo.email)  # Deshabilitado temporalmente
+    # Enviar email en segundo plano para no bloquear el registro
+    background_tasks.add_task(generar_y_enviar_verificacion_email, nuevo.email)
 
     return AuthResponse(
         usuario=UsuarioRead.model_validate(nuevo),
-        requiere_verificacion_email=False,
-        requiere_verificacion_telefono=True,
+        requiere_verificacion_email=True,
+        requiere_verificacion_telefono=False,
     )
 
 
@@ -249,21 +252,45 @@ def verificar_recuperacion(body: VerificarRecuperacionRequest, db: Session = Dep
 
 @router.post("/email/enviar-codigo")
 def enviar_codigo_email(body: EnviarCodigoEmailRequest, db: Session = Depends(get_db)):
-    """Reenvía el código de verificación de email. AUTO-VERIFICA por bypass temporal."""
+    """Reenvía el código de verificación de email."""
     user = db.execute(select(Usuario).where(Usuario.email == body.email)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="No existe una cuenta con ese email.")
     
-    # if user.email_verificado:
-    #    raise HTTPException(status_code=400, detail="El email ya está verificado.")
+    if user.email_verificado:
+        raise HTTPException(status_code=400, detail="El email ya está verificado.")
 
-    # generar_y_enviar_verificacion_email(body.email)
+    generar_y_enviar_verificacion_email(body.email)
     
-    # Bypass temporal: auto-verificar al pedir el código
+    return {"detail": "Código enviado a tu casilla de correo."}
+
+
+@router.get("/email/verificar-link")
+def verificar_email_link(email: str, codigo: str, db: Session = Depends(get_db)):
+    """
+    Verifica el email a través de un link (método GET).
+    Si es exitoso, redirige a una página de confirmación en el frontend.
+    """
+    ok, error = verificar_codigo_email(email, codigo)
+    if not ok:
+        raise HTTPException(status_code=400, detail=error)
+
+    user = db.execute(select(Usuario).where(Usuario.email == email)).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+
+    user.email_verificado = True
+    
+    # Si es provider EMAIL, también debemos disparar el envío del código de WhatsApp
+    # para el siguiente paso del registro.
     user.email_verificado = True
     db.commit()
-    
-    return {"detail": "Email verificado automáticamente por bypass temporal.", "verificado": True}
+
+    # Redirigir a verificar teléfono (el frontend se encargará de pedir el código al cargar)
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(
+        url=f"{settings.FRONTEND_URL}/auth/verificar-telefono?telefono={user.telefono}&modoVerificacion=true"
+    )
 
 
 @router.post("/email/verificar", response_model=AuthResponse)
@@ -286,20 +313,6 @@ def verificar_email(body: VerificarCodigoEmailRequest, request: Request, db: Ses
     user.email_verificado = True
 
     if user.auth_provider == AuthProvider.EMAIL:
-        # Enviar WhatsApp al teléfono registrado para completar la verificación
-        codigo_wa = generar_codigo()
-        guardar_codigo(user.telefono, codigo_wa)
-        
-        mensaje = (
-            f"*Argentum*\n"
-            f"Tu codigo de verificacion es: *{codigo_wa}*\n"
-            f"Expira en 10 minutos.\n"
-            f"Si no lo pediste, ignora este mensaje."
-        )
-        enviado = enviar_mensaje_whatsapp(user.telefono, mensaje)
-        if not enviado:
-            raise HTTPException(status_code=500, detail="No se pudo enviar el mensaje de WhatsApp. Intentá de nuevo.")
-
         db.commit()
         return AuthResponse(
             usuario=UsuarioRead.model_validate(user),
@@ -353,9 +366,10 @@ def login_google(body: GoogleLoginRequest, request: Request, db: Session = Depen
 
     if user:
         if not user.email_verificado:
-            user.email_verificado = True
-            db.commit()
-            # print('[Auth][Google] Auto-verificando email por problemas con revision de cuenta')
+            raise HTTPException(
+                status_code=401,
+                detail="Tu cuenta de Argentum aún no ha verificado el email. Verificalo para poder usar Google.",
+            )
         
         # Si no tiene foto, actualizamos con la de Google
         if not user.foto_url:
@@ -531,10 +545,23 @@ def verificar_codigo_telefono(
 
     access, refresh = _tokens(user.id, request, db)
     
-    # requiere_datos si no tiene nombre (usuarios de teléfono que no completaron perfil)
-    # requiere_onboarding si tiene nombre pero no completó onboarding
-    req_datos = not user.nombre
-    req_onboarding = _requiere_onboarding(user) if user.nombre else False
+    # requiere_datos si no tiene nombre, email o password (usuarios de teléfono que no completaron perfil)
+    if user.auth_provider == AuthProvider.TELEFONO:
+        req_datos = not (
+            user.nombre and user.nombre.strip() and 
+            user.email and user.email.strip() and 
+            user.password_configurada
+        )
+    else:
+        # Para Google o Email, ya tienen los datos básicos en el registro
+        req_datos = not (user.nombre and user.nombre.strip())
+
+    # Si el usuario ya tiene email, no debería pedir completar datos (evita bucles en registro por email)
+    if user.email and user.auth_provider == AuthProvider.EMAIL:
+        req_datos = False
+
+    # Solo pedimos onboarding si ya tiene los datos básicos completos
+    req_onboarding = _requiere_onboarding(user) if not req_datos else False
 
     return AuthResponse(
         access_token=access,
@@ -552,34 +579,33 @@ def verificar_codigo_telefono(
 @router.post("/completar-perfil", response_model=AuthResponse)
 def completar_perfil(
     body: CompletarPerfilRequest,
-    request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
     """
-    Agrega nombre, apellido, email y password a una cuenta creada solo con teléfono.
-    Después envía un código de verificación al email.
-    Requiere autenticación.
+    Completa los datos del perfil (nombre, email, password) para usuarios que
+    registraron solo con teléfono. Al terminar, requiere verificar email.
     """
-    if current_user.auth_provider != AuthProvider.TELEFONO:
-        raise HTTPException(status_code=400, detail="Este endpoint es solo para cuentas creadas con teléfono.")
-
+    # Verificar que el email no esté tomado
     email_existente = db.execute(select(Usuario).where(Usuario.email == body.email)).scalar_one_or_none()
-    if email_existente:
+    if email_existente and email_existente.id != current_user.id:
         raise HTTPException(status_code=400, detail="Ese mail ya está registrado en otra cuenta.")
 
     current_user.nombre = body.nombre
     current_user.apellido = body.apellido
     current_user.email = body.email
     current_user.password_hash = get_password_hash(body.password)
-    current_user.email_verificado = True # Auto-verificado
+    current_user.password_configurada = True
+    current_user.email_verificado = False
     db.commit()
 
-    # generar_y_enviar_verificacion_email(body.email) # Deshabilitado temporalmente
+    # Enviar email en segundo plano
+    background_tasks.add_task(generar_y_enviar_verificacion_email, current_user.email)
 
     return AuthResponse(
         usuario=UsuarioRead.model_validate(current_user),
-        requiere_verificacion_email=False,
+        requiere_verificacion_email=True,
     )
 
 

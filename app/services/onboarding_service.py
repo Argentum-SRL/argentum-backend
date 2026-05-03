@@ -15,50 +15,25 @@ from app.schemas.onboarding import (
 
 def get_estado_onboarding(db: Session, user: Usuario) -> EstadoOnboardingResponse:
     pasos_pendientes = []
-    
-    # 1. Datos personales
+    # 1. Datos personales: nombre, apellido, fecha_nacimiento, sexo
     if not user.nombre or not user.apellido or not user.fecha_nacimiento or not user.sexo:
         pasos_pendientes.append("datos_personales")
     
-    # 2. Ciclo financiero
+    # 2. Ciclo financiero: tipo y valor
     if not user.ciclo_tipo or not user.ciclo_valor:
         pasos_pendientes.append("ciclo_financiero")
         
-    # 3. Moneda
-    # Nota: moneda_principal tiene default ARS en el modelo, 
-    # pero el user dice que falta si es null. 
-    # En el modelo pusimos nullable=False default=Moneda.ARS.
-    # Segun el requerimiento: "falta si moneda_principal es null".
-    # Vamos a asumir que si el usuario no paso por este paso, lo pedimos.
-    # Podemos usar un flag o chequear si ciclo_tipo ya se seteo pero moneda sigue en default.
-    # Pero el requerimiento es explicito: "falta si moneda_principal es null".
-    # Ajustaremos el modelo o la logica. 
-    # Si el modelo tiene default ARS, nunca sera null.
-    # Re-leamos: "moneda: falta si moneda_principal es null".
-    # Cambiaremos el modelo para que moneda_principal sea opcional en la BD 
-    # o usaremos otra señal.
-    # Por ahora, si es el default y no tiene billeteras, asumimos que le falta elegir.
-    # Pero mejor ser estrictos con lo que pide el usuario.
-    
-    # El paso 'primera_billetera' ha sido removido por pedido del usuario.
-    # El onboarding termina en el paso 'moneda'.
-    
-    # Re-evaluando: El usuario pide exactamente estos criterios:
-    # 1. "datos_personales": falta si nombre o apellido son null
-    # 2. "ciclo_financiero": falta si ciclo_tipo o ciclo_valor son null
-    # 3. "moneda": falta si moneda_principal es null
-    
-    # Dado que el modelo tiene default para moneda_principal, nunca sera null 
-    # a menos que cambiemos el modelo. 
-    # Vamos a cambiar el modelo Usuario para que moneda_principal sea Mapped[Moneda | None] 
-    # y nullable=True.
-    
-    if not user.nombre or not user.apellido or not user.fecha_nacimiento or not user.sexo:
-        if "datos_personales" not in pasos_pendientes: pasos_pendientes.append("datos_personales")
-    if not user.ciclo_tipo or not user.ciclo_valor:
-        if "ciclo_financiero" not in pasos_pendientes: pasos_pendientes.append("ciclo_financiero")
-    if not user.moneda_principal:
-        if "moneda" not in pasos_pendientes: pasos_pendientes.append("moneda")
+    # 3. Moneda: obligatoria si el onboarding no está completo
+    # Esto asegura que el usuario siempre pase por el paso de moneda para finalizar
+    if not user.onboarding_completo:
+        # Solo lo agregamos si no hay pasos anteriores críticos pendientes 
+        # (para mantener el orden 1 -> 2 -> 3)
+        if not pasos_pendientes:
+            pasos_pendientes.append("moneda")
+        else:
+            # Si hay pasos anteriores, moneda vendrá después
+            if "moneda" not in pasos_pendientes:
+                pasos_pendientes.append("moneda")
 
     return EstadoOnboardingResponse(
         onboarding_completo=user.onboarding_completo,
@@ -78,8 +53,8 @@ def validar_ciclo(ciclo_tipo: CicloTipo, ciclo_valor: str) -> tuple[bool, str | 
     if ciclo_tipo == CicloTipo.DIA_FIJO:
         try:
             dia = int(ciclo_valor)
-            if not (1 <= dia <= 28):
-                return False, "El día debe estar entre 1 y 28."
+            if not (1 <= dia <= 31):
+                return False, "El día debe estar entre 1 y 31."
         except ValueError:
             return False, "El valor debe ser un número para el tipo día fijo."
     elif ciclo_tipo == CicloTipo.REGLA:
