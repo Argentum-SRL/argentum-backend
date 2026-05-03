@@ -13,9 +13,9 @@ from app.core.auth import limpiar_tokens_expirados
 from app.services.recurrente_service import procesar_recurrentes
 
 # ---------------------------------------------------------------------------
-# Seed de categorías y subcategorías
+# Inicialización automática de Base de Datos
 # ---------------------------------------------------------------------------
-from scripts.seed_categorias import seed_categorias_subcategorias
+from scripts.init_full_db import init_full_db
 
 def _job_limpiar_tokens():
     """Tarea programada: elimina refresh tokens viejos cada 6 horas."""
@@ -57,9 +57,12 @@ app = FastAPI(title="Argentum API", version="1.0.0", lifespan=lifespan)
 
 
 @app.on_event("startup")
-def startup_seed():
-    """Ejecuta el seed de categorías al iniciar el servidor."""
-    seed_categorias_subcategorias()
+def startup_init_db():
+    """
+    Inicializa automáticamente la base de datos al arrancar el servidor.
+    Detecta modelos, crea tablas y ejecuta seeds iniciales.
+    """
+    init_full_db()
 
 _origins = [settings.FRONTEND_URL]
 if settings.ENVIRONMENT == "development":
