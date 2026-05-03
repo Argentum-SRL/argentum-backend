@@ -77,12 +77,12 @@ def actualizar_email(
         raise HTTPException(status_code=400, detail="El email ya está en uso")
     
     usuario.email = datos.email_nuevo
-    usuario.email_verificado = True # Auto-verificado temporalmente
+    usuario.email_verificado = False
     db.commit()
     
-    # email_service.generar_y_enviar_verificacion_email(datos.email_nuevo)
+    email_service.generar_y_enviar_verificacion_email(datos.email_nuevo)
     
-    return {"confirmacion": "Email actualizado exitosamente.", "requiere_verificacion_email": False}
+    return {"confirmacion": "Email actualizado exitosamente. Verificá tu nueva casilla.", "requiere_verificacion_email": True}
 
 def actualizar_password(
     db: Session, usuario: Usuario, datos: EditarPassword
@@ -145,10 +145,10 @@ def actualizar_ciclo_financiero(
     if datos.ciclo_tipo == CicloTipo.DIA_FIJO:
         try:
             dia = int(datos.ciclo_valor)
-            if not (1 <= dia <= 28):
+            if not (1 <= dia <= 31):
                 raise ValueError()
         except ValueError:
-            raise HTTPException(status_code=400, detail="El día fijo debe ser un número entre 1 y 28")
+            raise HTTPException(status_code=400, detail="El día fijo debe ser un número entre 1 y 31")
     elif datos.ciclo_tipo == CicloTipo.REGLA:
         reglas_validas = [
             'primer_lunes', 'primer_martes', 'primer_miercoles', 'primer_jueves', 'primer_viernes',

@@ -33,8 +33,9 @@ class Settings(BaseSettings):
     # Google
     GOOGLE_CLIENT_ID: str = ""
 
-    # CORS
+    # URLs
     FRONTEND_URL: str = "http://localhost:5173"
+    BACKEND_URL: str = "http://localhost:8000"
 
     # SMTP / Email
     SMTP_HOST: str = "smtp.gmail.com"

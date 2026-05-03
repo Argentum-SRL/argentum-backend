@@ -49,11 +49,6 @@ def post_datos_personales(
     if current_user.onboarding_completo:
         return OnboardingStepResponse(completado=True, siguiente_paso=None)
         
-    if current_user.nombre and current_user.apellido and current_user.fecha_nacimiento and current_user.sexo:
-        estado = get_estado_onboarding(db, current_user)
-        siguiente = estado.pasos_pendientes[0] if estado.pasos_pendientes else None
-        return OnboardingStepResponse(completado=True, siguiente_paso=siguiente)
-
     nombre = body.nombre.strip()
     apellido = body.apellido.strip()
     
@@ -75,6 +70,7 @@ def post_datos_personales(
     current_user.fecha_nacimiento = body.fecha_nacimiento
     current_user.sexo = body.sexo
     db.commit()
+    db.refresh(current_user)
     
     estado = get_estado_onboarding(db, current_user)
     siguiente = estado.pasos_pendientes[0] if estado.pasos_pendientes else None
@@ -94,11 +90,6 @@ def post_ciclo_financiero(
     if not current_user.nombre or not current_user.apellido or not current_user.fecha_nacimiento or not current_user.sexo:
         raise HTTPException(status_code=400, detail="Primero completá tus datos personales.")
 
-    if current_user.ciclo_tipo and current_user.ciclo_valor:
-        estado = get_estado_onboarding(db, current_user)
-        siguiente = estado.pasos_pendientes[0] if estado.pasos_pendientes else None
-        return OnboardingStepResponse(completado=True, siguiente_paso=siguiente)
-
     ok, error = validar_ciclo(body.ciclo_tipo, body.ciclo_valor)
     if not ok:
         raise HTTPException(status_code=400, detail=error)
@@ -106,6 +97,7 @@ def post_ciclo_financiero(
     current_user.ciclo_tipo = body.ciclo_tipo
     current_user.ciclo_valor = body.ciclo_valor
     db.commit()
+    db.refresh(current_user)
     
     estado = get_estado_onboarding(db, current_user)
     siguiente = estado.pasos_pendientes[0] if estado.pasos_pendientes else None
@@ -125,10 +117,6 @@ def post_moneda(
     if not current_user.ciclo_tipo or not current_user.ciclo_valor:
         raise HTTPException(status_code=400, detail="Primero configurá tu ciclo financiero.")
 
-    if current_user.moneda_principal:
-        estado = get_estado_onboarding(db, current_user)
-        siguiente = estado.pasos_pendientes[0] if estado.pasos_pendientes else None
-        return OnboardingStepResponse(completado=True, siguiente_paso=siguiente)
 
     if (body.moneda_principal == "USD" or body.moneda_secundaria_activa) and not body.tipo_dolar:
         raise HTTPException(status_code=400, detail="El tipo de dólar es obligatorio.")

@@ -150,8 +150,12 @@ def enviar_whatsapp(numero: str, mensaje: str) -> bool:
         logger.info("WhatsApp enviado exitosamente a %s. SID: %s", numero, msg.sid)
         return True
     except TwilioRestException as e:
-        print(f"[DEBUG-WA] ERROR DE TWILIO: {e}")
+        print(f"[DEBUG-WA] ERROR DE TWILIO (REST): {e}")
         logger.error("Error al enviar WhatsApp a %s: %s", numero, e)
+        return False
+    except Exception as e:
+        print(f"[DEBUG-WA] ERROR INESPERADO EN WHATSAPP: {type(e).__name__}: {e}")
+        logger.error("Error inesperado al enviar WhatsApp a %s: %s", numero, e)
         return False
 
 
