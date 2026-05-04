@@ -55,13 +55,15 @@ def list_transacciones(
 
 @router.get("/pendientes", response_model=List[TransaccionRead])
 def get_pendientes_ia(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
     """
-    Lista todas las transacciones con estado_verificacion='pendiente'.
+    Lista transacciones con estado_verificacion='pendiente' con límites.
     """
-    return transaccion_service.obtener_pendientes_ia(db, current_user.id)
+    return transaccion_service.obtener_pendientes_ia(db, current_user.id, skip=skip, limit=limit)
 
 
 @router.get("/{transaccion_id}", response_model=TransaccionRead)

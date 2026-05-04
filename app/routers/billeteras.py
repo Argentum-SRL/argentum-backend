@@ -4,7 +4,7 @@ from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update, delete, exists
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
@@ -35,20 +35,18 @@ def list_billeteras(
     # Failsafe: asegurar que tenga las billeteras de efectivo default
     usuario_service.crear_billeteras_efectivo_default(db, current_user.id)
     
-    billeteras = db.execute(select(Billetera).where(Billetera.usuario_id == current_user.id)).scalars().all()
+    # Optimización N+1: Usar subqueries correlacionadas para verificar transacciones y transferencias
+    exists_tx = exists().where(Transaccion.billetera_id == Billetera.id)
+    exists_tr = exists().where(
+        (TransferenciaInterna.billetera_origen_id == Billetera.id) | 
+        (TransferenciaInterna.billetera_destino_id == Billetera.id)
+    )
+    
+    stmt = select(Billetera, (exists_tx | exists_tr).label("has_tx")).where(Billetera.usuario_id == current_user.id)
+    rows = db.execute(stmt).all()
     
     results = []
-    for b in billeteras:
-        # Verificar transacciones
-        has_tx = db.execute(select(Transaccion.id).where(Transaccion.billetera_id == b.id).limit(1)).scalar_one_or_none() is not None
-        if not has_tx:
-            # Verificar transferencias internas
-            has_tx = db.execute(select(TransferenciaInterna.id).where(
-                (TransferenciaInterna.billetera_origen_id == b.id) | 
-                (TransferenciaInterna.billetera_destino_id == b.id)
-            ).limit(1)).scalar_one_or_none() is not None
-        
-        # Mapear a BilleteraRead y añadir el flag
+    for b, has_tx in rows:
         b_read = BilleteraRead.model_validate(b)
         b_read.tiene_transacciones = has_tx
         results.append(b_read)
