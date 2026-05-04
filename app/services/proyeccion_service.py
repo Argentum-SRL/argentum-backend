@@ -6,7 +6,7 @@ from math import ceil
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from sqlalchemy import and_, func, select, desc, or_
+from sqlalchemy import and_, func, select, desc, or_, case
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.usuario import Usuario, Moneda
@@ -39,33 +39,42 @@ def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
 
     # Paso 2: Calcular promedio historico por categoria
     # Agrupamos por categoria los egresos de cada ciclo completo
-    totales_por_categoria_y_ciclo = []
     categorias_nombres = {}
-
-    for inicio, fin in ciclos_anteriores:
+    if n_ciclos > 0:
+        cycle_case = case(*[(and_(Transaccion.fecha >= inicio, Transaccion.fecha <= fin), idx) for idx, (inicio, fin) in enumerate(ciclos_anteriores)], else_=-1)
+        
         stmt = (
-            select(Transaccion.categoria_id, Categoria.nombre, func.sum(Transaccion.monto).label("total"))
+            select(
+                Transaccion.categoria_id, 
+                Categoria.nombre, 
+                cycle_case.label("cycle_idx"),
+                func.sum(Transaccion.monto).label("total")
+            )
             .join(Categoria, Transaccion.categoria_id == Categoria.id)
             .where(
                 and_(
                     Transaccion.usuario_id == usuario.id,
-                    Transaccion.fecha >= inicio,
-                    Transaccion.fecha <= fin,
                     Transaccion.tipo == TipoTransaccion.EGRESO,
                     Transaccion.es_padre_cuotas == False,
                     or_(
                         Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
                         Transaccion.estado_verificacion == None
-                    )
+                    ),
+                    cycle_case != -1
                 )
             )
-            .group_by(Transaccion.categoria_id, Categoria.nombre)
+            .group_by(Transaccion.categoria_id, Categoria.nombre, "cycle_idx")
         )
         res = db.execute(stmt).all()
-        ciclo_data = {row.categoria_id: row.total for row in res}
+        
+        # Inicializar la lista de diccionarios por ciclo
+        totales_por_categoria_y_ciclo = [{} for _ in range(n_ciclos)]
         for row in res:
-            categorias_nombres[row.categoria_id] = row.nombre
-        totales_por_categoria_y_ciclo.append(ciclo_data)
+            if row.cycle_idx != -1:
+                totales_por_categoria_y_ciclo[row.cycle_idx][row.categoria_id] = row.total
+                categorias_nombres[row.categoria_id] = row.nombre
+    else:
+        totales_por_categoria_y_ciclo = []
 
     promedios_historicos = {}
     if n_ciclos > 0:
@@ -306,18 +315,22 @@ def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
         )
     ).scalars().all()
 
+    # Optimización N+1: Obtener todos los IDs que ya generaron transacciones hoy
+    recurrentes_ids = [rec.id for rec in recurrentes_activas]
+    recurrentes_hoy = set()
+    if recurrentes_ids:
+        stmt_hoy = select(Transaccion.recurrente_id).where(
+            and_(
+                Transaccion.usuario_id == usuario.id,
+                Transaccion.recurrente_id.in_(recurrentes_ids),
+                Transaccion.fecha == hoy
+            )
+        )
+        recurrentes_hoy = set(db.execute(stmt_hoy).scalars().all())
+
     for rec in recurrentes_activas:
         # Verificar si ya genero transaccion hoy para no duplicar
-        ya_genero_hoy = db.execute(
-            select(Transaccion)
-            .where(
-                and_(
-                    Transaccion.usuario_id == usuario.id,
-                    Transaccion.recurrente_id == rec.id,
-                    Transaccion.fecha == hoy
-                )
-            )
-        ).first() is not None
+        ya_genero_hoy = rec.id in recurrentes_hoy
 
         start_check = hoy + timedelta(days=1) if ya_genero_hoy or True else hoy # El requerimiento dice hoy+1
         # Re-leemos el requerimiento: "Verificar si su dia_registro todavia no ocurrio en el ciclo actual (entre hoy+1 y fecha_fin_ciclo)"
