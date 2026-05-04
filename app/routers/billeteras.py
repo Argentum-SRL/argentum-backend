@@ -35,7 +35,24 @@ def list_billeteras(
     # Failsafe: asegurar que tenga las billeteras de efectivo default
     usuario_service.crear_billeteras_efectivo_default(db, current_user.id)
     
-    results = db.execute(select(Billetera).where(Billetera.usuario_id == current_user.id)).scalars().all()
+    billeteras = db.execute(select(Billetera).where(Billetera.usuario_id == current_user.id)).scalars().all()
+    
+    results = []
+    for b in billeteras:
+        # Verificar transacciones
+        has_tx = db.execute(select(Transaccion.id).where(Transaccion.billetera_id == b.id).limit(1)).scalar_one_or_none() is not None
+        if not has_tx:
+            # Verificar transferencias internas
+            has_tx = db.execute(select(TransferenciaInterna.id).where(
+                (TransferenciaInterna.billetera_origen_id == b.id) | 
+                (TransferenciaInterna.billetera_destino_id == b.id)
+            ).limit(1)).scalar_one_or_none() is not None
+        
+        # Mapear a BilleteraRead y añadir el flag
+        b_read = BilleteraRead.model_validate(b)
+        b_read.tiene_transacciones = has_tx
+        results.append(b_read)
+
     return results
 
 

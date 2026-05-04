@@ -38,5 +38,6 @@ class BilleteraUpdate(BaseModel):
 class BilleteraRead(BilleteraBase):
     id: UUID
     fecha_creacion: datetime
+    tiene_transacciones: bool = False
 
     model_config = ConfigDict(from_attributes=True)
