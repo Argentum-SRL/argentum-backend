@@ -8,7 +8,7 @@ from uuid import UUID
 import httpx
 from fastapi import HTTPException
 from dateutil.relativedelta import relativedelta
-from sqlalchemy import and_, func, select, desc, or_, case, literal, null, String, cast
+from sqlalchemy import and_, func, select, desc, or_, case, literal, null, String, cast, union_all
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -193,7 +193,7 @@ def get_dashboard_resumen(
         and_(GrupoCuotas.usuario_id == usuario.id, Cuota.pagada == False, Cuota.fecha_vencimiento >= hoy, Cuota.fecha_vencimiento <= limite_pagos)
     )
 
-    actividad = db.execute(m_stmt.union_all(s_stmt).union_all(c_stmt)).all()
+    actividad = db.execute(m_stmt.union_all(s_stmt, c_stmt)).all()
 
     # --- Procesamiento de Resultados ---
     ingresos, egresos = res.ing_actual or Decimal("0"), res.egr_actual or Decimal("0")
