@@ -2,20 +2,22 @@
 app/core/auth.py — Lógica central de autenticación JWT para Argentum.
 
 ESTRATEGIA DE SESIÓN:
-  - Access token:  JWT firmado, duración 15 minutos.
-  - Refresh token: UUID aleatorio hasheado con bcrypt, guardado en BD, duración 365 días.
-  - Rotation:      Cada vez que se usa el refresh token se revoca y se genera uno nuevo.
-  - Logout:        Único mecanismo para cerrar sesión; revoca el refresh token en BD.
+    - Access token:  JWT firmado, duración 15 minutos.
+    - Refresh token: token opaco con token_id indexable + secreto firmado con HMAC-SHA256.
+    - Rotation:      Cada vez que se usa el refresh token se revoca y se genera uno nuevo.
+    - Logout:        Único mecanismo para cerrar sesión; revoca el refresh token en BD.
 
 FLUJO ESPERADO EN EL FRONTEND:
-  1. Al hacer login, guardar access_token + refresh_token (ej: localStorage / httpOnly cookie).
-  2. Incluir el access_token en cada request: Authorization: Bearer <access_token>.
-  3. Si el server devuelve 401 → llamar POST /auth/refresh con { "refresh_token": "..." }.
-  4. Guardar los nuevos tokens devueltos por /auth/refresh.
-  5. Reintentar el request original con el nuevo access_token.
-  6. Si /auth/refresh también devuelve 401 → redirigir al login.
+    1. Al hacer login, guardar access_token + refresh_token (ej: localStorage / httpOnly cookie).
+    2. Incluir el access_token en cada request: Authorization: Bearer <access_token>.
+    3. Si el server devuelve 401 → llamar POST /auth/refresh con { "refresh_token": "..." }.
+    4. Guardar los nuevos tokens devueltos por /auth/refresh.
+    5. Reintentar el request original con el nuevo access_token.
+    6. Si /auth/refresh también devuelve 401 → redirigir al login.
 """
 
+import hashlib
+import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -40,12 +42,32 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
+def _refresh_secret_hash(secret: str) -> str:
+    return hmac.new(
+        settings.SECRET_KEY.encode("utf-8"),
+        secret.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _parse_refresh_token(refresh_token_plain: str) -> tuple[str | None, str | None]:
+    if "." not in refresh_token_plain:
+        return None, None
+    token_id, secret = refresh_token_plain.split(".", 1)
+    if not token_id or not secret:
+        return None, None
+    return token_id, secret
+
+
+def _refresh_token_matches(secret: str, token_hash: str) -> bool:
+    return hmac.compare_digest(_refresh_secret_hash(secret), token_hash)
+
+
 # ---------------------------------------------------------------------------
 # Access token (JWT firmado)
 # ---------------------------------------------------------------------------
 
 def crear_access_token(usuario_id: UUID | str) -> str:
-    """Crea un JWT de corta duración (15 minutos) con el ID del usuario como 'sub'."""
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {
         "sub": str(usuario_id),
@@ -57,11 +79,6 @@ def crear_access_token(usuario_id: UUID | str) -> str:
 
 
 def verificar_access_token(token: str) -> str:
-    """
-    Decodifica y valida el JWT.
-    Devuelve el usuario_id (str) si es válido.
-    Lanza HTTPException 401 si está expirado o es inválido.
-    """
     credentials_exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Token de acceso inválido o expirado",
@@ -79,26 +96,26 @@ def verificar_access_token(token: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Refresh token (UUID aleatorio, hasheado en BD)
+# Refresh token (token_id indexable + secreto firmado)
 # ---------------------------------------------------------------------------
 
 def crear_refresh_token(usuario_id: UUID | str, db: Session, device_info: str | None = None) -> str:
-    """
-    Genera un refresh token aleatorio seguro, lo guarda hasheado en la BD
-    con expiración de 365 días y devuelve el token en texto plano
-    (solo este momento se conoce el valor; luego solo el hash está en BD).
-    """
-    token_plain = secrets.token_urlsafe(64)
-    token_hash = pwd_context.hash(token_plain)
+    token_id = secrets.token_urlsafe(16)
+    token_secret = secrets.token_urlsafe(48)
+
+    token_plain = f"{token_id}.{token_secret}"
+    token_hash = _refresh_secret_hash(token_secret)
 
     expiracion = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
     db_token = RefreshToken(
         usuario_id=usuario_id if isinstance(usuario_id, UUID) else UUID(str(usuario_id)),
-        token=token_hash,
+        token_id=token_id,
+        token_hash=token_hash,
         fecha_expiracion=expiracion,
         device_info=device_info,
     )
+
     db.add(db_token)
     db.commit()
 
@@ -106,24 +123,25 @@ def crear_refresh_token(usuario_id: UUID | str, db: Session, device_info: str | 
 
 
 def _buscar_refresh_token(token_plain: str, db: Session) -> RefreshToken:
-    """
-    Busca un refresh token válido en la BD comparando el hash bcrypt.
-    Lanza 401 si no existe, está revocado o expirado.
-    """
-    # Bcrypt no permite búsqueda directa; hay que recuperar candidatos recientes
-    # y comparar hash. Para mantener la BD indexada usamos una ventana temporal amplia.
     ahora = datetime.now(timezone.utc)
+    token_id, secret = _parse_refresh_token(token_plain)
 
-    candidatos = db.execute(
+    if not token_id or not secret:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token inválido",
+        )
+
+    rt = db.execute(
         select(RefreshToken).where(
+            RefreshToken.token_id == token_id,
             RefreshToken.revocado == False,
             RefreshToken.fecha_expiracion > ahora,
         )
-    ).scalars().all()
+    ).scalar_one_or_none()
 
-    for rt in candidatos:
-        if pwd_context.verify(token_plain, rt.token):
-            return rt
+    if rt and _refresh_token_matches(secret, rt.token_hash):
+        return rt
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -137,18 +155,8 @@ def renovar_tokens(
     db: Session,
     device_info: str | None = None,
 ) -> dict:
-    """
-    Rotation strategy:
-      1. Verifica que el refresh token exista, no esté revocado y no haya expirado.
-      2. Revoca el token actual.
-      3. Genera un nuevo access token y un nuevo refresh token.
-      4. Devuelve ambos tokens nuevos.
-
-    Devuelve: {"access_token": str, "refresh_token": str, "token_type": "bearer"}
-    """
     rt = _buscar_refresh_token(refresh_token_plain, db)
 
-    # Revocar el token usado (rotation)
     rt.revocado = True
     db.flush()
 
@@ -165,29 +173,29 @@ def renovar_tokens(
 
 
 def revocar_refresh_token(token_plain: str, db: Session) -> None:
-    """Marca el refresh token como revocado. Silencioso si no existe."""
     ahora = datetime.now(timezone.utc)
-    candidatos = db.execute(
+    token_id, secret = _parse_refresh_token(token_plain)
+
+    if not token_id or not secret:
+        return
+
+    rt = db.execute(
         select(RefreshToken).where(
+            RefreshToken.token_id == token_id,
             RefreshToken.revocado == False,
             RefreshToken.fecha_expiracion > ahora,
         )
-    ).scalars().all()
+    ).scalar_one_or_none()
 
-    for rt in candidatos:
-        if pwd_context.verify(token_plain, rt.token):
-            rt.revocado = True
-            db.commit()
-            return
+    if rt and _refresh_token_matches(secret, rt.token_hash):
+        rt.revocado = True
+        db.commit()
 
 
 def revocar_todos_los_tokens(usuario_id: UUID | str, db: Session) -> int:
-    """
-    Revoca TODOS los refresh tokens activos de un usuario.
-    Devuelve la cantidad de tokens revocados.
-    """
     uid = usuario_id if isinstance(usuario_id, UUID) else UUID(str(usuario_id))
     ahora = datetime.now(timezone.utc)
+
     tokens = db.execute(
         select(RefreshToken).where(
             RefreshToken.usuario_id == uid,
@@ -199,17 +207,14 @@ def revocar_todos_los_tokens(usuario_id: UUID | str, db: Session) -> int:
     count = len(tokens)
     for rt in tokens:
         rt.revocado = True
+
     db.commit()
     return count
 
 
 def limpiar_tokens_expirados(db: Session) -> int:
-    """
-    Elimina físicamente los refresh tokens expirados o revocados.
-    Diseñado para ser llamado por APScheduler periódicamente.
-    Devuelve la cantidad de registros eliminados.
-    """
     ahora = datetime.now(timezone.utc)
+
     expirados = db.execute(
         select(RefreshToken).where(
             (RefreshToken.fecha_expiracion <= ahora) | (RefreshToken.revocado == True)
@@ -219,6 +224,7 @@ def limpiar_tokens_expirados(db: Session) -> int:
     count = len(expirados)
     for rt in expirados:
         db.delete(rt)
+
     db.commit()
     return count
 
@@ -231,13 +237,6 @@ def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> Usuario:
-    """
-    Dependency que extrae y valida el access token JWT del header
-    Authorization: Bearer <token>.
-
-    Si el token expiró devuelve 401 con mensaje claro para que el frontend
-    sepa que debe intentar renovar con /auth/refresh.
-    """
     usuario_id_str = verificar_access_token(token)
 
     usuario = db.execute(
@@ -257,9 +256,6 @@ def get_current_user(
 def get_current_admin(
     current_user: Usuario = Depends(get_current_user),
 ) -> Usuario:
-    """
-    Dependency que además de autenticar, verifica que el usuario sea admin.
-    """
     if current_user.rol != RolUsuario.ADMIN:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -272,27 +268,25 @@ def get_optional_user(
     request: Request,
     db: Session = Depends(get_db),
 ) -> Usuario | None:
-    """
-    Dependency opcional: devuelve el usuario si hay un Bearer token válido,
-    o None si no hay token o el token es inválido. No lanza excepciones.
-    Útil en endpoints que se comportan diferente según si el usuario está autenticado.
-    """
-    from jose import JWTError
-
     auth_header = request.headers.get("authorization", "")
     if not auth_header.startswith("Bearer "):
         return None
 
     token = auth_header[7:]
+
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         usuario_id_str: str | None = payload.get("sub")
         token_type: str | None = payload.get("type")
+
         if not usuario_id_str or token_type != "access":
             return None
+
         usuario = db.execute(
             select(Usuario).where(Usuario.id == UUID(usuario_id_str))
         ).scalar_one_or_none()
+
         return usuario
+
     except (JWTError, Exception):
         return None

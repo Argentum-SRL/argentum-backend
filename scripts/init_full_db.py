@@ -43,9 +43,10 @@ def init_full_db():
         logger.info("✔ Todos los modelos han sido detectados y registrados.")
 
         # 2. CREACIÓN DE TABLAS
-        # Base.metadata.create_all es idempotente y maneja correctamente las Foreign Keys
-        logger.info("Creando tablas en la base de datos (PostgreSQL/Supabase)...")
-        Base.metadata.create_all(bind=engine)
+        # Base.metadata.create_all es desactivado para favorecer el control por Alembic
+        logger.info("El esquema de tablas es gestionado exclusivamente por Alembic.")
+        # Base.metadata.create_all(bind=engine)
+
         
         # Validación de creación
         inspector = inspect(engine)
