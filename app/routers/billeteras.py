@@ -128,28 +128,23 @@ def delete_billetera(
     if billetera.es_efectivo:
         raise HTTPException(status_code=400, detail="Las billeteras de efectivo (ARS/USD) no pueden eliminarse")
 
-    # VERIFICACIÓN DE TRANSACCIONES ASOCIADAS
-    # NOTA: Este chequeo es crucial para la integridad de los datos financieros.
-    # Cuando se desarrolle el módulo de transacciones, esta validación asegurará que no queden registros huérfanos.
+    # VERIFICACIÓN DE INTEGRIDAD (Optimizada: 1 query para ambos chequeos)
+    exists_tx = exists().where(Transaccion.billetera_id == billetera_id)
+    exists_tr = exists().where(
+        (TransferenciaInterna.billetera_origen_id == billetera_id) | 
+        (TransferenciaInterna.billetera_destino_id == billetera_id)
+    )
     
-    # 1. Buscar transacciones manuales, recurrentes, etc.
-    stmt_tx = select(Transaccion.id).where(Transaccion.billetera_id == billetera_id).limit(1)
-    has_tx = db.execute(stmt_tx).scalar_one_or_none()
+    check_stmt = select(exists_tx.label("has_tx"), exists_tr.label("has_tr"))
+    check_res = db.execute(check_stmt).one()
     
-    if has_tx:
+    if check_res.has_tx:
         raise HTTPException(
             status_code=400, 
             detail="No se puede eliminar la billetera porque tiene transacciones asociadas. Por favor, archivala para mantener el historial."
         )
 
-    # 2. Buscar transferencias internas (origen o destino)
-    stmt_tr = select(TransferenciaInterna.id).where(
-        (TransferenciaInterna.billetera_origen_id == billetera_id) | 
-        (TransferenciaInterna.billetera_destino_id == billetera_id)
-    ).limit(1)
-    has_tr = db.execute(stmt_tr).scalar_one_or_none()
-
-    if has_tr:
+    if check_res.has_tr:
         raise HTTPException(
             status_code=400, 
             detail="No se puede eliminar la billetera porque tiene transferencias internas asociadas. Por favor, archivala."
