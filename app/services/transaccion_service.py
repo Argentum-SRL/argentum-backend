@@ -313,10 +313,13 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
     return transaccion
 
 
-def obtener_pendientes_ia(db: Session, usuario_id: UUID):
+def obtener_pendientes_ia(db: Session, usuario_id: UUID, skip: int = 0, limit: int = 100):
     return db.execute(
         select(Transaccion).where(
             Transaccion.usuario_id == usuario_id,
             Transaccion.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE
-        ).order_by(desc(Transaccion.fecha))
+        )
+        .order_by(desc(Transaccion.fecha), desc(Transaccion.fecha_creacion))
+        .offset(skip)
+        .limit(limit)
     ).scalars().all()

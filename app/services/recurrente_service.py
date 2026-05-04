@@ -87,7 +87,7 @@ def eliminar_recurrente(db: Session, usuario_id: UUID, recurrente_id: UUID):
 
 def procesar_recurrentes(db: Session):
     """
-    Genera transacciones reales a partir de las plantillas recurrentes.
+    Genera transacciones reales a partir de las plantillas recurrentes (Optimizado).
     """
     hoy = date.today()
     ultimo_dia_mes = calendar.monthrange(hoy.year, hoy.month)[1]
@@ -96,7 +96,29 @@ def procesar_recurrentes(db: Session):
         select(TransaccionRecurrente).where(TransaccionRecurrente.estado == EstadoTransaccionRecurrente.ACTIVA)
     ).scalars().all()
 
+    if not recurrentes:
+        return 0
+
+    # PRECARGA: Obtener IDs necesarios
+    billeteras_ids = {r.billetera_id for r in recurrentes}
+    recurrente_ids = {r.id for r in recurrentes}
+
+    # PRECARGA: Billeteras en un mapa para acceso rápido O(1)
+    billeteras_db = db.execute(select(Billetera).where(Billetera.id.in_(billeteras_ids))).scalars().all()
+    billeteras_map = {b.id: b for b in billeteras_db}
+
+    # PRECARGA: Transacciones existentes hoy en un set para verificación O(1)
+    existentes = db.execute(
+        select(Transaccion.recurrente_id).where(
+            Transaccion.recurrente_id.in_(recurrente_ids),
+            Transaccion.fecha == hoy
+        )
+    ).scalars().all()
+    existentes_set = set(existentes)
+
+    nuevas_txs = []
     generadas = 0
+
     for rec in recurrentes:
         debe_generar = False
         
@@ -111,49 +133,40 @@ def procesar_recurrentes(db: Session):
                 debe_generar = True
                 
         elif rec.frecuencia == "quincenal":
-            # Primera quincena
             target_day_1 = min(rec.dia_registro, ultimo_dia_mes)
-            # Segunda quincena (+15 días)
             target_day_2 = min(rec.dia_registro + 15, ultimo_dia_mes)
-            
             if hoy.day == target_day_1 or hoy.day == target_day_2:
                 debe_generar = True
 
-        if debe_generar:
-            # Verificar duplicados para hoy
-            ya_existe = db.execute(
-                select(Transaccion).where(
-                    Transaccion.recurrente_id == rec.id,
-                    Transaccion.fecha == hoy
-                )
-            ).scalar_one_or_none()
+        if debe_generar and rec.id not in existentes_set:
+            nueva_tx = Transaccion(
+                usuario_id=rec.usuario_id,
+                tipo=rec.tipo,
+                monto=rec.monto,
+                moneda=rec.moneda,
+                fecha=hoy,
+                descripcion=rec.descripcion,
+                categoria_id=rec.categoria_id,
+                subcategoria_id=rec.subcategoria_id,
+                billetera_id=rec.billetera_id,
+                es_recurrente=True,
+                recurrente_id=rec.id,
+                origen=OrigenTransaccion.RECURRENTE
+            )
+            nuevas_txs.append(nueva_tx)
+            
+            # Impactar saldo en memoria (el objeto está trackeado por SQLAlchemy)
+            billetera = billeteras_map.get(rec.billetera_id)
+            if billetera:
+                if rec.tipo == "ingreso":
+                    billetera.saldo_actual += rec.monto
+                else:
+                    billetera.saldo_actual -= rec.monto
+            
+            generadas += 1
 
-            if not ya_existe:
-                nueva_tx = Transaccion(
-                    usuario_id=rec.usuario_id,
-                    tipo=rec.tipo,
-                    monto=rec.monto,
-                    moneda=rec.moneda,
-                    fecha=hoy,
-                    descripcion=rec.descripcion,
-                    categoria_id=rec.categoria_id,
-                    subcategoria_id=rec.subcategoria_id,
-                    billetera_id=rec.billetera_id,
-                    es_recurrente=True,
-                    recurrente_id=rec.id,
-                    origen=OrigenTransaccion.RECURRENTE
-                )
-                db.add(nueva_tx)
-                
-                # Impactar saldo
-                billetera = db.get(Billetera, rec.billetera_id)
-                if billetera:
-                    if rec.tipo == "ingreso":
-                        billetera.saldo_actual += rec.monto
-                    else:
-                        billetera.saldo_actual -= rec.monto
-                
-                generadas += 1
+    if nuevas_txs:
+        db.add_all(nuevas_txs)
+        db.commit()
 
-    db.commit()
     return generadas

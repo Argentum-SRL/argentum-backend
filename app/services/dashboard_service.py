@@ -8,7 +8,7 @@ from uuid import UUID
 import httpx
 from fastapi import HTTPException
 from dateutil.relativedelta import relativedelta
-from sqlalchemy import and_, func, select, desc, or_
+from sqlalchemy import and_, func, select, desc, or_, case
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
@@ -140,9 +140,12 @@ def get_dashboard_resumen(
     # Para obtener el ciclo anterior, tomamos un dia antes del inicio del actual
     fecha_inicio_ant, fecha_fin_ant = get_ciclo_fechas(usuario, fecha_inicio - timedelta(days=1))
 
-    # Balance actual
-    transacciones_ciclo = db.execute(
-        select(Transaccion)
+    # Balance actual (Optimizada con agregaciones SQL)
+    res_actual = db.execute(
+        select(
+            func.sum(case((Transaccion.tipo == TipoTransaccion.INGRESO, Transaccion.monto), else_=0)).label("ingresos"),
+            func.sum(case((Transaccion.tipo == TipoTransaccion.EGRESO, Transaccion.monto), else_=0)).label("egresos")
+        )
         .where(
             and_(
                 Transaccion.usuario_id == usuario.id,
@@ -155,15 +158,18 @@ def get_dashboard_resumen(
                 )
             )
         )
-    ).scalars().all()
+    ).one()
     
-    ingresos = sum(t.monto for t in transacciones_ciclo if t.tipo == TipoTransaccion.INGRESO)
-    egresos = sum(t.monto for t in transacciones_ciclo if t.tipo == TipoTransaccion.EGRESO)
+    ingresos = res_actual.ingresos or Decimal("0")
+    egresos = res_actual.egresos or Decimal("0")
     balance = ingresos - egresos
     
-    # Balance anterior
-    transacciones_ant = db.execute(
-        select(Transaccion)
+    # Balance anterior (Optimizada con agregaciones SQL)
+    res_ant = db.execute(
+        select(
+            func.sum(case((Transaccion.tipo == TipoTransaccion.INGRESO, Transaccion.monto), else_=0)).label("ingresos"),
+            func.sum(case((Transaccion.tipo == TipoTransaccion.EGRESO, Transaccion.monto), else_=0)).label("egresos")
+        )
         .where(
             and_(
                 Transaccion.usuario_id == usuario.id,
@@ -176,27 +182,26 @@ def get_dashboard_resumen(
                 )
             )
         )
-    ).scalars().all()
+    ).one()
     
-    ingresos_ant = sum(t.monto for t in transacciones_ant if t.tipo == TipoTransaccion.INGRESO)
-    egresos_ant = sum(t.monto for t in transacciones_ant if t.tipo == TipoTransaccion.EGRESO)
+    ingresos_ant = res_ant.ingresos or Decimal("0")
+    egresos_ant = res_ant.egresos or Decimal("0")
     balance_ant = ingresos_ant - egresos_ant
     
     variacion = None
     if balance_ant != 0:
         variacion = round(float(((balance - balance_ant) / abs(balance_ant)) * 100), 1)
 
-    # Disponible real
-    billeteras = db.execute(
-        select(Billetera)
+    # Disponible real (Optimizada con agregación SQL)
+    total_billeteras = db.execute(
+        select(func.sum(Billetera.saldo_actual))
         .where(
             and_(
                 Billetera.usuario_id == usuario.id,
                 Billetera.estado == EstadoBilletera.ACTIVA
             )
         )
-    ).scalars().all()
-    total_billeteras = sum(b.saldo_actual for b in billeteras)
+    ).scalar() or Decimal("0")
     
     # Proximo ciclo para cuotas comprometidas
     fecha_inicio_prox, fecha_fin_prox = get_ciclo_fechas(usuario, fecha_fin + timedelta(days=1))
@@ -330,13 +335,13 @@ def get_dashboard_resumen(
         "proximos_pagos": proximos_pagos
     }
 
-def get_cotizacion_usuario(usuario: Usuario) -> Dict[str, Any]:
+async def get_cotizacion_usuario(usuario: Usuario) -> Dict[str, Any]:
     tipo = usuario.tipo_dolar or "blue"
     url = f"https://dolarapi.com/v1/dolares/{tipo}"
     
     try:
-        with httpx.Client(timeout=10.0) as client:
-            response = client.get(url)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url)
             response.raise_for_status()
             data = response.json()
             return {
@@ -346,4 +351,56 @@ def get_cotizacion_usuario(usuario: Usuario) -> Dict[str, Any]:
                 "fecha_actualizacion": data.get("fechaActualizacion")
             }
     except Exception:
-        raise HTTPException(status_code=503, detail="Servicio de cotizaciones no disponible")
+        # Fallback para no romper el dashboard si falla la API externa
+        return {
+            "tipo": tipo,
+            "compra": 0,
+            "venta": 0,
+            "fecha_actualizacion": None,
+            "error": "Servicio de cotizaciones no disponible"
+        }
+
+async def get_resumen_completo(db: Session, usuario: Usuario, desde: Optional[date] = None, hasta: Optional[date] = None) -> Dict[str, Any]:
+    """
+    Consolida múltiples datos para el dashboard en una sola respuesta.
+    """
+    # 1. Obtener billeteras (Usando la lógica de list_billeteras optimizada)
+    from app.routers.billeteras import BilleteraRead
+    from sqlalchemy import exists
+    from app.models.transaccion import Transaccion
+    from app.models.transferencia_interna import TransferenciaInterna
+    
+    exists_tx = exists().where(Transaccion.billetera_id == Billetera.id)
+    exists_tr = exists().where(
+        (TransferenciaInterna.billetera_origen_id == Billetera.id) | 
+        (TransferenciaInterna.billetera_destino_id == Billetera.id)
+    )
+    
+    stmt_billeteras = select(Billetera, (exists_tx | exists_tr).label("has_tx")).where(Billetera.usuario_id == usuario.id)
+    rows_billeteras = db.execute(stmt_billeteras).all()
+    
+    billeteras_data = []
+    for b, has_tx in rows_billeteras:
+        # Solo necesitamos datos básicos para el dashboard
+        billeteras_data.append({
+            "id": str(b.id),
+            "nombre": b.nombre,
+            "moneda": b.moneda.value,
+            "saldo_actual": float(b.saldo_actual),
+            "es_principal": b.es_principal,
+            "es_efectivo": b.es_efectivo,
+            "estado": b.estado.value,
+            "tiene_transacciones": has_tx
+        })
+
+    # 2. Obtener resumen del dashboard
+    resumen = get_dashboard_resumen(db, usuario, desde, hasta)
+
+    # 3. Obtener cotización (Async)
+    cotizacion = await get_cotizacion_usuario(usuario)
+
+    return {
+        "billeteras": billeteras_data,
+        "resumen": resumen,
+        "cotizacion": cotizacion
+    }
