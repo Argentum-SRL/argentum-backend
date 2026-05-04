@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
-from app.models.usuario import Moneda
+from app.models.usuario import Moneda, Usuario
 
 
 class EstadoBilletera(str, Enum):
