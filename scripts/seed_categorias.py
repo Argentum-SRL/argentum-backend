@@ -45,14 +45,14 @@ CATEGORIAS_SEED = [
         ]
     },
     {
-        "nombre": "Salud",
+        "nombre": "Salud y cuidado personal",
         "tipo": "egreso",
         "icono": "medicina",
         "color": "#D97706",
         "subcategorias": [
             "Farmacia", "Médico / Consulta", "Obra social / Prepaga",
-            "Dentista", "Óptica", "Psicólogo",
-            "Kinesiología", "Estudios médicos"
+            "Dentista", "Óptica", "Terapia",
+            "Kinesiología", "Estudios médicos", "Peluquería", "Gimnasio", "Spa"
         ]
     },
     {
