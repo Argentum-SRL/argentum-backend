@@ -17,9 +17,9 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.append(BASE_DIR)
 
-from app.core.database import engine, Base
+from app.core.database import engine, Base, SessionLocal
 from sqlalchemy import inspect
-from scripts.seed_categorias import seed_categorias_subcategorias
+from scripts.seed_categorias import seed_categorias
 
 def init_full_db():
     """
@@ -55,7 +55,11 @@ def init_full_db():
 
         # 3. CARGA DE DATOS INICIALES (SEED)
         logger.info("Ejecutando seed de categorías y subcategorías...")
-        seed_categorias_subcategorias()
+        db_seed = SessionLocal()
+        try:
+            seed_categorias(db_seed)
+        finally:
+            db_seed.close()
         
         print("="*60)
         logger.info("SISTEMA DE BASE DE DATOS LISTO Y ACTUALIZADO")
