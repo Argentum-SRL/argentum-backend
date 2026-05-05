@@ -13,6 +13,7 @@ from app.models.transaccion import (
     TipoTransaccion,
 )
 from app.models.usuario import Moneda
+from app.schemas.subcategoria import SubcategoriaRead
 
 
 class InfoCuotas(BaseModel):
@@ -68,5 +69,6 @@ class TransaccionUpdate(BaseModel):
 class TransaccionRead(TransaccionBase):
     id: UUID
     fecha_creacion: datetime
+    subcategoria: SubcategoriaRead | None = None
 
     model_config = ConfigDict(from_attributes=True)
