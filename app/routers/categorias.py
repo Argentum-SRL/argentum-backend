@@ -6,7 +6,7 @@ from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.models.usuario import Usuario
 from app.models.categoria import Categoria, EstadoCategoria
-from app.models.subcategoria import Subcategoria
+from app.models.subcategoria import Subcategoria, EstadoSubcategoria
 from app.schemas.categoria import CategoriaRead
 from app.schemas.subcategoria import SubcategoriaRead
 
@@ -39,5 +39,12 @@ def list_subcategorias(
     Lista las subcategorías de una categoría específica.
     """
     _ = current_user
-    stmt = select(Subcategoria).where(Subcategoria.categoria_id == categoria_id)
+    stmt = select(Subcategoria).where(
+        Subcategoria.categoria_id == categoria_id,
+        Subcategoria.estado == EstadoSubcategoria.ACTIVA,
+        or_(
+            Subcategoria.es_global == True,
+            Subcategoria.creador_id == current_user.id
+        )
+    )
     return db.execute(stmt).scalars().all()
