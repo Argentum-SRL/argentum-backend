@@ -71,6 +71,9 @@ class Transaccion(Base):
     billetera_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("billeteras.id"), nullable=False
     )
+    tarjeta_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("tarjetas_credito.id"), nullable=True
+    )
     es_recurrente: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     recurrente_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("transacciones_recurrentes.id"), nullable=True
@@ -96,6 +99,7 @@ class Transaccion(Base):
     categoria: Mapped[Categoria | None] = relationship("Categoria")
     subcategoria: Mapped[Subcategoria | None] = relationship("Subcategoria")
     billetera: Mapped[Billetera] = relationship("Billetera")
+    tarjeta: Mapped[TarjetaCredito | None] = relationship("TarjetaCredito")
 
     def __repr__(self) -> str:
         return (
