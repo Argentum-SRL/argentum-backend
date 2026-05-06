@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, date
 from decimal import Decimal
 from uuid import UUID
 from pydantic import BaseModel, Field
@@ -26,12 +26,41 @@ class TarjetaCreditoUpdate(BaseModel):
     moneda: Moneda | None = None
     color: str | None = Field(None, max_length=7)
 
+class CuotaResumen(BaseModel):
+    id: UUID
+    descripcion: str
+    numero_cuota: int
+    total_cuotas: int
+    monto: Decimal
+    moneda: str
+    fecha_vencimiento: date
+
+    class Config:
+        from_attributes = True
+
+class ResumenFuturo(BaseModel):
+    mes: str           # "Junio 2026"
+    mes_fecha: date    # primer día del mes, para ordenar
+    total: Decimal
+    moneda: str
+    cantidad_cuotas: int
+
+class ResumenTarjeta(BaseModel):
+    fecha_cierre_proximo: date
+    fecha_vencimiento_proximo: date
+    total_comprometido_resumen_actual: Decimal
+    total_comprometido_resumen_siguiente: Decimal
+    cuotas_resumen_actual: list[CuotaResumen]
+    cuotas_resumen_siguiente: list[CuotaResumen]
+    resumenes_futuros: list[ResumenFuturo]
+
 class TarjetaCreditoResponse(TarjetaCreditoBase):
     id: UUID
     usuario_id: UUID
     billetera_id: UUID
     estado: EstadoTarjeta
     fecha_creacion: datetime
+    resumen_actual: ResumenTarjeta | None = None
 
     class Config:
         from_attributes = True
