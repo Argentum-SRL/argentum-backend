@@ -227,7 +227,7 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito) -> ResumenTarj
         total_cuotas = grupo.cantidad_cuotas if grupo else 1
 
         cuota_data = CuotaResumen(
-            id=cuota.id,
+            id=cuota.transaccion_id,
             descripcion=get_descripcion(cuota),
             numero_cuota=cuota.numero_cuota,
             total_cuotas=total_cuotas,

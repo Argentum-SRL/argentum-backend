@@ -108,6 +108,9 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate) ->
         monto_total = data.info_cuotas.monto_total
         cant = data.info_cuotas.cantidad_cuotas
         
+        # Asegurar que cant sea al menos 1 para evitar DivisionByZero
+        cant = max(1, data.info_cuotas.cantidad_cuotas)
+        
         if data.info_cuotas.tiene_interes and data.info_cuotas.tasa_interes:
             tasa_mensual = data.info_cuotas.tasa_interes / 100
             if tasa_mensual > 0:
@@ -161,7 +164,8 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate) ->
             cantidad_cuotas=cant,
             primer_vencimiento=primer_vencimiento,
             monto_cuota=monto_cuota,
-            usuario_id=str(usuario_id)
+            usuario_id=str(usuario_id),
+            cuota_inicial=data.info_cuotas.cuota_inicial
         )
         
         # Actualizar la transaccion padre con el link al grupo (opcional pero util)
@@ -180,9 +184,11 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate) ->
         usuario_id=usuario_id
     )
     
-    # 4. Actualizar saldo solo si es confirmada y es hoy o pasada
+    # 4. Actualizar saldo solo si es confirmada, es hoy o pasada, y NO es crédito
+    # (El crédito impacta vía el pago del resumen consolidado)
     if (nueva_transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE 
-        and nueva_transaccion.fecha <= date.today()):
+        and nueva_transaccion.fecha <= date.today()
+        and nueva_transaccion.metodo_pago != MetodoPago.CREDITO):
         if nueva_transaccion.tipo == TipoTransaccion.INGRESO:
             billetera.saldo_actual += nueva_transaccion.monto
         else:
@@ -197,9 +203,6 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate) ->
 def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, data: TransaccionUpdate) -> Transaccion:
     transaccion = obtener_transaccion(db, usuario_id, transaccion_id)
     
-    if transaccion.es_cuota_hija or transaccion.es_padre_cuotas:
-        raise HTTPException(status_code=400, detail="No se pueden editar transacciones ligadas a cuotas individualmente.")
-
     impacto_saldo_cambia = any([
         data.monto is not None,
         data.tipo is not None,
@@ -207,11 +210,15 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
         data.fecha is not None,
         data.estado_verificacion is not None
     ])
+
+    if (transaccion.es_cuota_hija or transaccion.es_padre_cuotas) and impacto_saldo_cambia:
+        raise HTTPException(status_code=400, detail="No se pueden editar montos, fechas o billeteras de transacciones ligadas a cuotas individualmente.")
     
     if impacto_saldo_cambia:
         # Revertir impacto anterior si existia
         if (transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE 
-            and transaccion.fecha <= date.today()):
+            and transaccion.fecha <= date.today()
+            and transaccion.metodo_pago != MetodoPago.CREDITO):
             billetera_vieja = db.get(Billetera, transaccion.billetera_id)
             if transaccion.tipo == TipoTransaccion.INGRESO:
                 billetera_vieja.saldo_actual -= transaccion.monto
@@ -224,7 +231,8 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
             
         # Aplicar nuevo impacto
         if (transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE 
-            and transaccion.fecha <= date.today()):
+            and transaccion.fecha <= date.today()
+            and transaccion.metodo_pago != MetodoPago.CREDITO):
             billetera_nueva = db.get(Billetera, transaccion.billetera_id)
             if not billetera_nueva or billetera_nueva.usuario_id != usuario_id:
                 raise HTTPException(status_code=404, detail="Billetera no encontrada")
@@ -255,12 +263,12 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID):
             grupo = db.get(GrupoCuotas, transaccion.grupo_cuotas_id)
         
         if grupo:
-            # 2. Revertir saldo de cuotas ya pagadas
+            # 2. Revertir saldo (solo si no es crédito, aunque las cuotas suelen serlo)
             cuotas = db.execute(select(Cuota).where(Cuota.grupo_id == grupo.id)).scalars().all()
             for c in cuotas:
                 if c.pagada or c.fecha_vencimiento <= date.today():
                     tx_hija = db.get(Transaccion, c.transaccion_id)
-                    if tx_hija:
+                    if tx_hija and tx_hija.metodo_pago != MetodoPago.CREDITO:
                         b = db.get(Billetera, tx_hija.billetera_id)
                         if b:
                             if tx_hija.tipo == TipoTransaccion.INGRESO:
@@ -268,20 +276,41 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID):
                             else:
                                 b.saldo_actual += tx_hija.monto
             
-            # 3. Eliminar todo en orden
+            # 3. Romper dependencias circulares antes de borrar
             id_hijas = [c.transaccion_id for c in cuotas]
             id_padre = grupo.transaccion_padre_id
             
-            db.execute(delete(Cuota).where(Cuota.grupo_id == grupo.id))
-            db.execute(delete(Transaccion).where(Transaccion.id.in_(id_hijas)))
+            # Nullify references in all transactions involved
+            db.execute(
+                delete(Cuota).where(Cuota.grupo_id == grupo.id)
+            )
+            
+            # Update involved transactions to remove FK to the group
+            from sqlalchemy import update
+            where_clause = Transaccion.id == id_padre
+            if id_hijas:
+                where_clause = or_(where_clause, Transaccion.id.in_(id_hijas))
+                
+            db.execute(
+                update(Transaccion)
+                .where(where_clause)
+                .values(grupo_cuotas_id=None)
+            )
+            db.flush()
+
+            # 4. Eliminar en orden
             db.execute(delete(GrupoCuotas).where(GrupoCuotas.id == grupo.id))
+            if id_hijas:
+                db.execute(delete(Transaccion).where(Transaccion.id.in_(id_hijas)))
             db.execute(delete(Transaccion).where(Transaccion.id == id_padre))
+            
             db.commit()
             return {"detail": "Grupo de cuotas eliminado exitosamente"}
 
     # Transaccion normal
     if (transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE 
-        and transaccion.fecha <= date.today()):
+        and transaccion.fecha <= date.today()
+        and transaccion.metodo_pago != MetodoPago.CREDITO):
         billetera = db.get(Billetera, transaccion.billetera_id)
         if billetera:
             if transaccion.tipo == TipoTransaccion.INGRESO:

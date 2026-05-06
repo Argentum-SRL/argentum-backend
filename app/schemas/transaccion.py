@@ -18,6 +18,7 @@ from app.schemas.subcategoria import SubcategoriaRead
 
 class InfoCuotas(BaseModel):
     cantidad_cuotas: int
+    cuota_inicial: int = 1
     tiene_interes: bool = False
     tasa_interes: Decimal | None = None
     monto_total: Decimal # El monto base sin interes (o el total si no hay interes)

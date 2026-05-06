@@ -13,14 +13,18 @@ def crear_cuotas(
     cantidad_cuotas: int,
     primer_vencimiento: date,
     monto_cuota: Decimal,
-    usuario_id: str
+    usuario_id: str,
+    cuota_inicial: int = 1
 ) -> list[Cuota]:
     """
     Crea las transacciones hijas y los registros de cuotas para un grupo.
     """
     cuotas = []
-    for i in range(1, cantidad_cuotas + 1):
-        fecha_cuota = primer_vencimiento + relativedelta(months=i-1)
+    # Empezamos desde la cuota_inicial hasta la total
+    for i in range(cuota_inicial, cantidad_cuotas + 1):
+        # La primera cuota que creamos (que es la i) debe tener la fecha del primer_vencimiento
+        # El offset es i - cuota_inicial (si i=cuota_inicial, offset=0)
+        fecha_cuota = primer_vencimiento + relativedelta(months=i - cuota_inicial)
         
         # 1. Crear la transacción hija (el movimiento de dinero futuro)
         hija = Transaccion(
