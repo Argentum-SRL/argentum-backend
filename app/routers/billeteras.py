@@ -54,6 +54,33 @@ def list_billeteras(
     return results
 
 
+@router.get("/{billetera_id}", response_model=BilleteraRead)
+def get_billetera(
+    billetera_id: str,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Obtiene una billetera específica por ID."""
+    from sqlalchemy import or_
+    
+    stmt = select(Billetera).where(Billetera.id == billetera_id, Billetera.usuario_id == current_user.id)
+    billetera = db.execute(stmt).scalars().one_or_none()
+    
+    if not billetera:
+        raise HTTPException(status_code=404, detail="Billetera no encontrada")
+    
+    # Verificamos transacciones y transferencias por separado para mayor seguridad
+    has_tx = db.query(exists().where(Transaccion.billetera_id == billetera_id)).scalar()
+    has_tr = db.query(exists().where(or_(
+        TransferenciaInterna.billetera_origen_id == billetera_id,
+        TransferenciaInterna.billetera_destino_id == billetera_id
+    ))).scalar()
+    
+    b_read = BilleteraRead.model_validate(billetera)
+    b_read.tiene_transacciones = bool(has_tx or has_tr)
+    return b_read
+
+
 @router.post("", response_model=BilleteraRead, status_code=status.HTTP_201_CREATED)
 def create_billetera(
     body: CrearBilleteraRequest,
