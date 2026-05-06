@@ -34,6 +34,8 @@ class TransaccionBase(BaseModel):
     subcategoria_id: UUID | None = None
     metodo_pago: MetodoPago | None = None
     billetera_id: UUID
+    tarjeta_id: UUID | None = None
+    primer_vencimiento_manual: date | None = None
     es_recurrente: bool = False
     recurrente_id: UUID | None = None
     es_cuota_hija: bool = False
@@ -57,6 +59,8 @@ class TransaccionUpdate(BaseModel):
     subcategoria_id: UUID | None = None
     metodo_pago: MetodoPago | None = None
     billetera_id: UUID | None = None
+    tarjeta_id: UUID | None = None
+    primer_vencimiento_manual: date | None = None
     es_recurrente: bool | None = None
     recurrente_id: UUID | None = None
     es_cuota_hija: bool | None = None

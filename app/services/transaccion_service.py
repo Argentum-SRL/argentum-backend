@@ -7,11 +7,14 @@ from sqlalchemy import select, desc, or_, delete
 from sqlalchemy.orm import Session
 from dateutil.relativedelta import relativedelta
 
-from app.models.transaccion import Transaccion, TipoTransaccion, OrigenTransaccion, EstadoVerificacionTransaccion
+from app.models.transaccion import Transaccion, TipoTransaccion, OrigenTransaccion, EstadoVerificacionTransaccion, MetodoPago
 from app.models.billetera import Billetera
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.cuota import Cuota
+from app.models.tarjeta_credito import TarjetaCredito
 from app.schemas.transaccion import TransaccionCreate, TransaccionUpdate
+from app.services.tarjeta_service import calcular_primer_vencimiento
+from app.services import cuotas_service
 
 
 def obtener_transacciones(
@@ -116,51 +119,53 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate) ->
 
         total_financiado = monto_cuota * cant
 
+        # Determinar primer vencimiento
+        primer_vencimiento = None
+        if data.metodo_pago == MetodoPago.CREDITO and data.tarjeta_id:
+            tarjeta = db.query(TarjetaCredito).filter(
+                TarjetaCredito.id == data.tarjeta_id,
+                TarjetaCredito.usuario_id == usuario_id
+            ).first()
+            if not tarjeta:
+                raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+            primer_vencimiento = calcular_primer_vencimiento(
+                data.fecha, tarjeta.dia_cierre, tarjeta.dia_vencimiento
+            )
+        elif data.primer_vencimiento_manual:
+            primer_vencimiento = data.primer_vencimiento_manual
+        else:
+            # Comportamiento anterior: mes siguiente
+            primer_vencimiento = data.fecha + relativedelta(months=1)
+
         grupo = GrupoCuotas(
             usuario_id=usuario_id,
             transaccion_padre_id=nueva_transaccion.id,
+            tarjeta_id=data.tarjeta_id,
             descripcion=data.descripcion,
             monto_total=monto_total,
             cantidad_cuotas=cant,
             tiene_interes=data.info_cuotas.tiene_interes,
             tasa_interes=data.info_cuotas.tasa_interes,
             total_financiado=total_financiado,
-            moneda=data.moneda
+            moneda=data.moneda,
+            primer_vencimiento=primer_vencimiento
         )
         db.add(grupo)
         db.flush()
 
-        # Generar cuotas (empiezan el mes SIGUIENTE)
-        for i in range(1, cant + 1):
-            fecha_cuota = data.fecha + relativedelta(months=i)
-            
-            hija = Transaccion(
-                usuario_id=usuario_id,
-                tipo=data.tipo,
-                monto=monto_cuota,
-                moneda=data.moneda,
-                fecha=fecha_cuota,
-                descripcion=f"{data.descripcion} (Cuota {i}/{cant})",
-                categoria_id=data.categoria_id,
-                subcategoria_id=data.subcategoria_id,
-                metodo_pago=data.metodo_pago,
-                billetera_id=data.billetera_id,
-                es_cuota_hija=True,
-                grupo_cuotas_id=grupo.id,
-                origen=data.origen
-            )
-            db.add(hija)
-            db.flush()
-
-            cuota_reg = Cuota(
-                grupo_id=grupo.id,
-                transaccion_id=hija.id,
-                numero_cuota=i,
-                monto_proyectado=monto_cuota,
-                fecha_vencimiento=fecha_cuota,
-                pagada=False # Las cuotas futuras no se pagan solas al crear el grupo
-            )
-            db.add(cuota_reg)
+        # Generar cuotas usando el nuevo servicio
+        cuotas_service.crear_cuotas(
+            db=db,
+            transaccion_padre=nueva_transaccion,
+            grupo=grupo,
+            cantidad_cuotas=cant,
+            primer_vencimiento=primer_vencimiento,
+            monto_cuota=monto_cuota,
+            usuario_id=str(usuario_id)
+        )
+        
+        # Actualizar la transaccion padre con el link al grupo (opcional pero util)
+        nueva_transaccion.grupo_cuotas_id = grupo.id
 
             # Al crear un grupo de cuotas, NINGUNA impacta el saldo hoy
             # porque la primera empieza el mes que viene.

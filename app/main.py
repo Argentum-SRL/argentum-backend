@@ -76,7 +76,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard
+from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas
 from fastapi.staticfiles import StaticFiles
 import os
 
@@ -84,6 +84,7 @@ app.include_router(auth.router)
 app.include_router(onboarding.router)
 app.include_router(usuarios.router)
 app.include_router(billeteras.router)
+app.include_router(tarjetas.router, prefix="/tarjetas", tags=["tarjetas"])
 app.include_router(transacciones.router)
 app.include_router(transferencias.router)
 app.include_router(recurrentes.router)
