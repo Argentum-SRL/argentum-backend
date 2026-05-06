@@ -74,6 +74,7 @@ class Transaccion(Base):
     tarjeta_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("tarjetas_credito.id"), nullable=True
     )
+    primer_vencimiento_manual: Mapped[date | None] = mapped_column(Date, nullable=True)
     es_recurrente: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     recurrente_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("transacciones_recurrentes.id"), nullable=True
