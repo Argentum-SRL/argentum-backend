@@ -20,6 +20,8 @@ from app.models.suscripcion import Suscripcion, EstadoSuscripcion
 from app.models.cuota import Cuota
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.historial_suscripcion import HistorialSuscripcion
+from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
+from app.services.tarjeta_service import calcular_resumen_actual
 
 def get_date_by_rule(rule: str, month: int, year: int) -> date:
     """Calcula la fecha exacta segun una regla (ej: ultimo_viernes)."""
@@ -209,10 +211,41 @@ def get_dashboard_resumen(
         "categoria_nombre": r.extra_1, "estado_verificacion": r.extra_3
     } for r in actividad if r.item_tipo == "movimiento"]
 
-    proximos_pagos = sorted([{
+    proximos_pagos = [{
         "id": r.id, "nombre": r.nombre, "monto": float(r.monto or 0), "moneda": r.moneda,
         "fecha_cobro": r.fecha.isoformat(), "dias_restantes": (r.fecha - hoy).days, "tipo": r.item_tipo
-    } for r in actividad if r.item_tipo in ("suscripcion", "cuota")], key=lambda x: x["fecha_cobro"])[:5]
+    } for r in actividad if r.item_tipo in ("suscripcion", "cuota")]
+
+    # --- AGREGAR VENCIMIENTOS DE TARJETAS ---
+    tarjetas = db.query(TarjetaCredito).filter(
+        TarjetaCredito.usuario_id == usuario.id,
+        TarjetaCredito.estado == EstadoTarjeta.ACTIVA
+    ).all()
+
+    for tarjeta in tarjetas:
+        resumen_t = calcular_resumen_actual(db, tarjeta)
+        total_t = resumen_t.total_comprometido_resumen_actual
+
+        if total_t <= 0:
+            continue
+
+        d_venc = resumen_t.fecha_vencimiento_proximo
+        dias_restantes = (d_venc - hoy).days
+
+        # Solo incluir si vence dentro de los próximos 30 días
+        if 0 <= dias_restantes <= 30:
+            proximos_pagos.append({
+                "id": str(tarjeta.id),
+                "nombre": f"Resumen {tarjeta.nombre}",
+                "monto": float(total_t),
+                "moneda": tarjeta.moneda.value,
+                "fecha_cobro": d_venc.isoformat(),
+                "dias_restantes": dias_restantes,
+                "tipo": "resumen_tarjeta",
+                "color": tarjeta.color
+            })
+
+    proximos_pagos = sorted(proximos_pagos, key=lambda x: x["fecha_cobro"])[:5]
 
     return {
         "periodo": {

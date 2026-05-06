@@ -11,6 +11,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.core.database import SessionLocal
 from app.core.auth import limpiar_tokens_expirados
 from app.services.recurrente_service import procesar_recurrentes
+from app.services.vencimiento_tarjeta_service import procesar_vencimientos_tarjetas
 
 # ---------------------------------------------------------------------------
 # Inicialización automática de Base de Datos
@@ -37,9 +38,19 @@ def _job_procesar_recurrentes():
     finally:
         db.close()
 
+def _job_vencimientos_tarjetas():
+    """Tarea programada: genera transacciones de vencimiento de tarjetas una vez al día."""
+    db = SessionLocal()
+    try:
+        procesar_vencimientos_tarjetas(db)
+        print("[scheduler] Job de vencimientos de tarjetas ejecutado.")
+    finally:
+        db.close()
+
 scheduler = BackgroundScheduler(timezone="UTC")
 scheduler.add_job(_job_limpiar_tokens, "interval", hours=6, id="limpiar_refresh_tokens")
 scheduler.add_job(_job_procesar_recurrentes, "cron", hour=0, minute=5, id="procesar_recurrentes")
+scheduler.add_job(_job_vencimientos_tarjetas, "cron", hour=6, minute=0, id="vencimientos_tarjetas")
 
 
 @asynccontextmanager
