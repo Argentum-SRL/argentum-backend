@@ -4,7 +4,7 @@ from uuid import UUID
 from calendar import monthrange
 from dateutil.relativedelta import relativedelta
 from fastapi import HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
 from app.models.billetera import Billetera
@@ -167,7 +167,7 @@ def eliminar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID) -> None:
     db.commit()
 
 
-def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito) -> ResumenTarjeta:
+def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preloaded: list[Cuota] = None) -> ResumenTarjeta:
     hoy = date.today()
 
     # ── Calcular fecha de cierre próximo ──────────────────
@@ -192,33 +192,35 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito) -> ResumenTarj
     fecha_vencimiento_proximo = venc
 
     # ── Obtener todas las cuotas futuras de esta tarjeta ──
-    # Cuota -> GrupoCuotas (tarjeta_id) -> filtrar por tarjeta
-    cuotas = (
-        db.query(Cuota)
-        .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
-        .filter(
-            GrupoCuotas.tarjeta_id == tarjeta.id,
-            Cuota.pagada == False,
-            Cuota.fecha_vencimiento >= hoy
+    if cuotas_preloaded is not None:
+        cuotas = cuotas_preloaded
+    else:
+        # Cuota -> GrupoCuotas (tarjeta_id) -> filtrar por tarjeta
+        cuotas = (
+            db.query(Cuota)
+            .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
+            .options(
+                joinedload(Cuota.transaccion).joinedload(Transaccion.subcategoria),
+                joinedload(Cuota.grupo)
+            )
+            .filter(
+                GrupoCuotas.tarjeta_id == tarjeta.id,
+                Cuota.pagada == False,
+                Cuota.fecha_vencimiento >= hoy
+            )
+            .order_by(Cuota.fecha_vencimiento)
+            .all()
         )
-        .order_by(Cuota.fecha_vencimiento)
-        .all()
-    )
 
     # ── Obtener datos de la transacción vinculada ────────
     def get_info_transaccion(cuota: Cuota):
-        # La cuota apunta a la transacción "hija"
-        tx = db.query(Transaccion).filter(Transaccion.id == cuota.transaccion_id).first()
+        # Usar la relación cargada en lugar de query manual
+        tx = cuota.transaccion
         if not tx:
             return "Sin descripción", None
             
-        # Intentar obtener el nombre de la subcategoría
-        sub_nombre = None
-        if tx.subcategoria_id:
-            from app.models.subcategoria import Subcategoria
-            sub = db.query(Subcategoria).filter(Subcategoria.id == tx.subcategoria_id).first()
-            if sub:
-                sub_nombre = sub.nombre
+        # Intentar obtener el nombre de la subcategoría desde la relación
+        sub_nombre = tx.subcategoria.nombre if tx.subcategoria else None
         
         # Limpiar la descripción: quitar el "(Cuota X/Y)" si existe
         # ya que lo mostraremos en el subtítulo

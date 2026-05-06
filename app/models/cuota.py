@@ -7,6 +7,11 @@ from uuid import UUID, uuid4
 from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.grupo_cuotas import GrupoCuotas
+    from app.models.transaccion import Transaccion
 
 from app.core.database import Base
 
@@ -28,7 +33,8 @@ class Cuota(Base):
     ajustada_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     pagada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    grupo: Mapped["GrupoCuotas"] = relationship("GrupoCuotas", back_populates="cuotas")
+    grupo: Mapped[GrupoCuotas] = relationship("GrupoCuotas", back_populates="cuotas")
+    transaccion: Mapped[Transaccion] = relationship("Transaccion")
 
     def __repr__(self) -> str:
         return (

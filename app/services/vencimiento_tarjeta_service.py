@@ -1,8 +1,8 @@
 from datetime import date
 from decimal import Decimal
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
-from app.models.transaccion import Transaccion
+from app.models.transaccion import Transaccion, TipoTransaccion
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.cuota import Cuota
 from app.services.tarjeta_service import calcular_resumen_actual
@@ -15,6 +15,29 @@ def procesar_vencimientos_tarjetas(db: Session) -> None:
         TarjetaCredito.estado == EstadoTarjeta.ACTIVA,
         TarjetaCredito.dia_vencimiento == hoy.day
     ).all()
+
+    # Optimización N+1: Pre-cargar todas las cuotas futuras de estas tarjetas
+    all_cuotas = (
+        db.query(Cuota)
+        .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
+        .options(
+            joinedload(Cuota.transaccion).joinedload(Transaccion.subcategoria),
+            joinedload(Cuota.grupo)
+        )
+        .filter(
+            GrupoCuotas.tarjeta_id.in_([t.id for t in tarjetas]) if tarjetas else False,
+            Cuota.pagada == False,
+            Cuota.fecha_vencimiento >= hoy
+        )
+        .all()
+    )
+
+    cuotas_por_tarjeta = {}
+    for c in all_cuotas:
+        tid = c.grupo.tarjeta_id
+        if tid not in cuotas_por_tarjeta:
+            cuotas_por_tarjeta[tid] = []
+        cuotas_por_tarjeta[tid].append(c)
 
     for tarjeta in tarjetas:
 
@@ -31,7 +54,7 @@ def procesar_vencimientos_tarjetas(db: Session) -> None:
             continue
 
         # ── Calcular total del resumen actual ─────────────
-        resumen = calcular_resumen_actual(db, tarjeta)
+        resumen = calcular_resumen_actual(db, tarjeta, cuotas_preloaded=cuotas_por_tarjeta.get(tarjeta.id, []))
         total = resumen.total_comprometido_resumen_actual
 
         if total <= 0:

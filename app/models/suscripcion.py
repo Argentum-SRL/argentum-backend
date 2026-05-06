@@ -7,6 +7,12 @@ from uuid import UUID, uuid4
 from sqlalchemy import Date, DateTime, Enum as SAEnum, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.usuario import Usuario
+    from app.models.categoria import Categoria
+    from app.models.historial_suscripcion import HistorialSuscripcion
 
 from app.core.database import Base
 
@@ -51,6 +57,8 @@ class Suscripcion(Base):
     )
 
     historial: Mapped[list["HistorialSuscripcion"]] = relationship("HistorialSuscripcion", back_populates="suscripcion")
+    usuario: Mapped[Usuario] = relationship("Usuario")
+    categoria: Mapped[Categoria | None] = relationship("Categoria")
 
     def __repr__(self) -> str:
         return (

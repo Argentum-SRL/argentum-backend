@@ -11,6 +11,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.usuario import Moneda
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.categoria import Categoria
+    from app.models.periodo_presupuesto import PeriodoPresupuesto
+    from app.models.usuario import Usuario
 
 
 class PeriodoPresupuestoTipo(str, Enum):
@@ -55,11 +61,12 @@ class Presupuesto(Base):
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
-    categorias: Mapped[list["Categoria"]] = relationship(
+    categorias: Mapped[list[Categoria]] = relationship(
         "Categoria",
         secondary="presupuestos_categorias",
     )
-    periodos: Mapped[list["PeriodoPresupuesto"]] = relationship("PeriodoPresupuesto")
+    periodos: Mapped[list[PeriodoPresupuesto]] = relationship("PeriodoPresupuesto")
+    usuario: Mapped[Usuario] = relationship("Usuario")
 
     def __repr__(self) -> str:
         return (

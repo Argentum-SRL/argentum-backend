@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy import select, desc, or_, delete
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from dateutil.relativedelta import relativedelta
 
 from app.models.transaccion import Transaccion, TipoTransaccion, OrigenTransaccion, EstadoVerificacionTransaccion, MetodoPago
@@ -61,6 +61,8 @@ def obtener_transacciones(
         query = query.where(Transaccion.es_cuota_hija == es_cuota_hija)
         
     query = query.order_by(desc(Transaccion.fecha), desc(Transaccion.fecha_creacion))
+    
+    query = query.options(joinedload(Transaccion.subcategoria))
     
     return db.execute(query.offset(skip).limit(limit)).scalars().all()
 
@@ -264,10 +266,12 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID):
         
         if grupo:
             # 2. Revertir saldo (solo si no es crédito, aunque las cuotas suelen serlo)
-            cuotas = db.execute(select(Cuota).where(Cuota.grupo_id == grupo.id)).scalars().all()
+            cuotas = db.execute(
+                select(Cuota).options(joinedload(Cuota.transaccion)).where(Cuota.grupo_id == grupo.id)
+            ).scalars().all()
             for c in cuotas:
                 if c.pagada or c.fecha_vencimiento <= date.today():
-                    tx_hija = db.get(Transaccion, c.transaccion_id)
+                    tx_hija = c.transaccion
                     if tx_hija and tx_hija.metodo_pago != MetodoPago.CREDITO:
                         b = db.get(Billetera, tx_hija.billetera_id)
                         if b:
@@ -353,6 +357,7 @@ def obtener_pendientes_ia(db: Session, usuario_id: UUID, skip: int = 0, limit: i
             Transaccion.usuario_id == usuario_id,
             Transaccion.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE
         )
+        .options(joinedload(Transaccion.subcategoria))
         .order_by(desc(Transaccion.fecha), desc(Transaccion.fecha_creacion))
         .offset(skip)
         .limit(limit)

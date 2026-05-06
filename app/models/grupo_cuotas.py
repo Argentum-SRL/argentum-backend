@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.tarjeta_credito import TarjetaCredito
     from app.models.cuota import Cuota
+    from app.models.usuario import Usuario
+    from app.models.transaccion import Transaccion
 
 
 class GrupoCuotas(Base):
@@ -44,6 +46,8 @@ class GrupoCuotas(Base):
 
     cuotas: Mapped[list[Cuota]] = relationship("Cuota", back_populates="grupo")
     tarjeta: Mapped[TarjetaCredito | None] = relationship("TarjetaCredito")
+    usuario: Mapped[Usuario] = relationship("Usuario")
+    transaccion_padre: Mapped[Transaccion] = relationship("Transaccion", foreign_keys=[transaccion_padre_id])
 
     def __repr__(self) -> str:
         return (

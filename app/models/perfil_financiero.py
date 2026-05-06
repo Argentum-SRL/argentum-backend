@@ -6,7 +6,11 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import DateTime, ForeignKey, Integer, Numeric
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.usuario import Usuario
 
 from app.core.database import Base
 
@@ -28,6 +32,7 @@ class PerfilFinanciero(Base):
     fecha_creacion: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+    usuario: Mapped["Usuario"] = relationship("Usuario")
 
     def __repr__(self) -> str:
         return (

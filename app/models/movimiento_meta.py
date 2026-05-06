@@ -11,6 +11,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.usuario import Moneda
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.meta import Meta
+    from app.models.billetera import Billetera
 
 
 class TipoMovimientoMeta(str, Enum):
@@ -41,6 +46,7 @@ class MovimientoMeta(Base):
     )
 
     meta: Mapped["Meta"] = relationship("Meta", back_populates="movimientos")
+    billetera: Mapped["Billetera"] = relationship("Billetera")
 
     def __repr__(self) -> str:
         return (

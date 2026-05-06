@@ -11,6 +11,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.usuario import Moneda
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.usuario import Usuario
+    from app.models.movimiento_meta import MovimientoMeta
 
 
 class EstadoMeta(str, Enum):
@@ -39,9 +44,10 @@ class Meta(Base):
     fecha_creacion: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+    usuario: Mapped[Usuario] = relationship("Usuario")
 
     # La meta no queda atada a una billetera fija; cada movimiento define origen/destino.
-    movimientos: Mapped[list["MovimientoMeta"]] = relationship("MovimientoMeta", back_populates="meta")
+    movimientos: Mapped[list[MovimientoMeta]] = relationship("MovimientoMeta", back_populates="meta")
 
     def __repr__(self) -> str:
         return (

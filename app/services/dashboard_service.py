@@ -9,7 +9,7 @@ import httpx
 from fastapi import HTTPException
 from dateutil.relativedelta import relativedelta
 from sqlalchemy import and_, func, select, desc, or_, case, literal, null, String, cast, union_all
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.models.usuario import Usuario, CicloTipo
@@ -222,8 +222,33 @@ def get_dashboard_resumen(
         TarjetaCredito.estado == EstadoTarjeta.ACTIVA
     ).all()
 
+    # Optimizacion N+1: Pre-cargar todas las cuotas futuras de todas las tarjetas activas
+    all_cuotas = (
+        db.query(Cuota)
+        .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
+        .options(
+            joinedload(Cuota.transaccion).joinedload(Transaccion.subcategoria),
+            joinedload(Cuota.grupo)
+        )
+        .filter(
+            GrupoCuotas.usuario_id == usuario.id,
+            GrupoCuotas.tarjeta_id.in_([t.id for t in tarjetas]) if tarjetas else False,
+            Cuota.pagada == False,
+            Cuota.fecha_vencimiento >= hoy
+        )
+        .order_by(Cuota.fecha_vencimiento)
+        .all()
+    )
+
+    cuotas_por_tarjeta = {}
+    for c in all_cuotas:
+        tid = c.grupo.tarjeta_id
+        if tid not in cuotas_por_tarjeta:
+            cuotas_por_tarjeta[tid] = []
+        cuotas_por_tarjeta[tid].append(c)
+
     for tarjeta in tarjetas:
-        resumen_t = calcular_resumen_actual(db, tarjeta)
+        resumen_t = calcular_resumen_actual(db, tarjeta, cuotas_preloaded=cuotas_por_tarjeta.get(tarjeta.id, []))
         total_t = resumen_t.total_comprometido_resumen_actual
 
         if total_t <= 0:
