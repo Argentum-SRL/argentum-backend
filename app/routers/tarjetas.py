@@ -8,7 +8,8 @@ from app.models.usuario import Usuario
 from app.schemas.tarjeta_credito import (
     TarjetaCreditoCreate, 
     TarjetaCreditoUpdate, 
-    TarjetaCreditoResponse
+    TarjetaCreditoResponse,
+    ResumenTarjeta
 )
 from app.services import tarjeta_service
 
@@ -70,3 +71,19 @@ def eliminar_tarjeta(
 ):
     tarjeta_service.eliminar_tarjeta(db, current_user.id, tarjeta_id)
     return None
+
+@router.get("/{tarjeta_id}/resumen", response_model=ResumenTarjeta)
+def get_resumen_tarjeta(
+    tarjeta_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    tarjeta = db.query(tarjeta_service.TarjetaCredito).filter(
+        tarjeta_service.TarjetaCredito.id == tarjeta_id,
+        tarjeta_service.TarjetaCredito.usuario_id == current_user.id
+    ).first()
+    
+    if not tarjeta:
+        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+
+    return tarjeta_service.calcular_resumen_actual(db, tarjeta)
