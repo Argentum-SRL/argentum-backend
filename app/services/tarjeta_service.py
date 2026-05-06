@@ -205,12 +205,31 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito) -> ResumenTarj
         .all()
     )
 
-    # ── Obtener descripción de la transacción padre ────────
-    def get_descripcion(cuota: Cuota) -> str:
-        tx_padre = db.query(Transaccion).filter(
-            Transaccion.id == cuota.transaccion_id
-        ).first()
-        return tx_padre.descripcion if tx_padre else "Sin descripción"
+    # ── Obtener datos de la transacción vinculada ────────
+    def get_info_transaccion(cuota: Cuota):
+        # La cuota apunta a la transacción "hija"
+        tx = db.query(Transaccion).filter(Transaccion.id == cuota.transaccion_id).first()
+        if not tx:
+            return "Sin descripción", None
+            
+        # Intentar obtener el nombre de la subcategoría
+        sub_nombre = None
+        if tx.subcategoria_id:
+            from app.models.subcategoria import Subcategoria
+            sub = db.query(Subcategoria).filter(Subcategoria.id == tx.subcategoria_id).first()
+            if sub:
+                sub_nombre = sub.nombre
+        
+        # Limpiar la descripción: quitar el "(Cuota X/Y)" si existe
+        # ya que lo mostraremos en el subtítulo
+        desc_limpia = tx.descripcion
+        import re
+        desc_limpia = re.sub(r'\s*\(Cuota\s*\d+/\d+\)\s*$', '', desc_limpia).strip()
+        
+        # Si la descripción quedó vacía o es muy genérica, usar la subcategoría
+        final_desc = desc_limpia or sub_nombre or "Transacción"
+        
+        return final_desc, sub_nombre
 
     # ── Agrupar cuotas por resumen ─────────────────────────
     venc_siguiente = fecha_vencimiento_proximo + relativedelta(months=1)
@@ -226,9 +245,12 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito) -> ResumenTarj
         grupo = cuota.grupo
         total_cuotas = grupo.cantidad_cuotas if grupo else 1
 
+        desc_final, sub_nombre = get_info_transaccion(cuota)
+        
         cuota_data = CuotaResumen(
             id=cuota.transaccion_id,
-            descripcion=get_descripcion(cuota),
+            descripcion=desc_final,
+            subcategoria_nombre=sub_nombre,
             numero_cuota=cuota.numero_cuota,
             total_cuotas=total_cuotas,
             monto=cuota.monto_real if cuota.monto_real is not None else cuota.monto_proyectado,

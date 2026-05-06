@@ -29,6 +29,7 @@ class TarjetaCreditoUpdate(BaseModel):
 class CuotaResumen(BaseModel):
     id: UUID
     descripcion: str
+    subcategoria_nombre: str | None = None
     numero_cuota: int
     total_cuotas: int
     monto: Decimal
