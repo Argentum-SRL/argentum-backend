@@ -3,6 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
+import logging
+
+# Reducir ruido en la consola: ocultar mensajes informativos de APScheduler
+# y de accesos HTTP para que veas solo lo esencial.
+logging.getLogger('apscheduler').setLevel(logging.WARNING)
+logging.getLogger('uvicorn.access').setLevel(logging.WARNING)
 
 # ---------------------------------------------------------------------------
 # APScheduler — limpieza periódica de refresh tokens expirados/revocados
@@ -47,17 +53,21 @@ def _job_vencimientos_tarjetas():
     finally:
         db.close()
 
-scheduler = BackgroundScheduler(timezone="UTC")
-scheduler.add_job(_job_limpiar_tokens, "interval", hours=6, id="limpiar_refresh_tokens")
-scheduler.add_job(_job_procesar_recurrentes, "cron", hour=0, minute=5, id="procesar_recurrentes")
-scheduler.add_job(_job_vencimientos_tarjetas, "cron", hour=6, minute=0, id="vencimientos_tarjetas")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Crear el scheduler y registrar jobs aquí para evitar que se
+    # añadan en tiempo de import (evita duplicados con --reload)
+    scheduler = BackgroundScheduler(timezone="UTC")
+    scheduler.add_job(_job_limpiar_tokens, "interval", hours=6, id="limpiar_refresh_tokens")
+    scheduler.add_job(_job_procesar_recurrentes, "cron", hour=0, minute=5, id="procesar_recurrentes")
+    scheduler.add_job(_job_vencimientos_tarjetas, "cron", hour=6, minute=0, id="vencimientos_tarjetas")
     scheduler.start()
-    yield
-    scheduler.shutdown(wait=False)
+    # Mensaje corto y claro para la consola
+    print("Backend listo: servidor y tareas automáticas activas.")
+    try:
+        yield
+    finally:
+        scheduler.shutdown(wait=False)
 
 
 # ---------------------------------------------------------------------------
