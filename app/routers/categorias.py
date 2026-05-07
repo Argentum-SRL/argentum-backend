@@ -48,3 +48,21 @@ def list_subcategorias(
         )
     )
     return db.execute(stmt).scalars().all()
+
+@router.get("/subcategorias", response_model=List[SubcategoriaRead])
+def list_all_subcategorias(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    """
+    Lista todas las subcategorías activas (globales y personales).
+    """
+    stmt = select(Subcategoria).where(
+        Subcategoria.estado == EstadoSubcategoria.ACTIVA,
+        or_(
+            Subcategoria.es_global == True,
+            Subcategoria.creador_id == current_user.id
+        )
+    )
+    return db.execute(stmt).scalars().all()
+

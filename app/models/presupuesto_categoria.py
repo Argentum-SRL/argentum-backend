@@ -4,7 +4,13 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import CheckConstraint, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.presupuesto import Presupuesto
+    from app.models.categoria import Categoria
+    from app.models.subcategoria import Subcategoria
 
 from app.core.database import Base
 
@@ -28,6 +34,10 @@ class PresupuestoCategoria(Base):
     subcategoria_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("subcategorias.id"), nullable=True
     )
+
+    presupuesto: Mapped[Presupuesto] = relationship("Presupuesto", back_populates="categorias")
+    categoria: Mapped[Categoria | None] = relationship("Categoria")
+    subcategoria: Mapped[Subcategoria | None] = relationship("Subcategoria")
 
     def __repr__(self) -> str:
         return (

@@ -18,6 +18,7 @@ from app.core.database import SessionLocal
 from app.core.auth import limpiar_tokens_expirados
 from app.services.recurrente_service import procesar_recurrentes
 from app.services.vencimiento_tarjeta_service import procesar_vencimientos_tarjetas
+from app.services.presupuesto_service import renovar_presupuestos
 
 # ---------------------------------------------------------------------------
 # Inicialización automática de Base de Datos
@@ -53,6 +54,15 @@ def _job_vencimientos_tarjetas():
     finally:
         db.close()
 
+def _job_renovar_presupuestos():
+    """Tarea programada: renueva presupuestos automáticamente una vez al día."""
+    db = SessionLocal()
+    try:
+        renovar_presupuestos(db)
+        print("[scheduler] Job de renovación de presupuestos ejecutado.")
+    finally:
+        db.close()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Crear el scheduler y registrar jobs aquí para evitar que se
@@ -61,6 +71,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(_job_limpiar_tokens, "interval", hours=6, id="limpiar_refresh_tokens")
     scheduler.add_job(_job_procesar_recurrentes, "cron", hour=0, minute=5, id="procesar_recurrentes")
     scheduler.add_job(_job_vencimientos_tarjetas, "cron", hour=6, minute=0, id="vencimientos_tarjetas")
+    scheduler.add_job(_job_renovar_presupuestos, "cron", hour=0, minute=5, id="renovar_presupuestos")
     scheduler.start()
     # Mensaje corto y claro para la consola
     print("Backend listo: servidor y tareas automáticas activas.")
@@ -97,7 +108,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas
+from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos
 from fastapi.staticfiles import StaticFiles
 import os
 
@@ -111,6 +122,7 @@ app.include_router(transferencias.router)
 app.include_router(recurrentes.router)
 app.include_router(categorias.router)
 app.include_router(dashboard.router)
+app.include_router(presupuestos.router, prefix="/presupuestos")
 
 # Servir archivos estáticos de media (Ignorado por git)
 os.makedirs("media/fotos", exist_ok=True)

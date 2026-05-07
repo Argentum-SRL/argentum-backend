@@ -14,7 +14,7 @@ from app.models.cuota import Cuota
 from app.models.tarjeta_credito import TarjetaCredito
 from app.schemas.transaccion import TransaccionCreate, TransaccionUpdate
 from app.services.tarjeta_service import calcular_primer_vencimiento
-from app.services import cuotas_service
+from app.services import cuotas_service, presupuesto_service
 
 
 def obtener_transacciones(
@@ -199,12 +199,19 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate) ->
     db.add(nueva_transaccion)
     db.commit()
     db.refresh(nueva_transaccion)
+    
+    # Impacto en presupuestos
+    presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False)
+    
     return nueva_transaccion
 
 
 def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, data: TransaccionUpdate) -> Transaccion:
     transaccion = obtener_transaccion(db, usuario_id, transaccion_id)
     
+    # Impacto en presupuestos (Revertir con datos viejos)
+    presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=True)
+
     impacto_saldo_cambia = any([
         data.monto is not None,
         data.tipo is not None,
@@ -250,6 +257,10 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
             
     db.commit()
     db.refresh(transaccion)
+
+    # Impacto en presupuestos (Aplicar con datos nuevos)
+    presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=False)
+
     return transaccion
 
 
@@ -324,6 +335,10 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID):
             
     db.delete(transaccion)
     db.commit()
+
+    # Impacto en presupuestos
+    presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=True)
+
     return {"detail": "Transacción eliminada exitosamente"}
 
 
@@ -348,6 +363,10 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
             
     db.commit()
     db.refresh(transaccion)
+
+    # Impacto en presupuestos
+    presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=False)
+
     return transaccion
 
 

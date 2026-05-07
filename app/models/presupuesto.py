@@ -14,8 +14,8 @@ from app.models.usuario import Moneda
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app.models.categoria import Categoria
     from app.models.periodo_presupuesto import PeriodoPresupuesto
+    from app.models.presupuesto_categoria import PresupuestoCategoria
     from app.models.usuario import Usuario
 
 
@@ -61,9 +61,10 @@ class Presupuesto(Base):
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
-    categorias: Mapped[list[Categoria]] = relationship(
-        "Categoria",
-        secondary="presupuestos_categorias",
+    categorias: Mapped[list[PresupuestoCategoria]] = relationship(
+        "PresupuestoCategoria",
+        back_populates="presupuesto",
+        cascade="all, delete-orphan",
     )
     periodos: Mapped[list[PeriodoPresupuesto]] = relationship("PeriodoPresupuesto")
     usuario: Mapped[Usuario] = relationship("Usuario")
