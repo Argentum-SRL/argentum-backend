@@ -11,6 +11,7 @@ from app.models.presupuesto import Presupuesto, PeriodoPresupuestoTipo, Renovaci
 from app.models.presupuesto_categoria import PresupuestoCategoria
 from app.models.periodo_presupuesto import PeriodoPresupuesto
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion
+from app.models.subcategoria import Subcategoria
 from app.models.notificacion import Notificacion, TipoNotificacion
 from app.models.configuracion_notificacion import ConfiguracionNotificacion
 from app.models.usuario import Usuario
@@ -72,7 +73,12 @@ def calcular_gasto_en_periodo(
     
     conditions = []
     if cat_ids:
-        conditions.append(Transaccion.categoria_id.in_(cat_ids))
+        conditions.append(or_(
+            Transaccion.categoria_id.in_(cat_ids),
+            Transaccion.subcategoria_id.in_(
+                select(Subcategoria.id).where(Subcategoria.categoria_id.in_(cat_ids))
+            )
+        ))
     if subcat_ids:
         conditions.append(Transaccion.subcategoria_id.in_(subcat_ids))
         
@@ -291,9 +297,16 @@ def registrar_impacto_presupuesto(db: Session, transaccion: Transaccion, reverti
         )
     ).scalars().all()
     
+    # Resolver categoría si solo tiene subcategoría
+    tx_cat_id = transaccion.categoria_id
+    if not tx_cat_id and transaccion.subcategoria_id:
+        sub = db.get(Subcategoria, transaccion.subcategoria_id)
+        if sub:
+            tx_cat_id = sub.categoria_id
+
     for presu in presupuestos:
         aplica = any(
-            (c.categoria_id == transaccion.categoria_id and c.categoria_id is not None) or
+            (c.categoria_id == tx_cat_id and c.categoria_id is not None) or
             (c.subcategoria_id == transaccion.subcategoria_id and c.subcategoria_id is not None)
             for c in presu.categorias
         )

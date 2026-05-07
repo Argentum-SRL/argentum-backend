@@ -5,6 +5,7 @@ from dateutil.relativedelta import relativedelta
 from app.models.cuota import Cuota
 from app.models.transaccion import Transaccion, TipoTransaccion
 from app.models.grupo_cuotas import GrupoCuotas
+from app.services import presupuesto_service
 
 def crear_cuotas(
     db: Session,
@@ -45,6 +46,9 @@ def crear_cuotas(
         )
         db.add(hija)
         db.flush()
+
+        # Impacto en presupuestos
+        presupuesto_service.registrar_impacto_presupuesto(db, hija, revertir=False)
 
         # 2. Crear el registro de la cuota vinculada al grupo
         cuota_reg = Cuota(

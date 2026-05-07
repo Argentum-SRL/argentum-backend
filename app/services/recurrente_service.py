@@ -9,6 +9,7 @@ from app.models.transaccion import Transaccion, OrigenTransaccion
 from app.models.billetera import Billetera
 from app.models.transaccion_recurrente import TransaccionRecurrente, EstadoTransaccionRecurrente
 from app.schemas.transaccion_recurrente import TransaccionRecurrenteCreate, TransaccionRecurrenteUpdate
+from app.services import presupuesto_service
 
 
 def obtener_recurrentes(db: Session, usuario_id: UUID):
@@ -164,6 +165,9 @@ def procesar_recurrentes(db: Session):
                     billetera.saldo_actual -= rec.monto
             
             generadas += 1
+            
+            # Impacto en presupuestos
+            presupuesto_service.registrar_impacto_presupuesto(db, nueva_tx, revertir=False)
 
     if nuevas_txs:
         db.add_all(nuevas_txs)

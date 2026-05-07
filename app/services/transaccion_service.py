@@ -196,12 +196,12 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate) ->
         else:
             billetera.saldo_actual -= nueva_transaccion.monto
         
+    # Impacto en presupuestos
+    presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False)
+
     db.add(nueva_transaccion)
     db.commit()
     db.refresh(nueva_transaccion)
-    
-    # Impacto en presupuestos
-    presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False)
     
     return nueva_transaccion
 
@@ -255,11 +255,11 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
         for key, value in update_data.items():
             setattr(transaccion, key, value)
             
-    db.commit()
-    db.refresh(transaccion)
-
     # Impacto en presupuestos (Aplicar con datos nuevos)
     presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=False)
+
+    db.commit()
+    db.refresh(transaccion)
 
     return transaccion
 
@@ -333,11 +333,11 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID):
             else:
                 billetera.saldo_actual += transaccion.monto
             
-    db.delete(transaccion)
-    db.commit()
-
     # Impacto en presupuestos
     presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=True)
+
+    db.delete(transaccion)
+    db.commit()
 
     return {"detail": "Transacción eliminada exitosamente"}
 
@@ -361,11 +361,11 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
         else:
             billetera.saldo_actual -= transaccion.monto
             
-    db.commit()
-    db.refresh(transaccion)
-
     # Impacto en presupuestos
     presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=False)
+
+    db.commit()
+    db.refresh(transaccion)
 
     return transaccion
 
