@@ -1,5 +1,5 @@
 from uuid import UUID
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Optional
 from fastapi import HTTPException
@@ -80,15 +80,29 @@ def obtener_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID) -> 
     return transaccion
 
 
+def _hoy_argentina() -> date:
+    """Retorna la fecha actual en hora Argentina (UTC-3)."""
+    return (datetime.now(timezone.utc) - timedelta(hours=3)).date()
+
+
+def _afecta_saldo(transaccion) -> bool:
+    """True si la transacción debe/debió impactar el saldo de la billetera."""
+    return (
+        transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE
+        and transaccion.fecha <= _hoy_argentina()
+        and transaccion.metodo_pago != MetodoPago.CREDITO
+    )
+
+
 def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate) -> Transaccion:
     # 1. Validar billetera
     billetera = db.execute(
         select(Billetera).where(
-            Billetera.id == data.billetera_id, 
+            Billetera.id == data.billetera_id,
             Billetera.usuario_id == usuario_id
         )
     ).scalar_one_or_none()
-    
+
     if not billetera:
         raise HTTPException(status_code=404, detail="Billetera no encontrada")
     
@@ -188,9 +202,7 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate) ->
     
     # 4. Actualizar saldo solo si es confirmada, es hoy o pasada, y NO es crédito
     # (El crédito impacta vía el pago del resumen consolidado)
-    if (nueva_transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE 
-        and nueva_transaccion.fecha <= date.today()
-        and nueva_transaccion.metodo_pago != MetodoPago.CREDITO):
+    if _afecta_saldo(nueva_transaccion):
         if nueva_transaccion.tipo == TipoTransaccion.INGRESO:
             billetera.saldo_actual += nueva_transaccion.monto
         else:
@@ -217,7 +229,8 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
         data.tipo is not None,
         data.billetera_id is not None and data.billetera_id != transaccion.billetera_id,
         data.fecha is not None,
-        data.estado_verificacion is not None
+        data.estado_verificacion is not None,
+        data.metodo_pago is not None and data.metodo_pago != transaccion.metodo_pago
     ])
 
     if (transaccion.es_cuota_hija or transaccion.es_padre_cuotas) and impacto_saldo_cambia:
@@ -225,27 +238,23 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
     
     if impacto_saldo_cambia:
         # Revertir impacto anterior si existia
-        if (transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE 
-            and transaccion.fecha <= date.today()
-            and transaccion.metodo_pago != MetodoPago.CREDITO):
+        if _afecta_saldo(transaccion):
             billetera_vieja = db.get(Billetera, transaccion.billetera_id)
             if transaccion.tipo == TipoTransaccion.INGRESO:
                 billetera_vieja.saldo_actual -= transaccion.monto
             else:
                 billetera_vieja.saldo_actual += transaccion.monto
-            
+
         update_data = data.model_dump(exclude_unset=True)
         for key, value in update_data.items():
             setattr(transaccion, key, value)
-            
+
         # Aplicar nuevo impacto
-        if (transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE 
-            and transaccion.fecha <= date.today()
-            and transaccion.metodo_pago != MetodoPago.CREDITO):
+        if _afecta_saldo(transaccion):
             billetera_nueva = db.get(Billetera, transaccion.billetera_id)
             if not billetera_nueva or billetera_nueva.usuario_id != usuario_id:
                 raise HTTPException(status_code=404, detail="Billetera no encontrada")
-                
+
             if transaccion.tipo == TipoTransaccion.INGRESO:
                 billetera_nueva.saldo_actual += transaccion.monto
             else:
@@ -281,7 +290,7 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID):
                 select(Cuota).options(joinedload(Cuota.transaccion)).where(Cuota.grupo_id == grupo.id)
             ).scalars().all()
             for c in cuotas:
-                if c.pagada or c.fecha_vencimiento <= date.today():
+                if c.pagada or c.fecha_vencimiento <= _hoy_argentina():
                     tx_hija = c.transaccion
                     if tx_hija and tx_hija.metodo_pago != MetodoPago.CREDITO:
                         b = db.get(Billetera, tx_hija.billetera_id)
@@ -323,9 +332,7 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID):
             return {"detail": "Grupo de cuotas eliminado exitosamente"}
 
     # Transaccion normal
-    if (transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE 
-        and transaccion.fecha <= date.today()
-        and transaccion.metodo_pago != MetodoPago.CREDITO):
+    if _afecta_saldo(transaccion):
         billetera = db.get(Billetera, transaccion.billetera_id)
         if billetera:
             if transaccion.tipo == TipoTransaccion.INGRESO:
@@ -351,7 +358,8 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
     transaccion.estado_verificacion = EstadoVerificacionTransaccion.CONFIRMADA
     
     # Al confirmar, RECIEN impacta el saldo si la fecha es hoy o pasada
-    if transaccion.fecha <= date.today():
+    hoy = (datetime.now(timezone.utc) - timedelta(hours=3)).date()
+    if transaccion.fecha <= hoy and transaccion.metodo_pago != MetodoPago.CREDITO:
         billetera = db.get(Billetera, transaccion.billetera_id)
         if not billetera:
             raise HTTPException(status_code=404, detail="Billetera no encontrada")
