@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.usuario import Usuario
     from app.models.categoria import Categoria
+    from app.models.billetera import Billetera
+    from app.models.tarjeta_credito import TarjetaCredito
     from app.models.historial_suscripcion import HistorialSuscripcion
 
 from app.core.database import Base
@@ -38,6 +40,12 @@ class Suscripcion(Base):
     usuario_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False
     )
+    billetera_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("billeteras.id"), nullable=True
+    )
+    tarjeta_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("tarjetas_credito.id"), nullable=True
+    )
     nombre: Mapped[str] = mapped_column(String(100), nullable=False)
     categoria_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("categorias.id"), nullable=True
@@ -59,6 +67,8 @@ class Suscripcion(Base):
     historial: Mapped[list["HistorialSuscripcion"]] = relationship("HistorialSuscripcion", back_populates="suscripcion")
     usuario: Mapped[Usuario] = relationship("Usuario")
     categoria: Mapped[Categoria | None] = relationship("Categoria")
+    billetera: Mapped[Billetera | None] = relationship("Billetera")
+    tarjeta: Mapped[TarjetaCredito | None] = relationship("TarjetaCredito")
 
     def __repr__(self) -> str:
         return (
