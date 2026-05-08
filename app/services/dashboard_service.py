@@ -16,6 +16,7 @@ from app.models.usuario import Usuario, CicloTipo
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion
 from app.models.categoria import Categoria
+from app.models.subcategoria import Subcategoria
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion
 from app.models.cuota import Cuota
 from app.models.grupo_cuotas import GrupoCuotas
@@ -160,8 +161,11 @@ def get_dashboard_resumen(
         Categoria.nombre.label("extra_1"), # categoria_nombre
         Billetera.nombre.label("extra_2"), # billetera_nombre
         cast(Transaccion.estado_verificacion, String).label("extra_3"), # estado_verificacion
-        cast(Transaccion.tipo, String).label("extra_4") # tipo_transaccion
-    ).join(Categoria, isouter=True).join(Billetera, isouter=True).where(
+        cast(Transaccion.tipo, String).label("extra_4"), # tipo_transaccion
+        Subcategoria.nombre.label("extra_5") # subcategoria_nombre
+    ).join(Categoria, Transaccion.categoria_id == Categoria.id, isouter=True)\
+     .join(Billetera, Transaccion.billetera_id == Billetera.id, isouter=True)\
+     .join(Subcategoria, Transaccion.subcategoria_id == Subcategoria.id, isouter=True).where(
         and_(Transaccion.usuario_id == usuario.id, Transaccion.fecha >= fecha_inicio, Transaccion.fecha <= fecha_fin, Transaccion.es_padre_cuotas == False)
     ).order_by(desc(Transaccion.fecha), desc(Transaccion.fecha_creacion)).limit(6)
 
@@ -175,7 +179,8 @@ def get_dashboard_resumen(
         cast(null(), String).label("extra_1"),
         cast(null(), String).label("extra_2"),
         cast(null(), String).label("extra_3"),
-        cast(null(), String).label("extra_4")
+        cast(null(), String).label("extra_4"),
+        cast(null(), String).label("extra_5")
     ).where(
         and_(Suscripcion.usuario_id == usuario.id, Suscripcion.estado == EstadoSuscripcion.ACTIVA, Suscripcion.proximo_cobro >= hoy, Suscripcion.proximo_cobro <= limite_pagos)
     )
@@ -190,7 +195,8 @@ def get_dashboard_resumen(
         cast(null(), String).label("extra_1"),
         cast(null(), String).label("extra_2"),
         cast(null(), String).label("extra_3"),
-        cast(null(), String).label("extra_4")
+        cast(null(), String).label("extra_4"),
+        cast(null(), String).label("extra_5")
     ).join(GrupoCuotas).where(
         and_(GrupoCuotas.usuario_id == usuario.id, Cuota.pagada == False, Cuota.fecha_vencimiento >= hoy, Cuota.fecha_vencimiento <= limite_pagos)
     )
@@ -208,7 +214,8 @@ def get_dashboard_resumen(
     movimientos_data = [{
         "id": r.id, "descripcion": r.nombre, "fecha": r.fecha.isoformat(), "monto": float(r.monto),
         "tipo": r.extra_4, "moneda": r.moneda, "billetera_nombre": r.extra_2 or "Billetera",
-        "categoria_nombre": r.extra_1, "estado_verificacion": r.extra_3
+        "categoria_nombre": r.extra_1, "estado_verificacion": r.extra_3,
+        "subcategoria_nombre": r.extra_5
     } for r in actividad if r.item_tipo == "movimiento"]
 
     proximos_pagos = [{
