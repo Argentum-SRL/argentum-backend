@@ -45,6 +45,7 @@ class ResumenFuturo(BaseModel):
     total: Decimal
     moneda: str
     cantidad_cuotas: int
+    cuotas: list[CuotaResumen] = []
 
 class ResumenTarjeta(BaseModel):
     fecha_cierre_proximo: date

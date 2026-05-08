@@ -147,8 +147,9 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate) ->
             ).first()
             if not tarjeta:
                 raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+            proximo_resumen = data.info_cuotas.proximo_resumen if data.info_cuotas else False
             primer_vencimiento = calcular_primer_vencimiento(
-                data.fecha, tarjeta.dia_cierre, tarjeta.dia_vencimiento
+                data.fecha, tarjeta.dia_cierre, tarjeta.dia_vencimiento, proximo_resumen
             )
         elif data.primer_vencimiento_manual:
             primer_vencimiento = data.primer_vencimiento_manual

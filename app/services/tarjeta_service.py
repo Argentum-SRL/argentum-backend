@@ -30,17 +30,22 @@ MESES_ES = {
 def calcular_primer_vencimiento(
     fecha_compra: date,
     dia_cierre: int,
-    dia_vencimiento: int
+    dia_vencimiento: int,
+    proximo_resumen: bool = False
 ) -> date:
     """
     Calcula la fecha del primer vencimiento de una compra con tarjeta.
     Si la compra es antes o el mismo día del cierre, vence el mes siguiente.
     Si es después del cierre, vence a los dos meses.
+    Si proximo_resumen es True, se le suma un mes adicional.
     """
     if fecha_compra.day <= dia_cierre:
         base = fecha_compra + relativedelta(months=1)
     else:
         base = fecha_compra + relativedelta(months=2)
+
+    if proximo_resumen:
+        base = base + relativedelta(months=1)
 
     ultimo_dia = monthrange(base.year, base.month)[1]
     dia_real = min(dia_vencimiento, ultimo_dia)
@@ -279,10 +284,12 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
                                       cuota.fecha_vencimiento.month, 1),
                     "total": Decimal(0),
                     "moneda": tarjeta.moneda.value,
-                    "cantidad_cuotas": 0
+                    "cantidad_cuotas": 0,
+                    "cuotas": []
                 }
             futuros_dict[mes_key]["total"] += cuota_data.monto
             futuros_dict[mes_key]["cantidad_cuotas"] += 1
+            futuros_dict[mes_key]["cuotas"].append(cuota_data)
 
     resumenes_futuros = [
         ResumenFuturo(**v)

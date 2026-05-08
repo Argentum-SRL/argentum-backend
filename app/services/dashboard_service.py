@@ -188,7 +188,12 @@ def get_dashboard_resumen(
     c_stmt = select(
         literal("cuota").label("item_tipo"),
         cast(Cuota.id, String).label("id"),
-        GrupoCuotas.descripcion.label("nombre"),
+        func.coalesce(
+            GrupoCuotas.descripcion, 
+            Subcategoria.nombre,
+            Categoria.nombre,
+            literal("Cuota")
+        ).label("nombre"),
         Cuota.monto_proyectado.label("monto"),
         cast(GrupoCuotas.moneda, String).label("moneda"),
         Cuota.fecha_vencimiento.label("fecha"),
@@ -197,7 +202,11 @@ def get_dashboard_resumen(
         cast(null(), String).label("extra_3"),
         cast(null(), String).label("extra_4"),
         cast(null(), String).label("extra_5")
-    ).join(GrupoCuotas).where(
+    ).join(GrupoCuotas)\
+     .join(Transaccion, GrupoCuotas.transaccion_padre_id == Transaccion.id)\
+     .join(Categoria, Transaccion.categoria_id == Categoria.id, isouter=True)\
+     .join(Subcategoria, Transaccion.subcategoria_id == Subcategoria.id, isouter=True)\
+     .where(
         and_(GrupoCuotas.usuario_id == usuario.id, Cuota.pagada == False, Cuota.fecha_vencimiento >= hoy, Cuota.fecha_vencimiento <= limite_pagos)
     )
 

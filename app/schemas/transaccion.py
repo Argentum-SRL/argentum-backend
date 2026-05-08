@@ -22,6 +22,7 @@ class InfoCuotas(BaseModel):
     tiene_interes: bool = False
     tasa_interes: Decimal | None = None
     monto_total: Decimal # El monto base sin interes (o el total si no hay interes)
+    proximo_resumen: bool = False
 
 
 class TransaccionBase(BaseModel):
