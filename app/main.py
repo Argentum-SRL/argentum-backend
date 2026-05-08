@@ -19,6 +19,7 @@ from app.core.auth import limpiar_tokens_expirados
 from app.services.recurrente_service import procesar_recurrentes
 from app.services.vencimiento_tarjeta_service import procesar_vencimientos_tarjetas
 from app.services.presupuesto_service import renovar_presupuestos
+from app.services.cobro_suscripcion_service import procesar_cobros_suscripciones
 
 # ---------------------------------------------------------------------------
 # Inicialización automática de Base de Datos
@@ -63,6 +64,15 @@ def _job_renovar_presupuestos():
     finally:
         db.close()
 
+def _job_cobros_suscripciones():
+    """Tarea programada: procesa cobros de suscripciones automáticamente una vez al día."""
+    db = SessionLocal()
+    try:
+        procesar_cobros_suscripciones(db)
+        print("[scheduler] Job de cobros de suscripciones ejecutado.")
+    finally:
+        db.close()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Crear el scheduler y registrar jobs aquí para evitar que se
@@ -72,6 +82,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(_job_procesar_recurrentes, "cron", hour=0, minute=5, id="procesar_recurrentes")
     scheduler.add_job(_job_vencimientos_tarjetas, "cron", hour=6, minute=0, id="vencimientos_tarjetas")
     scheduler.add_job(_job_renovar_presupuestos, "cron", hour=0, minute=5, id="renovar_presupuestos")
+    scheduler.add_job(_job_cobros_suscripciones, "cron", hour=6, minute=5, id="cobros_suscripciones")
     scheduler.start()
     # Mensaje corto y claro para la consola
     print("Backend listo: servidor y tareas automáticas activas.")
