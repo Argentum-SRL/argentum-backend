@@ -198,7 +198,7 @@ def get_dashboard_resumen(
         cast(GrupoCuotas.moneda, String).label("moneda"),
         Cuota.fecha_vencimiento.label("fecha"),
         cast(null(), String).label("extra_1"),
-        cast(null(), String).label("extra_2"),
+        cast(GrupoCuotas.tarjeta_id, String).label("extra_2"),
         cast(null(), String).label("extra_3"),
         cast(null(), String).label("extra_4"),
         cast(null(), String).label("extra_5")
@@ -230,7 +230,7 @@ def get_dashboard_resumen(
     proximos_pagos = [{
         "id": r.id, "nombre": r.nombre, "monto": float(r.monto or 0), "moneda": r.moneda,
         "fecha_cobro": r.fecha.isoformat(), "dias_restantes": (r.fecha - hoy).days, "tipo": r.item_tipo
-    } for r in actividad if r.item_tipo in ("suscripcion", "cuota")]
+    } for r in actividad if r.item_tipo in ("suscripcion", "cuota") and not (r.item_tipo == "cuota" and r.extra_2)]
 
     # --- AGREGAR VENCIMIENTOS DE TARJETAS ---
     tarjetas = db.query(TarjetaCredito).filter(
@@ -283,7 +283,10 @@ def get_dashboard_resumen(
                 "fecha_cobro": d_venc.isoformat(),
                 "dias_restantes": dias_restantes,
                 "tipo": "resumen_tarjeta",
-                "color": tarjeta.color
+                "color": tarjeta.color,
+                "red": tarjeta.red.value,
+                "billetera_nombre": tarjeta.billetera.nombre,
+                "billetera_id": str(tarjeta.billetera_id)
             })
 
     proximos_pagos = sorted(proximos_pagos, key=lambda x: x["fecha_cobro"])[:5]
