@@ -64,7 +64,7 @@ class Suscripcion(Base):
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
 
-    historial: Mapped[list["HistorialSuscripcion"]] = relationship("HistorialSuscripcion", back_populates="suscripcion")
+    historial: Mapped[list["HistorialSuscripcion"]] = relationship("HistorialSuscripcion", back_populates="suscripcion", cascade="all, delete-orphan")
     usuario: Mapped[Usuario] = relationship("Usuario")
     categoria: Mapped[Categoria | None] = relationship("Categoria")
     billetera: Mapped[Billetera | None] = relationship("Billetera")
