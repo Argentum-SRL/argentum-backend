@@ -119,7 +119,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones
+from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas
 from fastapi.staticfiles import StaticFiles
 import os
 
@@ -135,6 +135,7 @@ app.include_router(categorias.router)
 app.include_router(dashboard.router)
 app.include_router(presupuestos.router, prefix="/presupuestos")
 app.include_router(suscripciones.router)
+app.include_router(metas.router, prefix="/goals", tags=["goals"])
 
 # Servir archivos estáticos de media (Ignorado por git)
 os.makedirs("media/fotos", exist_ok=True)

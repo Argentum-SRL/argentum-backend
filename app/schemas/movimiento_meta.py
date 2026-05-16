@@ -4,14 +4,15 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
+from typing import Optional
 from pydantic import BaseModel, ConfigDict
 
 from app.models.movimiento_meta import TipoMovimientoMeta
 from app.models.usuario import Moneda
+from app.schemas.billetera import BilleteraRead
 
 
 class MovimientoMetaBase(BaseModel):
-    meta_id: UUID
     tipo: TipoMovimientoMeta
     monto: Decimal
     moneda_movimiento: Moneda
@@ -37,6 +38,8 @@ class MovimientoMetaUpdate(BaseModel):
 
 class MovimientoMetaRead(MovimientoMetaBase):
     id: UUID
+    meta_id: UUID
     fecha_creacion: datetime
+    billetera: Optional[BilleteraRead] = None
 
     model_config = ConfigDict(from_attributes=True)
