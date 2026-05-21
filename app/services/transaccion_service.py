@@ -383,7 +383,13 @@ def obtener_pendientes_ia(db: Session, usuario_id: UUID, skip: int = 0, limit: i
     return db.execute(
         select(Transaccion).where(
             Transaccion.usuario_id == usuario_id,
-            Transaccion.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE
+            Transaccion.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE,
+            Transaccion.origen.in_([
+                OrigenTransaccion.IA_WPP,
+                OrigenTransaccion.IA_CHAT,
+                OrigenTransaccion.IA_PDF,
+            ]),
+            Transaccion.es_padre_cuotas == False,
         )
         .options(joinedload(Transaccion.subcategoria))
         .order_by(desc(Transaccion.fecha), desc(Transaccion.fecha_creacion))

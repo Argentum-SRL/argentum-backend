@@ -53,6 +53,21 @@ def calcular_primer_vencimiento(
     return base.replace(day=dia_real)
 
 
+def calcular_fecha_vencimiento_proximo(tarjeta: TarjetaCredito, hoy: date | None = None) -> date:
+    """Devuelve la fecha del próximo vencimiento de la tarjeta a partir de hoy."""
+    if hoy is None:
+        hoy = date.today()
+    ultimo_dia_mes = monthrange(hoy.year, hoy.month)[1]
+    dia_venc = min(tarjeta.dia_vencimiento, ultimo_dia_mes)
+    venc = date(hoy.year, hoy.month, dia_venc)
+    if hoy > venc:
+        proximo_mes = hoy + relativedelta(months=1)
+        ultimo_dia_proximo = monthrange(proximo_mes.year, proximo_mes.month)[1]
+        dia_venc_proximo = min(tarjeta.dia_vencimiento, ultimo_dia_proximo)
+        venc = date(proximo_mes.year, proximo_mes.month, dia_venc_proximo)
+    return venc
+
+
 def obtener_tarjetas(db: Session, usuario_id: UUID) -> list[TarjetaCredito]:
     return db.query(TarjetaCredito).filter(
         TarjetaCredito.usuario_id == usuario_id,
