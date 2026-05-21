@@ -96,6 +96,26 @@ def crear_suscripcion(db: Session, usuario_id: UUID, data: SuscripcionCreate) ->
     db.add(primer_precio)
     db.commit()
     db.refresh(nueva_suscripcion)
+
+    # Disparar el primer cobro inmediatamente para que aparezca ya en el resumen
+    if nueva_suscripcion.billetera_id or nueva_suscripcion.tarjeta_id:
+        from app.services.cobro_suscripcion_service import _cobrar_suscripcion
+        from app.services import tarjeta_service
+
+        primer_vencimiento = None
+        if nueva_suscripcion.tarjeta_id:
+            tarjeta = db.query(TarjetaCredito).filter(
+                TarjetaCredito.id == nueva_suscripcion.tarjeta_id
+            ).first()
+            if tarjeta:
+                # Usar el próximo vencimiento de la tarjeta para que el primer cargo
+                # entre siempre en el Resumen Actual, sin importar el dia_cierre
+                primer_vencimiento = tarjeta_service.calcular_fecha_vencimiento_proximo(tarjeta)
+
+        _cobrar_suscripcion(db, nueva_suscripcion, nueva_suscripcion.proximo_cobro, primer_vencimiento)
+        db.commit()
+        db.refresh(nueva_suscripcion)
+
     return nueva_suscripcion
 
 def obtener_suscripciones(db: Session, usuario_id: UUID, estado: str | None = None) -> List[SuscripcionResponse]:
