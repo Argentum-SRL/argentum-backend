@@ -336,3 +336,104 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
         cuotas_resumen_siguiente=cuotas_siguiente,
         resumenes_futuros=resumenes_futuros
     )
+
+
+def pagar_resumen_tarjeta(
+    db: Session,
+    usuario_id: UUID,
+    tarjeta_id: UUID,
+    fecha_pago: date | None = None
+) -> Transaccion:
+    # 1. Obtener la tarjeta
+    tarjeta = db.query(TarjetaCredito).filter(
+        TarjetaCredito.id == tarjeta_id,
+        TarjetaCredito.usuario_id == usuario_id
+    ).first()
+    if not tarjeta:
+        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+
+    # 2. Calcular la fecha de vencimiento próximo para saber qué cuotas entran
+    hoy = date.today()
+    fecha_vencimiento_proximo = calcular_fecha_vencimiento_proximo(tarjeta, hoy)
+
+    # 3. Obtener todas las cuotas de esta tarjeta que no estén pagadas y venzan en o antes de la fecha de vencimiento próximo
+    cuotas_a_pagar = (
+        db.query(Cuota)
+        .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
+        .filter(
+            GrupoCuotas.tarjeta_id == tarjeta.id,
+            Cuota.pagada == False,
+            Cuota.fecha_vencimiento >= hoy,
+            Cuota.fecha_vencimiento <= fecha_vencimiento_proximo
+        )
+        .all()
+    )
+
+    if not cuotas_a_pagar:
+        raise HTTPException(status_code=400, detail="No hay saldo o cuotas pendientes de pago en el resumen actual.")
+
+    # 4. Calcular el monto total a pagar
+    monto_total = sum(
+        (c.monto_real if c.monto_real is not None else c.monto_proyectado)
+        for c in cuotas_a_pagar
+    )
+
+    if monto_total <= 0:
+        raise HTTPException(status_code=400, detail="El monto del resumen a pagar debe ser mayor a cero.")
+
+    # 5. Buscar la categoría "Banco" y subcategoría "Tarjeta de crédito"
+    from app.models.categoria import Categoria
+    from app.models.subcategoria import Subcategoria
+
+    categoria = db.query(Categoria).filter(
+        Categoria.nombre.ilike("Banco"),
+        (Categoria.creador_id == usuario_id) | (Categoria.es_global == True)
+    ).first()
+
+    subcategoria = None
+    if categoria:
+        subcategoria = db.query(Subcategoria).filter(
+            Subcategoria.categoria_id == categoria.id,
+            Subcategoria.nombre.ilike("Tarjeta%de%crédito") | Subcategoria.nombre.ilike("Tarjetas%de%crédito"),
+            (Subcategoria.creador_id == usuario_id) | (Subcategoria.es_global == True)
+        ).first()
+
+    # 6. Crear la transacción de egreso
+    from app.schemas.transaccion import TransaccionCreate
+    from app.services import transaccion_service
+    from app.models.transaccion import TipoTransaccion, MetodoPago, OrigenTransaccion, EstadoVerificacionTransaccion
+
+    ultimos_4 = tarjeta.nombre[-4:] if len(tarjeta.nombre) >= 4 else tarjeta.nombre
+    descripcion_pago = f"Pago resumen {ultimos_4}"
+
+    fecha_transaccion = fecha_pago or transaccion_service._hoy_argentina()
+
+    tx_data = TransaccionCreate(
+        tipo=TipoTransaccion.EGRESO,
+        monto=monto_total,
+        moneda=tarjeta.moneda,
+        fecha=fecha_transaccion,
+        descripcion=descripcion_pago,
+        categoria_id=categoria.id if categoria else None,
+        subcategoria_id=subcategoria.id if subcategoria else None,
+        metodo_pago=MetodoPago.DEBITO,
+        billetera_id=tarjeta.billetera_id,
+        tarjeta_id=tarjeta.id,
+        es_recurrente=False,
+        es_cuota_hija=False,
+        es_padre_cuotas=False,
+        origen=OrigenTransaccion.MANUAL,
+        estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA
+    )
+
+    # 7. Registrar la transacción
+    tx = transaccion_service.crear_transaccion(db, usuario_id, tx_data)
+
+    # 8. Marcar las cuotas como pagadas
+    for cuota in cuotas_a_pagar:
+        cuota.pagada = True
+
+    db.commit()
+    db.refresh(tx)
+    return tx
+

@@ -9,8 +9,10 @@ from app.schemas.tarjeta_credito import (
     TarjetaCreditoCreate, 
     TarjetaCreditoUpdate, 
     TarjetaCreditoResponse,
-    ResumenTarjeta
+    ResumenTarjeta,
+    PagarTarjetaBody
 )
+from app.schemas.transaccion import TransaccionRead
 from app.services import tarjeta_service
 
 router = APIRouter()
@@ -87,3 +89,15 @@ def get_resumen_tarjeta(
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
 
     return tarjeta_service.calcular_resumen_actual(db, tarjeta)
+
+
+@router.post("/{tarjeta_id}/pagar", response_model=TransaccionRead)
+def pagar_tarjeta(
+    tarjeta_id: UUID,
+    body: PagarTarjetaBody | None = None,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    fecha_pago = body.fecha_pago if body else None
+    return tarjeta_service.pagar_resumen_tarjeta(db, current_user.id, tarjeta_id, fecha_pago)
+
