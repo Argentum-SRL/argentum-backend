@@ -66,3 +66,8 @@ class TarjetaCreditoResponse(TarjetaCreditoBase):
 
     class Config:
         from_attributes = True
+
+
+class PagarTarjetaBody(BaseModel):
+    fecha_pago: date | None = None
+
