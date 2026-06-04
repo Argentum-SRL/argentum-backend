@@ -34,9 +34,12 @@ def obtener_transacciones(
     es_cuota_hija: Optional[bool] = None
 ):
     # El usuario solo ve transacciones normales e hijas. Nunca las "padre de cuotas".
+    # Las transacciones pagadas con crédito (compras en 1 pago o cuotas) se excluyen de la lista general
+    # para evitar duplicaciones; solo se cuenta el pago consolidado del resumen (que se registra como debito).
     query = select(Transaccion).where(
         Transaccion.usuario_id == usuario_id,
-        Transaccion.es_padre_cuotas == False
+        Transaccion.es_padre_cuotas == False,
+        Transaccion.metodo_pago != MetodoPago.CREDITO
     )
     
     if billetera_id:

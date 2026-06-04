@@ -140,6 +140,7 @@ def get_dashboard_resumen(
         and_(
             Transaccion.usuario_id == usuario.id,
             Transaccion.es_padre_cuotas == False,
+            Transaccion.metodo_pago != MetodoPago.CREDITO,
             or_(Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA, Transaccion.estado_verificacion == None)
         )
     )
@@ -166,7 +167,13 @@ def get_dashboard_resumen(
     ).join(Categoria, Transaccion.categoria_id == Categoria.id, isouter=True)\
      .join(Billetera, Transaccion.billetera_id == Billetera.id, isouter=True)\
      .join(Subcategoria, Transaccion.subcategoria_id == Subcategoria.id, isouter=True).where(
-        and_(Transaccion.usuario_id == usuario.id, Transaccion.fecha >= fecha_inicio, Transaccion.fecha <= fecha_fin, Transaccion.es_padre_cuotas == False)
+        and_(
+            Transaccion.usuario_id == usuario.id,
+            Transaccion.fecha >= fecha_inicio,
+            Transaccion.fecha <= fecha_fin,
+            Transaccion.es_padre_cuotas == False,
+            Transaccion.metodo_pago != MetodoPago.CREDITO
+        )
     ).order_by(desc(Transaccion.fecha), desc(Transaccion.fecha_creacion)).limit(6)
 
     s_stmt = select(

@@ -80,7 +80,7 @@ def procesar_vencimientos_tarjetas(db: Session) -> None:
             descripcion=f'Resumen {tarjeta.nombre} — {mes_label} {hoy.year}',
             billetera_id=tarjeta.billetera_id,
             tarjeta_id=tarjeta.id,
-            metodo_pago='credito', # Es el pago de la tarjeta
+            metodo_pago='debito', # Es el débito del pago del resumen
             origen='recurrente',
             estado_verificacion='pendiente',
             es_recurrente=False,

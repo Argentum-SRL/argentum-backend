@@ -187,14 +187,24 @@ def eliminar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID) -> None:
     db.commit()
 
 
+def calcular_fecha_cierre_de_vencimiento(vencimiento: date, dia_cierre: int, dia_vencimiento: int) -> date:
+    """
+    Calcula la fecha de cierre de tarjeta que corresponde a una fecha de vencimiento dada.
+    Si el día de vencimiento es menor o igual al día de cierre, el cierre es el mes anterior.
+    Si el día de vencimiento es mayor, el cierre es el mismo mes.
+    """
+    if dia_vencimiento <= dia_cierre:
+        mes_cierre = vencimiento - relativedelta(months=1)
+    else:
+        mes_cierre = vencimiento
+
+    ultimo_dia = monthrange(mes_cierre.year, mes_cierre.month)[1]
+    dia_real = min(dia_cierre, ultimo_dia)
+    return mes_cierre.replace(day=dia_real)
+
+
 def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preloaded: list[Cuota] = None) -> ResumenTarjeta:
     hoy = date.today()
-
-    # ── Calcular fecha de cierre próximo ──────────────────
-    cierre = date(hoy.year, hoy.month, tarjeta.dia_cierre)
-    if hoy > cierre:
-        cierre = cierre + relativedelta(months=1)
-    fecha_cierre_proximo = cierre
 
     # ── Calcular fecha de vencimiento próximo ─────────────
     # Usar el último día del mes si dia_vencimiento es mayor
@@ -210,6 +220,12 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
         venc = date(proximo_mes.year, proximo_mes.month, dia_venc_proximo)
     
     fecha_vencimiento_proximo = venc
+
+    # ── Calcular fecha de cierre próximo ──────────────────
+    # El cierre debe corresponder al período de vencimiento próximo
+    fecha_cierre_proximo = calcular_fecha_cierre_de_vencimiento(
+        fecha_vencimiento_proximo, tarjeta.dia_cierre, tarjeta.dia_vencimiento
+    )
 
     # ── Obtener todas las cuotas futuras de esta tarjeta ──
     if cuotas_preloaded is not None:
