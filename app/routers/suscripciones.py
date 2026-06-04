@@ -20,7 +20,7 @@ router = APIRouter(prefix="/suscripciones", tags=["suscripciones"])
 
 @router.get("", response_model=List[SuscripcionResponse])
 def get_suscripciones(
-    estado: Optional[str] = Query(None, regex="^(activa|pausada|cancelada)$"),
+    estado: Optional[str] = Query(None, pattern="^(activa|pausada|cancelada)$"),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):

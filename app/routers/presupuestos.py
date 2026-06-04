@@ -70,7 +70,7 @@ def _map_presupuesto_response(p) -> PresupuestoResponse:
 
 from datetime import timedelta
 
-@router.get("/", response_model=List[PresupuestoResponse])
+@router.get("", response_model=List[PresupuestoResponse])
 def listar_presupuestos(
     estado: Optional[str] = None,
     db: Session = Depends(get_db),
@@ -79,7 +79,7 @@ def listar_presupuestos(
     presupuestos = presupuesto_service.obtener_presupuestos(db, usuario.id, estado)
     return [_map_presupuesto_response(p) for p in presupuestos]
 
-@router.post("/", response_model=PresupuestoResponse)
+@router.post("", response_model=PresupuestoResponse)
 def crear_presupuesto(
     data: PresupuestoCreate,
     db: Session = Depends(get_db),
