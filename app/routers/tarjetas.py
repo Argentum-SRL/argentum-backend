@@ -15,7 +15,7 @@ from app.services import tarjeta_service
 
 router = APIRouter()
 
-@router.get("/", response_model=list[TarjetaCreditoResponse])
+@router.get("", response_model=list[TarjetaCreditoResponse])
 def listar_tarjetas(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
@@ -30,7 +30,7 @@ def listar_tarjetas_por_billetera(
 ):
     return tarjeta_service.obtener_tarjetas_por_billetera(db, current_user.id, billetera_id)
 
-@router.post("/", response_model=TarjetaCreditoResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=TarjetaCreditoResponse, status_code=status.HTTP_201_CREATED)
 def crear_tarjeta(
     data: TarjetaCreditoCreate,
     db: Session = Depends(get_db),

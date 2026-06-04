@@ -21,7 +21,7 @@ from app.services import meta_service
 
 router = APIRouter(tags=["metas"])
 
-@router.get("/", response_model=List[MetaRead])
+@router.get("", response_model=List[MetaRead])
 def listar_metas(
     activas_solo: bool = False,
     db: Session = Depends(get_db),
@@ -29,7 +29,7 @@ def listar_metas(
 ):
     return meta_service.obtener_metas(db, usuario.id, activas_solo)
 
-@router.post("/", response_model=MetaRead)
+@router.post("", response_model=MetaRead)
 def crear_meta(
     data: MetaCreate,
     db: Session = Depends(get_db),
