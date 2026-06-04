@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.config import settings
 from app.models.usuario import Usuario, CicloTipo
 from app.models.billetera import Billetera, EstadoBilletera
-from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion
+from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion, MetodoPago
 from app.models.categoria import Categoria
 from app.models.subcategoria import Subcategoria
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion
