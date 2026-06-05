@@ -35,9 +35,19 @@ class CuotaResumen(BaseModel):
     monto: Decimal
     moneda: str
     fecha_vencimiento: date
+    pagada: bool
 
     class Config:
         from_attributes = True
+
+class ResumenAnterior(BaseModel):
+    mes: str
+    fecha_vencimiento: date
+    fecha_cierre: date
+    total: Decimal
+    moneda: str
+    pagado: bool
+    cuotas: list[CuotaResumen]
 
 class ResumenFuturo(BaseModel):
     mes: str           # "Junio 2026"
@@ -55,6 +65,7 @@ class ResumenTarjeta(BaseModel):
     cuotas_resumen_actual: list[CuotaResumen]
     cuotas_resumen_siguiente: list[CuotaResumen]
     resumenes_futuros: list[ResumenFuturo]
+    resumenes_anteriores: list[ResumenAnterior] = []
 
 class TarjetaCreditoResponse(TarjetaCreditoBase):
     id: UUID
