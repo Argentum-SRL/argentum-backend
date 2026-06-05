@@ -427,8 +427,8 @@ def login_google(body: GoogleLoginRequest, request: Request, db: Session = Depen
         access_token=access,
         refresh_token=refresh,
         usuario=UsuarioRead.model_validate(user),
-        requiere_telefono=not user.telefono_verificado,
-        requiere_onboarding=_requiere_onboarding(user) if user.telefono_verificado else False,
+        requiere_telefono=False,
+        requiere_onboarding=_requiere_onboarding(user),
     )
 
 
