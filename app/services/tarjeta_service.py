@@ -16,7 +16,8 @@ from app.schemas.tarjeta_credito import (
     TarjetaCreditoUpdate,
     ResumenTarjeta,
     CuotaResumen,
-    ResumenFuturo
+    ResumenFuturo,
+    ResumenAnterior
 )
 
 MESES_ES = {
@@ -227,7 +228,8 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
         fecha_vencimiento_proximo, tarjeta.dia_cierre, tarjeta.dia_vencimiento
     )
 
-    # ── Obtener todas las cuotas futuras de esta tarjeta ──
+    # ── Obtener todas las cuotas de esta tarjeta (incluidas las del último año) ──
+    one_year_ago = hoy - relativedelta(years=1)
     if cuotas_preloaded is not None:
         cuotas = cuotas_preloaded
     else:
@@ -241,8 +243,7 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
             )
             .filter(
                 GrupoCuotas.tarjeta_id == tarjeta.id,
-                Cuota.pagada == False,
-                Cuota.fecha_vencimiento >= hoy
+                Cuota.fecha_vencimiento >= one_year_ago
             )
             .order_by(Cuota.fecha_vencimiento)
             .all()
@@ -277,6 +278,7 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
 
     cuotas_actual = []
     cuotas_siguiente = []
+    anteriores_dict: dict[str, dict] = {}
     futuros_dict: dict[str, dict] = {}
 
     for cuota in cuotas:
@@ -293,15 +295,42 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
             total_cuotas=total_cuotas,
             monto=cuota.monto_real if cuota.monto_real is not None else cuota.monto_proyectado,
             moneda=tarjeta.moneda.value,
-            fecha_vencimiento=cuota.fecha_vencimiento
+            fecha_vencimiento=cuota.fecha_vencimiento,
+            pagada=cuota.pagada
         )
 
-        if cuota.fecha_vencimiento <= fecha_vencimiento_proximo:
+        if cuota.fecha_vencimiento < fecha_vencimiento_proximo:
+            # Resumen anterior
+            venc_key = cuota.fecha_vencimiento.strftime("%Y-%m")
+            nombre_mes_en = cuota.fecha_vencimiento.strftime("%B")
+            nombre_mes_es = MESES_ES.get(nombre_mes_en, nombre_mes_en)
+            mes_label = f"{nombre_mes_es} {cuota.fecha_vencimiento.year}"
+            
+            if venc_key not in anteriores_dict:
+                cierre_date = calcular_fecha_cierre_de_vencimiento(
+                    cuota.fecha_vencimiento, tarjeta.dia_cierre, tarjeta.dia_vencimiento
+                )
+                anteriores_dict[venc_key] = {
+                    "mes": mes_label,
+                    "fecha_vencimiento": cuota.fecha_vencimiento,
+                    "fecha_cierre": cierre_date,
+                    "total": Decimal(0),
+                    "moneda": tarjeta.moneda.value,
+                    "pagado": True,
+                    "cuotas": []
+                }
+            
+            anteriores_dict[venc_key]["total"] += cuota_data.monto
+            if not cuota.pagada:
+                anteriores_dict[venc_key]["pagado"] = False
+            anteriores_dict[venc_key]["cuotas"].append(cuota_data)
+
+        elif cuota.fecha_vencimiento == fecha_vencimiento_proximo:
             cuotas_actual.append(cuota_data)
-        elif cuota.fecha_vencimiento <= venc_siguiente:
+        elif fecha_vencimiento_proximo < cuota.fecha_vencimiento <= venc_siguiente:
             cuotas_siguiente.append(cuota_data)
         else:
-            # Agrupar por mes
+            # Agrupar por mes futuro
             mes_key = cuota.fecha_vencimiento.strftime("%Y-%m")
             # Traducir mes a español
             nombre_mes_en = cuota.fecha_vencimiento.strftime("%B")
@@ -322,6 +351,11 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
             futuros_dict[mes_key]["cantidad_cuotas"] += 1
             futuros_dict[mes_key]["cuotas"].append(cuota_data)
 
+    resumenes_anteriores = [
+        ResumenAnterior(**v)
+        for v in sorted(anteriores_dict.values(), key=lambda x: x["fecha_vencimiento"])
+    ]
+
     resumenes_futuros = [
         ResumenFuturo(**v)
         for v in sorted(futuros_dict.values(), key=lambda x: x["mes_fecha"])
@@ -334,7 +368,8 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
         total_comprometido_resumen_siguiente=sum(c.monto for c in cuotas_siguiente),
         cuotas_resumen_actual=cuotas_actual,
         cuotas_resumen_siguiente=cuotas_siguiente,
-        resumenes_futuros=resumenes_futuros
+        resumenes_futuros=resumenes_futuros,
+        resumenes_anteriores=resumenes_anteriores
     )
 
 
@@ -363,7 +398,6 @@ def pagar_resumen_tarjeta(
         .filter(
             GrupoCuotas.tarjeta_id == tarjeta.id,
             Cuota.pagada == False,
-            Cuota.fecha_vencimiento >= hoy,
             Cuota.fecha_vencimiento <= fecha_vencimiento_proximo
         )
         .all()
