@@ -59,7 +59,15 @@ def obtener_transacciones(
     if estado_verificacion:
         query = query.where(Transaccion.estado_verificacion == estado_verificacion)
     if busqueda:
-        query = query.where(Transaccion.descripcion.ilike(f"%{busqueda}%"))
+        from app.models.categoria import Categoria
+        from app.models.subcategoria import Subcategoria
+        query = query.outerjoin(Transaccion.categoria).outerjoin(Transaccion.subcategoria).where(
+            or_(
+                Transaccion.descripcion.ilike(f"%{busqueda}%"),
+                Categoria.nombre.ilike(f"%{busqueda}%"),
+                Subcategoria.nombre.ilike(f"%{busqueda}%")
+            )
+        )
     if es_cuota_hija is not None:
         query = query.where(Transaccion.es_cuota_hija == es_cuota_hija)
         
