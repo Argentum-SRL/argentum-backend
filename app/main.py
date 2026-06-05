@@ -135,6 +135,7 @@ app.add_middleware(
 
 from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, tools
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, Response
 import os
 
 app.include_router(auth.router)
@@ -152,8 +153,30 @@ app.include_router(suscripciones.router)
 app.include_router(metas.router, prefix="/goals", tags=["goals"])
 app.include_router(tools.router, prefix="/api/v1/tools", tags=["tools"])
 
-# Servir archivos estáticos de media (Ignorado por git)
+# Servir archivos estáticos de media con fallback para fotos de perfil no encontradas (evita 404s en consola)
 os.makedirs("media/fotos", exist_ok=True)
+
+@app.get("/media/fotos/{filename}")
+async def get_foto_perfil(filename: str):
+    filepath = os.path.join("media", "fotos", filename)
+    if os.path.exists(filepath):
+        return FileResponse(filepath)
+    
+    # SVG elegante de avatar por defecto en caso de no encontrarse el archivo localmente
+    default_avatar_svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="128" height="128">'
+        '<rect width="24" height="24" fill="#0f172a"/>'
+        '<circle cx="12" cy="8.5" r="4" fill="#64748b"/>'
+        '<path d="M12 14c-4.42 0-8 2.24-8 5v1h16v-1c0-2.76-3.58-5-8-5z" fill="#64748b"/>'
+        '</svg>'
+    )
+    headers = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0"
+    }
+    return Response(content=default_avatar_svg, media_type="image/svg+xml", headers=headers)
+
 app.mount("/media", StaticFiles(directory="media"), name="media")
 
 
