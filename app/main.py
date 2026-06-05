@@ -73,6 +73,19 @@ def _job_cobros_suscripciones():
     finally:
         db.close()
 
+def _job_actualizar_ipc():
+    """Tarea programada: actualiza el IPC automáticamente de forma diaria."""
+    db = SessionLocal()
+    try:
+        from app.services.tools_service import get_current_ipc
+        print("[scheduler] Iniciando actualización automática de IPC...")
+        ipc_cache = get_current_ipc(db)
+        print(f"[scheduler] IPC actualizado/verificado: {ipc_cache.valor_mensual}% ({ipc_cache.fecha_dato}) - Fuente: {ipc_cache.fuente}")
+    except Exception as e:
+        print(f"[scheduler] Error al actualizar IPC automáticamente: {str(e)}")
+    finally:
+        db.close()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Crear el scheduler y registrar jobs aquí para evitar que se
@@ -83,6 +96,7 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(_job_vencimientos_tarjetas, "cron", hour=6, minute=0, id="vencimientos_tarjetas")
     scheduler.add_job(_job_renovar_presupuestos, "cron", hour=0, minute=5, id="renovar_presupuestos")
     scheduler.add_job(_job_cobros_suscripciones, "cron", hour=6, minute=5, id="cobros_suscripciones")
+    scheduler.add_job(_job_actualizar_ipc, "cron", hour=13, minute=0, id="actualizar_ipc")
     scheduler.start()
     # Mensaje corto y claro para la consola
     print("Backend listo: servidor y tareas automáticas activas.")
@@ -119,7 +133,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas
+from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, tools
 from fastapi.staticfiles import StaticFiles
 import os
 
@@ -136,6 +150,7 @@ app.include_router(dashboard.router)
 app.include_router(presupuestos.router, prefix="/presupuestos")
 app.include_router(suscripciones.router)
 app.include_router(metas.router, prefix="/goals", tags=["goals"])
+app.include_router(tools.router, prefix="/api/v1/tools", tags=["tools"])
 
 # Servir archivos estáticos de media (Ignorado por git)
 os.makedirs("media/fotos", exist_ok=True)
