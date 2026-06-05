@@ -1,5 +1,6 @@
 import os
 import shutil
+import time
 from uuid import UUID
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import delete, select
@@ -192,7 +193,8 @@ def actualizar_foto(
         os.makedirs(FOTOS_DIR, exist_ok=True)
     
     if usuario.foto_url and not usuario.foto_url.startswith("http"):
-        old_path = os.path.join(os.getcwd(), usuario.foto_url.lstrip("/"))
+        clean_url = usuario.foto_url.split("?")[0]
+        old_path = os.path.join(os.getcwd(), clean_url.lstrip("/"))
         if os.path.exists(old_path):
             try:
                 os.remove(old_path)
@@ -205,7 +207,7 @@ def actualizar_foto(
     with open(filepath, "wb") as buffer:
         shutil.copyfileobj(archivo.file, buffer)
     
-    usuario.foto_url = f"/{FOTOS_DIR}/{filename}"
+    usuario.foto_url = f"/{FOTOS_DIR}/{filename}?v={int(time.time())}"
     db.commit()
     db.refresh(usuario)
     
@@ -213,7 +215,8 @@ def actualizar_foto(
 
 def eliminar_foto(db: Session, usuario: Usuario) -> dict:
     if usuario.foto_url and not usuario.foto_url.startswith("http"):
-        path = os.path.join(os.getcwd(), usuario.foto_url.lstrip("/"))
+        clean_url = usuario.foto_url.split("?")[0]
+        path = os.path.join(os.getcwd(), clean_url.lstrip("/"))
         if os.path.exists(path):
             try:
                 os.remove(path)
@@ -228,7 +231,8 @@ def eliminar_usuario(db: Session, usuario: Usuario) -> dict:
     usuario_id = usuario.id
     
     if usuario.foto_url and not usuario.foto_url.startswith("http"):
-        path = os.path.join(os.getcwd(), usuario.foto_url.lstrip("/"))
+        clean_url = usuario.foto_url.split("?")[0]
+        path = os.path.join(os.getcwd(), clean_url.lstrip("/"))
         if os.path.exists(path):
             try:
                 os.remove(path)
