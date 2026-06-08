@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.models.usuario import Usuario
-from app.schemas.tools import InstallmentConvenienceRequest
+from app.schemas.tools import InstallmentConvenienceRequest, CanAffordRequest, CanAffordResponse, FinancialContextResponse
 from app.services import tools_service
 
 router = APIRouter()
@@ -47,3 +47,44 @@ def calculate_convenience_endpoint(
         "success": True,
         "data": result
     }
+
+
+@router.get("/financial-context", response_model=FinancialContextResponse)
+def get_financial_context_endpoint(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Devuelve el contexto financiero del usuario necesario para pre-cargar la calculadora.
+    """
+    ctx = tools_service.obtener_contexto_financiero(current_user.id, db)
+    return {
+        "success": True,
+        "data": ctx
+    }
+
+
+@router.post("/can-afford", response_model=CanAffordResponse)
+def can_afford_endpoint(
+    body: CanAffordRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Calcula si el usuario puede permitirse una compra y con qué impacto.
+    """
+    result = tools_service.calcular_puede_permitirse(
+        user_id=current_user.id,
+        precio_total=body.precio_total,
+        modo=body.modo,
+        cantidad_cuotas=body.cantidad_cuotas,
+        tiene_interes=body.tiene_interes,
+        tna=body.tna,
+        ingreso_manual=body.ingreso_manual,
+        db=db
+    )
+    return {
+        "success": True,
+        "data": result
+    }
+
