@@ -21,6 +21,7 @@ from app.models.transaccion import Transaccion
 from app.models.transaccion_recurrente import TransaccionRecurrente
 from app.models.transferencia_interna import TransferenciaInterna
 from app.models.usuario import Usuario
+from app.models.tools import IPCCache
 
 __all__ = [
     "Usuario",
@@ -46,4 +47,6 @@ __all__ = [
     "Transaccion",
     "TransaccionRecurrente",
     "TransferenciaInterna",
+    "IPCCache",
 ]
+
