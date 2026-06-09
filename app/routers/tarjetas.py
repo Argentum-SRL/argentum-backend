@@ -1,5 +1,5 @@
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -10,7 +10,8 @@ from app.schemas.tarjeta_credito import (
     TarjetaCreditoUpdate, 
     TarjetaCreditoResponse,
     ResumenTarjeta,
-    PagarTarjetaBody
+    PagarTarjetaBody,
+    PresionFuturaResponse
 )
 from app.schemas.transaccion import TransaccionRead
 from app.services import tarjeta_service
@@ -73,6 +74,21 @@ def eliminar_tarjeta(
 ):
     tarjeta_service.eliminar_tarjeta(db, current_user.id, tarjeta_id)
     return None
+
+
+@router.get("/presion-futura", response_model=PresionFuturaResponse)
+def get_presion_futura(
+    meses: int = Query(default=6, ge=1, le=12),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Devuelve el total comprometido en cuotas de tarjeta para los próximos N meses,
+    desglosado por tarjeta y agrupado por mes de vencimiento del resumen.
+    """
+    resultado = tarjeta_service.calcular_presion_futura(db, current_user, meses)
+    return {"success": True, "data": resultado}
+
 
 @router.get("/{tarjeta_id}/resumen", response_model=ResumenTarjeta)
 def get_resumen_tarjeta(

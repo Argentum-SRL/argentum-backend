@@ -82,3 +82,33 @@ class TarjetaCreditoResponse(TarjetaCreditoBase):
 class PagarTarjetaBody(BaseModel):
     fecha_pago: date | None = None
 
+
+class DetalleTarjetaMes(BaseModel):
+    tarjeta_id: str
+    tarjeta_nombre: str
+    total: float
+
+
+class MesPresionFutura(BaseModel):
+    anio: int
+    mes: int
+    mes_label: str
+    total: float
+    tarjetas: list[DetalleTarjetaMes]
+
+
+class PresionFuturaData(BaseModel):
+    meses: list[MesPresionFutura]
+    total_comprometido: float
+
+    class Config:
+        from_attributes = True
+
+
+class PresionFuturaResponse(BaseModel):
+    success: bool
+    data: PresionFuturaData
+
+    class Config:
+        from_attributes = True
+
