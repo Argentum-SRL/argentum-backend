@@ -13,6 +13,7 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 async def get_resumen(
     desde: str | None = None,
     hasta: str | None = None,
+    billetera_ids: str | None = None,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ) -> Any:
@@ -20,15 +21,18 @@ async def get_resumen(
     Retorna el resumen del dashboard para el usuario autenticado.
     """
     from datetime import date
+    import uuid
     fecha_desde = date.fromisoformat(desde) if desde else None
     fecha_hasta = date.fromisoformat(hasta) if hasta else None
+    ids_lista = [uuid.UUID(i.strip()) for i in billetera_ids.split(',')] if billetera_ids else None
     
-    return dashboard_service.get_dashboard_resumen(db, current_user, fecha_desde, fecha_hasta)
+    return dashboard_service.get_dashboard_resumen(db, current_user, fecha_desde, fecha_hasta, billetera_ids=ids_lista)
 
 @router.get("/resumen-completo")
 async def get_resumen_completo(
     desde: str | None = None,
     hasta: str | None = None,
+    billetera_ids: str | None = None,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ) -> Any:
@@ -36,10 +40,12 @@ async def get_resumen_completo(
     Retorna billeteras, resumen y cotización en una sola llamada (Optimizado).
     """
     from datetime import date
+    import uuid
     fecha_desde = date.fromisoformat(desde) if desde else None
     fecha_hasta = date.fromisoformat(hasta) if hasta else None
+    ids_lista = [uuid.UUID(i.strip()) for i in billetera_ids.split(',')] if billetera_ids else None
     
-    return await dashboard_service.get_resumen_completo(db, current_user, fecha_desde, fecha_hasta)
+    return await dashboard_service.get_resumen_completo(db, current_user, fecha_desde, fecha_hasta, billetera_ids=ids_lista)
 
 @router.get("/cotizacion")
 async def get_cotizacion(
