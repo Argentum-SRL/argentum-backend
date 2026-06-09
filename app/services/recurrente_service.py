@@ -12,11 +12,13 @@ from app.schemas.transaccion_recurrente import TransaccionRecurrenteCreate, Tran
 from app.services import presupuesto_service
 
 
-def obtener_recurrentes(db: Session, usuario_id: UUID):
+def obtener_recurrentes(db: Session, usuario_id: UUID, skip: int = 0, limit: int = 50):
     return db.execute(
         select(TransaccionRecurrente)
         .where(TransaccionRecurrente.usuario_id == usuario_id)
         .order_by(desc(TransaccionRecurrente.fecha_creacion))
+        .offset(skip)
+        .limit(limit)
     ).scalars().all()
 
 

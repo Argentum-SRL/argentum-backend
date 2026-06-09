@@ -16,7 +16,7 @@ class StorageService:
         """Sube un archivo a Supabase Storage y devuelve la URL pública."""
         upload_url = f"{self.url}/{self.bucket}/{filename}"
         
-        with httpx.Client() as client:
+        with httpx.Client(timeout=httpx.Timeout(connect=5.0, read=15.0, write=15.0, pool=5.0)) as client:
             # Intentar subir el archivo
             resp = client.post(
                 upload_url,
@@ -49,7 +49,7 @@ class StorageService:
     def eliminar_archivo(self, filename: str):
         """Elimina un archivo de Supabase Storage."""
         delete_url = f"{self.url}/{self.bucket}/{filename}"
-        with httpx.Client() as client:
+        with httpx.Client(timeout=httpx.Timeout(connect=5.0, read=15.0, write=15.0, pool=5.0)) as client:
             client.delete(delete_url, headers=self.headers)
 
 storage_service = StorageService()

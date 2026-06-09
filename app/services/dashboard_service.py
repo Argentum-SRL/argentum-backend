@@ -240,10 +240,14 @@ def get_dashboard_resumen(
     } for r in actividad if r.item_tipo in ("suscripcion", "cuota") and not (r.item_tipo == "cuota" and r.extra_2)]
 
     # --- AGREGAR VENCIMIENTOS DE TARJETAS ---
-    tarjetas = db.query(TarjetaCredito).filter(
+    tarjetas = db.query(TarjetaCredito).options(
+        joinedload(TarjetaCredito.billetera)
+    ).filter(
         TarjetaCredito.usuario_id == usuario.id,
         TarjetaCredito.estado == EstadoTarjeta.ACTIVA
     ).all()
+
+    limite_futuro = hoy + timedelta(days=365)
 
     # Optimizacion N+1: Pre-cargar todas las cuotas futuras de todas las tarjetas activas
     all_cuotas = (
@@ -257,7 +261,8 @@ def get_dashboard_resumen(
             GrupoCuotas.usuario_id == usuario.id,
             GrupoCuotas.tarjeta_id.in_([t.id for t in tarjetas]) if tarjetas else False,
             Cuota.pagada == False,
-            Cuota.fecha_vencimiento >= hoy
+            Cuota.fecha_vencimiento >= hoy,
+            Cuota.fecha_vencimiento <= limite_futuro
         )
         .order_by(Cuota.fecha_vencimiento)
         .all()

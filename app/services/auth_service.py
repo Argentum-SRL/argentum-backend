@@ -1,8 +1,11 @@
+import logging
 import time
 import httpx
 from fastapi import HTTPException
 from jose import jwt
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Global variables for caching Google's JWKS
 _GOOGLE_JWKS = None
@@ -25,18 +28,18 @@ def _get_google_jwks() -> dict:
     if not _GOOGLE_JWKS or (now - _JWKS_LAST_FETCH) > _CACHE_TTL:
         url = "https://www.googleapis.com/oauth2/v3/certs"
         try:
-            print("[Auth][Google][Backend] Fetching Google public JWKs...")
+            logger.debug("[Auth][Google][Backend] Fetching Google public JWKs...")
             response = httpx.get(url, timeout=5)
             if response.status_code == 200:
                 _GOOGLE_JWKS = response.json()
                 _JWKS_LAST_FETCH = now
-                print("[Auth][Google][Backend] Google JWKs cached successfully.")
+                logger.debug("[Auth][Google][Backend] Google JWKs cached successfully.")
             else:
-                print(f"[Auth][Google][Backend] Failed to fetch JWKs, status: {response.status_code}")
+                logger.warning("[Auth][Google][Backend] Failed to fetch JWKs, status: %s", response.status_code)
                 if not _GOOGLE_JWKS:
                     raise Exception("Could not retrieve Google certs from server")
         except Exception as exc:
-            print(f"[Auth][Google][Backend] Error fetching Google certs: {repr(exc)}")
+            logger.exception("[Auth][Google][Backend] Error fetching Google certs")
             if not _GOOGLE_JWKS:
                 raise HTTPException(status_code=400, detail="No se pudieron obtener las claves de Google") from exc
                 
@@ -49,13 +52,14 @@ def verify_google_token(token: str) -> dict:
     y el conjunto de claves públicas JWKS de Google.
     Cae de vuelta a tokeninfo en caso de cualquier error de descompresión o firma local.
     """
-    print('[Auth][Google][Backend] Verificando token localmente', {
-        'tokenPresent': bool(token),
-        'tokenLength': len(token),
-        'tokenPrefix': _mask(token),
-        'googleClientIdPresent': bool(settings.GOOGLE_CLIENT_ID),
-        'googleClientIdPrefix': _mask(settings.GOOGLE_CLIENT_ID),
-    })
+    logger.debug(
+        '[Auth][Google][Backend] Verificando token localmente tokenPresent=%s tokenLength=%s tokenPrefix=%s googleClientIdPresent=%s googleClientIdPrefix=%s',
+        bool(token),
+        len(token),
+        _mask(token),
+        bool(settings.GOOGLE_CLIENT_ID),
+        _mask(settings.GOOGLE_CLIENT_ID),
+    )
     
     try:
         # 1. Obtener la cabecera sin verificar para extraer la Key ID ('kid')
@@ -82,25 +86,25 @@ def verify_google_token(token: str) -> dict:
             issuer=["accounts.google.com", "https://accounts.google.com"]
         )
         
-        print('[Auth][Google][Backend] Verificación local exitosa para:', token_data.get('email'))
+        logger.debug('[Auth][Google][Backend] Verificación local exitosa para: %s', token_data.get('email'))
         return token_data
         
     except Exception as e:
-        print('[Auth][Google][Backend] Falló verificación local, cayendo en fallback tokeninfo:', repr(e))
+        logger.warning('[Auth][Google][Backend] Falló verificación local, cayendo en fallback tokeninfo: %s', repr(e))
         
         # Fallback al endpoint tokeninfo para mayor robustez
         url = f"https://oauth2.googleapis.com/tokeninfo?id_token={token}"
         try:
             response = httpx.get(url, timeout=10)
             if response.status_code != 200:
-                print('[Auth][Google][Backend] Fallback tokeninfo falló:', response.text)
+                logger.warning('[Auth][Google][Backend] Fallback tokeninfo falló: %s', response.text)
                 raise HTTPException(status_code=400, detail="Token de Google inválido")
             
             token_data = response.json()
             if "aud" not in token_data or token_data["aud"] != settings.GOOGLE_CLIENT_ID:
                 raise HTTPException(status_code=400, detail="Audiencia del token no coincide")
                 
-            print('[Auth][Google][Backend] Fallback tokeninfo exitoso para:', token_data.get('email'))
+            logger.debug('[Auth][Google][Backend] Fallback tokeninfo exitoso para: %s', token_data.get('email'))
             return token_data
         except Exception as exc:
             raise HTTPException(status_code=400, detail="No se pudo validar el token de Google") from exc

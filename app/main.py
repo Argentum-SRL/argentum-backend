@@ -1,19 +1,37 @@
+import logging
+import asyncio
+import os
+import sys
+from contextlib import asynccontextmanager
+from concurrent.futures import ThreadPoolExecutor
+
+import anyio
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.gzip import GZipMiddleware
+from starlette.requests import Request
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 
 from app.core.config import settings
-import logging
 
+logger = logging.getLogger(__name__)
 # Reducir ruido en la consola: ocultar mensajes informativos de APScheduler
 # y de accesos HTTP para que veas solo lo esencial.
-logging.getLogger('apscheduler').setLevel(logging.WARNING)
-logging.getLogger('uvicorn.access').setLevel(logging.WARNING)
+logging.getLogger("apscheduler").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 # ---------------------------------------------------------------------------
 # APScheduler — limpieza periódica de refresh tokens expirados/revocados
 # ---------------------------------------------------------------------------
-from apscheduler.schedulers.background import BackgroundScheduler
 from app.core.database import SessionLocal
 from app.core.auth import limpiar_tokens_expirados
 from app.services.recurrente_service import procesar_recurrentes
@@ -26,71 +44,153 @@ from app.services.cobro_suscripcion_service import procesar_cobros_suscripciones
 # ---------------------------------------------------------------------------
 from scripts.init_full_db import init_full_db
 
-def _job_limpiar_tokens():
+class TimeoutMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, timeout: float = 30.0):
+        super().__init__(app)
+        self.timeout = timeout
+
+    async def dispatch(self, request: Request, call_next):
+        try:
+            with anyio.fail_after(self.timeout):
+                return await call_next(request)
+        except TimeoutError:
+            return JSONResponse(
+                status_code=504,
+                content={
+                    "success": False,
+                    "error": {
+                        "code": "TIMEOUT",
+                        "message": "La solicitud tardó demasiado. Intentá de nuevo."
+                    }
+                }
+            )
+
+async def _job_limpiar_tokens():
     """Tarea programada: elimina refresh tokens viejos cada 6 horas."""
     db = SessionLocal()
     try:
         eliminados = limpiar_tokens_expirados(db)
         if eliminados:
-            print(f"[scheduler] Refresh tokens eliminados: {eliminados}")
+            logger.info("Refresh tokens eliminados: %s", eliminados)
+    except Exception:
+        logger.exception("Error en job limpiar_tokens")
     finally:
         db.close()
 
-def _job_procesar_recurrentes():
+
+async def _job_procesar_recurrentes():
     """Tarea programada: genera transacciones recurrentes una vez al día."""
     db = SessionLocal()
     try:
         generadas = procesar_recurrentes(db)
         if generadas:
-            print(f"[scheduler] Transacciones recurrentes generadas: {generadas}")
+            logger.info("Transacciones recurrentes generadas: %s", generadas)
+    except Exception:
+        logger.exception("Error en job procesar_recurrentes")
     finally:
         db.close()
 
-def _job_vencimientos_tarjetas():
+
+async def _job_vencimientos_tarjetas():
     """Tarea programada: genera transacciones de vencimiento de tarjetas una vez al día."""
     db = SessionLocal()
     try:
         procesar_vencimientos_tarjetas(db)
-        print("[scheduler] Job de vencimientos de tarjetas ejecutado.")
+        logger.info("Job de vencimientos de tarjetas ejecutado.")
+    except Exception:
+        logger.exception("Error en job vencimientos_tarjetas")
     finally:
         db.close()
 
-def _job_renovar_presupuestos():
+
+async def _job_renovar_presupuestos():
     """Tarea programada: renueva presupuestos automáticamente una vez al día."""
     db = SessionLocal()
     try:
         renovar_presupuestos(db)
-        print("[scheduler] Job de renovación de presupuestos ejecutado.")
+        logger.info("Job de renovación de presupuestos ejecutado.")
+    except Exception:
+        logger.exception("Error en job renovar_presupuestos")
     finally:
         db.close()
 
-def _job_cobros_suscripciones():
+
+async def _job_cobros_suscripciones():
     """Tarea programada: procesa cobros de suscripciones automáticamente una vez al día."""
     db = SessionLocal()
     try:
         procesar_cobros_suscripciones(db)
-        print("[scheduler] Job de cobros de suscripciones ejecutado.")
+        logger.info("Job de cobros de suscripciones ejecutado.")
+    except Exception:
+        logger.exception("Error en job cobros_suscripciones")
     finally:
         db.close()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Crear el scheduler y registrar jobs aquí para evitar que se
     # añadan en tiempo de import (evita duplicados con --reload)
-    scheduler = BackgroundScheduler(timezone="UTC")
-    scheduler.add_job(_job_limpiar_tokens, "interval", hours=6, id="limpiar_refresh_tokens")
-    scheduler.add_job(_job_procesar_recurrentes, "cron", hour=0, minute=5, id="procesar_recurrentes")
-    scheduler.add_job(_job_vencimientos_tarjetas, "cron", hour=6, minute=0, id="vencimientos_tarjetas")
-    scheduler.add_job(_job_renovar_presupuestos, "cron", hour=0, minute=5, id="renovar_presupuestos")
-    scheduler.add_job(_job_cobros_suscripciones, "cron", hour=6, minute=5, id="cobros_suscripciones")
+    loop = asyncio.get_running_loop()
+    with ThreadPoolExecutor() as pool:
+        await loop.run_in_executor(pool, init_full_db)
+
+    scheduler = AsyncIOScheduler(timezone="UTC")
+    scheduler.add_job(
+        _job_limpiar_tokens,
+        "interval",
+        hours=6,
+        id="limpiar_refresh_tokens",
+        misfire_grace_time=300,
+        max_instances=1,
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _job_procesar_recurrentes,
+        "cron",
+        hour=0,
+        minute=5,
+        id="procesar_recurrentes",
+        misfire_grace_time=300,
+        max_instances=1,
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _job_vencimientos_tarjetas,
+        "cron",
+        hour=6,
+        minute=0,
+        id="vencimientos_tarjetas",
+        misfire_grace_time=300,
+        max_instances=1,
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _job_renovar_presupuestos,
+        "cron",
+        hour=0,
+        minute=15,
+        id="renovar_presupuestos",
+        misfire_grace_time=300,
+        max_instances=1,
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _job_cobros_suscripciones,
+        "cron",
+        hour=6,
+        minute=30,
+        id="cobros_suscripciones",
+        misfire_grace_time=300,
+        max_instances=1,
+        replace_existing=True,
+    )
     scheduler.start()
-    # Mensaje corto y claro para la consola
-    print("Backend listo: servidor y tareas automáticas activas.")
+    logger.info("Backend listo: servidor y tareas automáticas activas.")
     try:
         yield
     finally:
         scheduler.shutdown(wait=False)
-
 
 # ---------------------------------------------------------------------------
 # App
@@ -98,19 +198,33 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Argentum API", version="1.0.0", lifespan=lifespan)
 
+app.add_middleware(TimeoutMiddleware, timeout=30.0)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-@app.on_event("startup")
-def startup_init_db():
-    """
-    Inicializa automáticamente la base de datos al arrancar el servidor.
-    Detecta modelos, crea tablas y ejecuta seeds iniciales.
-    """
-    init_full_db()
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception(
+        "Error no manejado",
+        extra={
+            "path": request.url.path,
+            "method": request.method,
+        }
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "error": {
+                "code": "INTERNAL_ERROR",
+                "message": "Ocurrió un error inesperado. Intentá de nuevo."
+            }
+        }
+    )
 
 _origins = [settings.FRONTEND_URL]
 if settings.ENVIRONMENT == "development":
     _origins.extend(["http://localhost:5173", "http://localhost:5174"])
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
@@ -120,8 +234,6 @@ app.add_middleware(
 )
 
 from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas
-from fastapi.staticfiles import StaticFiles
-import os
 
 app.include_router(auth.router)
 app.include_router(onboarding.router)
