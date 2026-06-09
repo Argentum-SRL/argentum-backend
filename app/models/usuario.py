@@ -6,9 +6,13 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, String
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from app.models.notificacion import Notificacion
+    from app.models.configuracion_notificacion import ConfiguracionNotificacion
 
 
 class AuthProvider(str, Enum):
@@ -88,6 +92,19 @@ class Usuario(Base):
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
     ultimo_acceso: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    notificaciones = relationship(
+        "Notificacion",
+        back_populates="usuario",
+        cascade="all, delete-orphan",
+        lazy="dynamic"
+    )
+    configuracion_notificacion = relationship(
+        "ConfiguracionNotificacion",
+        back_populates="usuario",
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return (
