@@ -13,6 +13,7 @@ from app.models.usuario import Usuario, Moneda
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.transaccion import Transaccion
 from app.models.transferencia_interna import TransferenciaInterna
+from app.models.tarjeta_credito import TarjetaCredito
 from app.schemas.billetera import BilleteraRead, BilleteraUpdate
 from app.services import usuario_service
 
@@ -155,16 +156,29 @@ def delete_billetera(
     if billetera.es_efectivo:
         raise HTTPException(status_code=400, detail="Las billeteras de efectivo (ARS/USD) no pueden eliminarse")
 
-    # VERIFICACIÓN DE INTEGRIDAD (Optimizada: 1 query para ambos chequeos)
+    # VERIFICACIÓN DE INTEGRIDAD (Optimizada: 1 query para todos los chequeos)
     exists_tx = exists().where(Transaccion.billetera_id == billetera_id)
     exists_tr = exists().where(
         (TransferenciaInterna.billetera_origen_id == billetera_id) | 
         (TransferenciaInterna.billetera_destino_id == billetera_id)
     )
+    exists_tc = exists().where(TarjetaCredito.billetera_id == billetera_id)
     
-    check_stmt = select(exists_tx.label("has_tx"), exists_tr.label("has_tr"))
+    check_stmt = select(exists_tx.label("has_tx"), exists_tr.label("has_tr"), exists_tc.label("has_tc"))
     check_res = db.execute(check_stmt).one()
     
+    if check_res.has_tc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "BILLETERA_CON_TARJETAS",
+                    "message": "No podés eliminar esta billetera porque tiene tarjetas de crédito asociadas. Eliminá primero las tarjetas."
+                }
+            }
+        )
+
     if check_res.has_tx:
         raise HTTPException(
             status_code=400, 

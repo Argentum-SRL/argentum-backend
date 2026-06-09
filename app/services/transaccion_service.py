@@ -105,7 +105,7 @@ def _afecta_saldo(transaccion) -> bool:
     )
 
 
-def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate) -> Transaccion:
+def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, commit: bool = True) -> Transaccion:
     # 1. Validar billetera
     billetera = db.execute(
         select(Billetera).where(
@@ -202,8 +202,11 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate) ->
             # Al crear un grupo de cuotas, NINGUNA impacta el saldo hoy
             # porque la primera empieza el mes que viene.
         
-        db.commit()
-        db.refresh(nueva_transaccion)
+        if commit:
+            db.commit()
+            db.refresh(nueva_transaccion)
+        else:
+            db.flush()
         return nueva_transaccion
 
     # 3. Transacción normal
@@ -224,8 +227,11 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate) ->
     presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False)
 
     db.add(nueva_transaccion)
-    db.commit()
-    db.refresh(nueva_transaccion)
+    if commit:
+        db.commit()
+        db.refresh(nueva_transaccion)
+    else:
+        db.flush()
     
     return nueva_transaccion
 

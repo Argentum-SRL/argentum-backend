@@ -1,3 +1,4 @@
+import logging
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import UUID
@@ -5,6 +6,8 @@ from calendar import monthrange
 from dateutil.relativedelta import relativedelta
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
+
+logger = logging.getLogger(__name__)
 
 from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
 from app.models.billetera import Billetera
@@ -460,16 +463,21 @@ def pagar_resumen_tarjeta(
         estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA
     )
 
-    # 7. Registrar la transacción
-    tx = transaccion_service.crear_transaccion(db, usuario_id, tx_data)
+    # 7. Registrar la transacción de forma atómica
+    try:
+        tx = transaccion_service.crear_transaccion(db, usuario_id, tx_data, commit=False)
 
-    # 8. Marcar las cuotas como pagadas
-    for cuota in cuotas_a_pagar:
-        cuota.pagada = True
+        # 8. Marcar las cuotas como pagadas
+        for cuota in cuotas_a_pagar:
+            cuota.pagada = True
 
-    db.commit()
-    db.refresh(tx)
-    return tx
+        db.commit()
+        db.refresh(tx)
+        return tx
+    except Exception:
+        db.rollback()
+        logger.exception("Error al pagar resumen de tarjeta %s", tarjeta_id)
+        raise
 
 
 def calcular_presion_futura(

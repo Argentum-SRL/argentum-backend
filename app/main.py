@@ -14,6 +14,9 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
+from starlette.types import ASGIApp, Receive, Scope, Send
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 logging.basicConfig(
     level=logging.INFO,
@@ -51,26 +54,40 @@ from app.services.notificacion_scheduler_service import (
 # ---------------------------------------------------------------------------
 from scripts.init_full_db import init_full_db
 
-class TimeoutMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, timeout: float = 30.0):
-        super().__init__(app)
+class TimeoutMiddleware:
+    """
+    Middleware ASGI puro (no BaseHTTPMiddleware) para evitar el bug de Starlette
+    donde BaseHTTPMiddleware interrumpe el pipeline antes de que CORSMiddleware
+    pueda agregar los headers Access-Control-Allow-Origin.
+    """
+    def __init__(self, app: ASGIApp, timeout: float = 30.0):
+        self.app = app
         self.timeout = timeout
 
-    async def dispatch(self, request: Request, call_next):
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
         try:
             with anyio.fail_after(self.timeout):
-                return await call_next(request)
+                await self.app(scope, receive, send)
         except TimeoutError:
-            return JSONResponse(
-                status_code=504,
-                content={
-                    "success": False,
-                    "error": {
-                        "code": "TIMEOUT",
-                        "message": "La solicitud tardó demasiado. Intentá de nuevo."
-                    }
-                }
-            )
+            if scope["type"] == "http":
+                await send({
+                    "type": "http.response.start",
+                    "status": 504,
+                    "headers": [
+                        [b"content-type", b"application/json"],
+                    ],
+                })
+                await send({
+                    "type": "http.response.body",
+                    "body": b'{"success":false,"error":{"code":"TIMEOUT","message":"La solicitud tard\xc3\xb3 demasiado. Intent\xc3\xa1 de nuevo."}}',
+                })
+        except asyncio.CancelledError:
+            # El cliente se desconectó — salir limpiamente sin loguear como error
+            raise
 
 async def _job_limpiar_tokens():
     """Tarea programada: elimina refresh tokens viejos cada 6 horas."""
@@ -280,9 +297,6 @@ app = FastAPI(title="Argentum API", version="1.0.0", lifespan=lifespan)
 #   1. GZipMiddleware
 #   2. TimeoutMiddleware
 #   3. CORSMiddleware  ← último registrado = primero en ejecutar
-app.add_middleware(GZipMiddleware, minimum_size=1000)
-app.add_middleware(TimeoutMiddleware, timeout=30.0)
-
 _origins = [settings.FRONTEND_URL]
 if settings.ENVIRONMENT == "development":
     _origins.extend(["http://localhost:5173", "http://localhost:3000", "http://localhost:5174"])
@@ -293,6 +307,72 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(TimeoutMiddleware, timeout=30.0)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Intercepta errores de validación de Pydantic (422) y los reformatea
+    al contrato de error estandarizado del proyecto.
+    """
+    # Construir un mensaje legible a partir de los errores de validación
+    errores = exc.errors()
+    if errores:
+        primer_error = errores[0]
+        campo = " → ".join(str(loc) for loc in primer_error.get("loc", []))
+        mensaje = f"Error en el campo '{campo}': {primer_error.get('msg', 'valor inválido')}"
+    else:
+        mensaje = "Los datos enviados son inválidos."
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "success": False,
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": mensaje,
+            }
+        }
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """
+    Intercepta HTTPException de FastAPI/Starlette y las reformatea
+    al contrato de error estandarizado del proyecto.
+    Si el detail ya es un dict con el formato correcto, lo usa directamente.
+    """
+    # Si el detail ya tiene el formato correcto del proyecto, usarlo
+    if isinstance(exc.detail, dict) and "error" in exc.detail:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.detail
+        )
+
+    # Si es un string simple, formatearlo
+    mensaje = exc.detail if isinstance(exc.detail, str) else "Error en la solicitud."
+    codigo = {
+        400: "BAD_REQUEST",
+        401: "UNAUTHORIZED",
+        403: "FORBIDDEN",
+        404: "NOT_FOUND",
+        409: "CONFLICT",
+        422: "UNPROCESSABLE",
+    }.get(exc.status_code, "HTTP_ERROR")
+
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "error": {
+                "code": codigo,
+                "message": mensaje,
+            }
+        }
+    )
 
 
 @app.exception_handler(Exception)
