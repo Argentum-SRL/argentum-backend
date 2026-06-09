@@ -3,7 +3,7 @@ import os
 import shutil
 from uuid import UUID
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.models.usuario import Usuario, AuthProvider, CicloTipo, Moneda
@@ -28,6 +28,7 @@ from app.models.subcategoria import Subcategoria
 from app.models.movimiento_meta import MovimientoMeta
 from app.models.periodo_presupuesto import PeriodoPresupuesto
 from app.models.presupuesto_categoria import PresupuestoCategoria
+from app.models.tarjeta_credito import TarjetaCredito
 from app.core.security import get_password_hash, verify_password
 from app.services import email_service, whatsapp_service
 from app.schemas.usuario import (
@@ -237,51 +238,60 @@ def eliminar_usuario(db: Session, usuario: Usuario) -> dict:
             except Exception:
                 logger.warning("Error al eliminar archivo de foto del usuario", exc_info=True)
 
-    # 1. Eliminar hijos sin usuario_id directo (dependencias de segundo nivel)
-    # Cuotas (vía GrupoCuotas)
-    db.execute(delete(Cuota).where(
-        Cuota.grupo_id.in_(select(GrupoCuotas.id).where(GrupoCuotas.usuario_id == usuario_id))
-    ))
-    
-    # Movimientos de Meta (vía Meta)
-    db.execute(delete(MovimientoMeta).where(
-        MovimientoMeta.meta_id.in_(select(Meta.id).where(Meta.usuario_id == usuario_id))
-    ))
-    
-    # Periodos de Presupuesto (vía Presupuesto)
-    db.execute(delete(PeriodoPresupuesto).where(
-        PeriodoPresupuesto.presupuesto_id.in_(select(Presupuesto.id).where(Presupuesto.usuario_id == usuario_id))
-    ))
-    
-    # Categorías de Presupuesto (vía Presupuesto)
-    db.execute(delete(PresupuestoCategoria).where(
-        PresupuestoCategoria.presupuesto_id.in_(select(Presupuesto.id).where(Presupuesto.usuario_id == usuario_id))
-    ))
-    
-    # Historial de Suscripciones (vía Suscripcion)
-    db.execute(delete(HistorialSuscripcion).where(
-        HistorialSuscripcion.suscripcion_id.in_(select(Suscripcion.id).where(Suscripcion.usuario_id == usuario_id))
-    ))
+    try:
+        # 0. Romper referencia circular de transacciones → grupos_cuotas para permitir el borrado
+        db.execute(update(Transaccion).where(Transaccion.usuario_id == usuario_id).values(grupo_cuotas_id=None))
+        db.flush()
 
-    # 2. Modelos con usuario_id
-    modelos_usuario = [
-        ConversacionWpp, Notificacion, RefreshToken, Suscripcion,
-        Presupuesto, Meta, GrupoCuotas, TransaccionRecurrente, 
-        TransferenciaInterna, CategoriaExcluida, ConfiguracionNotificacion,
-        Transaccion, Billetera, PerfilFinanciero
-    ]
-    
-    for modelo in modelos_usuario:
-        db.execute(delete(modelo).where(modelo.usuario_id == usuario_id))
-    
-    # 3. Modelos con creador_id (Categorías y Subcategorías personalizadas)
-    modelos_creador = [Subcategoria, Categoria]
-    for modelo in modelos_creador:
-        db.execute(delete(modelo).where(modelo.creador_id == usuario_id))
-    
-    # 4. Finalmente el usuario
-    db.delete(usuario)
-    db.commit()
+        # 1. Eliminar hijos sin usuario_id directo (dependencias de segundo nivel)
+        # Cuotas (vía GrupoCuotas)
+        db.execute(delete(Cuota).where(
+            Cuota.grupo_id.in_(select(GrupoCuotas.id).where(GrupoCuotas.usuario_id == usuario_id))
+        ))
+        
+        # Movimientos de Meta (vía Meta)
+        db.execute(delete(MovimientoMeta).where(
+            MovimientoMeta.meta_id.in_(select(Meta.id).where(Meta.usuario_id == usuario_id))
+        ))
+        
+        # Periodos de Presupuesto (vía Presupuesto)
+        db.execute(delete(PeriodoPresupuesto).where(
+            PeriodoPresupuesto.presupuesto_id.in_(select(Presupuesto.id).where(Presupuesto.usuario_id == usuario_id))
+        ))
+        
+        # Categorías de Presupuesto (vía Presupuesto)
+        db.execute(delete(PresupuestoCategoria).where(
+            PresupuestoCategoria.presupuesto_id.in_(select(Presupuesto.id).where(Presupuesto.usuario_id == usuario_id))
+        ))
+        
+        # Historial de Suscripciones (vía Suscripcion)
+        db.execute(delete(HistorialSuscripcion).where(
+            HistorialSuscripcion.suscripcion_id.in_(select(Suscripcion.id).where(Suscripcion.usuario_id == usuario_id))
+        ))
+
+        # 2. Modelos con usuario_id
+        modelos_usuario = [
+            ConversacionWpp, Notificacion, RefreshToken, Suscripcion,
+            Presupuesto, Meta, GrupoCuotas, TransaccionRecurrente, 
+            TransferenciaInterna, CategoriaExcluida, ConfiguracionNotificacion,
+            Transaccion, TarjetaCredito, Billetera, PerfilFinanciero
+        ]
+        
+        for modelo in modelos_usuario:
+            db.execute(delete(modelo).where(modelo.usuario_id == usuario_id))
+        
+        # 3. Modelos con creador_id (Categorías y Subcategorías personalizadas)
+        modelos_creador = [Subcategoria, Categoria]
+        for modelo in modelos_creador:
+            db.execute(delete(modelo).where(modelo.creador_id == usuario_id))
+        
+        # 4. Finalmente el usuario
+        db.delete(usuario)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Error al eliminar usuario %s", usuario_id)
+        raise
     
     return {"confirmacion": "Usuario y todos sus datos eliminados correctamente"}
 
