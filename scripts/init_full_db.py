@@ -40,7 +40,7 @@ def init_full_db():
         package = app.models
         for _, module_name, _ in pkgutil.walk_packages(package.__path__, package.__name__ + "."):
             importlib.import_module(module_name)
-        logger.info("✔ Todos los modelos han sido detectados y registrados.")
+        logger.info("OK: Todos los modelos han sido detectados y registrados.")
 
         # 2. CREACIÓN DE TABLAS
         # Base.metadata.create_all es desactivado para favorecer el control por Alembic
@@ -51,7 +51,7 @@ def init_full_db():
         # Validación de creación
         inspector = inspect(engine)
         tablas_actuales = inspector.get_table_names()
-        logger.info(f"✔ Tablas verificadas/creadas correctamente. Total: {len(tablas_actuales)}")
+        logger.info(f"OK: Tablas verificadas/creadas correctamente. Total: {len(tablas_actuales)}")
 
         # 3. CARGA DE DATOS INICIALES (SEED)
         logger.info("Ejecutando seed de categorías y subcategorías...")
@@ -67,7 +67,7 @@ def init_full_db():
         return True
 
     except Exception as e:
-        logger.error(f"❌ ERROR CRÍTICO durante la inicialización: {str(e)}")
+        logger.error(f"ERROR: ERROR CRÍTICO durante la inicialización: {str(e)}")
         # En un script de inicialización, es preferible propagar el error si es crítico
         return False
 
