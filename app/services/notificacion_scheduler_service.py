@@ -14,12 +14,16 @@ logger = logging.getLogger(__name__)
 def _job_notificaciones_cuotas(db_session_factory):
     """
     Corre diariamente a las 07:00 UTC.
-    Detecta cuotas próximas a vencer según la anticipación configurada por cada usuario.
+    Detecta cuotas próximas a vencer y notifica según corresponda:
+    - Para cuotas con tarjeta: notifica por el resumen consolidado de la tarjeta.
+    - Para cuotas sin tarjeta: notifica por la cuota individual.
     """
     db: Session = db_session_factory()
     try:
         from app.models.cuota import Cuota
         from app.models.grupo_cuotas import GrupoCuotas
+        from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
+        from app.services.tarjeta_service import calcular_resumen_actual
 
         configs = db.query(
             ConfiguracionNotificacion.usuario_id,
@@ -35,29 +39,78 @@ def _job_notificaciones_cuotas(db_session_factory):
             dias = config.cuota_vence_anticipacion_dias
             fecha_objetivo = hoy + timedelta(days=dias)
 
-            cuotas = (
+            # ─────────────────────────────────────────────────────────────────
+            # PARTE 1: Cuotas CON tarjeta → notificar por resumen de tarjeta
+            # ─────────────────────────────────────────────────────────────────
+            tarjetas = db.query(TarjetaCredito).filter(
+                TarjetaCredito.usuario_id == usuario_id,
+                TarjetaCredito.estado == EstadoTarjeta.ACTIVA
+            ).all()
+
+            for tarjeta in tarjetas:
+                resumen = calcular_resumen_actual(db, tarjeta)
+                fecha_vencimiento_resumen = resumen.fecha_vencimiento_proximo
+
+                if not fecha_vencimiento_resumen:
+                    continue
+
+                # Verificar si el vencimiento del resumen cae en la fecha objetivo (hoy + N días)
+                if fecha_vencimiento_resumen != fecha_objetivo:
+                    continue
+
+                total_resumen = resumen.total_comprometido_resumen_actual
+
+                if not total_resumen or float(total_resumen) <= 0:
+                    continue
+
+                mensaje = (
+                    f"El resumen de tu tarjeta {tarjeta.nombre} vence "
+                    f"el {fecha_vencimiento_resumen.strftime('%d/%m/%Y')} "
+                    f"— total: ${float(total_resumen):,.0f}"
+                )
+
+                grupo_override = f"RESUMEN_TARJETA_{tarjeta.id}_{hoy.strftime('%Y%m%d')}"
+
+                crear_notificacion(
+                    db=db,
+                    usuario_id=usuario_id,
+                    tipo=TipoNotificacion.CUOTA_VENCE,
+                    nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                    mensaje=mensaje,
+                    entidad_tipo="tarjeta",
+                    entidad_id=tarjeta.id,
+                    deep_link="/app/tarjetas",
+                    canal_web=config.cuota_vence_web,
+                    canal_whatsapp=config.cuota_vence_whatsapp,
+                    grupo_agrupacion_override=grupo_override,
+                )
+
+            # ─────────────────────────────────────────────────────────────────
+            # PARTE 2: Cuotas SIN tarjeta → notificar por cuota individual
+            # ─────────────────────────────────────────────────────────────────
+            cuotas_sin_tarjeta = (
                 db.query(Cuota)
                 .options(joinedload(Cuota.grupo))
                 .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
                 .filter(
                     GrupoCuotas.usuario_id == usuario_id,
+                    GrupoCuotas.tarjeta_id == None,
                     Cuota.fecha_vencimiento == fecha_objetivo,
                     Cuota.pagada == False,
                 )
                 .all()
             )
 
-            for cuota in cuotas:
+            for cuota in cuotas_sin_tarjeta:
                 grupo = cuota.grupo
                 descripcion = getattr(grupo, 'descripcion', 'Compra en cuotas') if grupo else 'Compra en cuotas'
-                cantidad_cuotas = getattr(grupo, 'cantidad_cuotas', '?') if grupo else '?'
-                numero_cuota = getattr(cuota, 'numero_cuota', '?')
+                cantidad = getattr(grupo, 'cantidad_cuotas', '?') if grupo else '?'
+                numero = getattr(cuota, 'numero_cuota', '?')
                 monto = float(getattr(cuota, 'monto_proyectado', 0) or getattr(cuota, 'monto_real', 0))
 
                 mensaje = (
-                    f"La cuota {numero_cuota}/{cantidad_cuotas} "
-                    f"de '{descripcion}' vence el {fecha_objetivo.strftime('%d/%m/%Y')} "
-                    f"(${monto:,.0f})"
+                    f"Cuota {numero}/{cantidad} de '{descripcion}' "
+                    f"vence el {fecha_objetivo.strftime('%d/%m/%Y')} (${monto:,.0f})"
                 )
 
                 crear_notificacion(
@@ -68,7 +121,7 @@ def _job_notificaciones_cuotas(db_session_factory):
                     mensaje=mensaje,
                     entidad_tipo="cuota",
                     entidad_id=cuota.id,
-                    deep_link="/app/transacciones",
+                    deep_link="/app/tarjetas",
                     canal_web=config.cuota_vence_web,
                     canal_whatsapp=config.cuota_vence_whatsapp,
                 )

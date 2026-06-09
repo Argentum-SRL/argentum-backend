@@ -471,3 +471,102 @@ def pagar_resumen_tarjeta(
     db.refresh(tx)
     return tx
 
+
+def calcular_presion_futura(
+    db: Session,
+    usuario,
+    meses: int = 6,
+) -> dict:
+    """
+    Calcula la presión financiera futura: cuánto debe el usuario en cuotas
+    de tarjeta por cada mes de vencimiento, para los próximos N meses.
+    """
+    from datetime import date
+    from dateutil.relativedelta import relativedelta
+    from decimal import Decimal
+    from collections import defaultdict
+    from sqlalchemy.orm import joinedload
+
+    hoy = date.today()
+    fecha_limite = hoy + relativedelta(months=meses)
+
+    # Obtener tarjetas activas del usuario
+    tarjetas = db.query(TarjetaCredito).filter(
+        TarjetaCredito.usuario_id == usuario.id,
+        TarjetaCredito.estado == EstadoTarjeta.ACTIVA,
+    ).all()
+
+    if not tarjetas:
+        return {"meses": [], "total_comprometido": 0}
+
+    tarjeta_ids = [t.id for t in tarjetas]
+    tarjeta_map = {t.id: t for t in tarjetas}
+
+    # Obtener todas las cuotas no pagadas de las tarjetas del usuario
+    # dentro del período de análisis, usando joinedload para evitar N+1
+    cuotas = (
+        db.query(Cuota)
+        .options(joinedload(Cuota.grupo))
+        .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
+        .filter(
+            GrupoCuotas.tarjeta_id.in_(tarjeta_ids),
+            Cuota.pagada == False,
+            Cuota.fecha_vencimiento > hoy,
+            Cuota.fecha_vencimiento <= fecha_limite,
+        )
+        .all()
+    )
+
+    # Agrupar por (año, mes) de vencimiento, luego por tarjeta
+    por_mes = defaultdict(lambda: defaultdict(Decimal))
+
+    for cuota in cuotas:
+        grupo = cuota.grupo
+        if not grupo or not grupo.tarjeta_id:
+            continue
+
+        mes_key = (cuota.fecha_vencimiento.year, cuota.fecha_vencimiento.month)
+        monto = Decimal(str(cuota.monto_real if cuota.monto_real is not None else cuota.monto_proyectado or 0))
+        por_mes[mes_key][grupo.tarjeta_id] += monto
+
+    # Construir la respuesta ordenada
+    resultado_meses = []
+    for mes_key in sorted(por_mes.keys()):
+        año, mes = mes_key
+        detalle_tarjetas = []
+        total_mes = Decimal("0")
+
+        for tarjeta_id, monto in por_mes[mes_key].items():
+            tarjeta = tarjeta_map.get(tarjeta_id)
+            if not tarjeta:
+                continue
+            detalle_tarjetas.append({
+                "tarjeta_id": str(tarjeta_id),
+                "tarjeta_nombre": tarjeta.nombre,
+                "total": float(monto),
+            })
+            total_mes += monto
+
+        # Ordenar tarjetas por monto descendente
+        detalle_tarjetas.sort(key=lambda x: x["total"], reverse=True)
+
+        # Traducir mes a español y abreviar (e.g. Jun 2026)
+        nombre_mes_en = date(año, mes, 1).strftime("%B")
+        nombre_mes_es = MESES_ES.get(nombre_mes_en, nombre_mes_en)
+        mes_abr = nombre_mes_es[:3].capitalize()
+
+        resultado_meses.append({
+            "anio": año,
+            "mes": mes,
+            "mes_label": f"{mes_abr} {año}",
+            "total": float(total_mes),
+            "tarjetas": detalle_tarjetas,
+        })
+
+    total_comprometido = sum(m["total"] for m in resultado_meses)
+
+    return {
+        "meses": resultado_meses,
+        "total_comprometido": float(total_comprometido),
+    }
+

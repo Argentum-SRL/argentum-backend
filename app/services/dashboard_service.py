@@ -126,16 +126,7 @@ def get_dashboard_resumen(
         func.sum(case((cycle_ant_cond, case((Transaccion.tipo == TipoTransaccion.INGRESO, Transaccion.monto), else_=0)), else_=0)).label("ing_ant"),
         func.sum(case((cycle_ant_cond, case((Transaccion.tipo == TipoTransaccion.EGRESO, Transaccion.monto), else_=0)), else_=0)).label("egr_ant"),
         sub_total_billeteras.label("total_billeteras"),
-        (
-            select(func.sum(Cuota.monto_proyectado))
-            .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
-            .where(and_(
-                GrupoCuotas.usuario_id == usuario.id,
-                Cuota.pagada == False,
-                Cuota.fecha_vencimiento >= fecha_inicio_prox,
-                Cuota.fecha_vencimiento <= fecha_fin_prox
-            )).scalar_subquery()
-        ).label("cuotas_comprometidas")
+        literal(0).label("cuotas_comprometidas")
     ).where(
         and_(
             Transaccion.usuario_id == usuario.id,
@@ -275,14 +266,21 @@ def get_dashboard_resumen(
             cuotas_por_tarjeta[tid] = []
         cuotas_por_tarjeta[tid].append(c)
 
+    cuotas_comprometidas_tarjetas = Decimal("0")
+    fecha_limite = hoy + timedelta(days=35)
+
     for tarjeta in tarjetas:
         resumen_t = calcular_resumen_actual(db, tarjeta, cuotas_preloaded=cuotas_por_tarjeta.get(tarjeta.id, []))
         total_t = resumen_t.total_comprometido_resumen_actual
 
+        d_venc = resumen_t.fecha_vencimiento_proximo
+        if d_venc and d_venc <= fecha_limite:
+            if total_t:
+                cuotas_comprometidas_tarjetas += Decimal(str(total_t))
+
         if total_t <= 0:
             continue
 
-        d_venc = resumen_t.fecha_vencimiento_proximo
         dias_restantes = (d_venc - hoy).days
 
         # Solo incluir si vence dentro de los próximos 30 días
@@ -301,6 +299,7 @@ def get_dashboard_resumen(
                 "billetera_id": str(tarjeta.billetera_id)
             })
 
+    cuotas_c = cuotas_comprometidas_tarjetas
     proximos_pagos = sorted(proximos_pagos, key=lambda x: x["fecha_cobro"])[:5]
 
     return {
