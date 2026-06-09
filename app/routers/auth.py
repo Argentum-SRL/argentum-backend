@@ -20,6 +20,7 @@ FLUJOS:
   3. Email/password → registro → verificar-email → verificar-teléfono → tokens
 """
 
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status, BackgroundTasks
@@ -77,6 +78,8 @@ from app.services.whatsapp_service import (
     verificar_codigo,
 )
 from app.services import usuario_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -342,27 +345,29 @@ def verificar_email(body: VerificarCodigoEmailRequest, request: Request, db: Ses
 @router.post("/google", response_model=AuthResponse)
 def login_google(body: GoogleLoginRequest, request: Request, db: Session = Depends(get_db)):
     """Login / registro con Google ID token."""
-    print('[Auth][Google][Backend] /auth/google recibido', {
-        'origin': request.headers.get('origin'),
-        'userAgent': request.headers.get('user-agent'),
-        'tokenPresent': bool(body.token),
-        'tokenLength': len(body.token),
-        'tokenPrefix': body.token[:12] + '...' if body.token else None,
-    })
+    logger.debug(
+        '[Auth][Google][Backend] /auth/google recibido origin=%s userAgent=%s tokenPresent=%s tokenLength=%s tokenPrefix=%s',
+        request.headers.get('origin'),
+        request.headers.get('user-agent'),
+        bool(body.token),
+        len(body.token),
+        body.token[:12] + '...' if body.token else None,
+    )
 
     token_info = verify_google_token(body.token)
     email = token_info.get("email")
     if not email:
-        print('[Auth][Google][Backend] Token válido pero sin email')
+        logger.warning('[Auth][Google][Backend] Token válido pero sin email')
         raise HTTPException(status_code=400, detail="El token de Google no contiene un email válido.")
 
     user = db.execute(select(Usuario).where(Usuario.email == email)).scalar_one_or_none()
 
-    print('[Auth][Google][Backend] Usuario buscado', {
-        'email': email,
-        'exists': bool(user),
-        'authProvider': getattr(user.auth_provider, 'value', None) if user else None,
-    })
+    logger.debug(
+        '[Auth][Google][Backend] Usuario buscado email=%s exists=%s authProvider=%s',
+        email,
+        bool(user),
+        getattr(user.auth_provider, 'value', None) if user else None,
+    )
 
     if user:
         if not user.email_verificado:
@@ -384,12 +389,13 @@ def login_google(body: GoogleLoginRequest, request: Request, db: Session = Depen
             nombre = partes[0]
             apellido = partes[1] if len(partes) > 1 else ""
 
-        print('[Auth][Google][Backend] Creando usuario nuevo', {
-            'email': email,
-            'nombre': nombre,
-            'apellido': apellido,
-            'picture': bool(token_info.get('picture')),
-        })
+        logger.info(
+            '[Auth][Google][Backend] Creando usuario nuevo email=%s nombre=%s apellido=%s picture=%s',
+            email,
+            nombre,
+            apellido,
+            bool(token_info.get('picture')),
+        )
 
         user = Usuario(
             nombre=nombre or None,
@@ -414,12 +420,13 @@ def login_google(body: GoogleLoginRequest, request: Request, db: Session = Depen
     user.ultimo_acceso = datetime.now(timezone.utc)
     db.commit()
 
-    print('[Auth][Google][Backend] Tokens emitidos', {
-        'userId': user.id,
-        'email': user.email,
-        'requiereTelefono': not user.telefono_verificado,
-        'requiereOnboarding': _requiere_onboarding(user) if user.telefono_verificado else False,
-    })
+    logger.info(
+        '[Auth][Google][Backend] Tokens emitidos userId=%s email=%s requiereTelefono=%s requiereOnboarding=%s',
+        user.id,
+        user.email,
+        not user.telefono_verificado,
+        _requiere_onboarding(user) if user.telefono_verificado else False,
+    )
 
     access, refresh = _tokens(user.id, request, db)
 

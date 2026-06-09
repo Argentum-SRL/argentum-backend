@@ -1,6 +1,6 @@
 from uuid import UUID
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -24,10 +24,12 @@ router = APIRouter(tags=["metas"])
 @router.get("", response_model=List[MetaRead])
 def listar_metas(
     activas_solo: bool = False,
+    skip: int = Query(default=0, ge=0, description="Registros a saltear"),
+    limit: int = Query(default=50, ge=1, le=200, description="Máximo de registros a devolver"),
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user)
 ):
-    return meta_service.obtener_metas(db, usuario.id, activas_solo)
+    return meta_service.obtener_metas(db, usuario.id, activas_solo, skip=skip, limit=limit)
 
 @router.post("", response_model=MetaRead)
 def crear_meta(

@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass, field
 
 from twilio.base.exceptions import TwilioRestException
+from twilio.http.http_client import TwilioHttpClient
 from twilio.rest import Client
 
 from app.core.config import settings
@@ -114,7 +115,12 @@ def _get_twilio_client() -> Client | None:
         return None
 
     if _twilio_client is None:
-        _twilio_client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+        http_client = TwilioHttpClient(timeout=15)
+        _twilio_client = Client(
+            settings.TWILIO_ACCOUNT_SID,
+            settings.TWILIO_AUTH_TOKEN,
+            http_client=http_client,
+        )
     return _twilio_client
 
 
@@ -131,7 +137,6 @@ def enviar_whatsapp(numero: str, mensaje: str) -> bool:
     client = _get_twilio_client()
 
     if client is None:
-        print(f"[DEBUG-WA] MODO SIMULADO - No hay credenciales de Twilio. Para: {to_whatsapp}")
         logger.warning(
             "Twilio no configurado; mensaje de WhatsApp simulado para %s",
             numero,
@@ -140,21 +145,18 @@ def enviar_whatsapp(numero: str, mensaje: str) -> bool:
         return True
 
     try:
-        print(f"[DEBUG-WA] USANDO TWILIO REAL - De: {from_whatsapp} Para: {to_whatsapp}")
+        logger.debug("USANDO TWILIO REAL - De: %s Para: %s", from_whatsapp, to_whatsapp)
         msg = client.messages.create(
             body=mensaje,
             from_=from_whatsapp,
             to=to_whatsapp,
         )
-        print(f"[DEBUG-WA] Twilio aceptó el mensaje. SID: {msg.sid}")
         logger.info("WhatsApp enviado exitosamente a %s. SID: %s", numero, msg.sid)
         return True
     except TwilioRestException as e:
-        print(f"[DEBUG-WA] ERROR DE TWILIO (REST): {e}")
         logger.error("Error al enviar WhatsApp a %s: %s", numero, e)
         return False
     except Exception as e:
-        print(f"[DEBUG-WA] ERROR INESPERADO EN WHATSAPP: {type(e).__name__}: {e}")
         logger.error("Error inesperado al enviar WhatsApp a %s: %s", numero, e)
         return False
 

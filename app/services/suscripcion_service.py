@@ -5,6 +5,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import select, desc
 from fastapi import HTTPException
+from sqlalchemy.orm import selectinload
 from dateutil.relativedelta import relativedelta
 
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion, FrecuenciaSuscripcion
@@ -119,7 +120,9 @@ def crear_suscripcion(db: Session, usuario_id: UUID, data: SuscripcionCreate) ->
     return nueva_suscripcion
 
 def obtener_suscripciones(db: Session, usuario_id: UUID, estado: str | None = None) -> List[SuscripcionResponse]:
-    query = db.query(Suscripcion).filter(Suscripcion.usuario_id == usuario_id)
+    query = db.query(Suscripcion).options(
+        selectinload(Suscripcion.historial)
+    ).filter(Suscripcion.usuario_id == usuario_id)
     if estado:
         query = query.filter(Suscripcion.estado == EstadoSuscripcion(estado))
     
@@ -127,10 +130,11 @@ def obtener_suscripciones(db: Session, usuario_id: UUID, estado: str | None = No
     
     res = []
     for s in suscripciones:
-        precio = obtener_precio_vigente(db, s.id)
+        historial_ordenado = sorted(s.historial, key=lambda x: x.vigente_desde, reverse=True)
+        precio = historial_ordenado[0] if historial_ordenado else None
         costo_mensual = calcular_costo_mensual(s.frecuencia.value, precio.monto) if precio else None
         
-        historial = sorted(s.historial, key=lambda x: x.vigente_desde, reverse=True)
+        historial = historial_ordenado
         
         s_data = SuscripcionResponse.model_validate(s)
         s_data.precio_actual = precio

@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 from uuid import UUID
@@ -39,6 +40,7 @@ from app.schemas.usuario import (
 )
 
 FOTOS_DIR = "media/fotos"
+logger = logging.getLogger(__name__)
 
 def obtener_usuario_me(db: Session, usuario_id: UUID) -> Usuario:
     usuario = db.execute(select(Usuario).where(Usuario.id == usuario_id)).scalar_one_or_none()
@@ -197,7 +199,7 @@ def actualizar_foto(
             try:
                 os.remove(old_path)
             except Exception:
-                pass
+                logger.warning("Error al eliminar archivo de foto anterior", exc_info=True)
 
     filename = f"{usuario.id}.{extension}"
     filepath = os.path.join(FOTOS_DIR, filename)
@@ -218,7 +220,7 @@ def eliminar_foto(db: Session, usuario: Usuario) -> dict:
             try:
                 os.remove(path)
             except Exception:
-                pass
+                logger.warning("Error al eliminar archivo de foto", exc_info=True)
     
     usuario.foto_url = None
     db.commit()
@@ -233,7 +235,7 @@ def eliminar_usuario(db: Session, usuario: Usuario) -> dict:
             try:
                 os.remove(path)
             except Exception:
-                pass
+                logger.warning("Error al eliminar archivo de foto del usuario", exc_info=True)
 
     # 1. Eliminar hijos sin usuario_id directo (dependencias de segundo nivel)
     # Cuotas (vía GrupoCuotas)

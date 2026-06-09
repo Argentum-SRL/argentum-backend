@@ -1,3 +1,4 @@
+import logging
 import sys
 import os
 
@@ -7,6 +8,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from app.core.database import SessionLocal
 from app.models.categoria import Categoria, TipoCategoria
 from app.models.subcategoria import Subcategoria
+
+logger = logging.getLogger(__name__)
 
 categorias_data = [
     {
@@ -84,11 +87,11 @@ categorias_data = [
 def run_seed():
     db = SessionLocal()
     try:
-        print("Iniciando carga de categorías globales...")
+        logger.info("Iniciando carga de categorías globales...")
         
         # Verificar si ya existen categorías para no duplicar
         if db.query(Categoria).count() > 0:
-            print("Ya existen categorías en la base de datos. El seed no se ejecutará para evitar duplicados.")
+            logger.info("Ya existen categorías en la base de datos. El seed no se ejecutará para evitar duplicados.")
             return
 
         for cat_data in categorias_data:
@@ -111,11 +114,11 @@ def run_seed():
                 db.add(subcategoria)
                 
         db.commit()
-        print("¡Categorías globales cargadas con éxito!")
+        logger.info("Categorías globales cargadas con éxito")
         
     except Exception as e:
         db.rollback()
-        print(f"Error al cargar el seed: {e}")
+        logger.exception("Error al cargar el seed")
     finally:
         db.close()
 

@@ -13,11 +13,12 @@ from app.models.usuario import Moneda
 from app.schemas.meta import MetaCreate, MetaUpdate
 from app.schemas.movimiento_meta import MovimientoMetaCreate
 
-def obtener_metas(db: Session, usuario_id: UUID, activas_solo: bool = False) -> List[Meta]:
+def obtener_metas(db: Session, usuario_id: UUID, activas_solo: bool = False, skip: int = 0, limit: int = 50) -> List[Meta]:
     query = select(Meta).where(Meta.usuario_id == usuario_id)
     if activas_solo:
         query = query.where(Meta.estado == EstadoMeta.ACTIVA)
     query = query.order_by(desc(Meta.fecha_creacion))
+    query = query.offset(skip).limit(limit)
     return db.execute(query).scalars().all()
 
 def obtener_meta(db: Session, usuario_id: UUID, meta_id: UUID) -> Meta:

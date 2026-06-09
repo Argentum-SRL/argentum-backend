@@ -1,7 +1,7 @@
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, Query
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
@@ -16,13 +16,15 @@ router = APIRouter(prefix="/recurrentes", tags=["recurrentes"])
 
 @router.get("", response_model=List[TransaccionRecurrenteRead])
 def list_recurrentes(
+    skip: int = Query(default=0, ge=0, description="Registros a saltear"),
+    limit: int = Query(default=50, ge=1, le=200, description="Máximo de registros a devolver"),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
     """
     Lista las transacciones recurrentes del usuario.
     """
-    return recurrente_service.obtener_recurrentes(db, current_user.id)
+    return recurrente_service.obtener_recurrentes(db, current_user.id, skip=skip, limit=limit)
 
 
 @router.get("/{recurrente_id}", response_model=TransaccionRecurrenteRead)

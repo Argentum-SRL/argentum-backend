@@ -51,12 +51,7 @@ def _generar_codigo() -> str:
 def _enviar_email(destinatario: str, asunto: str, cuerpo: str) -> bool:
     if not settings.SMTP_USER or "email de la app" in settings.SMTP_FROM:
         logger.warning("⚠️ SMTP no configurado — email para %s: %s", destinatario, cuerpo)
-        print(f"\n{'='*50}")
-        print(f"📧 EMAIL (modo desarrollo)")
-        print(f"   Para: {destinatario}")
-        print(f"   Asunto: {asunto}")
-        print(f"   Cuerpo: {cuerpo}")
-        print(f"{'='*50}\n")
+        logger.info("EMAIL (modo desarrollo) para=%s asunto=%s cuerpo=%s", destinatario, asunto, cuerpo)
         return True
 
     try:
@@ -66,7 +61,7 @@ def _enviar_email(destinatario: str, asunto: str, cuerpo: str) -> bool:
         msg["Subject"] = asunto
         msg.attach(MIMEText(cuerpo, "plain"))
 
-        server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT)
+        server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10)
         server.starttls()
         server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
         server.send_message(msg)
