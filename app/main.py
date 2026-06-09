@@ -38,6 +38,13 @@ from app.services.recurrente_service import procesar_recurrentes
 from app.services.vencimiento_tarjeta_service import procesar_vencimientos_tarjetas
 from app.services.presupuesto_service import renovar_presupuestos
 from app.services.cobro_suscripcion_service import procesar_cobros_suscripciones
+from app.services.notificacion_scheduler_service import (
+    _job_notificaciones_cuotas,
+    _job_notificaciones_presupuestos,
+    _job_notificaciones_suscripciones,
+    _job_notificaciones_inactividad,
+    _job_entrega_whatsapp_batched,
+)
 
 # ---------------------------------------------------------------------------
 # Inicialización automática de Base de Datos
@@ -127,6 +134,26 @@ async def _job_cobros_suscripciones():
         db.close()
 
 
+async def job_notificaciones_cuotas():
+    _job_notificaciones_cuotas(SessionLocal)
+
+
+async def job_notificaciones_presupuestos():
+    _job_notificaciones_presupuestos(SessionLocal)
+
+
+async def job_notificaciones_suscripciones():
+    _job_notificaciones_suscripciones(SessionLocal)
+
+
+async def job_notificaciones_inactividad():
+    _job_notificaciones_inactividad(SessionLocal)
+
+
+async def job_entrega_whatsapp_batched():
+    _job_entrega_whatsapp_batched(SessionLocal)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Crear el scheduler y registrar jobs aquí para evitar que se
@@ -185,6 +212,55 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         replace_existing=True,
     )
+    scheduler.add_job(
+        job_notificaciones_cuotas,
+        "cron",
+        hour=7,
+        minute=0,
+        id="notificaciones_cuotas",
+        misfire_grace_time=300,
+        max_instances=1,
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        job_notificaciones_presupuestos,
+        "cron",
+        hour=7,
+        minute=5,
+        id="notificaciones_presupuestos",
+        misfire_grace_time=300,
+        max_instances=1,
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        job_notificaciones_suscripciones,
+        "cron",
+        hour=7,
+        minute=10,
+        id="notificaciones_suscripciones",
+        misfire_grace_time=300,
+        max_instances=1,
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        job_notificaciones_inactividad,
+        "cron",
+        hour=7,
+        minute=15,
+        id="notificaciones_inactividad",
+        misfire_grace_time=300,
+        max_instances=1,
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        job_entrega_whatsapp_batched,
+        "cron",
+        minute="*",
+        id="entrega_whatsapp_batched",
+        misfire_grace_time=300,
+        max_instances=1,
+        replace_existing=True,
+    )
     scheduler.start()
     logger.info("Backend listo: servidor y tareas automáticas activas.")
     try:
@@ -233,7 +309,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas
+from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones
 
 app.include_router(auth.router)
 app.include_router(onboarding.router)
@@ -248,6 +324,7 @@ app.include_router(dashboard.router)
 app.include_router(presupuestos.router, prefix="/presupuestos")
 app.include_router(suscripciones.router)
 app.include_router(metas.router, prefix="/goals", tags=["goals"])
+app.include_router(notificaciones.router)
 
 # Servir archivos estáticos de media (Ignorado por git)
 os.makedirs("media/fotos", exist_ok=True)
