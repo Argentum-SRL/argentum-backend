@@ -274,8 +274,25 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Argentum API", version="1.0.0", lifespan=lifespan)
 
-app.add_middleware(TimeoutMiddleware, timeout=30.0)
+# Starlette apila middlewares en orden inverso: el último en add_middleware
+# es el outermost y ejecuta PRIMERO para cada request.
+# Orden correcto de registro (el último = el primero en ejecutar):
+#   1. GZipMiddleware
+#   2. TimeoutMiddleware
+#   3. CORSMiddleware  ← último registrado = primero en ejecutar
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(TimeoutMiddleware, timeout=30.0)
+
+_origins = [settings.FRONTEND_URL]
+if settings.ENVIRONMENT == "development":
+    _origins.extend(["http://localhost:5173", "http://localhost:3000", "http://localhost:5174"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.exception_handler(Exception)
@@ -298,16 +315,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         }
     )
 
-_origins = [settings.FRONTEND_URL]
-if settings.ENVIRONMENT == "development":
-    _origins.extend(["http://localhost:5173", "http://localhost:5174"])
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
 
 from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones
 
