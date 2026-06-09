@@ -97,7 +97,8 @@ def get_dashboard_resumen(
     usuario: Usuario, 
     fecha_desde_override: Optional[date] = None, 
     fecha_hasta_override: Optional[date] = None,
-    total_billeteras_override: Optional[Decimal] = None
+    total_billeteras_override: Optional[Decimal] = None,
+    billetera_ids: Optional[List[UUID]] = None
 ) -> Dict[str, Any]:
     """
     Retorna el resumen optimizado del dashboard en máximo 2 queries DB.
@@ -113,11 +114,27 @@ def get_dashboard_resumen(
     cycle_actual_cond = and_(Transaccion.fecha >= fecha_inicio, Transaccion.fecha <= fecha_fin)
     cycle_ant_cond = and_(Transaccion.fecha >= fecha_inicio_ant, Transaccion.fecha <= fecha_fin_ant)
     
+    billeteras_filter = and_(
+        Billetera.usuario_id == usuario.id,
+        Billetera.estado == EstadoBilletera.ACTIVA
+    )
+    if billetera_ids:
+        billeteras_filter = and_(billeteras_filter, Billetera.id.in_(billetera_ids))
+
     sub_total_billeteras = literal(total_billeteras_override) if total_billeteras_override is not None else (
         select(func.sum(Billetera.saldo_actual))
-        .where(and_(Billetera.usuario_id == usuario.id, Billetera.estado == EstadoBilletera.ACTIVA))
+        .where(billeteras_filter)
         .scalar_subquery()
     )
+
+    res_stmt_where = and_(
+        Transaccion.usuario_id == usuario.id,
+        Transaccion.es_padre_cuotas == False,
+        Transaccion.metodo_pago != MetodoPago.CREDITO,
+        or_(Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA, Transaccion.estado_verificacion == None)
+    )
+    if billetera_ids:
+        res_stmt_where = and_(res_stmt_where, Transaccion.billetera_id.in_(billetera_ids))
 
     res_stmt = select(
         func.min(Transaccion.fecha).label("primera_tx"),
@@ -127,14 +144,7 @@ def get_dashboard_resumen(
         func.sum(case((cycle_ant_cond, case((Transaccion.tipo == TipoTransaccion.EGRESO, Transaccion.monto), else_=0)), else_=0)).label("egr_ant"),
         sub_total_billeteras.label("total_billeteras"),
         literal(0).label("cuotas_comprometidas")
-    ).where(
-        and_(
-            Transaccion.usuario_id == usuario.id,
-            Transaccion.es_padre_cuotas == False,
-            Transaccion.metodo_pago != MetodoPago.CREDITO,
-            or_(Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA, Transaccion.estado_verificacion == None)
-        )
-    )
+    ).where(res_stmt_where)
     res = db.execute(res_stmt).one()
 
     # --- QUERY 2: Actividad Unificada (Movimientos + Pagos) ---
@@ -142,6 +152,16 @@ def get_dashboard_resumen(
         select(HistorialSuscripcion.monto).where(HistorialSuscripcion.suscripcion_id == Suscripcion.id)
         .order_by(desc(HistorialSuscripcion.vigente_desde)).limit(1).scalar_subquery()
     )
+
+    m_stmt_where = and_(
+        Transaccion.usuario_id == usuario.id,
+        Transaccion.fecha >= fecha_inicio,
+        Transaccion.fecha <= fecha_fin,
+        Transaccion.es_padre_cuotas == False,
+        Transaccion.metodo_pago != MetodoPago.CREDITO
+    )
+    if billetera_ids:
+        m_stmt_where = and_(m_stmt_where, Transaccion.billetera_id.in_(billetera_ids))
 
     m_stmt = select(
         literal("movimiento").label("item_tipo"),
@@ -157,15 +177,24 @@ def get_dashboard_resumen(
         Subcategoria.nombre.label("extra_5") # subcategoria_nombre
     ).join(Categoria, Transaccion.categoria_id == Categoria.id, isouter=True)\
      .join(Billetera, Transaccion.billetera_id == Billetera.id, isouter=True)\
-     .join(Subcategoria, Transaccion.subcategoria_id == Subcategoria.id, isouter=True).where(
-        and_(
-            Transaccion.usuario_id == usuario.id,
-            Transaccion.fecha >= fecha_inicio,
-            Transaccion.fecha <= fecha_fin,
-            Transaccion.es_padre_cuotas == False,
-            Transaccion.metodo_pago != MetodoPago.CREDITO
+     .join(Subcategoria, Transaccion.subcategoria_id == Subcategoria.id, isouter=True).where(m_stmt_where)\
+     .order_by(desc(Transaccion.fecha), desc(Transaccion.fecha_creacion)).limit(6)
+
+    s_stmt_where = and_(
+        Suscripcion.usuario_id == usuario.id,
+        Suscripcion.estado == EstadoSuscripcion.ACTIVA,
+        Suscripcion.proximo_cobro >= hoy,
+        Suscripcion.proximo_cobro <= limite_pagos
+    )
+    if billetera_ids:
+        tarjeta_ids_stmt = select(TarjetaCredito.id).where(TarjetaCredito.billetera_id.in_(billetera_ids))
+        s_stmt_where = and_(
+            s_stmt_where,
+            or_(
+                Suscripcion.billetera_id.in_(billetera_ids),
+                Suscripcion.tarjeta_id.in_(tarjeta_ids_stmt)
+            )
         )
-    ).order_by(desc(Transaccion.fecha), desc(Transaccion.fecha_creacion)).limit(6)
 
     s_stmt = select(
         literal("suscripcion").label("item_tipo"),
@@ -179,9 +208,20 @@ def get_dashboard_resumen(
         cast(null(), String).label("extra_3"),
         cast(null(), String).label("extra_4"),
         cast(null(), String).label("extra_5")
-    ).where(
-        and_(Suscripcion.usuario_id == usuario.id, Suscripcion.estado == EstadoSuscripcion.ACTIVA, Suscripcion.proximo_cobro >= hoy, Suscripcion.proximo_cobro <= limite_pagos)
+    ).where(s_stmt_where)
+
+    c_stmt_where = and_(
+        GrupoCuotas.usuario_id == usuario.id,
+        Cuota.pagada == False,
+        Cuota.fecha_vencimiento >= hoy,
+        Cuota.fecha_vencimiento <= limite_pagos
     )
+    if billetera_ids:
+        tarjeta_ids_stmt = select(TarjetaCredito.id).where(TarjetaCredito.billetera_id.in_(billetera_ids))
+        c_stmt_where = and_(
+            c_stmt_where,
+            GrupoCuotas.tarjeta_id.in_(tarjeta_ids_stmt)
+        )
 
     c_stmt = select(
         literal("cuota").label("item_tipo"),
@@ -204,9 +244,7 @@ def get_dashboard_resumen(
      .join(Transaccion, GrupoCuotas.transaccion_padre_id == Transaccion.id)\
      .join(Categoria, Transaccion.categoria_id == Categoria.id, isouter=True)\
      .join(Subcategoria, Transaccion.subcategoria_id == Subcategoria.id, isouter=True)\
-     .where(
-        and_(GrupoCuotas.usuario_id == usuario.id, Cuota.pagada == False, Cuota.fecha_vencimiento >= hoy, Cuota.fecha_vencimiento <= limite_pagos)
-    )
+     .where(c_stmt_where)
 
     actividad = db.execute(m_stmt.union_all(s_stmt, c_stmt)).all()
 
@@ -231,16 +269,20 @@ def get_dashboard_resumen(
     } for r in actividad if r.item_tipo in ("suscripcion", "cuota") and not (r.item_tipo == "cuota" and r.extra_2)]
 
     # --- AGREGAR VENCIMIENTOS DE TARJETAS ---
-    tarjetas = db.query(TarjetaCredito).options(
+    tarjetas_query = db.query(TarjetaCredito).options(
         joinedload(TarjetaCredito.billetera)
     ).filter(
         TarjetaCredito.usuario_id == usuario.id,
         TarjetaCredito.estado == EstadoTarjeta.ACTIVA
-    ).all()
+    )
+    if billetera_ids:
+        tarjetas_query = tarjetas_query.filter(TarjetaCredito.billetera_id.in_(billetera_ids))
+    tarjetas = tarjetas_query.all()
 
     limite_futuro = hoy + timedelta(days=365)
 
     # Optimizacion N+1: Pre-cargar todas las cuotas futuras de todas las tarjetas activas
+    tarjetas_ids = [t.id for t in tarjetas]
     all_cuotas = (
         db.query(Cuota)
         .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
@@ -250,7 +292,7 @@ def get_dashboard_resumen(
         )
         .filter(
             GrupoCuotas.usuario_id == usuario.id,
-            GrupoCuotas.tarjeta_id.in_([t.id for t in tarjetas]) if tarjetas else False,
+            GrupoCuotas.tarjeta_id.in_(tarjetas_ids) if tarjetas_ids else False,
             Cuota.pagada == False,
             Cuota.fecha_vencimiento >= hoy,
             Cuota.fecha_vencimiento <= limite_futuro
@@ -331,7 +373,13 @@ async def get_cotizacion_usuario(usuario: Usuario) -> Dict[str, Any]:
     except Exception:
         return {"tipo": tipo, "compra": 0, "venta": 0, "fecha_actualizacion": None, "error": "Servicio de cotizaciones no disponible"}
 
-async def get_resumen_completo(db: Session, usuario: Usuario, desde: Optional[date] = None, hasta: Optional[date] = None) -> Dict[str, Any]:
+async def get_resumen_completo(
+    db: Session, 
+    usuario: Usuario, 
+    desde: Optional[date] = None, 
+    hasta: Optional[date] = None,
+    billetera_ids: Optional[List[UUID]] = None
+) -> Dict[str, Any]:
     """
     Consolida todo el dashboard en exactamente 3 queries DB.
     """
@@ -349,14 +397,15 @@ async def get_resumen_completo(db: Session, usuario: Usuario, desde: Optional[da
     total_saldo_activa = Decimal("0")
     for b, has_tx in rows_billeteras:
         if b.estado == EstadoBilletera.ACTIVA:
-            total_saldo_activa += Decimal(str(b.saldo_actual))
+            if not billetera_ids or b.id in billetera_ids:
+                total_saldo_activa += Decimal(str(b.saldo_actual))
         billeteras_data.append({
             "id": str(b.id), "nombre": b.nombre, "moneda": b.moneda.value, "saldo_actual": float(b.saldo_actual),
             "es_principal": b.es_principal, "es_efectivo": b.es_efectivo, "estado": b.estado.value, "tiene_transacciones": has_tx
         })
 
     # QUERY 2 y 3: Se ejecutan dentro de get_dashboard_resumen
-    resumen = get_dashboard_resumen(db, usuario, desde, hasta, total_billeteras_override=total_saldo_activa)
+    resumen = get_dashboard_resumen(db, usuario, desde, hasta, total_billeteras_override=total_saldo_activa, billetera_ids=billetera_ids)
     cotizacion = await get_cotizacion_usuario(usuario)
 
     return {"billeteras": billeteras_data, "resumen": resumen, "cotizacion": cotizacion}
