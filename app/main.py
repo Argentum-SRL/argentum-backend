@@ -69,6 +69,12 @@ class TimeoutMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # Excluir el endpoint SSE del timeout — es una conexión de larga duración
+        path = scope.get("path", "")
+        if path == "/notificaciones/sse":
+            await self.app(scope, receive, send)
+            return
+
         try:
             with anyio.fail_after(self.timeout):
                 await self.app(scope, receive, send)
