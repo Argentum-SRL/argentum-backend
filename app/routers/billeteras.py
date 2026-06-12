@@ -191,22 +191,30 @@ def delete_billetera(
     # Chequear las tarjetas de crédito asociadas
     cards = db.execute(select(TarjetaCredito).where(TarjetaCredito.billetera_id == billetera_id)).scalars().all()
     if cards:
-        card_ids = [c.id for c in cards]
-        # Check if any card has transactions
-        has_card_tx = db.execute(select(exists().where(Transaccion.tarjeta_id.in_(card_ids)))).scalar()
-        # Check if any card has cuotas
-        has_card_cuotas = db.execute(select(exists().where(GrupoCuotas.tarjeta_id.in_(card_ids)))).scalar()
-        # Check if any card has subscriptions
-        has_card_sub = db.execute(select(exists().where(Suscripcion.tarjeta_id.in_(card_ids)))).scalar()
+        tarjetas_bloqueantes = []
+        for c in cards:
+            has_tx = db.execute(select(exists().where(Transaccion.tarjeta_id == c.id))).scalar()
+            has_cuotas = db.execute(select(exists().where(GrupoCuotas.tarjeta_id == c.id))).scalar()
+            has_sub = db.execute(select(exists().where(Suscripcion.tarjeta_id == c.id))).scalar()
+            if has_tx or has_cuotas or has_sub:
+                tarjetas_bloqueantes.append(c)
 
-        if has_card_tx or has_card_cuotas or has_card_sub:
+        if tarjetas_bloqueantes:
+            nombres = ", ".join(t.nombre for t in tarjetas_bloqueantes)
             raise HTTPException(
                 status_code=400,
                 detail={
                     "success": False,
                     "error": {
                         "code": "BILLETERA_CON_TARJETAS",
-                        "message": "No podés eliminar esta billetera porque tiene tarjetas de crédito con consumos, cuotas o suscripciones registradas. Eliminá primero las tarjetas o archivalas."
+                        "message": (
+                            f"No podés eliminar esta billetera porque "
+                            f"{'la tarjeta' if len(tarjetas_bloqueantes) == 1 else 'las tarjetas'} "
+                            f"{nombres} "
+                            f"{'tiene' if len(tarjetas_bloqueantes) == 1 else 'tienen'} "
+                            f"transacciones registradas. "
+                            f"Archivá o eliminá {'esa tarjeta' if len(tarjetas_bloqueantes) == 1 else 'esas tarjetas'} primero."
+                        )
                     }
                 }
             )

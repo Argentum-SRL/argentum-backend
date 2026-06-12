@@ -242,6 +242,36 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
     # Impacto en presupuestos (Revertir con datos viejos)
     presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=True)
 
+    CAMPOS_FINANCIEROS_CUOTA = {
+        'monto', 'moneda', 'tipo', 'billetera_id',
+        'tarjeta_id', 'metodo_pago', 'fecha', 'estado_verificacion'
+    }
+
+    CAMPOS_PERMITIDOS_CUOTA = {'descripcion', 'categoria_id', 'subcategoria_id'}
+
+    # Si es una transacción de cuotas, verificar que solo se editen campos permitidos
+    if transaccion.es_cuota_hija or transaccion.es_padre_cuotas:
+        datos_update = data.model_dump(exclude_unset=True)
+        campos_financieros_modificados = []
+
+        for campo in CAMPOS_FINANCIEROS_CUOTA:
+            if campo in datos_update:
+                valor_actual = getattr(transaccion, campo, None)
+                valor_nuevo = datos_update[campo]
+                # Comparar con conversión de tipos para evitar falsos positivos
+                if str(valor_actual) != str(valor_nuevo) and valor_actual != valor_nuevo:
+                    campos_financieros_modificados.append(campo)
+
+        if campos_financieros_modificados:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"No podés modificar los campos financieros de una transacción en cuotas "
+                    f"({', '.join(campos_financieros_modificados)}). "
+                    f"Solo podés editar la descripción y la categoría."
+                )
+            )
+
     impacto_saldo_cambia = any([
         data.monto is not None,
         data.tipo is not None,
@@ -250,9 +280,6 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
         data.estado_verificacion is not None,
         data.metodo_pago is not None and data.metodo_pago != transaccion.metodo_pago
     ])
-
-    if (transaccion.es_cuota_hija or transaccion.es_padre_cuotas) and impacto_saldo_cambia:
-        raise HTTPException(status_code=400, detail="No se pueden editar montos, fechas o billeteras de transacciones ligadas a cuotas individualmente.")
     
     if impacto_saldo_cambia:
         # Revertir impacto anterior si existia

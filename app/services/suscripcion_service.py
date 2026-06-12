@@ -209,13 +209,23 @@ def cambiar_estado(db: Session, usuario_id: UUID, suscripcion_id: UUID, nuevo_es
     db.refresh(suscripcion)
     return suscripcion
 
-def eliminar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID):
-    suscripcion = db.query(Suscripcion).filter(Suscripcion.id == suscripcion_id, Suscripcion.usuario_id == usuario_id).first()
+def eliminar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID) -> None:
+    """
+    Elimina una suscripción de forma atómica.
+    Si está activa o pausada, la cancela primero en la misma transacción.
+    No requiere que esté previamente cancelada.
+    """
+    suscripcion = db.query(Suscripcion).filter(
+        Suscripcion.id == suscripcion_id,
+        Suscripcion.usuario_id == usuario_id,
+    ).first()
+
     if not suscripcion:
-        raise HTTPException(status_code=404, detail="Suscripción no encontrada")
-    
+        raise ValueError("Suscripción no encontrada")
+
+    # Cancelar primero si no está ya cancelada (operación atómica)
     if suscripcion.estado != EstadoSuscripcion.CANCELADA:
-        raise HTTPException(status_code=400, detail="Cancelá la suscripción antes de eliminarla.")
+        suscripcion.estado = EstadoSuscripcion.CANCELADA
 
     db.delete(suscripcion)
     db.commit()
