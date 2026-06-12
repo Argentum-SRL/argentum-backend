@@ -27,8 +27,8 @@ class InstallmentConvenienceRequest(BaseModel):
     @field_validator('cantidad_cuotas')
     @classmethod
     def cuotas_validas(cls, v):
-        if v < 1 or v > 60:
-            raise ValueError('La cantidad de cuotas debe estar entre 1 y 60')
+        if v < 1 or v > 120:
+            raise ValueError('La cantidad de cuotas debe estar entre 1 y 120')
         return v
 
     @field_validator('inflacion_mensual')
@@ -91,8 +91,8 @@ class CanAffordRequest(BaseModel):
     @field_validator('cantidad_cuotas')
     @classmethod
     def cuotas_validas(cls, v):
-        if v < 1 or v > 60:
-            raise ValueError('La cantidad de cuotas debe estar entre 1 y 60')
+        if v < 1 or v > 120:
+            raise ValueError('La cantidad de cuotas debe estar entre 1 y 120')
         return v
 
     @model_validator(mode='after')
