@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -12,11 +13,13 @@ from app.models.presupuesto_categoria import PresupuestoCategoria
 from app.models.periodo_presupuesto import PeriodoPresupuesto
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion
 from app.models.subcategoria import Subcategoria
-from app.models.notificacion import Notificacion, TipoNotificacion
+from app.models.notificacion import Notificacion, TipoNotificacion, NivelNotificacion
 from app.models.configuracion_notificacion import ConfiguracionNotificacion
 from app.models.usuario import Usuario
 from app.schemas.presupuesto import PresupuestoCreate, PresupuestoUpdate
 from app.services.whatsapp_service import enviar_mensaje_whatsapp
+
+logger = logging.getLogger(__name__)
 
 def formatear_monto(monto: Decimal) -> str:
     # Formato simple para notificaciones
@@ -341,54 +344,66 @@ def verificar_alertas_presupuesto(db: Session, presupuesto: Presupuesto, periodo
     
     tipo = None
     if porcentaje >= 100:
-        tipo = TipoNotificacion.PRESUPUESTO_100
+        tipo = TipoNotificacion.PRESUPUESTO_AGOTADO
     elif porcentaje >= 80:
-        tipo = TipoNotificacion.PRESUPUESTO_80
+        tipo = TipoNotificacion.PRESUPUESTO_LIMITE
         
     if not tipo:
         return
         
-    modulo_ref_full = f"presupuestos/{presupuesto.id}/{periodo.id}"
-    existe = db.execute(
-        select(Notificacion).where(
-            Notificacion.usuario_id == presupuesto.usuario_id,
-            Notificacion.tipo == tipo,
-            Notificacion.modulo_ref == modulo_ref_full
-        )
-    ).scalars().first()
-    
-    if existe:
+    # 1. Obtener la configuración del usuario
+    from app.services.notificacion_service import obtener_configuracion, crear_notificacion
+    config = obtener_configuracion(db, presupuesto.usuario_id)
+
+    # 2. Verificar si el canal/tipo está activo en la configuración del usuario
+    canal_web = True
+    canal_whatsapp = False
+
+    if tipo == TipoNotificacion.PRESUPUESTO_AGOTADO:
+        canal_web = config.presupuesto_umbral_2_web
+        canal_whatsapp = config.presupuesto_umbral_2_whatsapp
+    elif tipo == TipoNotificacion.PRESUPUESTO_LIMITE:
+        if not config.presupuesto_umbral_1_activo:
+            return  # Alerta 80% desactivada por completo
+        canal_web = config.presupuesto_umbral_1_web
+        canal_whatsapp = config.presupuesto_umbral_1_whatsapp
+
+    # Si ambos canales están desactivados, no hacemos nada
+    if not canal_web and not canal_whatsapp:
         return
 
+    # 3. Formatear nombres de las categorías para el mensaje
     nombres_cats = ", ".join(set([c.categoria.nombre if c.categoria else c.subcategoria.nombre for c in presupuesto.categorias]))
     
-    if tipo == TipoNotificacion.PRESUPUESTO_100:
-        titulo = f"Superaste el presupuesto de {presupuesto.nombre}"
+    if tipo == TipoNotificacion.PRESUPUESTO_AGOTADO:
         mensaje = f"Llevás {formatear_monto(periodo.monto_usado)} de {formatear_monto(periodo.monto_limite)} en {nombres_cats}. Ya superaste el límite."
     else:
-        titulo = f"Vas por el {porcentaje:.0f}% de {presupuesto.nombre}"
         mensaje = f"Llevás {formatear_monto(periodo.monto_usado)} de {formatear_monto(periodo.monto_limite)}."
 
-    notif = Notificacion(
+    # 4. Crear la notificación utilizando el servicio común (se encarga del commit/db.add/deduplicación)
+    notif = crear_notificacion(
+        db=db,
         usuario_id=presupuesto.usuario_id,
         tipo=tipo,
-        titulo=titulo,
+        nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
         mensaje=mensaje,
-        modulo_ref=modulo_ref_full
+        entidad_tipo="presupuesto",
+        entidad_id=presupuesto.id,
+        deep_link=f"/presupuestos/{presupuesto.id}",
+        canal_web=canal_web,
+        canal_whatsapp=canal_whatsapp,
+        canal_email=False,
+        grupo_agrupacion_override=f"presupuestos/{presupuesto.id}/{periodo.id}"
     )
-    db.add(notif)
     
-    config = db.execute(
-        select(ConfiguracionNotificacion).where(
-            ConfiguracionNotificacion.usuario_id == presupuesto.usuario_id,
-            ConfiguracionNotificacion.tipo == tipo
-        )
-    ).scalar_one_or_none()
-    
-    if config and config.canal_wpp:
+    # 5. Enviar mensaje de WhatsApp inmediato si corresponde
+    if notif and canal_whatsapp:
         usuario = db.get(Usuario, presupuesto.usuario_id)
         if usuario and usuario.telefono:
-            enviar_mensaje_whatsapp(usuario.telefono, mensaje)
+            try:
+                enviar_mensaje_whatsapp(usuario.telefono, mensaje)
+            except Exception:
+                logger.warning("Error al enviar notificación de presupuesto por WhatsApp", exc_info=True)
 
 def renovar_presupuestos(db: Session):
     hoy = date.today()
@@ -416,14 +431,22 @@ def renovar_presupuestos(db: Session):
                 
                 if len(ultimos_3) == 3 and all(p.superado for p in ultimos_3):
                     promedio = sum(p.monto_usado for p in ultimos_3) / 3
-                    notif = Notificacion(
+                    from app.services.notificacion_service import crear_notificacion
+                    mensaje_sug = f"Superaste el límite del presupuesto '{presu.nombre}' por 3 períodos seguidos. El gasto promedio real fue de {formatear_monto(promedio)}. Considerá ajustar el límite."
+                    crear_notificacion(
+                        db=db,
                         usuario_id=presu.usuario_id,
-                        tipo=TipoNotificacion.SUGERENCIA_PRESUPUESTO,
-                        titulo=f"Revisá el presupuesto de {presu.nombre}",
-                        mensaje=f"Superaste el limite 3 periodos seguidos. El gasto promedio real fue de {formatear_monto(promedio)}. Considerá ajustar el límite.",
-                        modulo_ref=f"presupuestos/{presu.id}"
+                        tipo=TipoNotificacion.PRESUPUESTO_LIMITE,
+                        nivel=NivelNotificacion.SOFT,
+                        mensaje=mensaje_sug,
+                        entidad_tipo="presupuesto",
+                        entidad_id=presu.id,
+                        deep_link=f"/presupuestos/{presu.id}",
+                        canal_web=True,
+                        canal_whatsapp=False,
+                        canal_email=False,
+                        grupo_agrupacion_override=f"presupuestos/sugerencia/{presu.id}/{hoy.strftime('%Y%m%d')}"
                     )
-                    db.add(notif)
                 
                 nueva_inicio, nueva_fin = calcular_fechas_periodo(presu.periodo, hoy)
                 ya_existe = any(p.fecha_inicio == nueva_inicio for p in presu.periodos)
