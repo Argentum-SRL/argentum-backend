@@ -102,5 +102,8 @@ def delete_suscripcion(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
-    suscripcion_service.eliminar_suscripcion(db, current_user.id, id)
+    try:
+        suscripcion_service.eliminar_suscripcion(db, current_user.id, id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     return None
