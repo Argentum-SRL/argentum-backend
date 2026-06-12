@@ -156,29 +156,20 @@ def delete_billetera(
     if billetera.es_efectivo:
         raise HTTPException(status_code=400, detail="Las billeteras de efectivo (ARS/USD) no pueden eliminarse")
 
-    # VERIFICACIÓN DE INTEGRIDAD (Optimizada: 1 query para todos los chequeos)
+    # VERIFICACIÓN DE INTEGRIDAD
+    from app.models.suscripcion import Suscripcion
+    from app.models.grupo_cuotas import GrupoCuotas
+
     exists_tx = exists().where(Transaccion.billetera_id == billetera_id)
     exists_tr = exists().where(
         (TransferenciaInterna.billetera_origen_id == billetera_id) | 
         (TransferenciaInterna.billetera_destino_id == billetera_id)
     )
-    exists_tc = exists().where(TarjetaCredito.billetera_id == billetera_id)
+    exists_sub = exists().where(Suscripcion.billetera_id == billetera_id)
     
-    check_stmt = select(exists_tx.label("has_tx"), exists_tr.label("has_tr"), exists_tc.label("has_tc"))
+    check_stmt = select(exists_tx.label("has_tx"), exists_tr.label("has_tr"), exists_sub.label("has_sub"))
     check_res = db.execute(check_stmt).one()
     
-    if check_res.has_tc:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "BILLETERA_CON_TARJETAS",
-                    "message": "No podés eliminar esta billetera porque tiene tarjetas de crédito asociadas. Eliminá primero las tarjetas."
-                }
-            }
-        )
-
     if check_res.has_tx:
         raise HTTPException(
             status_code=400, 
@@ -190,6 +181,38 @@ def delete_billetera(
             status_code=400, 
             detail="No se puede eliminar la billetera porque tiene transferencias internas asociadas. Por favor, archivala."
         )
+
+    if check_res.has_sub:
+        raise HTTPException(
+            status_code=400,
+            detail="No se puede eliminar la billetera porque tiene suscripciones activas asociadas. Por favor, archivala o cancelá las suscripciones."
+        )
+
+    # Chequear las tarjetas de crédito asociadas
+    cards = db.execute(select(TarjetaCredito).where(TarjetaCredito.billetera_id == billetera_id)).scalars().all()
+    if cards:
+        card_ids = [c.id for c in cards]
+        # Check if any card has transactions
+        has_card_tx = db.execute(select(exists().where(Transaccion.tarjeta_id.in_(card_ids)))).scalar()
+        # Check if any card has cuotas
+        has_card_cuotas = db.execute(select(exists().where(GrupoCuotas.tarjeta_id.in_(card_ids)))).scalar()
+        # Check if any card has subscriptions
+        has_card_sub = db.execute(select(exists().where(Suscripcion.tarjeta_id.in_(card_ids)))).scalar()
+
+        if has_card_tx or has_card_cuotas or has_card_sub:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "success": False,
+                    "error": {
+                        "code": "BILLETERA_CON_TARJETAS",
+                        "message": "No podés eliminar esta billetera porque tiene tarjetas de crédito con consumos, cuotas o suscripciones registradas. Eliminá primero las tarjetas o archivalas."
+                    }
+                }
+            )
+        
+        # Si las tarjetas no tienen consumos ni dependencias, las eliminamos automáticamente
+        db.execute(delete(TarjetaCredito).where(TarjetaCredito.billetera_id == billetera_id))
 
     res = db.execute(delete(Billetera).where(Billetera.id == billetera_id, Billetera.usuario_id == current_user.id))
     db.commit()
