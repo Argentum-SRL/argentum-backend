@@ -315,19 +315,47 @@ def get_dashboard_resumen(
     for tarjeta in tarjetas:
         resumen_t = calcular_resumen_actual(db, tarjeta, cuotas_preloaded=cuotas_por_tarjeta.get(tarjeta.id, []))
         total_t = resumen_t.total_comprometido_resumen_actual
+        total_siguiente = resumen_t.total_comprometido_resumen_siguiente if hasattr(resumen_t, 'total_comprometido_resumen_siguiente') else 0
 
         d_venc = resumen_t.fecha_vencimiento_proximo
         if d_venc and d_venc <= fecha_limite:
             if total_t:
                 cuotas_comprometidas_tarjetas += Decimal(str(total_t))
 
+        if not d_venc:
+            continue
+
+        # Si el resumen actual es 0 pero hay deuda en el siguiente período,
+        # mostrar el próximo resumen con deuda real
         if total_t <= 0:
+            if total_siguiente and total_siguiente > 0:
+                # Calcular fecha del siguiente vencimiento
+                proximo_mes = d_venc + relativedelta(months=1)
+                from calendar import monthrange
+                ultimo_dia = monthrange(proximo_mes.year, proximo_mes.month)[1]
+                dia_venc_sig = min(tarjeta.dia_vencimiento, ultimo_dia)
+                d_venc_sig = date(proximo_mes.year, proximo_mes.month, dia_venc_sig)
+                dias_restantes_sig = (d_venc_sig - hoy).days
+                if 0 <= dias_restantes_sig <= 60:
+                    proximos_pagos.append({
+                        "id": str(tarjeta.id),
+                        "nombre": f"Resumen {tarjeta.nombre}",
+                        "monto": float(total_siguiente),
+                        "moneda": tarjeta.moneda.value,
+                        "fecha_cobro": d_venc_sig.isoformat(),
+                        "dias_restantes": dias_restantes_sig,
+                        "tipo": "resumen_tarjeta",
+                        "color": tarjeta.color,
+                        "red": tarjeta.red.value,
+                        "billetera_nombre": tarjeta.billetera.nombre,
+                        "billetera_id": str(tarjeta.billetera_id)
+                    })
             continue
 
         dias_restantes = (d_venc - hoy).days
 
-        # Solo incluir si vence dentro de los próximos 30 días
-        if 0 <= dias_restantes <= 30:
+        # Solo incluir si vence dentro de los próximos 45 días
+        if 0 <= dias_restantes <= 45:
             proximos_pagos.append({
                 "id": str(tarjeta.id),
                 "nombre": f"Resumen {tarjeta.nombre}",

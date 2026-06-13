@@ -6,9 +6,11 @@ from pydantic import BaseModel, field_validator, model_validator
 
 class InstallmentConvenienceRequest(BaseModel):
     precio_contado: float
-    precio_total_cuotas: float
+    precio_total_cuotas: float | None = None
     cantidad_cuotas: int
     inflacion_mensual: float
+    tiene_interes: bool = False
+    tna: float | None = None
 
     @field_validator('precio_contado')
     @classmethod
@@ -20,7 +22,7 @@ class InstallmentConvenienceRequest(BaseModel):
     @field_validator('precio_total_cuotas')
     @classmethod
     def precio_cuotas_positivo(cls, v):
-        if v <= 0:
+        if v is not None and v <= 0:
             raise ValueError('El precio en cuotas debe ser mayor a 0')
         return v
 
@@ -37,6 +39,18 @@ class InstallmentConvenienceRequest(BaseModel):
         if v < 0 or v > 100:
             raise ValueError('La inflación mensual debe estar entre 0% y 100%')
         return v
+
+    @model_validator(mode='after')
+    def validar_interes_y_total(self) -> InstallmentConvenienceRequest:
+        if not self.tiene_interes:
+            if self.precio_total_cuotas is None:
+                raise ValueError('Debe ingresar el precio total en cuotas si no tiene interés')
+        else:
+            if self.tna is None:
+                raise ValueError('Debe ingresar la TNA si las cuotas tienen interés')
+            if self.tna <= 0 or self.tna > 3000:
+                raise ValueError('La TNA debe estar entre 0 y 3000%')
+        return self
 
 
 class DetalleCuota(BaseModel):
@@ -56,6 +70,10 @@ class InstallmentConvenienceResponseData(BaseModel):
     cantidad_cuotas: int
     inflacion_mensual_usada: float
     detalle_por_mes: list[DetalleCuota]
+    tiene_interes: bool = False
+    tna_usada: float | None = None
+    interes_total: float | None = None
+    precio_total_cuotas_con_interes: float | None = None
 
 
 class IPCData(BaseModel):
