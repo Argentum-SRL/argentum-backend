@@ -51,10 +51,7 @@ class MonedaRequest(BaseModel):
     moneda_secundaria_activa: bool
     tipo_dolar: str | None = None
 
-class PrimeraBilleteraRequest(BaseModel):
-    nombre: str
-    moneda: Moneda
-    saldo_inicial: float = 0.0
+
 
 class OnboardingStepResponse(BaseModel):
     completated: bool = Field(..., alias="completado")
@@ -63,9 +60,4 @@ class OnboardingStepResponse(BaseModel):
     class Config:
         populate_by_name = True
 
-class FinalizarOnboardingResponse(BaseModel):
-    completated: bool = Field(..., alias="completado")
-    usuario: UsuarioRead
 
-    class Config:
-        populate_by_name = True

@@ -59,6 +59,7 @@ def get_ciclo_fechas(usuario: Usuario, hoy: date) -> tuple[date, date]:
         return inicio, fin
 
     if usuario.ciclo_tipo == CicloTipo.DIA_FIJO:
+        # TODO: aplicar lógica de día hábil (dias_habiles_service)
         try:
             dia = int(usuario.ciclo_valor)
         except ValueError:

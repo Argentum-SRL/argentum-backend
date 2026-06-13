@@ -4,13 +4,9 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 from app.models.usuario import Usuario, CicloTipo, Moneda, Sexo
-from app.models.billetera import Billetera
 from app.schemas.onboarding import (
     EstadoOnboardingResponse, 
-    DatosActuales,
-    CicloFinancieroRequest,
-    MonedaRequest,
-    PrimeraBilleteraRequest
+    DatosActuales
 )
 
 def get_estado_onboarding(db: Session, user: Usuario) -> EstadoOnboardingResponse:
@@ -66,23 +62,4 @@ def validar_ciclo(ciclo_tipo: CicloTipo, ciclo_valor: str) -> tuple[bool, str | 
             return False, "La regla seleccionada no es válida."
     return True, None
 
-def crear_billeteras_onboarding(db: Session, user: Usuario, request: PrimeraBilleteraRequest) -> None:
-    # 1. Billetera principal
-    b_principal = Billetera(
-        usuario_id=user.id,
-        nombre=request.nombre,
-        moneda=request.moneda,
-        saldo_inicial=request.saldo_inicial,
-        saldo_actual=request.saldo_inicial,
-        es_principal=True,
-        es_efectivo=False
-    )
-    db.add(b_principal)
-    
-    # 2 y 3. Billeteras de efectivo default
-    from app.services import usuario_service
-    usuario_service.crear_billeteras_efectivo_default(db, user.id)
-    
-    user.onboarding_completo = True
-    user.ultimo_acceso = datetime.now(timezone.utc)
-    db.commit()
+
