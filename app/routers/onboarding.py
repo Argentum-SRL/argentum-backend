@@ -11,14 +11,11 @@ from app.schemas.onboarding import (
     DatosPersonalesRequest,
     CicloFinancieroRequest,
     MonedaRequest,
-    PrimeraBilleteraRequest,
-    OnboardingStepResponse,
-    FinalizarOnboardingResponse
+    OnboardingStepResponse
 )
 from app.services.onboarding_service import (
     get_estado_onboarding,
-    validar_ciclo,
-    crear_billeteras_onboarding
+    validar_ciclo
 )
 from app.services.dolar_service import get_cotizaciones_dolar
 
@@ -143,19 +140,39 @@ def post_moneda(
     
     return OnboardingStepResponse(completado=True, siguiente_paso=None)
 
-@router.post("/primera-billetera", response_model=FinalizarOnboardingResponse)
-def post_primera_billetera(
-    body: PrimeraBilleteraRequest,
-    db: Session = Depends(get_db),
+
+@router.get("/preview-fecha-cobro")
+async def preview_fecha_cobro(
+    dia: int,
     current_user: Usuario = Depends(get_current_user)
 ):
-    if current_user.onboarding_completo:
-        return FinalizarOnboardingResponse(completado=True, usuario=current_user)
+    _ = current_user
+    if not (1 <= dia <= 31):
+        raise HTTPException(status_code=400, detail="El día debe estar entre 1 y 31.")
+    try:
+        from app.services import dias_habiles_service
+        import calendar
+        from datetime import date
+        
+        proxima_fecha = await dias_habiles_service.calcular_proxima_fecha_cobro(dia)
+        
+        ultimo_dia_mes = calendar.monthrange(proxima_fecha.year, proxima_fecha.month)[1]
+        dia_real_nominal = min(dia, ultimo_dia_mes)
+        fecha_nominal = date(proxima_fecha.year, proxima_fecha.month, dia_real_nominal)
+        
+        feriados = await dias_habiles_service.obtener_feriados_argentina(proxima_fecha.year)
+        es_habil = dias_habiles_service.es_dia_habil(fecha_nominal, feriados)
+        
+        return {
+            "dia_nominal": dia,
+            "proxima_fecha_cobro": proxima_fecha.isoformat(),
+            "es_dia_habil": es_habil
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error al calcular la fecha de cobro: {str(e)}"
+        )
 
-    # Validar paso anterior
-    if not current_user.moneda_principal:
-        raise HTTPException(status_code=400, detail="Primero seleccioná tu moneda principal.")
 
-    crear_billeteras_onboarding(db, current_user, body)
-    
-    return FinalizarOnboardingResponse(completado=True, usuario=current_user)
+
