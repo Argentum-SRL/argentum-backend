@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Optional
 from fastapi import HTTPException
-from sqlalchemy import select, desc, or_, delete
+from sqlalchemy import select, desc, or_, delete, not_, and_
 from sqlalchemy.orm import Session, joinedload
 from dateutil.relativedelta import relativedelta
 
@@ -39,7 +39,7 @@ def obtener_transacciones(
     query = select(Transaccion).where(
         Transaccion.usuario_id == usuario_id,
         Transaccion.es_padre_cuotas == False,
-        Transaccion.metodo_pago != MetodoPago.CREDITO
+        not_(and_(Transaccion.es_cuota_hija == True, Transaccion.metodo_pago == MetodoPago.CREDITO))
     )
     
     if billetera_id:

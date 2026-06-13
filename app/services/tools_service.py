@@ -144,8 +144,20 @@ def calcular_conveniencia_cuotas(req: InstallmentConvenienceRequest) -> dict:
     Calcula si conviene pagar en cuotas o de contado bajo la inflación provista.
     """
     tasa = req.inflacion_mensual / 100  # Convertir a decimal
-    monto_cuota = req.precio_total_cuotas / req.cantidad_cuotas
     
+    if req.tiene_interes and req.tna is not None:
+        i = (req.tna / 100) / 12  # tasa mensual decimal
+        if i == 0:
+            monto_cuota = req.precio_contado / req.cantidad_cuotas
+        else:
+            monto_cuota = req.precio_contado * (i * (1 + i) ** req.cantidad_cuotas) / ((1 + i) ** req.cantidad_cuotas - 1)
+        precio_total_cuotas = monto_cuota * req.cantidad_cuotas
+        interes_total = precio_total_cuotas - req.precio_contado
+    else:
+        monto_cuota = req.precio_total_cuotas / req.cantidad_cuotas
+        precio_total_cuotas = req.precio_total_cuotas
+        interes_total = 0.0
+
     detalle_cuotas = []
     costo_real_total = 0.0
     
@@ -173,14 +185,18 @@ def calcular_conveniencia_cuotas(req: InstallmentConvenienceRequest) -> dict:
     return {
         "resultado": resultado,
         "precio_contado": round(req.precio_contado, 2),
-        "precio_total_cuotas_nominal": round(req.precio_total_cuotas, 2),
+        "precio_total_cuotas_nominal": round(precio_total_cuotas, 2),
         "costo_real_cuotas": round(costo_real_total, 2),
         "ahorro_real": round(abs(diferencia), 2),
         "porcentaje_ahorro": round(porcentaje_diferencia, 2),
         "monto_cuota": round(monto_cuota, 2),
         "cantidad_cuotas": req.cantidad_cuotas,
         "inflacion_mensual_usada": req.inflacion_mensual,
-        "detalle_por_mes": detalle_cuotas
+        "detalle_por_mes": detalle_cuotas,
+        "tiene_interes": req.tiene_interes,
+        "tna_usada": req.tna if req.tiene_interes else None,
+        "interes_total": round(interes_total, 2) if req.tiene_interes else None,
+        "precio_total_cuotas_con_interes": round(precio_total_cuotas, 2) if req.tiene_interes else None
     }
 
 
