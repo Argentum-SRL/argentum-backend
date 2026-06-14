@@ -285,6 +285,18 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
     )
     scheduler.start()
+    # Pre-cargar feriados argentinos en cache para
+    # que calcular_fecha_cobro_sync funcione sin async
+    try:
+        from app.services.dias_habiles_service import obtener_feriados_argentina
+        from datetime import date as _date
+        anio_actual = _date.today().year
+        await obtener_feriados_argentina(anio_actual)
+        await obtener_feriados_argentina(anio_actual + 1)
+        logger.info("Feriados argentinos pre-cargados en cache.")
+    except Exception:
+        logger.warning("No se pudieron pre-cargar feriados. "
+                      "El ciclo usará fechas nominales como fallback.")
     logger.info("Backend listo: servidor y tareas automáticas activas.")
     try:
         yield
