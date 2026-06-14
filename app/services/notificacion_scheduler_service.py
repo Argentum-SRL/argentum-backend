@@ -1,5 +1,5 @@
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func, or_
 from app.models.notificacion import TipoNotificacion, NivelNotificacion, Notificacion
@@ -333,10 +333,11 @@ def _job_notificaciones_inactividad(db_session_factory):
 
             if tx_count == 0 and tf_count == 0:
                 # Comprobar si ya enviamos notificación de inactividad recientemente para evitar spam
+                from datetime import timezone
                 recent_notif = db.query(Notificacion).filter(
                     Notificacion.usuario_id == usuario_id,
                     Notificacion.tipo == TipoNotificacion.INACTIVIDAD,
-                    Notificacion.created_at >= datetime.utcnow() - timedelta(days=dias)
+                    Notificacion.created_at >= datetime.now(timezone.utc) - timedelta(days=dias)
                 ).first()
 
                 if not recent_notif:
@@ -421,5 +422,133 @@ def _job_entrega_whatsapp_batched(db_session_factory):
 
     except Exception:
         logger.exception("Error en _job_entrega_whatsapp_batched")
+    finally:
+        db.close()
+
+
+def _job_resumen_cierre_ciclo(db_session_factory):
+    """
+    Corre diariamente a las 07:20 UTC.
+    Detecta usuarios cuyo ciclo cerró ayer y les manda un resumen por WhatsApp.
+    """
+    db: Session = db_session_factory()
+    try:
+        from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion
+        from app.models.categoria import Categoria
+        from app.services.dashboard_service import get_ciclo_fechas
+        from sqlalchemy import func
+
+        hoy = (datetime.now(timezone.utc if hasattr(timezone, 'utc') else __import__('datetime').timezone.utc) - timedelta(hours=3)).date()
+        ayer = hoy - timedelta(days=1)
+
+        # Obtener usuarios con WhatsApp verificado y configuración activa
+        usuarios = (
+            db.query(Usuario)
+            .join(ConfiguracionNotificacion, Usuario.id == ConfiguracionNotificacion.usuario_id)
+            .filter(
+                Usuario.telefono != None,
+                Usuario.telefono_verificado == True,
+            )
+            .all()
+        )
+
+        for usuario in usuarios:
+            try:
+                # Verificar si ayer fue el último día del ciclo del usuario
+                fecha_inicio, fecha_fin = get_ciclo_fechas(usuario, ayer)
+                if fecha_fin != ayer:
+                    continue
+
+                # Verificar que no mandamos este resumen ya hoy
+                ya_enviado = db.query(Notificacion).filter(
+                    Notificacion.usuario_id == usuario.id,
+                    Notificacion.tipo == TipoNotificacion.RESUMEN_CICLO,
+                    Notificacion.created_at >= datetime.now(__import__('datetime').timezone.utc) - timedelta(hours=24),
+                ).first()
+                if ya_enviado:
+                    continue
+
+                # Calcular totales del ciclo cerrado
+                ingresos = db.query(func.sum(Transaccion.monto)).filter(
+                    Transaccion.usuario_id == usuario.id,
+                    Transaccion.tipo == TipoTransaccion.INGRESO,
+                    Transaccion.fecha >= fecha_inicio,
+                    Transaccion.fecha <= fecha_fin,
+                    Transaccion.es_padre_cuotas == False,
+                ).scalar() or 0
+
+                egresos = db.query(func.sum(Transaccion.monto)).filter(
+                    Transaccion.usuario_id == usuario.id,
+                    Transaccion.tipo == TipoTransaccion.EGRESO,
+                    Transaccion.fecha >= fecha_inicio,
+                    Transaccion.fecha <= fecha_fin,
+                    Transaccion.es_padre_cuotas == False,
+                ).scalar() or 0
+
+                if float(ingresos) == 0 and float(egresos) == 0:
+                    continue
+
+                balance = float(ingresos) - float(egresos)
+
+                # Categoría con más gasto
+                cat_top = db.query(
+                    Categoria.nombre,
+                    func.sum(Transaccion.monto).label("total")
+                ).join(Transaccion, Transaccion.categoria_id == Categoria.id).filter(
+                    Transaccion.usuario_id == usuario.id,
+                    Transaccion.tipo == TipoTransaccion.EGRESO,
+                    Transaccion.fecha >= fecha_inicio,
+                    Transaccion.fecha <= fecha_fin,
+                    Transaccion.es_padre_cuotas == False,
+                ).group_by(Categoria.nombre).order_by(func.sum(Transaccion.monto).desc()).first()
+
+                # Gastos hormiga: categorías con muchas transacciones de monto bajo
+                hormiga_threshold = 5
+                gastos_hormiga_raw = db.query(
+                    Categoria.nombre,
+                    func.count(Transaccion.id).label("cantidad"),
+                    func.sum(Transaccion.monto).label("total")
+                ).join(Transaccion, Transaccion.categoria_id == Categoria.id).filter(
+                    Transaccion.usuario_id == usuario.id,
+                    Transaccion.tipo == TipoTransaccion.EGRESO,
+                    Transaccion.fecha >= fecha_inicio,
+                    Transaccion.fecha <= fecha_fin,
+                    Transaccion.es_padre_cuotas == False,
+                ).group_by(Categoria.nombre).having(
+                    func.count(Transaccion.id) >= hormiga_threshold
+                ).order_by(func.count(Transaccion.id).desc()).limit(3).all()
+
+                gastos_hormiga = [
+                    {"categoria": r.nombre, "cantidad": r.cantidad, "total": float(r.total)}
+                    for r in gastos_hormiga_raw
+                ] if gastos_hormiga_raw else None
+
+                mensaje = wpp_svc.formatear_resumen_ciclo(
+                    total_ingresos=float(ingresos),
+                    total_egresos=float(egresos),
+                    balance=balance,
+                    categoria_top=cat_top.nombre if cat_top else None,
+                    monto_categoria_top=float(cat_top.total) if cat_top else None,
+                    gastos_hormiga=gastos_hormiga,
+                )
+
+                crear_notificacion(
+                    db=db,
+                    usuario_id=usuario.id,
+                    tipo=TipoNotificacion.RESUMEN_CICLO,
+                    nivel=NivelNotificacion.FINANCIERA_INFORMATIVA,
+                    mensaje=mensaje,
+                    canal_web=False,
+                    canal_whatsapp=True,
+                )
+
+            except Exception:
+                logger.exception("Error generando resumen de ciclo para usuario %s", usuario.id)
+                continue
+
+        logger.info("Job resumen_cierre_ciclo completado")
+
+    except Exception:
+        logger.exception("Error en _job_resumen_cierre_ciclo")
     finally:
         db.close()

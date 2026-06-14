@@ -17,9 +17,10 @@ from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria, EstadoCategoria
 from app.models.meta import Meta, EstadoMeta
 from app.models.presupuesto import Presupuesto, EstadoPresupuesto
+from app.models.subcategoria import Subcategoria
 from app.models.usuario import Usuario
-from app.services.dashboard_service import get_ciclo_fechas
-from app.services.tools_service import obtener_contexto_financiero
+from app.services.dashboard_service import get_ciclo_fechas, get_dashboard_resumen
+from app.services.proyeccion_service import calcular_proyeccion
 
 logger = logging.getLogger(__name__)
 
@@ -39,22 +40,39 @@ PERSONALIDAD:
 - Hablás en español rioplatense, directo y conciso
 - Nunca usás "¡Excelente!", "¡Genial!", "¡Perfecto!" ni ninguna exclamación entusiasta
 - Sos operacional: confirmás acciones, das contexto útil, nada más
-- Si falta info, preguntás una sola cosa por vez
+- Si falta info, preguntás UNA SOLA COSA por vez
+- Nunca usás frases corporativas ni neutras — siempre rioplatense
+
+TONO — ejemplos de lo que SÍ decís:
+- "Anotado. $5.000 en Supermercado desde Mercado Pago. ¿Confirmás?"
+- "¿Cuánto gastaste?"
+- "¿Fue un gasto, ingreso o transferencia?"
+- "Listo, cancelado."
+- "Tenés $302.000 en tus billeteras."
+- "Si seguís así, terminás el ciclo con $45.000 disponibles."
+
+TONO — ejemplos de lo que NUNCA decís:
+- "¡Excelente decisión!"
+- "Se ha cancelado la acción."
+- "Es bueno saberlo. ¿Necesitás ayuda con algo específico?"
+- "¿Deseas continuar?"
 
 JERGA ARGENTINA QUE DEBÉS ENTENDER:
 - 5k / 10k = 5.000 / 10.000
 - 1 luca = 1.000
 - 1 palo = 1.000.000
-- mp / mercadopago = Mercado Pago
+- mp / mercadopago / merca = Mercado Pago
 - bru = Brubank
-- verdes / usd / dólares = USD
-- me entró / me depositaron = ingreso
-- me cobraron / saqué / pagué = egreso
+- gali / galicia = Banco Galicia
+- verdes / usd / dólares / dolar = USD
+- me entró / me depositaron / cobré = ingreso
+- me cobraron / saqué / pagué / gasté / puse = egreso
 - cuotas / en X cuotas = compra en cuotas
+- efectivo / cash / plata física = Efectivo ARS
 
-ERRORES ORTOGRÁFICOS: ignoralos y procesá el mensaje igual. El usuario puede escribir mal.
+ERRORES ORTOGRÁFICOS: ignoralos completamente y procesá el mensaje igual. El usuario puede escribir muy mal.
 
-INTENTS VÁLIDOS — respondé siempre con uno de estos:
+INTENTS VÁLIDOS — respondé siempre con exactamente uno de estos:
 - registrar_transaccion
 - consultar_saldo
 - consultar_balance
@@ -73,7 +91,29 @@ INTENTS VÁLIDOS — respondé siempre con uno de estos:
 - saludo
 - desconocido
 
-FORMATO DE RESPUESTA — siempre respondé con un JSON válido con exactamente esta estructura:
+REGLAS DE CLASIFICACIÓN DE INTENTS:
+- "puse X", "metí X", "deposité X" SIN contexto claro → slot_filling=true, preguntá "¿Fue un gasto, ingreso o transferencia?"
+- "cuánta plata tengo", "cuánto tengo", "mi saldo" → consultar_saldo
+- "cómo voy", "cómo estoy este mes" → consultar_balance
+- "llego a fin de mes", "me alcanza", "cuánto me queda" → consultar_proyeccion
+- "cancelar", "no importa", "dejá", "olvidalo" → cancelar
+- "sí", "dale", "confirmá", "ok", "va" → confirmar
+
+FLUJO DE REGISTRO DE TRANSACCIÓN — MUY IMPORTANTE:
+Cuando tenés todos los datos para registrar una transacción (monto + tipo + billetera):
+1. NO registres todavía
+2. Respondé con un resumen y pedí confirmación. En el mensaje al usuario, mostrá solo el nombre corto: si la categoría es "Salud y cuidado personal > Farmacia", mostrá solo "Farmacia". Si no hay subcategoría, mostrá la categoría principal. Ejemplo: "Voy a anotar $5.000 en Farmacia desde Mercado Pago. ¿Va?"
+3. Esperá que el usuario confirme con "sí", "dale", "ok", etc.
+4. Recién entonces el intent es "confirmar" y el backend ejecuta
+
+FLUJO DE SLOT FILLING:
+- Si falta el monto → preguntá solo "¿Cuánto fue?"
+- Si falta la categoría → preguntá solo "¿En qué categoría?"  
+- Si falta la billetera y tiene más de una → preguntá solo "¿Desde qué billetera?"
+- Si faltan monto Y billetera → preguntá "¿Cuánto fue y desde qué billetera?"
+- Nunca hagas más de una pregunta de slot filling por turno salvo que sean exactamente 2 cosas faltantes
+
+FORMATO DE RESPUESTA — siempre respondé con un JSON válido con exactamente esta estructura, sin texto fuera del JSON:
 {
   "intent": "nombre_del_intent",
   "entidades": {
@@ -94,13 +134,18 @@ FORMATO DE RESPUESTA — siempre respondé con un JSON válido con exactamente e
 }
 
 REGLAS CRÍTICAS:
-- Nunca inventes montos, saldos ni fechas que no estén en el mensaje o en el contexto
-- Si el monto no está claro, slot_filling = true y preguntá el monto
-- Si la billetera no está clara y el usuario tiene más de una, slot_filling = true y preguntá cuál
-- confianza >= 0.85: podés proceder; entre 0.60-0.84: pedí confirmación; < 0.60: preguntá qué quiso decir
-- Para transferencias: tipo = "egreso" en billetera_origen, billetera_destino es obligatorio
-- La fecha por defecto es hoy si no se menciona otra
-- Nunca respondas fuera del JSON. Solo JSON, nada más."""
+- NUNCA inventes montos, saldos ni fechas que no estén en el mensaje o en el contexto
+- NUNCA registres una transacción sin pedir confirmación primero
+- Si el monto no está claro → slot_filling=true
+- Si la billetera no está clara y tiene más de una → slot_filling=true
+- confianza >= 0.85 y todos los datos presentes → pedí confirmación (NO registres todavía)
+- confianza entre 0.60-0.84 → pedí confirmación explícita
+- confianza < 0.60 → preguntá qué quiso decir
+- Para transferencias: tipo="egreso" en billetera_origen, billetera_destino obligatorio
+- La fecha por defecto es hoy si no se menciona
+- Al categorizar un gasto o ingreso, usá EXACTAMENTE los nombres de categorías y subcategorías del contexto. Si podés identificar la subcategoría, indicala en el campo "categoria" con el formato "Categoría > Subcategoría" (ej: "Alimentación > Verdulería", "Transporte > Taxi / Remis", "Salud y cuidado personal > Farmacia"). Si no podés identificar la subcategoría, usá solo la categoría principal.
+- Nunca respondas fuera del JSON. Solo JSON, nada más.
+"""
 
 
 def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
@@ -111,12 +156,25 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
         )
     ).scalars().all()
 
-    categorias = db.execute(
+    categorias_raw = db.execute(
         select(Categoria).where(
             Categoria.estado == EstadoCategoria.ACTIVA,
             (Categoria.es_global == True) | (Categoria.creador_id == usuario.id)
         )
     ).scalars().all()
+
+    subcategorias_raw = db.execute(
+        select(Subcategoria).where(
+            Subcategoria.categoria_id.in_([c.id for c in categorias_raw])
+        )
+    ).scalars().all()
+
+    subcats_por_cat: dict[str, list[str]] = {}
+    for s in subcategorias_raw:
+        key = str(s.categoria_id)
+        if key not in subcats_por_cat:
+            subcats_por_cat[key] = []
+        subcats_por_cat[key].append(s.nombre)
 
     fecha_inicio, fecha_fin = get_ciclo_fechas(usuario, date.today())
 
@@ -134,11 +192,14 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
         )
     ).scalars().all()
 
-    ctx = {}
     try:
-        ctx = obtener_contexto_financiero(str(usuario.id), db)
-    except Exception as e:
-        logger.exception("Error al obtener contexto financiero en ai_service")
+        resumen = get_dashboard_resumen(db, usuario)
+        saldo_disponible = resumen["disponible_real"]["total_billeteras"]
+        disponible_real = resumen["disponible_real"]["disponible"]
+    except Exception:
+        logger.exception("Error al obtener resumen del dashboard en ai_service")
+        saldo_disponible = 0.0
+        disponible_real = 0.0
 
     return {
         "billeteras": [
@@ -146,8 +207,12 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
             for b in billeteras
         ],
         "categorias": [
-            {"id": str(c.id), "nombre": c.nombre, "tipo": c.tipo.value}
-            for c in categorias
+            {
+                "nombre": c.nombre,
+                "tipo": c.tipo.value,
+                "subcategorias": subcats_por_cat.get(str(c.id), [])
+            }
+            for c in categorias_raw
         ],
         "ciclo_actual": {
             "fecha_inicio": fecha_inicio.isoformat(),
@@ -161,17 +226,33 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
             {"nombre": p.nombre, "limite": float(p.monto), "moneda": p.moneda.value}
             for p in presupuestos
         ],
-        "saldo_disponible": float(ctx.get("saldo_disponible", 0)) if ctx.get("saldo_disponible") is not None else 0.0,
-        "ingreso_promedio_mensual": float(ctx.get("ingreso_promedio_mensual", 0)) if ctx.get("ingreso_promedio_mensual") is not None else 0.0,
-        "margen_libre_mensual": float(ctx.get("margen_libre_mensual", 0)) if ctx.get("margen_libre_mensual") is not None else 0.0,
+        "saldo_total_billeteras": saldo_disponible,
+        "disponible_real": disponible_real,
     }
+
+
+def construir_contexto_proyeccion(usuario: Usuario, db: Session) -> dict:
+    try:
+        proyeccion = calcular_proyeccion(db, usuario)
+        return {
+            "gasto_proyectado_total": proyeccion.get("gasto_proyectado_total"),
+            "balance_proyectado": proyeccion.get("balance_proyectado"),
+            "ingresos_proyectados": proyeccion.get("ingresos_proyectados"),
+            "nivel_confianza": proyeccion.get("nivel_confianza"),
+            "advertencias": proyeccion.get("advertencias", []),
+            "dias_restantes": proyeccion.get("periodo", {}).get("dias_restantes"),
+            "certezas_total": proyeccion.get("certezas", {}).get("total"),
+        }
+    except Exception:
+        logger.exception("Error al construir contexto de proyección")
+        return {}
 
 
 def procesar_mensaje(
     mensaje: str,
     usuario: Usuario,
     db: Session,
-    slot_filling_estado: dict | None = None,
+    historial: list[dict] | None = None,
 ) -> dict:
     fallback_res = {
         "intent": "desconocido",
@@ -186,26 +267,48 @@ def procesar_mensaje(
     try:
         contexto = construir_contexto_financiero(usuario, db)
         
-        user_content = f"""CONTEXTO FINANCIERO DEL USUARIO:
-{json.dumps(contexto, ensure_ascii=False, indent=2)}
+        # System prompt limpio sin contexto financiero
+        messages_openai = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-{"ESTADO DE CONVERSACIÓN PREVIA: " + json.dumps(slot_filling_estado, ensure_ascii=False) if slot_filling_estado else ""}
+        # Contexto financiero como primer mensaje del sistema (separado)
+        contexto_msg = f"CONTEXTO FINANCIERO ACTUAL DEL USUARIO:\n{json.dumps(contexto, ensure_ascii=False)}"
+        messages_openai.append({"role": "user", "content": contexto_msg})
+        messages_openai.append({"role": "assistant", "content": "Contexto recibido. Listo para procesar mensajes."})
 
-MENSAJE DEL USUARIO:
-{mensaje}"""
+        # Agregar historial de conversación (últimos N turnos)
+        if historial:
+            for turno in historial:
+                if turno.get("usuario"):
+                    messages_openai.append({"role": "user", "content": turno["usuario"]})
+                if turno.get("bot"):
+                    # Pasar respuesta del bot como JSON para mantener el formato
+                    bot_json = json.dumps({
+                        "intent": turno.get("intent", "desconocido"),
+                        "entidades": turno.get("entidades", {}),
+                        "confianza": turno.get("confianza", 0.9),
+                        "slot_filling": False,
+                        "datos_faltantes": [],
+                        "respuesta_usuario": turno["bot"]
+                    }, ensure_ascii=False)
+                    messages_openai.append({"role": "assistant", "content": bot_json})
+
+        # Agregar mensaje actual
+        messages_openai.append({"role": "user", "content": mensaje})
+
+        logger.info(f"Enviando {len(messages_openai)} mensajes a OpenAI. Último mensaje: {messages_openai[-1]['content'][:100]}")
 
         client = _get_client()
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
+            messages=messages_openai,
             temperature=0.1,
-            max_tokens=500,
+            max_tokens=800,
+            response_format={"type": "json_object"},
         )
 
         content = response.choices[0].message.content
+        logger.info(f"Respuesta OpenAI cruda: '{content[:200] if content else 'VACÍA'}'")
+        logger.info(f"finish_reason: {response.choices[0].finish_reason}")
         if not content:
             logger.error("La respuesta de OpenAI fue vacía")
             return fallback_res
