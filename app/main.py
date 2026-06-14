@@ -403,7 +403,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 
-from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools
+from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas
 
 app.include_router(auth.router)
 app.include_router(onboarding.router)
@@ -420,6 +420,7 @@ app.include_router(suscripciones.router)
 app.include_router(metas.router, prefix="/goals", tags=["goals"])
 app.include_router(notificaciones.router)
 app.include_router(tools.router, prefix="/api/v1/tools")
+app.include_router(grupos_cuotas.router)
 
 # Servir archivos estáticos de media (Ignorado por git)
 os.makedirs("media/fotos", exist_ok=True)

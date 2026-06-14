@@ -75,7 +75,9 @@ def obtener_transacciones(
     
     query = query.options(joinedload(Transaccion.subcategoria))
     
-    return db.execute(query.offset(skip).limit(limit)).scalars().all()
+    transacciones = db.execute(query.offset(skip).limit(limit)).scalars().all()
+    
+    return transacciones
 
 
 def obtener_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID) -> Transaccion:
