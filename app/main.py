@@ -47,6 +47,7 @@ from app.services.notificacion_scheduler_service import (
     _job_notificaciones_suscripciones,
     _job_notificaciones_inactividad,
     _job_entrega_whatsapp_batched,
+    _job_resumen_cierre_ciclo,
 )
 
 # ---------------------------------------------------------------------------
@@ -177,6 +178,10 @@ async def job_entrega_whatsapp_batched():
     _job_entrega_whatsapp_batched(SessionLocal)
 
 
+async def job_resumen_cierre_ciclo():
+    _job_resumen_cierre_ciclo(SessionLocal)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Crear el scheduler y registrar jobs aquí para evitar que se
@@ -271,6 +276,16 @@ async def lifespan(app: FastAPI):
         hour=7,
         minute=15,
         id="notificaciones_inactividad",
+        misfire_grace_time=300,
+        max_instances=1,
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        job_resumen_cierre_ciclo,
+        "cron",
+        hour=7,
+        minute=20,
+        id="resumen_cierre_ciclo",
         misfire_grace_time=300,
         max_instances=1,
         replace_existing=True,
