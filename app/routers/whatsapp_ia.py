@@ -372,12 +372,71 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
         return None
 
 
+def _transcribir_audio(media_url: str, media_content_type: str) -> str | None:
+    """
+    Descarga un audio de Twilio y lo transcribe con Whisper.
+    Retorna el texto transcripto o None si falla.
+    """
+    import httpx
+    import tempfile
+    import os
+    from app.core.config import settings
+    from openai import OpenAI
+
+    try:
+        # Descargar el audio desde Twilio con autenticación básica
+        twilio_sid = settings.TWILIO_ACCOUNT_SID
+        twilio_token = settings.TWILIO_AUTH_TOKEN
+
+        with httpx.Client(timeout=30, follow_redirects=True) as client:
+            response = client.get(
+                media_url,
+                auth=(twilio_sid, twilio_token),
+            )
+            response.raise_for_status()
+            audio_bytes = response.content
+
+        # Determinar extensión según content type
+        ext_map = {
+            "audio/ogg": ".ogg",
+            "audio/mpeg": ".mp3",
+            "audio/mp4": ".mp4",
+            "audio/wav": ".wav",
+            "audio/webm": ".webm",
+            "audio/amr": ".amr",
+        }
+        ext = ext_map.get(media_content_type, ".ogg")
+
+        # Guardar en archivo temporal y transcribir
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+
+        try:
+            client_oai = OpenAI(api_key=settings.OPENAI_API_KEY)
+            with open(tmp_path, "rb") as audio_file:
+                transcripcion = client_oai.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    language="es",
+                )
+            return transcripcion.text
+        finally:
+            os.unlink(tmp_path)
+
+    except Exception:
+        logger.exception("Error al transcribir audio de WhatsApp")
+        return None
+
+
 @router.post("/webhook", response_class=PlainTextResponse)
 async def whatsapp_webhook(
     request: Request,
     Body: str = Form(default=""),
     From: str = Form(default=""),
     NumMedia: str = Form(default="0"),
+    MediaUrl0: str = Form(default=""),
+    MediaContentType0: str = Form(default=""),
     db: Session = Depends(get_db),
 ) -> PlainTextResponse:
     try:
@@ -387,9 +446,23 @@ async def whatsapp_webhook(
             resp.message("No encontramos tu cuenta. Registrate en argentum.app")
             return PlainTextResponse(content=str(resp), media_type="application/xml")
 
-        if not Body.strip() and NumMedia == "0":
+        # Procesar audio si viene un mensaje de voz
+        mensaje_texto = Body.strip()
+        transcripcion = None
+
+        if NumMedia != "0" and MediaUrl0 and MediaContentType0.startswith("audio"):
+            transcripcion = _transcribir_audio(MediaUrl0, MediaContentType0)
+            if transcripcion:
+                mensaje_texto = transcripcion
+                logger.info(f"Audio transcripto: '{transcripcion[:100]}'")
+            else:
+                resp = MessagingResponse()
+                resp.message("No pude escuchar el audio. Mandame el mensaje en texto.")
+                return PlainTextResponse(content=str(resp), media_type="application/xml")
+        
+        if not mensaje_texto:
             resp = MessagingResponse()
-            resp.message("No entendí tu mensaje. Mandame texto.")
+            resp.message("No entendí tu mensaje. Mandame texto o un audio.")
             return PlainTextResponse(content=str(resp), media_type="application/xml")
 
         # Solo para menú numérico de billeteras
@@ -397,7 +470,7 @@ async def whatsapp_webhook(
 
         # Detectar selección numérica de billetera
         es_seleccion, nombre_billetera = _resolver_seleccion_numerica(
-            Body.strip(), usuario.id, db, conv_activa
+            mensaje_texto, usuario.id, db, conv_activa
         )
         if es_seleccion:
             if nombre_billetera is None:
@@ -408,7 +481,7 @@ async def whatsapp_webhook(
                 return PlainTextResponse(content=str(resp), media_type="application/xml")
             
             # Inyectar la billetera seleccionada en el mensaje para que la IA lo procese
-            mensaje_enriquecido = f"{Body.strip()} (billetera: {nombre_billetera})"
+            mensaje_enriquecido = f"{mensaje_texto} (billetera: {nombre_billetera})"
             if conv_activa and conv_activa.slot_filling_estado:
                 estado_previo = dict(conv_activa.slot_filling_estado)
                 estado_previo["billetera_origen"] = nombre_billetera
@@ -428,7 +501,7 @@ async def whatsapp_webhook(
             )
         else:
             resultado_ia = ai_service.procesar_mensaje(
-                mensaje=Body.strip(),
+                mensaje=mensaje_texto,
                 usuario=usuario,
                 db=db,
                 historial=_obtener_historial_reciente(usuario.id, db),
@@ -591,8 +664,9 @@ async def whatsapp_webhook(
 
         nueva_conv = ConversacionWpp(
             usuario_id=usuario.id,
-            mensaje_usuario=Body.strip(),
-            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.AUDIO if transcripcion else TipoMensajeWpp.TEXTO,
+            transcripcion=transcripcion,
             mensaje_bot=resultado_ia["respuesta_usuario"],
             intent_detectado=resultado_ia.get("intent"),
             entidades=resultado_ia.get("entidades"),
