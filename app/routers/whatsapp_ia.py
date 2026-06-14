@@ -228,6 +228,12 @@ def _obtener_historial_reciente(usuario_id: UUID, db: Session, n: int = 6) -> li
             continue
         if c.mensaje_bot.startswith("No pude procesar"):
             continue
+        if c.mensaje_bot.startswith("No pude leer"):
+            continue
+        if c.mensaje_bot.startswith("No entendí"):
+            continue
+        if c.mensaje_bot.startswith("Opción inválida"):
+            continue
         if c.intent_detectado is None:
             continue
         resultado.append({
@@ -294,7 +300,13 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                         return None
 
                     tipo_val = entidades.get("tipo") or "egreso"
-                    billetera_id = _resolver_billetera(entidades.get("billetera_origen"), usuario.id, db)
+                    # Para ingresos usar billetera_destino, para egresos billetera_origen
+                    nombre_billetera = (
+                        entidades.get("billetera_destino")
+                        if tipo_val == "ingreso"
+                        else entidades.get("billetera_origen")
+                    ) or entidades.get("billetera_origen") or entidades.get("billetera_destino")
+                    billetera_id = _resolver_billetera(nombre_billetera, usuario.id, db)
                     if not billetera_id:
                         billetera_id = db.execute(
                             select(Billetera.id).where(
@@ -333,7 +345,7 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                         monto=Decimal(str(monto)),
                         moneda=moneda_val,
                         fecha=fecha_obj,
-                        descripcion=entidades.get("descripcion") or entidades.get("categoria") or "Transacción por WhatsApp",
+                        descripcion=entidades.get("descripcion") or _nombre_corto_categoria(entidades.get("categoria")) or "Transacción por WhatsApp",
                         billetera_id=billetera_id,
                         categoria_id=categoria_id,
                         subcategoria_id=subcategoria_id,
@@ -429,6 +441,96 @@ def _transcribir_audio(media_url: str, media_content_type: str) -> str | None:
         return None
 
 
+def _extraer_transaccion_de_imagen(media_url: str, media_content_type: str, usuario_nombre: str = "") -> str | None:
+    """
+    Descarga una imagen de Twilio y usa GPT-4o Vision para extraer
+    información de un ticket, factura o comprobante.
+    Retorna una descripción en texto de lo que encontró, o None si falla.
+    """
+    import httpx
+    import base64
+    from app.core.config import settings
+    from openai import OpenAI
+
+    try:
+        twilio_sid = settings.TWILIO_ACCOUNT_SID
+        twilio_token = settings.TWILIO_AUTH_TOKEN
+
+        with httpx.Client(timeout=30, follow_redirects=True) as client:
+            response = client.get(
+                media_url,
+                auth=(twilio_sid, twilio_token),
+            )
+            response.raise_for_status()
+            image_bytes = response.content
+
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+
+        client_oai = OpenAI(api_key=settings.OPENAI_API_KEY)
+
+        vision_response = client_oai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Sos un asistente que analiza tickets, facturas y comprobantes de pago argentinos. "
+                        "Extraé la información y respondé SOLO con una descripción en español rioplatense, "
+                        "como si el usuario de la app lo hubiera escrito. "
+                        "\n\nREGLAS IMPORTANTES:"
+                        "\n- Si es un ticket de compra o factura: 'gasté [monto] en [comercio]'"
+                        "\n- Si es un comprobante de transferencia: determiná quién envió y quién recibió"
+                        "\n  * Si el usuario es el DESTINATARIO (aparece en 'Para', 'A', 'Destinatario'): 'me entraron [monto] de [nombre origen]'"
+                        "\n  * Si el usuario es el ORIGEN (aparece en 'De', 'Origen', 'Remitente'): 'transferí [monto] a [nombre destinatario]'"
+                        "\n- Si hay fecha distinta a hoy, mencionala al final: 'el [fecha]'"
+                        "\n- Incluí el monto exacto con el símbolo $ tal como aparece en el comprobante"
+                        "\n- Si no podés identificar el monto, respondé exactamente: NO_IDENTIFICADO"
+                        + (f"\n\nNOMBRE DEL USUARIO DE LA APP: '{usuario_nombre}'. "
+                           "Comparalo con los nombres en el comprobante para determinar si es ingreso o egreso. "
+                           "Variaciones del nombre son válidas (ej: 'Sebastian' = 'Sebastián', apellidos parciales, etc)." 
+                           if usuario_nombre else "")
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{media_content_type};base64,{image_b64}",
+                                "detail": "high"
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": (
+                                "Analizá este comprobante y describí la transacción. "
+                                + (f"IMPORTANTE: el usuario de la app se llama '{usuario_nombre}'. "
+                                   f"Buscá ese nombre (o variaciones sin tilde, apellidos parciales) en el comprobante. "
+                                   f"Si aparece en el campo 'Para' o 'Destinatario', es un INGRESO: respondé 'me entraron [monto] de [origen]'. "
+                                   f"Si aparece en el campo 'De' u 'Origen', es un EGRESO: respondé 'transferí [monto] a [destinatario]'."
+                                   if usuario_nombre else "")
+                            )
+                        }
+                    ]
+                }
+            ],
+            max_tokens=200,
+        )
+
+        resultado = vision_response.choices[0].message.content
+        if not resultado or resultado.strip() == "NO_IDENTIFICADO":
+            return None
+
+        logger.info(f"Imagen analizada: '{resultado[:100]}'")
+        return resultado.strip()
+
+    except Exception:
+        logger.exception("Error al analizar imagen de WhatsApp")
+        return None
+
+
+
 @router.post("/webhook", response_class=PlainTextResponse)
 async def whatsapp_webhook(
     request: Request,
@@ -450,15 +552,27 @@ async def whatsapp_webhook(
         mensaje_texto = Body.strip()
         transcripcion = None
 
-        if NumMedia != "0" and MediaUrl0 and MediaContentType0.startswith("audio"):
-            transcripcion = _transcribir_audio(MediaUrl0, MediaContentType0)
-            if transcripcion:
-                mensaje_texto = transcripcion
-                logger.info(f"Audio transcripto: '{transcripcion[:100]}'")
-            else:
-                resp = MessagingResponse()
-                resp.message("No pude escuchar el audio. Mandame el mensaje en texto.")
-                return PlainTextResponse(content=str(resp), media_type="application/xml")
+        if NumMedia != "0" and MediaUrl0:
+            if MediaContentType0.startswith("audio"):
+                transcripcion = _transcribir_audio(MediaUrl0, MediaContentType0)
+                if transcripcion:
+                    mensaje_texto = transcripcion
+                    logger.info(f"Audio transcripto: '{transcripcion[:100]}'")
+                else:
+                    resp = MessagingResponse()
+                    resp.message("No pude escuchar el audio. Mandame el mensaje en texto.")
+                    return PlainTextResponse(content=str(resp), media_type="application/xml")
+
+            elif MediaContentType0.startswith("image"):
+                nombre_usuario = f"{usuario.nombre or ''} {usuario.apellido or ''}".strip()
+                descripcion_imagen = _extraer_transaccion_de_imagen(MediaUrl0, MediaContentType0, nombre_usuario)
+                if descripcion_imagen:
+                    mensaje_texto = descripcion_imagen
+                    logger.info(f"Imagen analizada: '{descripcion_imagen[:100]}'")
+                else:
+                    resp = MessagingResponse()
+                    resp.message("No pude leer el comprobante. Mandame los datos en texto.")
+                    return PlainTextResponse(content=str(resp), media_type="application/xml")
         
         if not mensaje_texto:
             resp = MessagingResponse()
@@ -553,8 +667,12 @@ async def whatsapp_webhook(
                 entidades = resultado_ia.get("entidades", {})
                 monto = entidades.get("monto")
                 categoria_raw = entidades.get("categoria")
-                billetera_raw = entidades.get("billetera_origen")
                 tipo = entidades.get("tipo", "egreso")
+                billetera_raw = (
+                    entidades.get("billetera_destino")
+                    if tipo == "ingreso"
+                    else entidades.get("billetera_origen")
+                ) or entidades.get("billetera_origen") or entidades.get("billetera_destino")
 
                 if monto is not None:
                     monto_str = _fmt(float(monto))
@@ -574,11 +692,18 @@ async def whatsapp_webhook(
                         ).scalars().first()
                         bill_display = bill.nombre if bill else billetera_raw
 
-                    partes = [f"Voy a anotar {monto_str}"]
-                    if cat_display:
-                        partes.append(f"en {cat_display}")
-                    if bill_display:
-                        partes.append(f"desde {bill_display}")
+                    if tipo == "ingreso":
+                        partes = [f"Voy a registrar un ingreso de {monto_str}"]
+                        if cat_display:
+                            partes.append(f"en {cat_display}")
+                        if bill_display:
+                            partes.append(f"a {bill_display}")
+                    else:
+                        partes = [f"Voy a anotar {monto_str}"]
+                        if cat_display:
+                            partes.append(f"en {cat_display}")
+                        if bill_display:
+                            partes.append(f"desde {bill_display}")
                     partes.append("¿Va?")
 
                     resultado_ia["respuesta_usuario"] = " ".join(partes)
@@ -647,12 +772,20 @@ async def whatsapp_webhook(
                         ).scalars().first()
                         bill_nombre = bill.nombre if bill else None
                     
-                    partes = [f"Listo. {monto_str}"]
-                    if nombre_categoria_display:
-                        partes.append(f"en {nombre_categoria_display}")
-                    if bill_nombre:
-                        partes.append(f"desde {bill_nombre}")
-                    partes.append("— registrado.")
+                    if tx.tipo == TipoTransaccion.INGRESO:
+                        partes = [f"Listo. Ingreso de {monto_str}"]
+                        if nombre_categoria_display:
+                            partes.append(f"en {nombre_categoria_display}")
+                        if bill_nombre:
+                            partes.append(f"a {bill_nombre}")
+                        partes.append("— registrado.")
+                    else:
+                        partes = [f"Listo. {monto_str}"]
+                        if nombre_categoria_display:
+                            partes.append(f"en {nombre_categoria_display}")
+                        if bill_nombre:
+                            partes.append(f"desde {bill_nombre}")
+                        partes.append("— registrado.")
                     
                     resultado_ia["respuesta_usuario"] = " ".join(partes)
             except Exception:
