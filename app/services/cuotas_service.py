@@ -21,17 +21,33 @@ def crear_cuotas(
     Crea las transacciones hijas y los registros de cuotas para un grupo.
     """
     cuotas = []
+    
+    monto_base = round(monto_cuota, 2)
+    total_financiado_real = grupo.total_financiado if grupo else None
+    
+    if total_financiado_real is not None:
+        total_base = monto_base * cantidad_cuotas
+        diferencia = total_financiado_real - total_base
+    else:
+        diferencia = Decimal('0.00')
+
     # Empezamos desde la cuota_inicial hasta la total
     for i in range(cuota_inicial, cantidad_cuotas + 1):
         # La primera cuota que creamos (que es la i) debe tener la fecha del primer_vencimiento
         # El offset es i - cuota_inicial (si i=cuota_inicial, offset=0)
         fecha_cuota = primer_vencimiento + relativedelta(months=i - cuota_inicial)
         
+        # Determinar el monto de esta cuota
+        if i == cantidad_cuotas:
+            monto_actual = monto_base + diferencia
+        else:
+            monto_actual = monto_base
+            
         # 1. Crear la transacción hija (el movimiento de dinero futuro)
         hija = Transaccion(
             usuario_id=usuario_id,
             tipo=transaccion_padre.tipo,
-            monto=monto_cuota,
+            monto=monto_actual,
             moneda=transaccion_padre.moneda,
             fecha=fecha_cuota,
             descripcion=f"{transaccion_padre.descripcion} (Cuota {i}/{cantidad_cuotas})",
@@ -55,7 +71,7 @@ def crear_cuotas(
             grupo_id=grupo.id,
             transaccion_id=hija.id,
             numero_cuota=i,
-            monto_proyectado=monto_cuota,
+            monto_proyectado=monto_actual,
             fecha_vencimiento=fecha_cuota,
             pagada=False
         )
