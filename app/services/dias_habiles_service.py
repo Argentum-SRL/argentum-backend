@@ -104,3 +104,34 @@ async def calcular_proxima_fecha_cobro(dia_nominal: int) -> date:
         return await calcular_fecha_cobro(dia_nominal, 1, anio + 1)
     else:
         return await calcular_fecha_cobro(dia_nominal, mes + 1, anio)
+
+
+def calcular_fecha_cobro_sync(dia_nominal: int, mes: int, anio: int) -> date:
+    """
+    Versión sincrónica de calcular_fecha_cobro.
+    Usa el cache en memoria si ya fue cargado previamente.
+    Si no hay cache para ese año, devuelve la fecha nominal
+    sin ajuste de día hábil (fallback seguro).
+    
+    Esta función existe porque get_ciclo_fechas es sync
+    y no puede llamar funciones async.
+    El cache se carga en el endpoint de preview-fecha-cobro
+    y en el scheduler, por lo que en uso normal
+    el cache estará disponible.
+    """
+    ultimo_dia_mes = calendar.monthrange(anio, mes)[1]
+    dia_real = min(dia_nominal, ultimo_dia_mes)
+    fecha = date(anio, mes, dia_real)
+    
+    # Usar cache si está disponible
+    feriados = _feriados_cache.get(anio, [])
+    
+    intentos = 0
+    while not es_dia_habil(fecha, feriados) and intentos < 7:
+        fecha -= timedelta(days=1)
+        intentos += 1
+        if fecha.year != anio:
+            feriados = _feriados_cache.get(fecha.year, []) + feriados
+    
+    return fecha
+

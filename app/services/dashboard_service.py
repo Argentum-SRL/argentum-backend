@@ -59,25 +59,26 @@ def get_ciclo_fechas(usuario: Usuario, hoy: date) -> tuple[date, date]:
         return inicio, fin
 
     if usuario.ciclo_tipo == CicloTipo.DIA_FIJO:
-        # TODO: aplicar lógica de día hábil (dias_habiles_service)
+        from app.services.dias_habiles_service import calcular_fecha_cobro_sync
         try:
             dia = int(usuario.ciclo_valor)
         except ValueError:
             dia = 1
         
-        last_of_month = (hoy.replace(day=1) + relativedelta(months=1)) - timedelta(days=1)
-        dia_ajustado = min(dia, last_of_month.day)
-        
-        if hoy.day >= dia_ajustado:
-            inicio = hoy.replace(day=dia_ajustado)
+        # Calcular inicio del ciclo actual con ajuste de día hábil
+        if hoy.day >= dia:
+            # El ciclo comenzó este mes
+            inicio = calcular_fecha_cobro_sync(dia, hoy.month, hoy.year)
         else:
+            # El ciclo comenzó el mes anterior
             prev_month = hoy - relativedelta(months=1)
-            last_of_prev = (prev_month.replace(day=1) + relativedelta(months=1)) - timedelta(days=1)
-            inicio = prev_month.replace(day=min(dia, last_of_prev.day))
+            inicio = calcular_fecha_cobro_sync(dia, prev_month.month, prev_month.year)
         
-        proximo_inicio = inicio + relativedelta(months=1)
-        last_of_next = (proximo_inicio.replace(day=1) + relativedelta(months=1)) - timedelta(days=1)
-        fin = proximo_inicio.replace(day=min(dia, last_of_next.day)) - timedelta(days=1)
+        # El ciclo termina el día antes del próximo inicio
+        proximo_mes = inicio + relativedelta(months=1)
+        proximo_inicio = calcular_fecha_cobro_sync(dia, proximo_mes.month, proximo_mes.year)
+        fin = proximo_inicio - timedelta(days=1)
+        
         return inicio, fin
 
     if usuario.ciclo_tipo == CicloTipo.REGLA:
