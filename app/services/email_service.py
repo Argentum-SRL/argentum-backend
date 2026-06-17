@@ -15,6 +15,10 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from app.core.config import settings
+from app.services.email_templates import (
+    template_verificacion_email,
+    template_recupero_contrasena,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,18 +52,38 @@ def _generar_codigo() -> str:
     return f"{random.randint(0, 999999):06d}"
 
 
-def _enviar_email(destinatario: str, asunto: str, cuerpo: str) -> bool:
+def _obtener_nombre_usuario(email: str) -> str:
+    try:
+        from app.core.database import SessionLocal
+        from app.models.usuario import Usuario
+        from sqlalchemy import select
+        with SessionLocal() as db:
+            user = db.execute(select(Usuario).where(Usuario.email == email)).scalar_one_or_none()
+            if user and user.nombre:
+                return user.nombre
+    except Exception as e:
+        logger.warning("No se pudo obtener el nombre del usuario desde la base de datos: %s", e)
+    return "Usuario"
+
+
+def _enviar_email(destinatario: str, asunto: str, cuerpo: str, cuerpo_html: str = None) -> bool:
     if not settings.SMTP_USER or "email de la app" in settings.SMTP_FROM:
         logger.warning("⚠️ SMTP no configurado — email para %s: %s", destinatario, cuerpo)
         logger.info("EMAIL (modo desarrollo) para=%s asunto=%s cuerpo=%s", destinatario, asunto, cuerpo)
         return True
 
     try:
-        msg = MIMEMultipart()
+        if cuerpo_html:
+            msg = MIMEMultipart("alternative")
+            msg.attach(MIMEText(cuerpo, "plain", "utf-8"))
+            msg.attach(MIMEText(cuerpo_html, "html", "utf-8"))
+        else:
+            msg = MIMEMultipart()
+            msg.attach(MIMEText(cuerpo, "plain", "utf-8"))
+
         msg["From"] = settings.SMTP_FROM
         msg["To"] = destinatario
         msg["Subject"] = asunto
-        msg.attach(MIMEText(cuerpo, "plain"))
 
         server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10)
         server.starttls()
@@ -133,7 +157,9 @@ def enviar_email_verificacion(destinatario: str, codigo: str) -> bool:
         f"Este código expira en 15 minutos.\n"
         f"Si no creaste una cuenta en Argentum, ignorá este mensaje."
     )
-    return _enviar_email(destinatario, asunto, cuerpo)
+    nombre = _obtener_nombre_usuario(destinatario)
+    cuerpo_html = template_verificacion_email(nombre=nombre, codigo=codigo_nuevo)
+    return _enviar_email(destinatario, asunto, cuerpo, cuerpo_html)
 
 
 def generar_y_enviar_verificacion_email(destinatario: str) -> str:
@@ -149,7 +175,9 @@ def generar_y_enviar_verificacion_email(destinatario: str) -> str:
         f"Este código expira en 15 minutos.\n"
         f"Si no creaste una cuenta en Argentum, ignorá este mensaje."
     )
-    enviado = _enviar_email(destinatario, asunto, cuerpo)
+    nombre = _obtener_nombre_usuario(destinatario)
+    cuerpo_html = template_verificacion_email(nombre=nombre, codigo=codigo)
+    enviado = _enviar_email(destinatario, asunto, cuerpo, cuerpo_html)
     if not enviado:
         logger.warning(
             "Email de verificación no enviado a %s. La cuenta se creó igual y el código quedó guardado en memoria.",
@@ -204,4 +232,7 @@ def enviar_email_recuperacion(destinatario: str, codigo: str) -> bool:
         f"Este código expira en 15 minutos.\n"
         f"Si no pediste recuperar tu contraseña, ignorá este mensaje."
     )
-    return _enviar_email(destinatario, asunto, cuerpo)
+    nombre = _obtener_nombre_usuario(destinatario)
+    link_recupero = f"{settings.FRONTEND_URL}/auth/recuperar-password?email={destinatario}&codigo={codigo}"
+    cuerpo_html = template_recupero_contrasena(nombre=nombre, link=link_recupero)
+    return _enviar_email(destinatario, asunto, cuerpo, cuerpo_html)
