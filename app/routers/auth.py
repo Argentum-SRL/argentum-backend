@@ -246,6 +246,21 @@ def verificar_recuperacion(body: VerificarRecuperacionRequest, db: Session = Dep
 
     user.password_hash = get_password_hash(body.nueva_password)
     db.commit()
+
+    # Enviar email de notificación de cambio de contraseña
+    try:
+        from app.services.notificacion_email_service import (
+            enviar_email_notificacion,
+            generar_email_cambio_contrasena,
+        )
+        asunto, html, texto = generar_email_cambio_contrasena(
+            usuario_nombre=user.nombre or "Usuario",
+            dispositivo="Recuperación de contraseña"
+        )
+        enviar_email_notificacion(user.email, asunto, html, texto)
+    except Exception as e:
+        logger.error("Error al enviar email de cambio de contraseña en recuperación: %s", e)
+
     return {"detail": "Contraseña actualizada correctamente."}
 
 

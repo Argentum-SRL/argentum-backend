@@ -117,6 +117,20 @@ def actualizar_password(
     usuario.password_configurada = True
     db.commit()
     
+    # Enviar email de notificación de cambio de contraseña
+    try:
+        from app.services.notificacion_email_service import (
+            enviar_email_notificacion,
+            generar_email_cambio_contrasena,
+        )
+        asunto, html, texto = generar_email_cambio_contrasena(
+            usuario_nombre=usuario.nombre or "Usuario",
+            dispositivo="Web browser"
+        )
+        enviar_email_notificacion(usuario.email, asunto, html, texto)
+    except Exception as e:
+        logger.error("Error al enviar email de cambio de contraseña: %s", e)
+    
     return {"confirmacion": "Contraseña actualizada exitosamente"}
 
 def actualizar_telefono(
