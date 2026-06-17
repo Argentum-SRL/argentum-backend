@@ -3,6 +3,11 @@ import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from app.core.config import settings
+from app.services.email_templates import (
+    template_cambio_contrasena,
+    template_nuevo_dispositivo,
+    template_intentos_login,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,54 +51,55 @@ def enviar_email_notificacion(
         return False
 
 
-def _html_base(contenido_inner: str) -> str:
-    return f"""
-    <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px; background: #ffffff;">
-      <h2 style="font-size: 20px; font-weight: 600; color: #0D2045; margin: 0 0 24px;">Argentum</h2>
-      {contenido_inner}
-      <hr style="border: none; border-top: 1px solid #E5E7EB; margin: 32px 0 16px;" />
-      <p style="font-size: 12px; color: #8A95A8; margin: 0;">
-        Este es un mensaje automático de seguridad de Argentum. No lo reenvíes ni compartas su contenido.
-      </p>
-    </div>
-    """
-
-
-def generar_email_cambio_contrasena(usuario_nombre: str) -> tuple[str, str, str]:
-    from datetime import datetime
-    ts = (datetime.utcnow() - __import__('datetime').timedelta(hours=-3)).strftime("%d/%m/%Y a las %H:%M")
+def generar_email_cambio_contrasena(
+    usuario_nombre: str,
+    fecha_hora_argentina: str = None,
+    dispositivo: str = "No especificado"
+) -> tuple[str, str, str]:
+    from datetime import datetime, timedelta
+    if not fecha_hora_argentina:
+        # CORRECCIÓN DEL BUG: Usar + timedelta(hours=-3) para restar 3 horas (GMT-3)
+        fecha_hora_argentina = (datetime.utcnow() + timedelta(hours=-3)).strftime("%d/%m/%Y a las %H:%M")
+    
     asunto = "Argentum — Cambio de contraseña detectado"
-    html = _html_base(f"""
-      <p style="font-size: 16px; color: #0A0D12; margin: 0 0 12px;">Hola {usuario_nombre},</p>
-      <p style="font-size: 14px; color: #0A0D12; margin: 0 0 12px;">
-        Se cambió la contraseña de tu cuenta el <strong>{ts}</strong> (hora Argentina).
-      </p>
-      <p style="font-size: 14px; color: #A32D2D; font-weight: 600; margin: 0;">
-        Si no fuiste vos, contactanos de inmediato respondiendo este email o cambiá tu contraseña de emergencia.
-      </p>
-    """)
+    html = template_cambio_contrasena(
+        nombre=usuario_nombre,
+        fecha_hora_argentina=fecha_hora_argentina,
+        dispositivo=dispositivo
+    )
     texto = (
         f"Hola {usuario_nombre},\n\n"
-        f"Se cambió la contraseña de tu cuenta el {ts} (hora Argentina).\n\n"
-        f"Si no fuiste vos, contactanos de inmediato."
+        f"Se cambió la contraseña de tu cuenta el {fecha_hora_argentina} (hora Argentina).\n\n"
+        f"Si no fuiste vos, contactanos de inmediato respondiendo este email o cambiá tu contraseña de emergencia."
     )
     return asunto, html, texto
 
 
-def generar_email_nuevo_dispositivo(usuario_nombre: str, ip: str = None) -> tuple[str, str, str]:
+def generar_email_nuevo_dispositivo(
+    usuario_nombre: str,
+    ip: str = None,
+    dispositivo: str = "No especificado",
+    ubicacion: str = "No especificada",
+    link_bloqueo: str = None
+) -> tuple[str, str, str]:
     from datetime import datetime, timedelta
     ts = (datetime.utcnow() + timedelta(hours=-3)).strftime("%d/%m/%Y a las %H:%M")
     ip_info = f" desde la IP {ip}" if ip else ""
+    
+    if ip and dispositivo == "No especificado":
+        dispositivo = f"Dispositivo (IP: {ip})"
+        
+    if not link_bloqueo:
+        link_bloqueo = f"{settings.FRONTEND_URL}/auth/recuperar-password"
+        
     asunto = "Argentum — Inicio de sesión desde un nuevo dispositivo"
-    html = _html_base(f"""
-      <p style="font-size: 16px; color: #0A0D12; margin: 0 0 12px;">Hola {usuario_nombre},</p>
-      <p style="font-size: 14px; color: #0A0D12; margin: 0 0 12px;">
-        Se detectó un inicio de sesión nuevo{ip_info} el <strong>{ts}</strong> (hora Argentina).
-      </p>
-      <p style="font-size: 14px; color: #A32D2D; font-weight: 600; margin: 0;">
-        Si no fuiste vos, cambiá tu contraseña de inmediato.
-      </p>
-    """)
+    html = template_nuevo_dispositivo(
+        nombre=usuario_nombre,
+        fecha_hora_argentina=ts,
+        dispositivo=dispositivo,
+        ubicacion=ubicacion,
+        link_bloqueo=link_bloqueo
+    )
     texto = (
         f"Hola {usuario_nombre},\n\n"
         f"Nuevo inicio de sesión{ip_info} el {ts} (hora Argentina).\n\n"
@@ -102,19 +108,28 @@ def generar_email_nuevo_dispositivo(usuario_nombre: str, ip: str = None) -> tupl
     return asunto, html, texto
 
 
-def generar_email_intentos_login(usuario_nombre: str) -> tuple[str, str, str]:
+def generar_email_intentos_login(
+    usuario_nombre: str,
+    cantidad_intentos: int = 5,
+    fecha_hora_argentina: str = None,
+    link_recupero: str = None
+) -> tuple[str, str, str]:
+    from datetime import datetime, timedelta
+    if not fecha_hora_argentina:
+        fecha_hora_argentina = (datetime.utcnow() + timedelta(hours=-3)).strftime("%d/%m/%Y a las %H:%M")
+        
+    if not link_recupero:
+        link_recupero = f"{settings.FRONTEND_URL}/auth/recuperar-password"
+        
     asunto = "Argentum — Múltiples intentos de acceso fallidos"
-    html = _html_base(f"""
-      <p style="font-size: 16px; color: #0A0D12; margin: 0 0 12px;">Hola {usuario_nombre},</p>
-      <p style="font-size: 14px; color: #0A0D12; margin: 0 0 12px;">
-        Detectamos múltiples intentos fallidos de acceso a tu cuenta.
-      </p>
-      <p style="font-size: 14px; color: #A32D2D; font-weight: 600; margin: 0;">
-        Si no fuiste vos, te recomendamos cambiar tu contraseña de inmediato.
-      </p>
-    """)
+    html = template_intentos_login(
+        nombre=usuario_nombre,
+        cantidad_intentos=cantidad_intentos,
+        fecha_hora_argentina=fecha_hora_argentina,
+        link_recupero=link_recupero
+    )
     texto = (
         f"Hola {usuario_nombre},\n\n"
-        f"Detectamos múltiples intentos fallidos de acceso. Si no fuiste vos, cambiá tu contraseña."
+        f"Detectamos múltiples intentos fallidos de acceso a tu cuenta el {fecha_hora_argentina}. Si no fuiste vos, cambiá tu contraseña."
     )
     return asunto, html, texto
