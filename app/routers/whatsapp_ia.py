@@ -12,8 +12,10 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from twilio.twiml.messaging_response import MessagingResponse
+from twilio.request_validator import RequestValidator
 
-from app.core.auth import get_current_user, get_db
+from app.core.config import settings
+from app.core.auth import get_current_admin_user, get_db
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria, EstadoCategoria
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
@@ -541,6 +543,21 @@ async def whatsapp_webhook(
     MediaContentType0: str = Form(default=""),
     db: Session = Depends(get_db),
 ) -> PlainTextResponse:
+    # Validación de firma Twilio (solo si el token está configurado)
+    if settings.TWILIO_AUTH_TOKEN:
+        twilio_signature = request.headers.get("X-Twilio-Signature", "")
+        webhook_url = str(request.url)
+        form_params = {
+            "Body": Body,
+            "From": From,
+            "NumMedia": NumMedia,
+            "MediaUrl0": MediaUrl0,
+            "MediaContentType0": MediaContentType0,
+        }
+        validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
+        if not validator.validate(webhook_url, form_params, twilio_signature):
+            raise HTTPException(status_code=403, detail="Firma Twilio inválida")
+
     try:
         usuario = _buscar_usuario_por_telefono(From, db)
         if not usuario:
@@ -827,7 +844,7 @@ async def whatsapp_webhook(
 def test_ia(
     mensaje: str,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user),
+    current_user: Usuario = Depends(get_current_admin_user),
 ) -> dict:
     return ai_service.procesar_mensaje(
         mensaje=mensaje,
