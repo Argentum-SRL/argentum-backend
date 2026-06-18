@@ -7,7 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import select, or_, func, update
 
-from app.models.usuario import Usuario, EstadoUsuario
+from app.models.usuario import Usuario, EstadoUsuario, AuthProvider
 from app.models.refresh_token import RefreshToken
 from app.services.email_service import enviar_reset_password_email
 from app.core.config import settings
@@ -238,9 +238,54 @@ def obtener_estadisticas(db: Session) -> dict:
     activos = db.scalar(select(func.count(Usuario.id)).where(Usuario.estado == EstadoUsuario.ACTIVO)) or 0
     onboarding_completo = db.scalar(select(func.count(Usuario.id)).where(Usuario.onboarding_completo == True)) or 0
     wpp_vinculados = db.scalar(select(func.count(Usuario.id)).where(Usuario.telefono_verificado == True)) or 0
+
+    # Grupo 1: Actividad reciente
+    inicio_hoy_utc = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    hace_7_dias = datetime.now(timezone.utc) - timedelta(days=7)
+
+    nuevos_hoy = db.scalar(
+        select(func.count(Usuario.id)).where(Usuario.fecha_registro >= inicio_hoy_utc)
+    ) or 0
+    nuevos_7_dias = db.scalar(
+        select(func.count(Usuario.id)).where(Usuario.fecha_registro >= hace_7_dias)
+    ) or 0
+    activos_7_dias = db.scalar(
+        select(func.count(Usuario.id)).where(
+            Usuario.ultimo_acceso.isnot(None),
+            Usuario.ultimo_acceso >= hace_7_dias
+        )
+    ) or 0
+    admins_total = db.scalar(
+        select(func.count(Usuario.id)).where(Usuario.is_admin == True)
+    ) or 0
+
+    # Grupo 2: Desglose por proveedor de registro
+    por_proveedor = {
+        "EMAIL": 0,
+        "GOOGLE": 0,
+        "TELEFONO": 0
+    }
+    stmt_prov = select(Usuario.auth_provider, func.count(Usuario.id)).group_by(Usuario.auth_provider)
+    results = db.execute(stmt_prov).all()
+    for prov, count in results:
+        if prov:
+            if isinstance(prov, AuthProvider):
+                key = prov.name
+            else:
+                try:
+                    key = AuthProvider(prov).name
+                except ValueError:
+                    key = str(prov).upper()
+            por_proveedor[key] = count
+
     return {
         "total": total,
         "activos": activos,
         "onboarding_completo": onboarding_completo,
         "whatsapp_vinculados": wpp_vinculados,
+        "nuevos_hoy": nuevos_hoy,
+        "nuevos_7_dias": nuevos_7_dias,
+        "activos_7_dias": activos_7_dias,
+        "admins_total": admins_total,
+        "por_proveedor": por_proveedor,
     }
