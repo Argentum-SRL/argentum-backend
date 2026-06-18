@@ -140,3 +140,27 @@ class MeResponse(BaseModel):
 
 class OkResponse(BaseModel):
     ok: bool = True
+
+
+class ValidarResetTokenResponse(BaseModel):
+    nombre: str
+
+
+class ConfirmarResetPasswordRequest(BaseModel):
+    token: str
+    nueva_password: str
+
+    @field_validator("nueva_password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        import re
+        if len(v) < 8:
+            raise ValueError("La contraseña debe tener al menos 8 caracteres.")
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("La contraseña debe incluir al menos una letra mayúscula.")
+        if not re.search(r"[a-z]", v):
+            raise ValueError("La contraseña debe incluir al menos una letra minúscula.")
+        if not re.search(r"[0-9]", v):
+            raise ValueError("La contraseña debe incluir al menos un número.")
+        return v
+

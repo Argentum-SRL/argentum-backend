@@ -59,9 +59,15 @@ from app.schemas.auth import (
     VerificarCodigoEmailRequest,
     VerificarCodigoTelefonoRequest,
     VerificarRecuperacionRequest,
+    ValidarResetTokenResponse,
+    ConfirmarResetPasswordRequest,
 )
 from app.schemas.usuario import UsuarioRead
-from app.services.auth_service import verify_google_token
+from app.services.auth_service import (
+    verify_google_token,
+    validar_reset_token,
+    confirmar_reset_password,
+)
 from app.services.email_service import (
     enviar_email_recuperacion,
     generar_codigo_recuperacion,
@@ -122,8 +128,10 @@ def _device_info(request: Request) -> str | None:
 
 
 def _tokens(usuario_id, request: Request, db: Session) -> tuple[str, str]:
+    user = db.execute(select(Usuario).where(Usuario.id == usuario_id)).scalar_one_or_none()
+    is_admin = user.is_admin if user else False
     return (
-        crear_access_token(usuario_id),
+        crear_access_token(usuario_id, is_admin=is_admin),
         crear_refresh_token(usuario_id, db, device_info=_device_info(request)),
     )
 
@@ -262,6 +270,30 @@ def verificar_recuperacion(body: VerificarRecuperacionRequest, db: Session = Dep
         logger.error("Error al enviar email de cambio de contraseña en recuperación: %s", e)
 
     return {"detail": "Contraseña actualizada correctamente."}
+
+
+@router.get("/reset-password/validar", response_model=dict)
+def validar_token(token: str, db: Session = Depends(get_db)):
+    """Verifica si el token de restablecimiento es válido."""
+    nombre = validar_reset_token(db, token)
+    return {"success": True, "data": {"nombre": nombre}}
+
+
+@router.post("/reset-password/confirmar", response_model=AuthResponse)
+def confirmar_token(
+    body: ConfirmarResetPasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """Verifica el token, actualiza la contraseña, revoca las sesiones y emite tokens de acceso."""
+    usuario = confirmar_reset_password(db, body.token, body.nueva_password)
+    access, refresh = _tokens(usuario.id, request, db)
+    return AuthResponse(
+        access_token=access,
+        refresh_token=refresh,
+        usuario=UsuarioRead.model_validate(usuario),
+        requiere_onboarding=_requiere_onboarding(usuario),
+    )
 
 
 # ---------------------------------------------------------------------------

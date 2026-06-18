@@ -3,10 +3,6 @@
 app/services/email_templates.py — Plantillas de email HTML profesionales para Argentum.
 """
 
-from app.core.config import settings
-
-LOGO_URL = f"{settings.BACKEND_URL}/media/argentum-app-icon.png"
-
 
 def _generar_html_base(
     color_header: str,
@@ -42,7 +38,7 @@ def _generar_html_base(
               <table cellpadding="0" cellspacing="0" border="0">
                 <tr>
                   <td style="padding-right: 12px; vertical-align: middle;">
-                    <img src="{LOGO_URL}" width="36" height="36" alt="Argentum" style="display: block; border-radius: 8px;">
+                    <img src="https://res.cloudinary.com/dhma0b3rz/image/upload/v1781813348/argentum-app-icon_tws3qb.png" width="36" height="36" alt="Argentum" style="display: block; border-radius: 8px;">
                   </td>
                   <td style="vertical-align: middle;">
                     <div style="font-size: 18px; font-weight: 600; color: #ffffff; letter-spacing: -0.3px; line-height: 1.2;">Argentum</div>
@@ -81,7 +77,7 @@ def _generar_html_base(
               <table cellpadding="0" cellspacing="0" border="0" width="100%">
                 <tr>
                   <td align="center" style="padding-bottom: 10px;">
-                    <img src="{LOGO_URL}" width="24" height="24" alt="" style="display: inline-block; border-radius: 6px; vertical-align: middle; margin-right: 6px;">
+                    <img src="https://res.cloudinary.com/dhma0b3rz/image/upload/v1781813348/argentum-app-icon_tws3qb.png" width="24" height="24" alt="" style="display: inline-block; border-radius: 6px; vertical-align: middle; margin-right: 6px;">
                     <span style="font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.6); vertical-align: middle;">Argentum</span>
                   </td>
                 </tr>
@@ -302,3 +298,46 @@ def template_intentos_login(nombre: str, cantidad_intentos: int, fecha_hora_arge
         nota_footer_body="Este es un correo de seguridad automático. No puede desactivarse.",
         texto_footer="Este correo es automático e informativo.",
     )
+
+
+def template_reset_password_email(nombre: str, reset_url: str) -> str:
+    """
+    Template 6: Restablecimiento de contraseña por parte de un administrador.
+    """
+    contenido = f"""
+    <p style="font-size: 14px; color: #3a3d42; line-height: 1.6; margin: 0 0 20px 0;">
+      Hola {nombre}, un administrador solicitó el restablecimiento de tu contraseña en Argentum.
+    </p>
+
+    <!-- CTA BUTTON -->
+    <div style="text-align: center; margin-bottom: 12px;">
+      <a href="{reset_url}" style="display: inline-block; background-color: #0D2045; color: #ffffff; font-size: 15px; font-weight: 600; text-decoration: none; padding: 14px 28px; border-radius: 8px;">
+        Restablecer Contraseña
+      </a>
+    </div>
+
+    <!-- LINK ALTERNATIVO -->
+    <p style="font-size: 13px; color: #8A95A8; margin: 0 0 10px 0;">
+      Si el botón no funciona, copiá y pegá este enlace en tu navegador:
+    </p>
+    <p style="font-size: 13px; margin: 0 0 24px 0; word-break: break-all;">
+      <a href="{reset_url}" style="color: #0C447C; text-decoration: underline;">{reset_url}</a>
+    </p>
+
+    <!-- SECURITY NOTE -->
+    <div style="background-color: #FFF8F0; border-left: 3px solid #A8905A; border-radius: 0 6px 6px 0; padding: 12px 16px; font-size: 13px; color: #5F4A2A; line-height: 1.5;">
+      Este link es válido por 1 hora. Si no solicitaste este cambio, ignorá este correo. Tu cuenta sigue segura.
+    </div>
+    """
+    return _generar_html_base(
+        color_header="#0D2045",
+        subtitulo="RESTABLECIMIENTO DE CONTRASEÑA",
+        badge_bg="#FFF3E0",
+        badge_text="#A8905A",
+        badge_label="Acción requerida",
+        titulo="Restablecé tu contraseña.",
+        contenido_html=contenido,
+        nota_footer_body="¿No solicitaste este cambio? Ignorá este correo. Tu contraseña no fue modificada.",
+        texto_footer="Recibís este correo porque se solicitó un restablecimiento de contraseña para tu cuenta.",
+    )
+

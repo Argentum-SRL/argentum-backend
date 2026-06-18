@@ -92,6 +92,34 @@ class Usuario(Base):
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
     ultimo_acceso: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reset_token_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reset_token_expira_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    tokens_revocados_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    @property
+    def is_active(self) -> bool:
+        return self.estado == EstadoUsuario.ACTIVO
+
+    @is_active.setter
+    def is_active(self, value: bool):
+        self.estado = EstadoUsuario.ACTIVO if value else EstadoUsuario.INACTIVO
+
+    @property
+    def onboarding_completado(self) -> bool:
+        return self.onboarding_completo
+
+    @onboarding_completado.setter
+    def onboarding_completado(self, value: bool):
+        self.onboarding_completo = value
+
+    @property
+    def whatsapp_vinculado(self) -> bool:
+        return self.telefono_verificado
+
+    @whatsapp_vinculado.setter
+    def whatsapp_vinculado(self, value: bool):
+        self.telefono_verificado = value
 
     notificaciones = relationship(
         "Notificacion",

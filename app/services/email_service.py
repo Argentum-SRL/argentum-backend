@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.services.email_templates import (
     template_verificacion_email,
     template_recupero_contrasena,
+    template_reset_password_email,
 )
 
 logger = logging.getLogger(__name__)
@@ -236,3 +237,17 @@ def enviar_email_recuperacion(destinatario: str, codigo: str) -> bool:
     link_recupero = f"{settings.FRONTEND_URL}/auth/recuperar-password?email={destinatario}&codigo={codigo}"
     cuerpo_html = template_recupero_contrasena(nombre=nombre, link=link_recupero)
     return _enviar_email(destinatario, asunto, cuerpo, cuerpo_html)
+
+
+def enviar_reset_password_email(email: str, nombre: str, reset_url: str) -> bool:
+    asunto = "Restablecé tu contraseña en Argentum"
+    cuerpo = (
+        f"Hola {nombre},\n\n"
+        f"Un administrador ha solicitado el restablecimiento de tu contraseña en Argentum.\n\n"
+        f"Podés restablecer tu contraseña haciendo clic en el siguiente enlace:\n"
+        f"{reset_url}\n\n"
+        f"Este enlace expira en 1 hora.\n"
+        f"Si vos no solicitaste esto, podés ignorar este correo de forma segura."
+    )
+    cuerpo_html = template_reset_password_email(nombre=nombre, reset_url=reset_url)
+    return _enviar_email(email, asunto, cuerpo, cuerpo_html)
