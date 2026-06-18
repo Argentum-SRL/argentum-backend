@@ -1,9 +1,17 @@
 import logging
 import time
 import httpx
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 from jose import jwt
 from app.core.config import settings
+from sqlalchemy.orm import Session
+from sqlalchemy import select, update
+from datetime import datetime, timezone
+import hashlib
+from app.models.usuario import Usuario
+from app.models.refresh_token import RefreshToken
+from app.core.security import get_password_hash
+
 
 logger = logging.getLogger(__name__)
 
@@ -108,3 +116,131 @@ def verify_google_token(token: str) -> dict:
             return token_data
         except Exception as exc:
             raise HTTPException(status_code=400, detail="No se pudo validar el token de Google") from exc
+
+
+def validar_reset_token(db: Session, token_raw: str) -> str:
+    """
+    Verifica si el token de restablecimiento es válido.
+    Retorna el nombre del usuario si es válido, de lo contrario lanza TOKEN_INVALIDO.
+    """
+    if not token_raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "TOKEN_INVALIDO",
+                    "message": "Este link es inválido o ya expiró.",
+                },
+            },
+        )
+    
+    token_hash = hashlib.sha256(token_raw.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    
+    usuario = db.execute(
+        select(Usuario).where(
+            Usuario.reset_token_hash == token_hash,
+            Usuario.reset_token_expira_at > now
+        )
+    ).scalar_one_or_none()
+    
+    if not usuario:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "TOKEN_INVALIDO",
+                    "message": "Este link es inválido o ya expiró.",
+                },
+            },
+        )
+    
+    return usuario.nombre or "Usuario"
+
+
+def confirmar_reset_password(db: Session, token_raw: str, nueva_password: str) -> Usuario:
+    """
+    Valida el token de restablecimiento, actualiza la contraseña del usuario,
+    invalida el token y revoca todas sus sesiones activas (incluyendo RefreshTokens).
+    """
+    if not token_raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "TOKEN_INVALIDO",
+                    "message": "Este link es inválido o ya expiró.",
+                },
+            },
+        )
+    
+    token_hash = hashlib.sha256(token_raw.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    
+    usuario = db.execute(
+        select(Usuario).where(
+            Usuario.reset_token_hash == token_hash,
+            Usuario.reset_token_expira_at > now
+        )
+    ).scalar_one_or_none()
+    
+    if not usuario:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "TOKEN_INVALIDO",
+                    "message": "Este link es inválido o ya expiró.",
+                },
+            },
+        )
+        
+    # Validar nueva_password: mínimo 8 chars, mayúscula, minúscula, número
+    import re
+    if len(nueva_password) < 8 or not re.search(r"[A-Z]", nueva_password) or not re.search(r"[a-z]", nueva_password) or not re.search(r"[0-9]", nueva_password):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "PASSWORD_INVALIDA",
+                    "message": "La contraseña debe tener al menos 8 caracteres, incluir una mayúscula, una minúscula y un número.",
+                },
+            },
+        )
+        
+    # Cambiar contraseña, invalidar token y revocar todas las sesiones en la misma transacción
+    try:
+        usuario.password_hash = get_password_hash(nueva_password)
+        usuario.password_configurada = True
+        usuario.reset_token_hash = None
+        usuario.reset_token_expira_at = None
+        usuario.tokens_revocados_at = now
+        
+        # Marcar todos los RefreshToken del usuario como revocados
+        db.execute(
+            update(RefreshToken)
+            .where(RefreshToken.usuario_id == usuario.id)
+            .values(revocado=True)
+        )
+        
+        db.commit()
+        return usuario
+    except Exception as e:
+        db.rollback()
+        logger.exception("Error al confirmar el reset de contraseña del usuario %s", usuario.id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "Ocurrió un error al guardar la nueva contraseña. Intentá de nuevo.",
+                },
+            },
+        )
+

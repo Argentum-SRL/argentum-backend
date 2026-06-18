@@ -1,0 +1,246 @@
+from __future__ import annotations
+import secrets
+import hashlib
+from datetime import datetime, timedelta, timezone
+from uuid import UUID
+from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
+from sqlalchemy import select, or_, func, update
+
+from app.models.usuario import Usuario, EstadoUsuario
+from app.models.refresh_token import RefreshToken
+from app.services.email_service import enviar_reset_password_email
+from app.core.config import settings
+
+
+def listar_usuarios(
+    db: Session,
+    page: int = 1,
+    limit: int = 20,
+    search: str | None = None,
+    estado: str | None = None,
+    onboarding: str | None = None,
+    wpp: str | None = None,
+) -> dict:
+    limit = min(limit, 50)
+    offset = (page - 1) * limit
+
+    conditions = []
+
+    # 1. Búsqueda por texto (nombre, email, teléfono)
+    if search:
+        search_term = f"%{search}%"
+        conditions.append(
+            or_(
+                Usuario.nombre.ilike(search_term),
+                Usuario.email.ilike(search_term),
+                Usuario.telefono.ilike(search_term),
+            )
+        )
+
+    # 2. Filtro por estado
+    if estado:
+        if estado == "activo":
+            conditions.append(Usuario.estado == EstadoUsuario.ACTIVO)
+        elif estado == "inactivo":
+            conditions.append(Usuario.estado == EstadoUsuario.INACTIVO)
+        elif estado == "bloqueado":
+            conditions.append(Usuario.estado == EstadoUsuario.PENDIENTE_VERIFICACION)
+
+    # 3. Filtro por onboarding
+    if onboarding:
+        if onboarding == "completo":
+            conditions.append(Usuario.onboarding_completo == True)
+        elif onboarding == "incompleto":
+            conditions.append(Usuario.onboarding_completo == False)
+
+    # 4. Filtro por WhatsApp (telefono_verificado)
+    if wpp:
+        if wpp == "vinculado":
+            conditions.append(Usuario.telefono_verificado == True)
+        elif wpp == "no_vinculado":
+            conditions.append(Usuario.telefono_verificado == False)
+
+    # Construir queries
+    base_query = select(Usuario).where(*conditions)
+    
+    # Contar total
+    total = db.scalar(select(func.count()).select_from(base_query.subquery()))
+
+    # Ejecutar consulta paginada ordenada por fecha de registro descendente
+    stmt = base_query.order_by(Usuario.fecha_registro.desc()).offset(offset).limit(limit)
+    usuarios = db.scalars(stmt).all()
+
+    pages = (total + limit - 1) // limit if total > 0 else 0
+
+    return {
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "pages": pages,
+        "usuarios": usuarios,
+    }
+
+
+def obtener_usuario(db: Session, usuario_id: UUID) -> Usuario:
+    user = db.execute(select(Usuario).where(Usuario.id == usuario_id)).scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "USER_NOT_FOUND",
+                    "message": "No encontramos ese usuario.",
+                },
+            },
+        )
+    return user
+
+
+def cambiar_estado_usuario(
+    db: Session, usuario_id: UUID, is_active: bool, admin_id: UUID
+) -> Usuario:
+    user = obtener_usuario(db, usuario_id)
+
+    if usuario_id == admin_id and not is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "ADMIN_CANNOT_DEACTIVATE_SELF",
+                    "message": "No podés desactivar tu propia cuenta de administrador.",
+                },
+            },
+        )
+
+    user.is_active = is_active
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def enviar_reset_password(db: Session, usuario_id: UUID, frontend_url: str) -> None:
+    user = obtener_usuario(db, usuario_id)
+
+    if not user.email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "USER_HAS_NO_EMAIL",
+                    "message": "Este usuario no tiene email registrado.",
+                },
+            },
+        )
+
+    token_raw = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token_raw.encode("utf-8")).hexdigest()
+
+    user.reset_token_hash = token_hash
+    user.reset_token_expira_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    db.commit()
+
+    base_frontend_url = frontend_url.rstrip("/") if frontend_url else settings.FRONTEND_URL.rstrip("/")
+    reset_url = f"{base_frontend_url}/reset-password?token={token_raw}"
+
+    enviado = enviar_reset_password_email(user.email, user.nombre or "Usuario", reset_url)
+
+    if not enviado:
+        # Rollback el token generado
+        user.reset_token_hash = None
+        user.reset_token_expira_at = None
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "EMAIL_SEND_FAILED",
+                    "message": "No pudimos enviar el email. Intentá de nuevo.",
+                },
+            },
+        )
+
+
+def revocar_sesiones(db: Session, usuario_id: UUID, admin_id: UUID) -> None:
+    user = obtener_usuario(db, usuario_id)
+
+    if usuario_id == admin_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "ADMIN_CANNOT_REVOKE_OWN_SESSIONS",
+                    "message": "Para cerrar tu sesión usá el logout normal.",
+                },
+            },
+        )
+
+    user.tokens_revocados_at = datetime.now(timezone.utc)
+    
+    # Marcar como revocados todos sus refresh tokens
+    db.execute(
+        update(RefreshToken)
+        .where(RefreshToken.usuario_id == usuario_id, RefreshToken.revocado == False)
+        .values(revocado=True)
+    )
+    db.commit()
+
+
+def desconectar_wpp(db: Session, usuario_id: UUID) -> Usuario:
+    user = obtener_usuario(db, usuario_id)
+
+    if not user.telefono_verificado:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "WPP_NOT_CONNECTED",
+                    "message": "Este usuario no tiene WhatsApp vinculado.",
+                },
+            },
+        )
+
+    user.telefono_verificado = False
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def resetear_onboarding(db: Session, usuario_id: UUID) -> Usuario:
+    user = obtener_usuario(db, usuario_id)
+
+    if not user.onboarding_completo:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "ONBOARDING_ALREADY_INCOMPLETE",
+                    "message": "El onboarding de este usuario ya está incompleto.",
+                },
+            },
+        )
+
+    user.onboarding_completo = False
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def obtener_estadisticas(db: Session) -> dict:
+    total = db.scalar(select(func.count(Usuario.id))) or 0
+    activos = db.scalar(select(func.count(Usuario.id)).where(Usuario.estado == EstadoUsuario.ACTIVO)) or 0
+    onboarding_completo = db.scalar(select(func.count(Usuario.id)).where(Usuario.onboarding_completo == True)) or 0
+    wpp_vinculados = db.scalar(select(func.count(Usuario.id)).where(Usuario.telefono_verificado == True)) or 0
+    return {
+        "total": total,
+        "activos": activos,
+        "onboarding_completo": onboarding_completo,
+        "whatsapp_vinculados": wpp_vinculados,
+    }

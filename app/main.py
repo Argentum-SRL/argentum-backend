@@ -430,7 +430,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 
-from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia
+from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin
 
 app.include_router(auth.router)
 app.include_router(onboarding.router)
@@ -449,6 +449,7 @@ app.include_router(notificaciones.router)
 app.include_router(tools.router, prefix="/api/v1/tools")
 app.include_router(grupos_cuotas.router)
 app.include_router(whatsapp_ia.router, prefix="/api")
+app.include_router(admin.router, prefix="/v1", tags=["admin"])
 
 # Servir archivos estáticos de media (Ignorado por git)
 os.makedirs("media/fotos", exist_ok=True)

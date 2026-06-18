@@ -67,13 +67,14 @@ def _refresh_token_matches(secret: str, token_hash: str) -> bool:
 # Access token (JWT firmado)
 # ---------------------------------------------------------------------------
 
-def crear_access_token(usuario_id: UUID | str) -> str:
+def crear_access_token(usuario_id: UUID | str, is_admin: bool = False) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {
         "sub": str(usuario_id),
         "exp": expire,
         "iat": datetime.now(timezone.utc),
         "type": "access",
+        "is_admin": is_admin,
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
@@ -141,6 +142,15 @@ def _buscar_refresh_token(token_plain: str, db: Session) -> RefreshToken:
     ).scalar_one_or_none()
 
     if rt and _refresh_token_matches(secret, rt.token_hash):
+        usuario = db.execute(select(Usuario).where(Usuario.id == rt.usuario_id)).scalar_one_or_none()
+        if usuario and usuario.tokens_revocados_at and rt.fecha_creacion < usuario.tokens_revocados_at:
+            rt.revocado = True
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Sesión revocada. Por favor iniciá sesión nuevamente.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         return rt
 
     raise HTTPException(
@@ -161,8 +171,10 @@ def renovar_tokens(
     db.flush()
 
     usuario_id = rt.usuario_id
+    usuario = db.execute(select(Usuario).where(Usuario.id == usuario_id)).scalar_one_or_none()
+    is_admin = usuario.is_admin if usuario else False
 
-    nuevo_access = crear_access_token(usuario_id)
+    nuevo_access = crear_access_token(usuario_id, is_admin=is_admin)
     nuevo_refresh = crear_refresh_token(usuario_id, db, device_info=device_info or rt.device_info)
 
     return {
@@ -250,7 +262,37 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    if usuario.tokens_revocados_at:
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            iat_timestamp = payload.get("iat")
+            if iat_timestamp:
+                iat_dt = datetime.fromtimestamp(iat_timestamp, tz=timezone.utc)
+                if iat_dt < usuario.tokens_revocados_at:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Sesión revocada. Por favor iniciá sesión nuevamente.",
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
+        except JWTError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token de acceso inválido o expirado",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
     return usuario
+
+
+def get_current_admin_user(
+    current_user: Usuario = Depends(get_current_user),
+) -> Usuario:
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permisos insuficientes: se requiere rol de administrador",
+        )
+    return current_user
 
 
 def get_current_admin(
