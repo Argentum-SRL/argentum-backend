@@ -45,21 +45,16 @@ from app.schemas.auth import (
     CompletarPerfilRequest,
     EnviarCodigoEmailRequest,
     EnviarCodigoRequest,
-    EnviarCodigoWhatsappRequest,
     GoogleLoginRequest,
     LoginRequest,
     LogoutRequest,
-    MeResponse,
-    OkResponse,
     RecuperarPasswordRequest,
     RefreshRequest,
     RegisterRequest,
     TokenResponse,
-    VerificarCodigoRequest,
     VerificarCodigoEmailRequest,
     VerificarCodigoTelefonoRequest,
     VerificarRecuperacionRequest,
-    ValidarResetTokenResponse,
     ConfirmarResetPasswordRequest,
 )
 from app.schemas.usuario import UsuarioRead
@@ -88,34 +83,6 @@ from app.services import usuario_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-
-@router.post("/enviar-codigo-whatsapp", response_model=OkResponse)
-def enviar_codigo_whatsapp(body: EnviarCodigoWhatsappRequest):
-    """Genera OTP de 6 digitos y lo envia por WhatsApp al telefono recibido."""
-    codigo = generar_codigo()
-    guardar_codigo(body.telefono, codigo)
-
-    mensaje = (
-        "*Argentum*\n"
-        f"Tu codigo de verificacion es: *{codigo}*\n"
-        "Expira en 10 minutos.\n"
-        "Si no lo pediste, ignora este mensaje."
-    )
-
-    if not enviar_whatsapp(body.telefono, mensaje):
-        raise HTTPException(status_code=500, detail="No se pudo enviar el codigo por WhatsApp.")
-
-    return OkResponse(ok=True)
-
-
-@router.post("/verificar-codigo", response_model=OkResponse)
-def verificar_codigo_whatsapp(body: VerificarCodigoRequest):
-    """Verifica OTP de WhatsApp guardado previamente."""
-    ok, error = verificar_codigo(body.telefono, body.codigo)
-    if not ok:
-        raise HTTPException(status_code=400, detail=error or "Codigo invalido o expirado.")
-    return OkResponse(ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -691,20 +658,4 @@ def logout_all(
     return {"detail": f"Sesión cerrada en {count} dispositivo(s)."}
 
 
-@router.get("/me", response_model=MeResponse)
-def me(current_user: Usuario = Depends(get_current_user)):
-    """Devuelve el perfil del usuario autenticado."""
-    return MeResponse(usuario=UsuarioRead.model_validate(current_user))
 
-
-@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
-def eliminar_cuenta(
-    db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user),
-):
-    """
-    Elimina permanentemente la cuenta del usuario y todos sus datos relacionados.
-    Utiliza el servicio centralizado para asegurar una limpieza completa.
-    """
-    usuario_service.eliminar_usuario(db, current_user)
-    return None

@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     # URLs
     FRONTEND_URL: str = "http://localhost:5173"
     BACKEND_URL: str = "http://localhost:8000"
+    TWILIO_WEBHOOK_URL: str = ""
 
     # SMTP / Email
     SMTP_HOST: str = "smtp.gmail.com"

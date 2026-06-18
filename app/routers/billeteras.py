@@ -132,7 +132,7 @@ def update_billetera(
         if body.estado is not None:
             billetera.estado = body.estado
     else:
-        for attr in ('nombre', 'moneda', 'saldo_actual', 'saldo_inicial', 'es_principal', 'es_efectivo', 'estado'):
+        for attr in ('nombre', 'moneda', 'es_principal', 'es_efectivo', 'estado'):
             val = getattr(body, attr, None)
             if val is not None:
                 setattr(billetera, attr, val)

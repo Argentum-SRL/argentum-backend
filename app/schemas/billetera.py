@@ -28,8 +28,6 @@ class BilleteraCreate(BilleteraBase):
 class BilleteraUpdate(BaseModel):
     nombre: str | None = None
     moneda: Moneda | None = None
-    saldo_actual: Decimal | None = None
-    saldo_inicial: Decimal | None = None
     es_principal: bool | None = None
     es_efectivo: bool | None = None
     estado: EstadoBilletera | None = None
