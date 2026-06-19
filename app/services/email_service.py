@@ -127,11 +127,11 @@ def verificar_codigo_email(email: str, codigo: str) -> tuple[bool, str | None]:
 
     entrada = _verificacion_cache.get(email)
     if not entrada:
-        return False, "El código expiró o no existe. Pedí uno nuevo."
+        return False, "El código ya expiró. Pedí uno nuevo."
 
     if time.time() > entrada.expiracion:
         del _verificacion_cache[email]
-        return False, "El código expiró. Pedí uno nuevo."
+        return False, "El código ya expiró. Pedí uno nuevo."
 
     if entrada.codigo != codigo:
         entrada.intentos_fallidos += 1
@@ -149,7 +149,7 @@ def verificar_codigo_email(email: str, codigo: str) -> tuple[bool, str | None]:
 def enviar_email_verificacion(destinatario: str, codigo: str) -> bool:
     codigo_nuevo = _generar_codigo() if not codigo else codigo
     guardar_codigo_verificacion_email(destinatario, codigo_nuevo)
-    asunto = "Verificá tu cuenta en Argentum"
+    asunto = "Verificá tu email para entrar a Argentum"
     link = f"{settings.BACKEND_URL}/auth/email/verificar-link?email={destinatario}&codigo={codigo_nuevo}"
     cuerpo = (
         f"Tu código de verificación es: {codigo_nuevo}\n\n"
@@ -167,7 +167,7 @@ def generar_y_enviar_verificacion_email(destinatario: str) -> str:
     """Genera código, lo guarda y lo envía. Devuelve el código (para logs en dev)."""
     codigo = _generar_codigo()
     guardar_codigo_verificacion_email(destinatario, codigo)
-    asunto = "Verificá tu cuenta en Argentum"
+    asunto = "Verificá tu email para entrar a Argentum"
     link = f"{settings.BACKEND_URL}/auth/email/verificar-link?email={destinatario}&codigo={codigo}"
     cuerpo = (
         f"Tu código de verificación es: {codigo}\n\n"

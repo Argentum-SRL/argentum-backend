@@ -91,7 +91,7 @@ def obtener_usuario(db: Session, usuario_id: UUID) -> Usuario:
                 "success": False,
                 "error": {
                     "code": "USER_NOT_FOUND",
-                    "message": "No encontramos ese usuario.",
+                    "message": "No encontramos al usuario.",
                 },
             },
         )
@@ -110,7 +110,7 @@ def cambiar_estado_usuario(
                 "success": False,
                 "error": {
                     "code": "ADMIN_CANNOT_DEACTIVATE_SELF",
-                    "message": "No podés desactivar tu propia cuenta de administrador.",
+                    "message": "No podés suspender tu propia cuenta.",
                 },
             },
         )

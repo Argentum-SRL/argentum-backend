@@ -68,7 +68,7 @@ def get_billetera(
     billetera = db.execute(stmt).scalars().one_or_none()
     
     if not billetera:
-        raise HTTPException(status_code=404, detail="Billetera no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
     
     # Verificamos transacciones y transferencias por separado para mayor seguridad
     has_tx = db.query(exists().where(Transaccion.billetera_id == billetera_id)).scalar()
@@ -118,7 +118,7 @@ def update_billetera(
     stmt = select(Billetera).where(Billetera.id == billetera_id, Billetera.usuario_id == current_user.id)
     billetera = db.execute(stmt).scalars().one_or_none()
     if not billetera:
-        raise HTTPException(status_code=404, detail="Billetera no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
 
     if body.es_principal:
         db.execute(
@@ -151,7 +151,7 @@ def delete_billetera(
     stmt = select(Billetera).where(Billetera.id == billetera_id, Billetera.usuario_id == current_user.id)
     billetera = db.execute(stmt).scalars().one_or_none()
     if not billetera:
-        raise HTTPException(status_code=404, detail="Billetera no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
 
     if billetera.es_efectivo:
         raise HTTPException(status_code=400, detail="Las billeteras de efectivo (ARS/USD) no pueden eliminarse")
@@ -225,7 +225,7 @@ def delete_billetera(
     res = db.execute(delete(Billetera).where(Billetera.id == billetera_id, Billetera.usuario_id == current_user.id))
     db.commit()
     if res.rowcount == 0:
-        raise HTTPException(status_code=404, detail="Billetera no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
     return
 
 
@@ -238,7 +238,7 @@ def archivar_billetera(
     stmt = select(Billetera).where(Billetera.id == billetera_id, Billetera.usuario_id == current_user.id)
     billetera = db.execute(stmt).scalars().one_or_none()
     if not billetera:
-        raise HTTPException(status_code=404, detail="Billetera no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
     billetera.estado = EstadoBilletera.ARCHIVADA
     db.commit()
     db.refresh(billetera)
@@ -254,7 +254,7 @@ def desarchivar_billetera(
     stmt = select(Billetera).where(Billetera.id == billetera_id, Billetera.usuario_id == current_user.id)
     billetera = db.execute(stmt).scalars().one_or_none()
     if not billetera:
-        raise HTTPException(status_code=404, detail="Billetera no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
     billetera.estado = EstadoBilletera.ACTIVA
     db.commit()
     db.refresh(billetera)

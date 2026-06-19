@@ -89,7 +89,7 @@ def obtener_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID) -> 
     ).scalar_one_or_none()
     
     if not transaccion:
-        raise HTTPException(status_code=404, detail="Transacción no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa transacción.")
     return transaccion
 
 
@@ -117,12 +117,12 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, co
     ).scalar_one_or_none()
 
     if not billetera:
-        raise HTTPException(status_code=404, detail="Billetera no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
     
     # 2. Manejo de Cuotas
     if data.es_padre_cuotas:
         if not data.info_cuotas:
-            raise HTTPException(status_code=400, detail="Debe proporcionar info_cuotas si es padre de cuotas")
+            raise HTTPException(status_code=400, detail="Para registrar una compra en cuotas, completá los datos de las cuotas.")
         
         # Crear transaccion padre (no impacta saldo)
         nueva_transaccion = Transaccion(
@@ -359,7 +359,7 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
         if _afecta_saldo(transaccion):
             billetera_nueva = db.get(Billetera, transaccion.billetera_id)
             if not billetera_nueva or billetera_nueva.usuario_id != usuario_id:
-                raise HTTPException(status_code=404, detail="Billetera no encontrada")
+                raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
 
             if transaccion.tipo == TipoTransaccion.INGRESO:
                 billetera_nueva.saldo_actual += transaccion.monto
@@ -486,7 +486,7 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
     if transaccion.fecha <= hoy and transaccion.metodo_pago != MetodoPago.CREDITO:
         billetera = db.get(Billetera, transaccion.billetera_id)
         if not billetera:
-            raise HTTPException(status_code=404, detail="Billetera no encontrada")
+            raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
             
         if transaccion.tipo == TipoTransaccion.INGRESO:
             billetera.saldo_actual += transaccion.monto

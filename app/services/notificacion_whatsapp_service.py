@@ -19,53 +19,43 @@ def enviar_whatsapp_notificacion(numero_telefono: str, mensaje: str) -> bool:
 
 
 def formatear_cuota_vence(descripcion: str, monto: float, fecha_str: str, dias: int) -> str:
-    dias_txt = "mañana" if dias == 1 else f"en {dias} días"
-    return (
-        f"📅 *Cuota próxima*\n\n"
-        f"*{descripcion}*\n"
-        f"{_fmt(monto)} — vence {dias_txt} ({fecha_str})"
-    )
+    return f"Tu cuota de *{descripcion}* vence el *{fecha_str}*. Acordate de tener saldo disponible."
 
 def formatear_presupuesto_limite(categoria: str, porcentaje: int, usado: float, limite: float) -> str:
     return (
-        f"⚠️ *Presupuesto al {porcentaje}%*\n\n"
+        f"*Presupuesto al {porcentaje}%*\n\n"
         f"{categoria}: usaste {_fmt(usado)} de {_fmt(limite)}.\n"
         f"Te queda {_fmt(limite - usado)}."
     )
 
 def formatear_presupuesto_agotado(categoria: str, usado: float, limite: float) -> str:
-    excedido = max(0, usado - limite)
-    return (
-        f"🔴 *Presupuesto agotado — {categoria}*\n\n"
-        f"Te pasaste por {_fmt(excedido)}.\n"
-        f"Llevás gastado {_fmt(usado)} de {_fmt(limite)}."
-    )
+    return f"Superaste tu presupuesto de *{categoria}*. Llevás {_fmt(usado)} de {_fmt(limite)}."
 
 def formatear_suscripcion_proxima(nombre: str, monto: float, dias: int) -> str:
     dias_txt = "mañana" if dias == 1 else f"en {dias} días"
     return (
-        f"💳 *{nombre}* se cobra {dias_txt}\n"
+        f"*{nombre}* se cobra {dias_txt}\n"
         f"{_fmt(monto)}"
     )
 
 def formatear_suscripcion_hoy(nombre: str, monto: float) -> str:
     return (
-        f"💳 Hoy se cobra *{nombre}*\n"
+        f"Hoy se cobra *{nombre}*\n"
         f"{_fmt(monto)}"
     )
 
-def formatear_saldo_cero(billetera: str) -> str:
-    return f"⚠️ Tu billetera *{billetera}* llegó a saldo cero."
+def formatear_saldo_cero(billetera: str, monto: float = 0.0) -> str:
+    return f"Tu billetera *{billetera}* tiene solo {_fmt(monto)} disponible."
 
 def formatear_meta_alcanzada(nombre: str, monto: float) -> str:
-    return f"🎯 Llegaste a tu meta *{nombre}* de {_fmt(monto)}."
+    return f"Llegaste a tu meta *{nombre}* de {_fmt(monto)}."
 
 def formatear_inactividad(dias: int) -> str:
-    return f"👋 Hace {dias} días que no registrás movimientos. ¿Todo bien?"
+    return f"Hace {dias} días que no registrás movimientos. ¿Todo bien?"
 
 def formatear_resumen_diario(mensajes: list[str]) -> str:
     items = "\n".join(f"• {m}" for m in mensajes)
-    return f"🔔 *Argentum — resumen de hoy*\n\n{items}"
+    return f"*Argentum — resumen de hoy*\n\n{items}"
 
 def formatear_resumen_ciclo(
     total_ingresos: float,
@@ -77,7 +67,7 @@ def formatear_resumen_ciclo(
 ) -> str:
     signo = "+" if balance >= 0 else ""
     lineas = [
-        f"📊 *Cerraste el ciclo*\n",
+        f"*Cerraste el ciclo*\n",
         f"Ingresos: {_fmt(total_ingresos)}",
         f"Egresos: {_fmt(total_egresos)}",
         f"Balance: {signo}{_fmt(balance)}",

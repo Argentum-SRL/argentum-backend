@@ -130,7 +130,7 @@ def validar_reset_token(db: Session, token_raw: str) -> str:
                 "success": False,
                 "error": {
                     "code": "TOKEN_INVALIDO",
-                    "message": "Este link es inválido o ya expiró.",
+                    "message": "El enlace para cambiar tu contraseña expiró. Podés pedir uno nuevo desde el inicio de sesión.",
                 },
             },
         )
@@ -152,7 +152,7 @@ def validar_reset_token(db: Session, token_raw: str) -> str:
                 "success": False,
                 "error": {
                     "code": "TOKEN_INVALIDO",
-                    "message": "Este link es inválido o ya expiró.",
+                    "message": "El enlace para cambiar tu contraseña expiró. Podés pedir uno nuevo desde el inicio de sesión.",
                 },
             },
         )
@@ -172,7 +172,7 @@ def confirmar_reset_password(db: Session, token_raw: str, nueva_password: str) -
                 "success": False,
                 "error": {
                     "code": "TOKEN_INVALIDO",
-                    "message": "Este link es inválido o ya expiró.",
+                    "message": "El enlace para cambiar tu contraseña expiró. Podés pedir uno nuevo desde el inicio de sesión.",
                 },
             },
         )
@@ -194,7 +194,7 @@ def confirmar_reset_password(db: Session, token_raw: str, nueva_password: str) -
                 "success": False,
                 "error": {
                     "code": "TOKEN_INVALIDO",
-                    "message": "Este link es inválido o ya expiró.",
+                    "message": "El enlace para cambiar tu contraseña expiró. Podés pedir uno nuevo desde el inicio de sesión.",
                 },
             },
         )

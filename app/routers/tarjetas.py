@@ -102,7 +102,7 @@ def get_resumen_tarjeta(
     ).first()
     
     if not tarjeta:
-        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
 
     return tarjeta_service.calcular_resumen_actual(db, tarjeta)
 

@@ -90,7 +90,7 @@ def cancelar_grupo(db: Session, grupo_id: any, usuario_id: any) -> GrupoCuotas:
     ).scalar_one_or_none()
 
     if not grupo:
-        raise HTTPException(status_code=404, detail="Grupo de cuotas no encontrado")
+        raise HTTPException(status_code=404, detail="No encontramos ese grupo de cuotas.")
 
     # 2. Si el grupo ya está COMPLETADO o CANCELADO, fallar con 400
     if grupo.estado == EstadoGrupoCuotas.CANCELADO:
@@ -147,7 +147,7 @@ def prepagar_grupo(
     ).scalar_one_or_none()
 
     if not grupo:
-        raise HTTPException(status_code=404, detail="Grupo de cuotas no encontrado")
+        raise HTTPException(status_code=404, detail="No encontramos ese grupo de cuotas.")
 
     # 2. Si grupo.estado != EstadoGrupoCuotas.ACTIVO, raise HTTPException 400
     if grupo.estado != EstadoGrupoCuotas.ACTIVO:

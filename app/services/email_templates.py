@@ -128,9 +128,9 @@ def template_verificacion_email(nombre: str, codigo: str) -> str:
         badge_bg="#E6F1FB",
         badge_text="#0C447C",
         badge_label="Verificación requerida",
-        titulo="Verificá tu dirección de correo.",
+        titulo="Verificá tu email para entrar a Argentum",
         contenido_html=contenido,
-        nota_footer_body="¿No solicitaste este código? Ignorá este correo. Tu cuenta sigue segura.",
+        nota_footer_body="Si no fuiste vos, podés ignorar este email. Tu cuenta está segura.",
         texto_footer="Recibís este correo porque tu cuenta solicitó un código de verificación.",
     )
 
@@ -141,16 +141,16 @@ def template_recupero_contrasena(nombre: str, link: str) -> str:
     """
     contenido = f"""
     <p style="font-size: 14px; color: #3a3d42; line-height: 1.6; margin: 0 0 16px 0;">
-      Hola {nombre}, recibimos un pedido para restablecer la contraseña de tu cuenta. Si fuiste vos, hacé clic en el botón de abajo.
+      Hacé clic en el botón para crear una contraseña nueva.
     </p>
     <p style="font-size: 14px; color: #3a3d42; line-height: 1.6; margin: 0 0 24px 0;">
-      Si no solicitaste este cambio, ignorá este correo. Tu cuenta sigue segura.
+      Si no fuiste vos, podés ignorar este email. Tu cuenta está segura.
     </p>
 
     <!-- CTA BUTTON -->
     <div style="text-align: center; margin-bottom: 12px;">
       <a href="{link}" style="display: inline-block; background-color: #0D2045; color: #ffffff; font-size: 14px; font-weight: 600; text-decoration: none; padding: 13px 28px; border-radius: 8px;">
-        Restablecer contraseña
+        Cambiar mi contraseña
       </a>
     </div>
     <div style="text-align: center; font-size: 13px; color: #8A95A8; margin-bottom: 24px;">
@@ -159,7 +159,7 @@ def template_recupero_contrasena(nombre: str, link: str) -> str:
 
     <!-- SECURITY NOTE -->
     <div style="background-color: #FFF8F0; border-left: 3px solid #A8905A; border-radius: 0 6px 6px 0; padding: 12px 16px; font-size: 13px; color: #5F4A2A; line-height: 1.5;">
-      Si no pediste restablecer tu contraseña, no es necesario que hagas nada. Este enlace expira automáticamente.
+      Si no fuiste vos, podés ignorar este email. Tu cuenta está segura.
     </div>
     """
     return _generar_html_base(
@@ -168,9 +168,9 @@ def template_recupero_contrasena(nombre: str, link: str) -> str:
         badge_bg="#E6F1FB",
         badge_text="#0C447C",
         badge_label="Acción solicitada",
-        titulo="Recuperá el acceso a tu cuenta.",
+        titulo="Cambiá tu contraseña de Argentum",
         contenido_html=contenido,
-        nota_footer_body="Recibís este correo porque tu cuenta solicitó un restablecimiento de contraseña.",
+        nota_footer_body="Si no fuiste vos, podés ignorar este email. Tu cuenta está segura.",
         texto_footer="Este es un mensaje automático de seguridad de Argentum.",
     )
 
@@ -279,7 +279,7 @@ def template_intentos_login(nombre: str, cantidad_intentos: int, fecha_hora_arge
     <!-- CTA BUTTON NAVY -->
     <div style="text-align: center; margin-bottom: 24px;">
       <a href="{link_recupero}" style="display: inline-block; background-color: #0D2045; color: #ffffff; font-size: 14px; font-weight: 600; text-decoration: none; padding: 13px 28px; border-radius: 8px;">
-        Restablecer contraseña
+        Cambiar mi contraseña
       </a>
     </div>
 
@@ -312,7 +312,7 @@ def template_reset_password_email(nombre: str, reset_url: str) -> str:
     <!-- CTA BUTTON -->
     <div style="text-align: center; margin-bottom: 12px;">
       <a href="{reset_url}" style="display: inline-block; background-color: #0D2045; color: #ffffff; font-size: 15px; font-weight: 600; text-decoration: none; padding: 14px 28px; border-radius: 8px;">
-        Restablecer Contraseña
+        Cambiar mi contraseña
       </a>
     </div>
 
@@ -326,18 +326,18 @@ def template_reset_password_email(nombre: str, reset_url: str) -> str:
 
     <!-- SECURITY NOTE -->
     <div style="background-color: #FFF8F0; border-left: 3px solid #A8905A; border-radius: 0 6px 6px 0; padding: 12px 16px; font-size: 13px; color: #5F4A2A; line-height: 1.5;">
-      Este link es válido por 1 hora. Si no solicitaste este cambio, ignorá este correo. Tu cuenta sigue segura.
+      Este link es válido por 1 hora. Si no fuiste vos, podés ignorar este email. Tu cuenta está segura.
     </div>
     """
     return _generar_html_base(
         color_header="#0D2045",
-        subtitulo="RESTABLECIMIENTO DE CONTRASEÑA",
+        subtitulo="Alguien pidió cambiar tu contraseña de Argentum",
         badge_bg="#FFF3E0",
         badge_text="#A8905A",
         badge_label="Acción requerida",
-        titulo="Restablecé tu contraseña.",
+        titulo="Cambiá tu contraseña de Argentum",
         contenido_html=contenido,
-        nota_footer_body="¿No solicitaste este cambio? Ignorá este correo. Tu contraseña no fue modificada.",
+        nota_footer_body="Si no fuiste vos, podés ignorar este email. Tu cuenta está segura.",
         texto_footer="Recibís este correo porque se solicitó un restablecimiento de contraseña para tu cuenta.",
     )
 

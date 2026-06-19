@@ -179,7 +179,7 @@ def obtener_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto:
     )
     presupuesto = db.execute(query).scalar_one_or_none()
     if not presupuesto:
-        raise HTTPException(status_code=404, detail="Presupuesto no encontrado")
+        raise HTTPException(status_code=404, detail="No encontramos ese presupuesto.")
     return presupuesto
 
 def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: PresupuestoUpdate) -> Presupuesto:

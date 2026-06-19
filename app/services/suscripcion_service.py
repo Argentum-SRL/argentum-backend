@@ -147,7 +147,7 @@ def obtener_suscripciones(db: Session, usuario_id: UUID, estado: str | None = No
 def obtener_suscripcion_detalle(db: Session, usuario_id: UUID, suscripcion_id: UUID) -> SuscripcionResponse:
     suscripcion = db.query(Suscripcion).filter(Suscripcion.id == suscripcion_id, Suscripcion.usuario_id == usuario_id).first()
     if not suscripcion:
-        raise HTTPException(status_code=404, detail="Suscripción no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa suscripción.")
     
     precio = obtener_precio_vigente(db, suscripcion.id)
     costo_mensual = calcular_costo_mensual(suscripcion.frecuencia.value, precio.monto) if precio else None
@@ -162,7 +162,7 @@ def obtener_suscripcion_detalle(db: Session, usuario_id: UUID, suscripcion_id: U
 def actualizar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID, data: SuscripcionUpdate) -> Suscripcion:
     suscripcion = db.query(Suscripcion).filter(Suscripcion.id == suscripcion_id, Suscripcion.usuario_id == usuario_id).first()
     if not suscripcion:
-        raise HTTPException(status_code=404, detail="Suscripción no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa suscripción.")
 
     update_data = data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
@@ -180,7 +180,7 @@ def actualizar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID, 
 def actualizar_precio(db: Session, usuario_id: UUID, suscripcion_id: UUID, data: ActualizarPrecioRequest) -> HistorialSuscripcion:
     suscripcion = db.query(Suscripcion).filter(Suscripcion.id == suscripcion_id, Suscripcion.usuario_id == usuario_id).first()
     if not suscripcion:
-        raise HTTPException(status_code=404, detail="Suscripción no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa suscripción.")
 
     nuevo_precio = HistorialSuscripcion(
         suscripcion_id=suscripcion_id,
@@ -196,7 +196,7 @@ def actualizar_precio(db: Session, usuario_id: UUID, suscripcion_id: UUID, data:
 def cambiar_estado(db: Session, usuario_id: UUID, suscripcion_id: UUID, nuevo_estado: EstadoSuscripcion) -> Suscripcion:
     suscripcion = db.query(Suscripcion).filter(Suscripcion.id == suscripcion_id, Suscripcion.usuario_id == usuario_id).first()
     if not suscripcion:
-        raise HTTPException(status_code=404, detail="Suscripción no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa suscripción.")
     
     if suscripcion.estado == EstadoSuscripcion.CANCELADA and nuevo_estado == EstadoSuscripcion.ACTIVA:
         raise HTTPException(status_code=400, detail="No se puede reactivar una suscripción cancelada. Creá una nueva.")
@@ -221,7 +221,7 @@ def eliminar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID) ->
     ).first()
 
     if not suscripcion:
-        raise ValueError("Suscripción no encontrada")
+        raise ValueError("No encontramos esa suscripción.")
 
     # Cancelar primero si no está ya cancelada (operación atómica)
     if suscripcion.estado != EstadoSuscripcion.CANCELADA:

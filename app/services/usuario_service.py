@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 def obtener_usuario_me(db: Session, usuario_id: UUID) -> Usuario:
     usuario = db.execute(select(Usuario).where(Usuario.id == usuario_id)).scalar_one_or_none()
     if not usuario:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        raise HTTPException(status_code=404, detail="No encontramos al usuario.")
     return usuario
 
 def actualizar_datos_personales(
@@ -74,11 +74,11 @@ def actualizar_email(
         )
     
     if not usuario.password_hash or not verify_password(datos.password_actual, usuario.password_hash):
-        raise HTTPException(status_code=400, detail="Contraseña actual incorrecta")
+        raise HTTPException(status_code=400, detail="La contraseña actual no es correcta.")
     
     result = db.execute(select(Usuario).where(Usuario.email == datos.email_nuevo))
     if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="El email ya está en uso")
+        raise HTTPException(status_code=400, detail="Ese email ya está siendo usado por otra cuenta.")
     
     usuario.email = datos.email_nuevo
     usuario.email_verificado = False
@@ -117,7 +117,7 @@ def actualizar_password(
         if not datos.password_actual:
             raise HTTPException(status_code=400, detail="La contraseña actual es obligatoria")
         if not verify_password(datos.password_actual, usuario.password_hash):
-            raise HTTPException(status_code=400, detail="Contraseña actual incorrecta")
+            raise HTTPException(status_code=400, detail="La contraseña actual no es correcta.")
     
     if datos.password_nueva != datos.password_nueva_confirmacion:
         raise HTTPException(status_code=400, detail="Las contraseñas no coinciden")
@@ -170,7 +170,7 @@ def actualizar_telefono(
 ) -> dict:
     if usuario.auth_provider != AuthProvider.GOOGLE:
         if not usuario.password_hash or not verify_password(datos.password_actual, usuario.password_hash):
-            raise HTTPException(status_code=400, detail="Contraseña actual incorrecta")
+            raise HTTPException(status_code=400, detail="La contraseña actual no es correcta.")
     
     result = db.execute(select(Usuario).where(Usuario.telefono == datos.telefono_nuevo))
     if result.scalar_one_or_none():
@@ -184,7 +184,7 @@ def actualizar_telefono(
     whatsapp_service.guardar_codigo(datos.telefono_nuevo, codigo)
     whatsapp_service.enviar_mensaje_whatsapp(
         datos.telefono_nuevo, 
-        f"Tu código de verificación de Argentum es: {codigo}"
+        f"Tu código de verificación de Argentum es *{codigo}*. Expira en 10 minutos."
     )
     
     return {"confirmacion": "Teléfono actualizado. Se envió un código por WhatsApp.", "requiere_verificacion_telefono": True}

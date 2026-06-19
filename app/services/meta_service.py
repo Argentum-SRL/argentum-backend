@@ -30,7 +30,7 @@ def obtener_meta(db: Session, usuario_id: UUID, meta_id: UUID) -> Meta:
     meta = db.execute(query).unique().scalar_one_or_none()
     
     if not meta:
-        raise HTTPException(status_code=404, detail="Meta no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa meta.")
     return meta
 
 def crear_meta(db: Session, usuario_id: UUID, data: MetaCreate) -> Meta:
