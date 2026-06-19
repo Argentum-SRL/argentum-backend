@@ -260,7 +260,7 @@ def procesar_mensaje(
         "confianza": 0.0,
         "slot_filling": False,
         "datos_faltantes": [],
-        "respuesta_usuario": "No pude procesar tu mensaje. Intentá de nuevo.",
+        "respuesta_usuario": "Hubo un problema al procesar tu mensaje. Intentá de nuevo.",
         "error": True,
     }
 

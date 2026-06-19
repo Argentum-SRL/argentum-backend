@@ -64,9 +64,8 @@ def _job_notificaciones_cuotas(db_session_factory):
                     continue
 
                 mensaje = (
-                    f"El resumen de tu tarjeta {tarjeta.nombre} vence "
-                    f"el {fecha_vencimiento_resumen.strftime('%d/%m/%Y')} "
-                    f"— total: ${float(total_resumen):,.0f}"
+                    f"El resumen de tu {tarjeta.nombre} cierra el {resumen.fecha_cierre_proximo.strftime('%d/%m/%Y')} "
+                    f"y vence el {fecha_vencimiento_resumen.strftime('%d/%m/%Y')}."
                 )
 
                 grupo_override = f"RESUMEN_TARJETA_{tarjeta.id}_{hoy.strftime('%Y%m%d')}"
@@ -109,8 +108,8 @@ def _job_notificaciones_cuotas(db_session_factory):
                 monto = float(getattr(cuota, 'monto_proyectado', 0) or getattr(cuota, 'monto_real', 0))
 
                 mensaje = (
-                    f"Cuota {numero}/{cantidad} de '{descripcion}' "
-                    f"vence el {fecha_objetivo.strftime('%d/%m/%Y')} (${monto:,.0f})"
+                    f"Tu cuota {numero}/{cantidad} de '{descripcion}' vence el {fecha_objetivo.strftime('%d/%m/%Y')} (${monto:,.0f}). "
+                    f"Acordate de tener el saldo disponible."
                 )
 
                 crear_notificacion(
@@ -184,7 +183,7 @@ def _job_notificaciones_presupuestos(db_session_factory):
 
                 # Alertas del umbral 1 (configurable, ej: 80%)
                 if config.presupuesto_umbral_1_activo and porcentaje >= config.presupuesto_umbral_1 and porcentaje < 100:
-                    mensaje = f"Vas gastando el {porcentaje}% de tu presupuesto '{nombre_pres}' (${gastado:,.0f} de ${limite:,.0f})"
+                    mensaje = f"Llevás gastado el {porcentaje}% de tu presupuesto '{nombre_pres}' (${gastado:,.0f} de ${limite:,.0f})"
                     crear_notificacion(
                         db=db,
                         usuario_id=usuario_id,
@@ -200,7 +199,7 @@ def _job_notificaciones_presupuestos(db_session_factory):
 
                 # Alertas del umbral 2 (100% agotado)
                 if porcentaje >= 100:
-                    mensaje = f"Agotaste tu presupuesto '{nombre_pres}' de ${limite:,.0f} (llevás gastado ${gastado:,.0f})"
+                    mensaje = f"Gastaste ${gastado:,.0f} de ${limite:,.0f} en {nombre_pres}. Superaste el límite que te pusiste."
                     crear_notificacion(
                         db=db,
                         usuario_id=usuario_id,
@@ -341,7 +340,7 @@ def _job_notificaciones_inactividad(db_session_factory):
                 ).first()
 
                 if not recent_notif:
-                    mensaje = f"Hace {dias} días que no registrás movimientos en Argentum."
+                    mensaje = f"¿Todo bien? Hace {dias} días que no registrás nada. Registrar tus gastos te ayuda a entender mejor en qué se va tu plata."
                     crear_notificacion(
                         db=db,
                         usuario_id=usuario_id,
@@ -642,12 +641,12 @@ def _job_resumen_semanal(db_session_factory):
 
                 if top_categoria:
                     mensaje = (
-                        f"Tu semana en números: ingresaste ${ingresos:,.0f} y gastaste ${egresos:,.0f} "
+                        f"Tu semana financiera: ingresaste ${ingresos:,.0f} y gastaste ${egresos:,.0f} "
                         f"(balance {signo}${balance:,.0f}). Tu mayor gasto fue en {top_categoria}."
                     )
                 else:
                     mensaje = (
-                        f"Tu semana en números: ingresaste ${ingresos:,.0f} y gastaste ${egresos:,.0f} "
+                        f"Tu semana financiera: ingresaste ${ingresos:,.0f} y gastaste ${egresos:,.0f} "
                         f"(balance {signo}${balance:,.0f})."
                     )
 

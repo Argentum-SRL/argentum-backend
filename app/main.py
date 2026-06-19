@@ -362,28 +362,9 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """
-    Intercepta errores de validación de Pydantic (422) y los reformatea
-    al contrato de error estandarizado del proyecto.
-    """
-    # Construir un mensaje legible a partir de los errores de validación
-    errores = exc.errors()
-    if errores:
-        primer_error = errores[0]
-        campo = " → ".join(str(loc) for loc in primer_error.get("loc", []))
-        mensaje = f"Error en el campo '{campo}': {primer_error.get('msg', 'valor inválido')}"
-    else:
-        mensaje = "Los datos enviados son inválidos."
-
     return JSONResponse(
         status_code=422,
-        content={
-            "success": False,
-            "error": {
-                "code": "VALIDATION_ERROR",
-                "message": mensaje,
-            }
-        }
+        content={"detail": "Hay campos con errores. Revisá los datos e intentá de nuevo."}
     )
 
 

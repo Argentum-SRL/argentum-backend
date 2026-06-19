@@ -110,7 +110,7 @@ def update_grupo_cuotas(
     ).scalar_one_or_none()
     
     if not grupo:
-        raise HTTPException(status_code=404, detail="Grupo de cuotas no encontrado")
+        raise HTTPException(status_code=404, detail="No encontramos ese grupo de cuotas.")
         
     hoy = _hoy_argentina()
     
@@ -195,7 +195,7 @@ def delete_grupo_cuotas(
     ).scalar_one_or_none()
     
     if not grupo:
-        raise HTTPException(status_code=404, detail="Grupo de cuotas no encontrado")
+        raise HTTPException(status_code=404, detail="No encontramos ese grupo de cuotas.")
         
     padre_id = grupo.transaccion_padre_id
     

@@ -593,7 +593,7 @@ async def whatsapp_webhook(
         
         if not mensaje_texto:
             resp = MessagingResponse()
-            resp.message("No entendí tu mensaje. Mandame texto o un audio.")
+            resp.message("No entendí bien lo que quisiste decir. Podés contarme qué gastaste, por ejemplo: *Almuerzo $1500*")
             return PlainTextResponse(content=str(resp), media_type="application/xml")
 
         # Solo para menú numérico de billeteras
@@ -836,7 +836,7 @@ async def whatsapp_webhook(
         db.rollback()
         logger.exception("Error procesando mensaje en webhook")
         resp = MessagingResponse()
-        resp.message("Hubo un problema procesando tu mensaje. Intentá de nuevo.")
+        resp.message("Hubo un problema al procesar tu mensaje. Intentá de nuevo.")
         return PlainTextResponse(content=str(resp), media_type="application/xml")
 
 

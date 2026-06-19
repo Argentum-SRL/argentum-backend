@@ -129,7 +129,7 @@ def actualizar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID, data: Ta
     ).first()
     
     if not tarjeta:
-        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
     
     update_data = data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
@@ -147,7 +147,7 @@ def archivar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID) -> Tarjeta
     ).first()
     
     if not tarjeta:
-        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
     
     tarjeta.estado = EstadoTarjeta.ARCHIVADA
     db.commit()
@@ -162,7 +162,7 @@ def desarchivar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID) -> Tarj
     ).first()
     
     if not tarjeta:
-        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
     
     tarjeta.estado = EstadoTarjeta.ACTIVA
     db.commit()
@@ -177,7 +177,7 @@ def eliminar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID) -> None:
     ).first()
     
     if not tarjeta:
-        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
     
     # Verificar si tiene transacciones registradas
     tiene_transacciones = db.query(Transaccion).filter(Transaccion.tarjeta_id == tarjeta_id).first()
@@ -388,7 +388,7 @@ def pagar_resumen_tarjeta(
         TarjetaCredito.usuario_id == usuario_id
     ).first()
     if not tarjeta:
-        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
 
     # 2. Calcular la fecha de vencimiento próximo para saber qué cuotas entran
     hoy = date.today()

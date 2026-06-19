@@ -32,7 +32,7 @@ def obtener_transferencia(db: Session, usuario_id: UUID, transferencia_id: UUID)
 
 def crear_transferencia(db: Session, usuario_id: UUID, data: TransferenciaInternaCreate) -> TransferenciaInterna:
     if data.billetera_origen_id == data.billetera_destino_id:
-        raise HTTPException(status_code=400, detail="La billetera de origen y destino no pueden ser la misma")
+        raise HTTPException(status_code=400, detail="La billetera de origen y destino no pueden ser la misma.")
 
     # 1. Validar billeteras
     b_origen = db.execute(
@@ -43,8 +43,10 @@ def crear_transferencia(db: Session, usuario_id: UUID, data: TransferenciaIntern
         select(Billetera).where(Billetera.id == data.billetera_destino_id, Billetera.usuario_id == usuario_id)
     ).scalar_one_or_none()
 
-    if not b_origen or not b_destino:
-        raise HTTPException(status_code=404, detail="Una o ambas billeteras no existen")
+    if not b_origen:
+        raise HTTPException(status_code=404, detail="No encontramos la billetera de origen.")
+    if not b_destino:
+        raise HTTPException(status_code=404, detail="No encontramos la billetera de destino.")
 
     # 2. Crear registro
     nueva_tr = TransferenciaInterna(

@@ -125,7 +125,7 @@ def register(user_in: RegisterRequest, background_tasks: BackgroundTasks, db: Se
                 status_code=400,
                 detail="Este email ya está registrado con Google. Usá el botón de Google para iniciar sesión.",
             )
-        raise HTTPException(status_code=400, detail="Ese mail ya está registrado en otra cuenta.")
+        raise HTTPException(status_code=400, detail="Ya existe una cuenta con ese email.")
 
     if db.execute(select(Usuario).where(Usuario.telefono == user_in.telefono)).scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Ese número de teléfono ya está registrado.")
@@ -167,10 +167,10 @@ def login(user_in: LoginRequest, request: Request, response: Response, db: Sessi
     user = db.execute(select(Usuario).where(Usuario.email == user_in.email)).scalar_one_or_none()
 
     if not user:
-        raise HTTPException(status_code=401, detail="Credenciales incorrectas.")
+        raise HTTPException(status_code=401, detail="El email o la contraseña no son correctos. Revisalos e intentá de nuevo.")
 
     if not user.email_verificado:
-        raise HTTPException(status_code=401, detail="Primero verificá tu email. Revisá tu casilla.")
+        raise HTTPException(status_code=401, detail="Todavía no verificaste tu cuenta. Revisá tu email para activarla.")
 
     if not user.password_hash:
         raise HTTPException(
@@ -179,7 +179,7 @@ def login(user_in: LoginRequest, request: Request, response: Response, db: Sessi
         )
 
     if not verify_password(user_in.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Credenciales incorrectas.")
+        raise HTTPException(status_code=401, detail="El email o la contraseña no son correctos. Revisalos e intentá de nuevo.")
 
     user.ultimo_acceso = datetime.now(timezone.utc)
     db.commit()
@@ -211,11 +211,11 @@ def recuperar_password(body: RecuperarPasswordRequest, db: Session = Depends(get
 def verificar_recuperacion(body: VerificarRecuperacionRequest, db: Session = Depends(get_db)):
     """Verifica el código de recuperación y actualiza la contraseña."""
     if not verificar_codigo_recuperacion(body.email, body.codigo):
-        raise HTTPException(status_code=400, detail="Código incorrecto o expirado.")
+        raise HTTPException(status_code=400, detail="El código que ingresaste no es válido. Revisalo o pedí uno nuevo.")
 
     user = db.execute(select(Usuario).where(Usuario.email == body.email)).scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+        raise HTTPException(status_code=404, detail="No encontramos una cuenta con esos datos.")
 
     if len(body.nueva_password) < 8:
         raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 8 caracteres.")
@@ -307,7 +307,7 @@ def enviar_codigo_email(body: EnviarCodigoEmailRequest, db: Session = Depends(ge
     """Reenvía el código de verificación de email."""
     user = db.execute(select(Usuario).where(Usuario.email == body.email)).scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="No existe una cuenta con ese email.")
+        raise HTTPException(status_code=404, detail="No encontramos una cuenta con esos datos.")
     
     if user.email_verificado:
         raise HTTPException(status_code=400, detail="El email ya está verificado.")
@@ -325,11 +325,11 @@ def verificar_email_link(email: str, codigo: str, db: Session = Depends(get_db))
     """
     ok, error = verificar_codigo_email(email, codigo)
     if not ok:
-        raise HTTPException(status_code=400, detail=error)
+        raise HTTPException(status_code=400, detail="Este enlace de verificación no es válido. Revisá tu email y usá el más reciente.")
 
     user = db.execute(select(Usuario).where(Usuario.email == email)).scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+        raise HTTPException(status_code=404, detail="No encontramos una cuenta con esos datos.")
 
     user.email_verificado = True
     
@@ -365,7 +365,7 @@ def verificar_email(
 
     user = db.execute(select(Usuario).where(Usuario.email == body.email)).scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="Usuario no encontrado.")
+        raise HTTPException(status_code=404, detail="No encontramos una cuenta con esos datos.")
 
     user.email_verificado = True
 
@@ -508,15 +508,10 @@ def enviar_codigo_telefono(body: EnviarCodigoRequest):
     codigo = generar_codigo()
     guardar_codigo(body.telefono, codigo)
 
-    mensaje = (
-        f"*Argentum*\n"
-        f"Tu codigo de verificacion es: *{codigo}*\n"
-        f"Expira en 10 minutos.\n"
-        f"Si no lo pediste, ignora este mensaje."
-    )
+    mensaje = f"Tu código de verificación de Argentum es *{codigo}*. Expira en 10 minutos."
     enviado = enviar_mensaje_whatsapp(body.telefono, mensaje)
     if not enviado:
-        raise HTTPException(status_code=500, detail="No se pudo enviar el mensaje de WhatsApp. Intentá de nuevo.")
+        raise HTTPException(status_code=500, detail="No pudimos mandarte el código por WhatsApp. Intentá de nuevo.")
 
     return {"detail": "Código de verificación enviado.", "telefono": body.telefono}
 
@@ -616,7 +611,7 @@ def verificar_codigo_telefono(
     # Caso B/C: Usuario existente.
     # Si es una cuenta de EMAIL que nunca verificó email, seguimos pidiendo verificación de email.
     if user.auth_provider == AuthProvider.EMAIL and not user.email_verificado:
-        raise HTTPException(status_code=401, detail="Primero verificá tu email. Revisá tu casilla.")
+        raise HTTPException(status_code=401, detail="Todavía no verificaste tu cuenta. Revisá tu email para activarla.")
 
     # Marcamos como verificado y activo (por si venía de pendiente)
     user.telefono_verificado = True
@@ -689,7 +684,7 @@ def completar_perfil(
     # Verificar que el email no esté tomado
     email_existente = db.execute(select(Usuario).where(Usuario.email == body.email)).scalar_one_or_none()
     if email_existente and email_existente.id != current_user.id:
-        raise HTTPException(status_code=400, detail="Ese mail ya está registrado en otra cuenta.")
+        raise HTTPException(status_code=400, detail="Ya existe una cuenta con ese email.")
 
     current_user.nombre = body.nombre
     current_user.apellido = body.apellido

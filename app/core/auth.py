@@ -258,7 +258,7 @@ def get_current_user(
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No autenticado",
+            detail="Necesitás iniciar sesión para continuar.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -271,7 +271,7 @@ def get_current_user(
     if usuario is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Usuario no encontrado",
+            detail="No encontramos una cuenta con esos datos.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -303,7 +303,7 @@ def get_current_admin_user(
     if not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permisos insuficientes: se requiere rol de administrador",
+            detail="No tenés permiso para hacer eso.",
         )
     return current_user
 
