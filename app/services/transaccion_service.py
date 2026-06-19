@@ -552,7 +552,15 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
     db.commit()
     db.refresh(transaccion)
 
+    # Trigger: recalcular perfil financiero en background
+    try:
+        from app.services.perfil_financiero_service import recalcular_perfil_tras_confirmacion
+        recalcular_perfil_tras_confirmacion(db, usuario_id)
+    except Exception:
+        pass  # No interrumpir el flujo principal si falla
+
     return transaccion
+
 
 
 def obtener_pendientes_ia(db: Session, usuario_id: UUID, skip: int = 0, limit: int = 100):

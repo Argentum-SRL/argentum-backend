@@ -11,7 +11,9 @@ from app.models.movimiento_meta import MovimientoMeta
 from app.models.notificacion import Notificacion
 from app.models.periodo_presupuesto import PeriodoPresupuesto
 from app.models.perfil_financiero import PerfilFinanciero
+from app.models.historial_perfil_financiero import HistorialPerfilFinanciero
 from app.models.presupuesto import Presupuesto
+
 from app.models.presupuesto_categoria import PresupuestoCategoria
 from app.models.refresh_token import RefreshToken
 from app.models.subcategoria import Subcategoria
@@ -40,8 +42,10 @@ __all__ = [
     "Notificacion",
     "PeriodoPresupuesto",
     "PerfilFinanciero",
+    "HistorialPerfilFinanciero",
     "Presupuesto",
     "PresupuestoCategoria",
+
     "RefreshToken",
     "Suscripcion",
     "Transaccion",

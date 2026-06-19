@@ -201,7 +201,7 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
         saldo_disponible = 0.0
         disponible_real = 0.0
 
-    return {
+    res = {
         "billeteras": [
             {"id": str(b.id), "nombre": b.nombre, "moneda": b.moneda.value, "saldo": float(b.saldo_actual)}
             for b in billeteras
@@ -229,6 +229,19 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
         "saldo_total_billeteras": saldo_disponible,
         "disponible_real": disponible_real,
     }
+
+    try:
+        from app.services.perfil_financiero_service import _obtener_perfil_sync, generar_texto_contexto_ia
+
+        perfil = _obtener_perfil_sync(db, usuario.id)
+        if perfil:
+            texto_contexto = generar_texto_contexto_ia(perfil)
+            if texto_contexto:
+                res["perfil_financiero"] = texto_contexto
+    except Exception as e:
+        logger.error(f"Error al inyectar perfil financiero en el AI bootstrap: {str(e)}", exc_info=True)
+
+    return res
 
 
 def construir_contexto_proyeccion(usuario: Usuario, db: Session) -> dict:
