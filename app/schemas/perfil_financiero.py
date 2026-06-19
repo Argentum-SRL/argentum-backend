@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, date
 from decimal import Decimal
 from uuid import UUID
 
@@ -37,3 +37,19 @@ class PerfilFinancieroRead(PerfilFinancieroBase):
     fecha_creacion: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class HistorialPerfilFinancieroRead(BaseModel):
+    id: UUID
+    usuario_id: UUID
+    periodo_inicio: date
+    periodo_fin: date
+    tasa_ahorro: Decimal | None = None
+    score_impulsividad: int | None = None
+    ratio_cuotas: Decimal | None = None
+    cumplimiento_presupuesto: Decimal | None = None
+    consistencia_registro: Decimal | None = None
+    porcentaje_suscripciones: Decimal | None = None
+    fecha_snapshot: datetime
+
+    model_config = ConfigDict(from_attributes=True)

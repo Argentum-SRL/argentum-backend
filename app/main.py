@@ -187,6 +187,53 @@ async def job_resumen_semanal():
     _job_resumen_semanal(SessionLocal)
 
 
+async def _job_actualizar_perfiles():
+    """Tarea programada: Recalcula el perfil financiero de todos los usuarios activos a las 02:00 UTC."""
+    from sqlalchemy import select
+    from app.models.usuario import Usuario, EstadoUsuario
+    from app.services.perfil_financiero_service import calcular_y_persistir_perfil
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def get_db_context():
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    db = SessionLocal()
+    try:
+        usuarios_activos = db.execute(
+            select(Usuario.id).where(Usuario.estado == EstadoUsuario.ACTIVO)
+        ).scalars().all()
+    except Exception:
+        logger.exception("Error en job _job_actualizar_perfiles")
+        db.close()
+        return
+    finally:
+        db.close()
+
+    semaforo = asyncio.Semaphore(50)
+    cant_actualizados = 0
+
+    async def procesar_usuario(usuario_id):
+        nonlocal cant_actualizados
+        async with semaforo:
+            try:
+                async with get_db_context() as db:
+                    await calcular_y_persistir_perfil(db, usuario_id)
+                    cant_actualizados += 1
+            except Exception as e:
+                logger.error(f"Error actualizando perfil {usuario_id}: {e}")
+
+    try:
+        await asyncio.gather(*[procesar_usuario(uid) for uid in usuarios_activos])
+        logger.info(f"Se actualizaron {cant_actualizados} perfiles financieros en el job programado.")
+    except Exception:
+        logger.exception("Error en job _job_actualizar_perfiles")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Crear el scheduler y registrar jobs aquí para evitar que se
@@ -315,6 +362,16 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         replace_existing=True,
     )
+    scheduler.add_job(
+        _job_actualizar_perfiles,
+        "cron",
+        hour=2,
+        minute=0,
+        id="actualizar_perfiles_financieros",
+        misfire_grace_time=300,
+        max_instances=1,
+        replace_existing=True,
+    )
     scheduler.start()
     # Pre-cargar feriados argentinos en cache para
     # que calcular_fecha_cobro_sync funcione sin async
@@ -427,7 +484,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 
-from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin
+from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin, perfil_financiero
 
 app.include_router(auth.router)
 app.include_router(onboarding.router)
@@ -447,6 +504,7 @@ app.include_router(tools.router, prefix="/api/v1/tools")
 app.include_router(grupos_cuotas.router)
 app.include_router(whatsapp_ia.router, prefix="/api")
 app.include_router(admin.router, prefix="/v1", tags=["admin"])
+app.include_router(perfil_financiero.router, prefix="/api/v1", tags=["perfil"])
 
 # Servir archivos estáticos de media (Ignorado por git)
 os.makedirs("media/fotos", exist_ok=True)
