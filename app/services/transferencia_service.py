@@ -56,6 +56,24 @@ def crear_transferencia(db: Session, usuario_id: UUID, data: TransferenciaIntern
     # Se permite distinta moneda. Se impacta el "monto" (en la moneda de la transferencia) 
     # en ambas billeteras. El usuario es responsable del tipo de cambio si las billeteras difieren.
     b_origen.saldo_actual -= data.monto
+    if b_origen.saldo_actual <= 0:
+        try:
+            from app.services.notificacion_service import crear_notificacion
+            from app.models.notificacion import TipoNotificacion, NivelNotificacion
+            crear_notificacion(
+                db=db,
+                usuario_id=usuario_id,
+                tipo=TipoNotificacion.SALDO_CERO,
+                nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                mensaje=f"Tu billetera '{b_origen.nombre}' quedó sin saldo disponible.",
+                entidad_tipo="billetera",
+                entidad_id=b_origen.id,
+                deep_link="/app/billeteras",
+                canal_web=True,
+                canal_whatsapp=True,
+            )
+        except Exception:
+            pass
     b_destino.saldo_actual += data.monto
 
     db.add(nueva_tr)

@@ -83,6 +83,22 @@ def actualizar_email(
     usuario.email = datos.email_nuevo
     usuario.email_verificado = False
     db.commit()
+
+    try:
+        from app.services.notificacion_service import crear_notificacion
+        from app.models.notificacion import TipoNotificacion, NivelNotificacion
+        crear_notificacion(
+            db=db,
+            usuario_id=usuario.id,
+            tipo=TipoNotificacion.CAMBIO_EMAIL,
+            nivel=NivelNotificacion.CRITICA,
+            mensaje="Tu email fue actualizado. Si no fuiste vos, contactanos de inmediato.",
+            canal_web=True,
+            canal_whatsapp=True,
+            canal_email=False,
+        )
+    except Exception:
+        pass
     
     email_service.generar_y_enviar_verificacion_email(datos.email_nuevo)
     
@@ -116,6 +132,22 @@ def actualizar_password(
     usuario.password_hash = get_password_hash(pw)
     usuario.password_configurada = True
     db.commit()
+
+    try:
+        from app.services.notificacion_service import crear_notificacion
+        from app.models.notificacion import TipoNotificacion, NivelNotificacion
+        crear_notificacion(
+            db=db,
+            usuario_id=usuario.id,
+            tipo=TipoNotificacion.CAMBIO_CONTRASENA,
+            nivel=NivelNotificacion.CRITICA,
+            mensaje="Tu contraseña fue actualizada. Si no fuiste vos, contactanos de inmediato.",
+            canal_web=True,
+            canal_whatsapp=True,
+            canal_email=False,
+        )
+    except Exception:
+        pass
     
     # Enviar email de notificación de cambio de contraseña
     try:

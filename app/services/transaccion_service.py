@@ -224,6 +224,59 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, co
             billetera.saldo_actual += nueva_transaccion.monto
         else:
             billetera.saldo_actual -= nueva_transaccion.monto
+            if billetera.saldo_actual <= 0:
+                try:
+                    from app.services.notificacion_service import crear_notificacion
+                    from app.models.notificacion import TipoNotificacion, NivelNotificacion
+                    crear_notificacion(
+                        db=db,
+                        usuario_id=usuario_id,
+                        tipo=TipoNotificacion.SALDO_CERO,
+                        nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                        mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
+                        entidad_tipo="billetera",
+                        entidad_id=billetera.id,
+                        deep_link="/app/billeteras",
+                        canal_web=True,
+                        canal_whatsapp=True,
+                    )
+                except Exception:
+                    pass
+
+            # Solo si tiene categoría asignada y hay suficiente historial
+            if nueva_transaccion.categoria_id is not None:
+                try:
+                    from sqlalchemy import func as sa_func
+                    from app.services.notificacion_service import crear_notificacion
+                    from app.models.notificacion import TipoNotificacion, NivelNotificacion
+
+                    promedio_resultado = db.execute(
+                        select(sa_func.avg(Transaccion.monto)).where(
+                            Transaccion.usuario_id == usuario_id,
+                            Transaccion.categoria_id == nueva_transaccion.categoria_id,
+                            Transaccion.tipo == TipoTransaccion.EGRESO,
+                            Transaccion.id != nueva_transaccion.id,  # excluir la transacción recién creada
+                        )
+                    ).scalar()
+
+                    if promedio_resultado is not None:
+                        promedio = float(promedio_resultado)
+                        monto_actual = float(nueva_transaccion.monto)
+                        if promedio > 0 and monto_actual > promedio * 2:
+                            crear_notificacion(
+                                db=db,
+                                usuario_id=usuario_id,
+                                tipo=TipoNotificacion.GASTO_INUSUAL,
+                                nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                                mensaje=f"Registramos un gasto inusual: ${monto_actual:,.0f} en una categoría donde tu promedio es ${promedio:,.0f}.",
+                                entidad_tipo="transaccion",
+                                entidad_id=nueva_transaccion.id,
+                                deep_link="/app/transacciones",
+                                canal_web=True,
+                                canal_whatsapp=True,
+                            )
+                except Exception:
+                    pass
         
     # Impacto en presupuestos
     presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False)
@@ -306,6 +359,24 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
                 billetera_nueva.saldo_actual += transaccion.monto
             else:
                 billetera_nueva.saldo_actual -= transaccion.monto
+                if billetera_nueva.saldo_actual <= 0:
+                    try:
+                        from app.services.notificacion_service import crear_notificacion
+                        from app.models.notificacion import TipoNotificacion, NivelNotificacion
+                        crear_notificacion(
+                            db=db,
+                            usuario_id=usuario_id,
+                            tipo=TipoNotificacion.SALDO_CERO,
+                            nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                            mensaje=f"Tu billetera '{billetera_nueva.nombre}' quedó sin saldo disponible.",
+                            entidad_tipo="billetera",
+                            entidad_id=billetera_nueva.id,
+                            deep_link="/app/billeteras",
+                            canal_web=True,
+                            canal_whatsapp=True,
+                        )
+                    except Exception:
+                        pass
     else:
         update_data = data.model_dump(exclude_unset=True)
         for key, value in update_data.items():
@@ -415,6 +486,59 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
             billetera.saldo_actual += transaccion.monto
         else:
             billetera.saldo_actual -= transaccion.monto
+            if billetera.saldo_actual <= 0:
+                try:
+                    from app.services.notificacion_service import crear_notificacion
+                    from app.models.notificacion import TipoNotificacion, NivelNotificacion
+                    crear_notificacion(
+                        db=db,
+                        usuario_id=usuario_id,
+                        tipo=TipoNotificacion.SALDO_CERO,
+                        nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                        mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
+                        entidad_tipo="billetera",
+                        entidad_id=billetera.id,
+                        deep_link="/app/billeteras",
+                        canal_web=True,
+                        canal_whatsapp=True,
+                    )
+                except Exception:
+                    pass
+
+            # Solo si tiene categoría asignada y hay suficiente historial
+            if transaccion.categoria_id is not None:
+                try:
+                    from sqlalchemy import func as sa_func
+                    from app.services.notificacion_service import crear_notificacion
+                    from app.models.notificacion import TipoNotificacion, NivelNotificacion
+
+                    promedio_resultado = db.execute(
+                        select(sa_func.avg(Transaccion.monto)).where(
+                            Transaccion.usuario_id == usuario_id,
+                            Transaccion.categoria_id == transaccion.categoria_id,
+                            Transaccion.tipo == TipoTransaccion.EGRESO,
+                            Transaccion.id != transaccion.id,  # excluir la transacción recién creada
+                        )
+                    ).scalar()
+
+                    if promedio_resultado is not None:
+                        promedio = float(promedio_resultado)
+                        monto_actual = float(transaccion.monto)
+                        if promedio > 0 and monto_actual > promedio * 2:
+                            crear_notificacion(
+                                db=db,
+                                usuario_id=usuario_id,
+                                tipo=TipoNotificacion.GASTO_INUSUAL,
+                                nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                                mensaje=f"Registramos un gasto inusual: ${monto_actual:,.0f} en una categoría donde tu promedio es ${promedio:,.0f}.",
+                                entidad_tipo="transaccion",
+                                entidad_id=transaccion.id,
+                                deep_link="/app/transacciones",
+                                canal_web=True,
+                                canal_whatsapp=True,
+                            )
+                except Exception:
+                    pass
             
     # Impacto en presupuestos
     presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=False)

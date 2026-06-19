@@ -552,3 +552,129 @@ def _job_resumen_cierre_ciclo(db_session_factory):
         logger.exception("Error en _job_resumen_cierre_ciclo")
     finally:
         db.close()
+
+
+def _job_resumen_semanal(db_session_factory):
+    """
+    Genera un resumen semanal de finanzas para cada usuario activo.
+    Corre los lunes a las 08:00 UTC y resume la semana anterior (lunes a domingo).
+    """
+    from datetime import date, timedelta
+    from sqlalchemy import func as sa_func, select
+    from app.models.usuario import Usuario, EstadoUsuario
+    from app.models.transaccion import Transaccion, TipoTransaccion
+    from app.models.categoria import Categoria
+    from app.models.configuracion_notificacion import ConfiguracionNotificacion
+    from app.models.notificacion import TipoNotificacion, NivelNotificacion
+    from app.services.notificacion_service import crear_notificacion
+
+    hoy = date.today()
+    # Semana anterior: lunes a domingo
+    lunes_pasado = hoy - timedelta(days=hoy.weekday() + 7)
+    domingo_pasado = lunes_pasado + timedelta(days=6)
+
+    db: Session = db_session_factory()
+    try:
+        usuarios = db.execute(
+            select(Usuario).where(Usuario.estado == EstadoUsuario.ACTIVO)
+        ).scalars().all()
+
+        for usuario in usuarios:
+            try:
+                config = db.execute(
+                    select(ConfiguracionNotificacion).where(
+                        ConfiguracionNotificacion.usuario_id == usuario.id
+                    )
+                ).scalar_one_or_none()
+
+                if config and getattr(config, 'resumen_semanal_activo', True) is False:
+                    continue  # si el usuario desactivó el resumen, saltar
+                
+                # Calcular egresos e ingresos de la semana anterior (excluyendo padre de cuotas para evitar duplicar)
+                egresos_result = db.execute(
+                    select(sa_func.sum(Transaccion.monto)).where(
+                        Transaccion.usuario_id == usuario.id,
+                        Transaccion.tipo == TipoTransaccion.EGRESO,
+                        Transaccion.fecha >= lunes_pasado,
+                        Transaccion.fecha <= domingo_pasado,
+                        Transaccion.es_padre_cuotas == False,
+                    )
+                ).scalar()
+
+                ingresos_result = db.execute(
+                    select(sa_func.sum(Transaccion.monto)).where(
+                        Transaccion.usuario_id == usuario.id,
+                        Transaccion.tipo == TipoTransaccion.INGRESO,
+                        Transaccion.fecha >= lunes_pasado,
+                        Transaccion.fecha <= domingo_pasado,
+                        Transaccion.es_padre_cuotas == False,
+                    )
+                ).scalar()
+
+                egresos = float(egresos_result or 0)
+                ingresos = float(ingresos_result or 0)
+
+                # Si no hubo ningún movimiento en la semana, no notificar
+                if egresos == 0 and ingresos == 0:
+                    continue
+
+                # Top categoría de la semana por egresos (excluyendo padre de cuotas)
+                top_categoria_result = db.execute(
+                    select(Categoria.nombre, sa_func.sum(Transaccion.monto).label("total"))
+                    .join(Categoria, Transaccion.categoria_id == Categoria.id)
+                    .where(
+                        Transaccion.usuario_id == usuario.id,
+                        Transaccion.tipo == TipoTransaccion.EGRESO,
+                        Transaccion.fecha >= lunes_pasado,
+                        Transaccion.fecha <= domingo_pasado,
+                        Transaccion.categoria_id.isnot(None),
+                        Transaccion.es_padre_cuotas == False,
+                    )
+                    .group_by(Categoria.nombre)
+                    .order_by(sa_func.sum(Transaccion.monto).desc())
+                    .limit(1)
+                ).first()
+
+                top_categoria = top_categoria_result[0] if top_categoria_result else None
+
+                balance = ingresos - egresos
+                signo = "+" if balance >= 0 else ""
+
+                if top_categoria:
+                    mensaje = (
+                        f"Tu semana en números: ingresaste ${ingresos:,.0f} y gastaste ${egresos:,.0f} "
+                        f"(balance {signo}${balance:,.0f}). Tu mayor gasto fue en {top_categoria}."
+                    )
+                else:
+                    mensaje = (
+                        f"Tu semana en números: ingresaste ${ingresos:,.0f} y gastaste ${egresos:,.0f} "
+                        f"(balance {signo}${balance:,.0f})."
+                    )
+
+                # Usar los canales configurados por el usuario si config existe
+                canal_web = config.resumen_semanal_web if config else True
+                canal_whatsapp = config.resumen_semanal_whatsapp if config else True
+
+                crear_notificacion(
+                    db=db,
+                    usuario_id=usuario.id,
+                    tipo=TipoNotificacion.RESUMEN_SEMANAL,
+                    nivel=NivelNotificacion.SOFT,
+                    mensaje=mensaje,
+                    deep_link="/app/dashboard",
+                    canal_web=canal_web,
+                    canal_whatsapp=canal_whatsapp,
+                )
+
+            except Exception as e:
+                logger.error(f"[resumen_semanal] Error procesando usuario {usuario.id}: {e}")
+                continue
+
+        db.commit()
+        logger.info("Job resumen_semanal completado")
+
+    except Exception as e:
+        logger.error(f"[resumen_semanal] Error general: {e}")
+        db.rollback()
+    finally:
+        db.close()
