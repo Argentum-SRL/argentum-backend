@@ -151,6 +151,12 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, co
 
         total_financiado = monto_cuota * cant
 
+        if data.metodo_pago == MetodoPago.CREDITO and not data.tarjeta_id:
+            raise HTTPException(
+                status_code=422,
+                detail="Tenés que seleccionar una tarjeta para registrar una compra en cuotas con crédito."
+            )
+
         # Determinar primer vencimiento
         primer_vencimiento = None
         if data.metodo_pago == MetodoPago.CREDITO and data.tarjeta_id:

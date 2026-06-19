@@ -3,7 +3,7 @@ from datetime import date
 from sqlalchemy.orm import Session
 from dateutil.relativedelta import relativedelta
 from app.models.cuota import Cuota
-from app.models.transaccion import Transaccion, TipoTransaccion
+from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion
 from app.models.grupo_cuotas import GrupoCuotas
 from app.services import presupuesto_service
 
@@ -58,13 +58,11 @@ def crear_cuotas(
             tarjeta_id=transaccion_padre.tarjeta_id, # Link a la tarjeta si existe
             es_cuota_hija=True,
             grupo_cuotas_id=grupo.id,
-            origen=transaccion_padre.origen
+            origen=transaccion_padre.origen,
+            estado_verificacion=EstadoVerificacionTransaccion.PENDIENTE
         )
         db.add(hija)
         db.flush()
-
-        # Impacto en presupuestos
-        presupuesto_service.registrar_impacto_presupuesto(db, hija, revertir=False)
 
         # 2. Crear el registro de la cuota vinculada al grupo
         cuota_reg = Cuota(
@@ -114,10 +112,13 @@ def cancelar_grupo(db: Session, grupo_id: any, usuario_id: any) -> GrupoCuotas:
                 presupuesto_service.registrar_impacto_presupuesto(db, tx_hija, revertir=True)
             except Exception:
                 pass
-            # Eliminar la transaccion hija de la DB
-            db.delete(tx_hija)
-        # Eliminar la cuota de la DB
-        db.delete(cuota)
+            # Marcar la transacción hija como cancelada con monto cero
+            tx_hija.estado_verificacion = EstadoVerificacionTransaccion.CANCELADA
+            tx_hija.monto = Decimal("0.00")
+            tx_hija.descripcion = f"{tx_hija.descripcion} (Cancelada)"
+        # Marcar la cuota como pagada con monto real cero
+        cuota.pagada = True
+        cuota.monto_real = Decimal("0.00")
 
     # 5. Marcar grupo.estado = EstadoGrupoCuotas.CANCELADO
     grupo.estado = EstadoGrupoCuotas.CANCELADO
