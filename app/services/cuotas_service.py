@@ -79,3 +79,169 @@ def crear_cuotas(
         cuotas.append(cuota_reg)
         
     return cuotas
+
+
+def cancelar_grupo(db: Session, grupo_id: any, usuario_id: any) -> GrupoCuotas:
+    from fastapi import HTTPException
+    from sqlalchemy import select
+    from app.models.grupo_cuotas import EstadoGrupoCuotas
+
+    # 1. Buscar el grupo por grupo_id y usuario_id — si no existe, raise HTTPException 404
+    grupo = db.execute(
+        select(GrupoCuotas).where(GrupoCuotas.id == grupo_id, GrupoCuotas.usuario_id == usuario_id)
+    ).scalar_one_or_none()
+
+    if not grupo:
+        raise HTTPException(status_code=404, detail="Grupo de cuotas no encontrado")
+
+    # 2. Si el grupo ya está COMPLETADO o CANCELADO, fallar con 400
+    if grupo.estado == EstadoGrupoCuotas.CANCELADO:
+        raise HTTPException(status_code=400, detail="El grupo ya está cancelado")
+    if grupo.estado == EstadoGrupoCuotas.COMPLETADO:
+        raise HTTPException(status_code=400, detail="El grupo ya está completado")
+
+    # 3. Obtener todas las cuotas del grupo con pagada == False (cuotas pendientes)
+    cuotas_pendientes = db.execute(
+        select(Cuota).where(Cuota.grupo_id == grupo.id, Cuota.pagada == False)
+    ).scalars().all()
+
+    # 4. Para cada cuota pendiente:
+    for cuota in cuotas_pendientes:
+        tx_hija = cuota.transaccion
+        if tx_hija:
+            # Revertir impacto de presupuesto si existe la tx hija antes de borrarla
+            try:
+                presupuesto_service.registrar_impacto_presupuesto(db, tx_hija, revertir=True)
+            except Exception:
+                pass
+            # Eliminar la transaccion hija de la DB
+            db.delete(tx_hija)
+        # Eliminar la cuota de la DB
+        db.delete(cuota)
+
+    # 5. Marcar grupo.estado = EstadoGrupoCuotas.CANCELADO
+    grupo.estado = EstadoGrupoCuotas.CANCELADO
+    # 6. db.commit()
+    db.commit()
+    # 7. Retornar el grupo actualizado
+    return grupo
+
+
+def prepagar_grupo(
+    db: Session,
+    grupo_id: any,
+    usuario_id: any,
+    billetera_id: any,
+    categoria_id: any = None
+) -> GrupoCuotas:
+    from fastapi import HTTPException
+    from sqlalchemy import select
+    from app.models.grupo_cuotas import EstadoGrupoCuotas
+    from app.models.billetera import Billetera
+    from app.models.transaccion import TipoTransaccion, MetodoPago, OrigenTransaccion, EstadoVerificacionTransaccion
+
+    # 1. Buscar el grupo por grupo_id y usuario_id — si no existe, raise HTTPException 404
+    grupo = db.execute(
+        select(GrupoCuotas).where(GrupoCuotas.id == grupo_id, GrupoCuotas.usuario_id == usuario_id)
+    ).scalar_one_or_none()
+
+    if not grupo:
+        raise HTTPException(status_code=404, detail="Grupo de cuotas no encontrado")
+
+    # 2. Si grupo.estado != EstadoGrupoCuotas.ACTIVO, raise HTTPException 400
+    if grupo.estado != EstadoGrupoCuotas.ACTIVO:
+        raise HTTPException(status_code=400, detail="El grupo no está activo")
+
+    # 3. Obtener todas las cuotas con pagada == False
+    cuotas_pendientes = db.execute(
+        select(Cuota).where(Cuota.grupo_id == grupo.id, Cuota.pagada == False)
+    ).scalars().all()
+
+    # 4. Si no hay cuotas pendientes, raise HTTPException 400 "No hay cuotas pendientes"
+    if not cuotas_pendientes:
+        raise HTTPException(status_code=400, detail="No hay cuotas pendientes")
+
+    # 5. Calcular monto_total_pendiente = sum(cuota.monto_proyectado for cuota in cuotas_pendientes)
+    monto_total_pendiente = sum(cuota.monto_proyectado for cuota in cuotas_pendientes)
+
+    # 6. Buscar la billetera por billetera_id y usuario_id — si no existe, raise HTTPException 404
+    billetera = db.execute(
+        select(Billetera).where(Billetera.id == billetera_id, Billetera.usuario_id == usuario_id)
+    ).scalar_one_or_none()
+
+    if not billetera:
+        raise HTTPException(status_code=404, detail="Billetera no encontrada")
+
+    # 7. Crear una transacción de egreso por el monto total pendiente:
+    nueva_transaccion = Transaccion(
+        usuario_id=usuario_id,
+        tipo=TipoTransaccion.EGRESO,
+        monto=monto_total_pendiente,
+        moneda=grupo.moneda,
+        fecha=date.today(),
+        descripcion=f"Prepago de {len(cuotas_pendientes)} cuotas restantes: {grupo.descripcion}",
+        categoria_id=categoria_id if categoria_id else (grupo.transaccion_padre.categoria_id if grupo.transaccion_padre else None),
+        metodo_pago=MetodoPago.DEBITO,
+        billetera_id=billetera_id,
+        es_cuota_hija=False,
+        origen=OrigenTransaccion.MANUAL,
+        estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA
+    )
+
+    # Debitar billetera.saldo_actual -= monto_total_pendiente
+    billetera.saldo_actual -= monto_total_pendiente
+
+    # Chequeo de saldo cero manualmente después de debitar
+    if billetera.saldo_actual <= 0:
+        try:
+            from app.services.notificacion_service import crear_notificacion
+            from app.models.notificacion import TipoNotificacion, NivelNotificacion
+            crear_notificacion(
+                db=db,
+                usuario_id=usuario_id,
+                tipo=TipoNotificacion.SALDO_CERO,
+                nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
+                entidad_tipo="billetera",
+                entidad_id=billetera.id,
+                deep_link="/app/billeteras",
+                canal_web=True,
+                canal_whatsapp=True,
+            )
+        except Exception:
+            pass
+
+    # Registrar impacto del prepago en el presupuesto
+    try:
+        presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False)
+    except Exception:
+        pass
+
+    # 8. Para cada cuota pendiente:
+    # - cuota.pagada = True
+    # - cuota.monto_real = cuota.monto_proyectado
+    for cuota in cuotas_pendientes:
+        cuota.pagada = True
+        cuota.monto_real = cuota.monto_proyectado
+        # Revertimos impacto de presupuesto de la cuota futura y ponemos su monto a 0 para no duplicar
+        tx_hija = cuota.transaccion
+        if tx_hija:
+            try:
+                presupuesto_service.registrar_impacto_presupuesto(db, tx_hija, revertir=True)
+            except Exception:
+                pass
+            tx_hija.monto = Decimal("0.00")
+            tx_hija.descripcion = f"{tx_hija.descripcion} (Prepagada)"
+
+    # 9. Marcar grupo.estado = EstadoGrupoCuotas.COMPLETADO
+    grupo.estado = EstadoGrupoCuotas.COMPLETADO
+
+    # 10. db.add(nueva_transaccion)
+    db.add(nueva_transaccion)
+
+    # 11. db.commit()
+    db.commit()
+
+    # 12. Retornar el grupo actualizado
+    return grupo
+

@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from uuid import UUID
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -151,14 +151,25 @@ def actualizar_configuracion(
 
 @router.get("/sse")
 async def sse_notificaciones(
-    token: str = Query(...),
+    request: Request,
+    token: Optional[str] = Query(default=None),
 ):
     """
-    Enpoint SSE para streaming en vivo de notificaciones nuevas sin leer.
-    El cliente se autentica pasando el JWT token como query parameter.
+    Endpoint SSE para streaming en vivo de notificaciones nuevas sin leer.
+    El cliente se autentica via cookie httpOnly (access_token) o via query param token.
+    El query param se mantiene por compatibilidad con clientes existentes.
     """
+    # Leer token desde query param primero, luego desde cookie httpOnly
+    access_token = token or request.cookies.get("access_token")
+
+    if not access_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token de acceso requerido"
+        )
+
     try:
-        usuario_id_str = verificar_access_token(token)
+        usuario_id_str = verificar_access_token(access_token)
         usuario_id = UUID(usuario_id_str)
     except Exception:
         raise HTTPException(

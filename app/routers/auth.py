@@ -22,8 +22,9 @@ FLUJOS:
 
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.core.config import settings
@@ -36,6 +37,8 @@ from app.core.auth import (
     renovar_tokens,
     revocar_refresh_token,
     revocar_todos_los_tokens,
+    setear_cookies_auth,
+    limpiar_cookies_auth,
 )
 from app.core.database import get_db
 from app.core.security import get_password_hash, verify_password
@@ -161,7 +164,7 @@ def register(user_in: RegisterRequest, background_tasks: BackgroundTasks, db: Se
 
 
 @router.post("/login", response_model=AuthResponse)
-def login(user_in: LoginRequest, request: Request, db: Session = Depends(get_db)):
+def login(user_in: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     """Login con email y password. Requiere email verificado y contraseña configurada."""
     user = db.execute(select(Usuario).where(Usuario.email == user_in.email)).scalar_one_or_none()
 
@@ -187,6 +190,7 @@ def login(user_in: LoginRequest, request: Request, db: Session = Depends(get_db)
     usuario_service.crear_billeteras_efectivo_default(db, user.id)
 
     access, refresh = _tokens(user.id, request, db)
+    setear_cookies_auth(response, access, refresh, settings)
     return AuthResponse(
         access_token=access,
         refresh_token=refresh,
@@ -222,6 +226,22 @@ def verificar_recuperacion(body: VerificarRecuperacionRequest, db: Session = Dep
     user.password_hash = get_password_hash(body.nueva_password)
     db.commit()
 
+    try:
+        from app.services.notificacion_service import crear_notificacion
+        from app.models.notificacion import TipoNotificacion, NivelNotificacion
+        crear_notificacion(
+            db=db,
+            usuario_id=user.id,
+            tipo=TipoNotificacion.CAMBIO_CONTRASENA,
+            nivel=NivelNotificacion.CRITICA,
+            mensaje="Tu contraseña fue actualizada. Si no fuiste vos, contactanos de inmediato.",
+            canal_web=True,
+            canal_whatsapp=True,
+            canal_email=False,
+        )
+    except Exception:
+        pass
+
     # Enviar email de notificación de cambio de contraseña
     try:
         from app.services.notificacion_email_service import (
@@ -250,11 +270,30 @@ def validar_token(token: str, db: Session = Depends(get_db)):
 def confirmar_token(
     body: ConfirmarResetPasswordRequest,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db)
 ):
     """Verifica el token, actualiza la contraseña, revoca las sesiones y emite tokens de acceso."""
     usuario = confirmar_reset_password(db, body.token, body.nueva_password)
+
+    try:
+        from app.services.notificacion_service import crear_notificacion
+        from app.models.notificacion import TipoNotificacion, NivelNotificacion
+        crear_notificacion(
+            db=db,
+            usuario_id=usuario.id,
+            tipo=TipoNotificacion.CAMBIO_CONTRASENA,
+            nivel=NivelNotificacion.CRITICA,
+            mensaje="Tu contraseña fue actualizada. Si no fuiste vos, contactanos de inmediato.",
+            canal_web=True,
+            canal_whatsapp=True,
+            canal_email=False,
+        )
+    except Exception:
+        pass
+
     access, refresh = _tokens(usuario.id, request, db)
+    setear_cookies_auth(response, access, refresh, settings)
     return AuthResponse(
         access_token=access,
         refresh_token=refresh,
@@ -311,7 +350,12 @@ def verificar_email_link(email: str, codigo: str, db: Session = Depends(get_db))
 
 
 @router.post("/email/verificar", response_model=AuthResponse)
-def verificar_email(body: VerificarCodigoEmailRequest, request: Request, db: Session = Depends(get_db)):
+def verificar_email(
+    body: VerificarCodigoEmailRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db)
+):
     """
     Verifica el código enviado al email.
 
@@ -341,6 +385,7 @@ def verificar_email(body: VerificarCodigoEmailRequest, request: Request, db: Ses
         user.estado = EstadoUsuario.ACTIVO
         db.commit()
         access, refresh = _tokens(user.id, request, db)
+        setear_cookies_auth(response, access, refresh, settings)
         return AuthResponse(
             access_token=access,
             refresh_token=refresh,
@@ -357,7 +402,12 @@ def verificar_email(body: VerificarCodigoEmailRequest, request: Request, db: Ses
 # ---------------------------------------------------------------------------
 
 @router.post("/google", response_model=AuthResponse)
-def login_google(body: GoogleLoginRequest, request: Request, db: Session = Depends(get_db)):
+def login_google(
+    body: GoogleLoginRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db)
+):
     """Login / registro con Google ID token."""
     logger.debug(
         '[Auth][Google][Backend] /auth/google recibido origin=%s userAgent=%s tokenPresent=%s tokenLength=%s tokenPrefix=%s',
@@ -443,6 +493,7 @@ def login_google(body: GoogleLoginRequest, request: Request, db: Session = Depen
     )
 
     access, refresh = _tokens(user.id, request, db)
+    setear_cookies_auth(response, access, refresh, settings)
 
     return AuthResponse(
         access_token=access,
@@ -480,6 +531,7 @@ def enviar_codigo_telefono(body: EnviarCodigoRequest):
 def verificar_codigo_telefono(
     body: VerificarCodigoTelefonoRequest,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
     usuario_autenticado: Usuario | None = Depends(get_optional_user),
 ):
@@ -518,6 +570,22 @@ def verificar_codigo_telefono(
         usuario_autenticado.telefono_verificado = True
         db.commit()
 
+        try:
+            from app.services.notificacion_service import crear_notificacion
+            from app.models.notificacion import TipoNotificacion, NivelNotificacion
+            crear_notificacion(
+                db=db,
+                usuario_id=usuario_autenticado.id,
+                tipo=TipoNotificacion.WHATSAPP_NUEVO_VINCULADO,
+                nivel=NivelNotificacion.CRITICA,
+                mensaje="Tu número de WhatsApp fue vinculado exitosamente. Si no fuiste vos, contactanos.",
+                canal_web=True,
+                canal_whatsapp=False,
+                canal_email=False,
+            )
+        except Exception:
+            pass
+
         return AuthResponse(
             usuario=UsuarioRead.model_validate(usuario_autenticado),
             requiere_onboarding=_requiere_onboarding(usuario_autenticado),
@@ -544,6 +612,7 @@ def verificar_codigo_telefono(
         usuario_service.crear_billeteras_efectivo_default(db, user.id)
 
         access, refresh = _tokens(user.id, request, db)
+        setear_cookies_auth(response, access, refresh, settings)
         return AuthResponse(
             access_token=access,
             refresh_token=refresh,
@@ -564,7 +633,24 @@ def verificar_codigo_telefono(
     user.ultimo_acceso = datetime.now(timezone.utc)
     db.commit()
 
+    try:
+        from app.services.notificacion_service import crear_notificacion
+        from app.models.notificacion import TipoNotificacion, NivelNotificacion
+        crear_notificacion(
+            db=db,
+            usuario_id=user.id,
+            tipo=TipoNotificacion.WHATSAPP_NUEVO_VINCULADO,
+            nivel=NivelNotificacion.CRITICA,
+            mensaje="Tu número de WhatsApp fue vinculado exitosamente. Si no fuiste vos, contactanos.",
+            canal_web=True,
+            canal_whatsapp=False,
+            canal_email=False,
+        )
+    except Exception:
+        pass
+
     access, refresh = _tokens(user.id, request, db)
+    setear_cookies_auth(response, access, refresh, settings)
     
     # requiere_datos si no tiene nombre, email o password (usuarios de teléfono que no completaron perfil)
     if user.auth_provider == AuthProvider.TELEFONO:
@@ -635,16 +721,31 @@ def completar_perfil(
 # ---------------------------------------------------------------------------
 
 @router.post("/refresh", response_model=TokenResponse)
-def refresh(body: RefreshRequest, request: Request, db: Session = Depends(get_db)):
+def refresh(
+    request: Request,
+    response: Response,
+    body: Optional[RefreshRequest] = None,
+    db: Session = Depends(get_db),
+):
     """Renueva los tokens usando rotation. El token usado se revoca."""
-    nuevos = renovar_tokens(body.refresh_token, db, device_info=_device_info(request))
+    refresh_token_value = (body.refresh_token if body else None) or request.cookies.get("refresh_token")
+    if not refresh_token_value:
+        raise HTTPException(status_code=401, detail="Refresh token no encontrado")
+
+    nuevos = renovar_tokens(refresh_token_value, db, device_info=_device_info(request))
+    setear_cookies_auth(response, nuevos["access_token"], nuevos["refresh_token"], settings)
     return TokenResponse(**nuevos)
 
 
 @router.post("/logout", status_code=status.HTTP_200_OK)
-def logout(body: LogoutRequest, db: Session = Depends(get_db)):
+def logout(
+    body: LogoutRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+):
     """Cierra la sesión del dispositivo actual revocando el refresh token."""
     revocar_refresh_token(body.refresh_token, db)
+    limpiar_cookies_auth(response)
     return {"detail": "Sesión cerrada correctamente."}
 
 

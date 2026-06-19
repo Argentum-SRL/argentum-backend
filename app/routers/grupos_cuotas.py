@@ -204,3 +204,31 @@ def delete_grupo_cuotas(
     
     db.commit()
     return {"detail": "Grupo eliminado"}
+
+
+from pydantic import BaseModel
+from typing import Optional
+from app.services.cuotas_service import cancelar_grupo, prepagar_grupo
+
+class PrepagoDatos(BaseModel):
+    billetera_id: UUID
+    categoria_id: Optional[UUID] = None
+
+@router.post("/{grupo_id}/cancelar", response_model=GrupoCuotasResumen)
+def cancelar_grupo_cuotas(
+    grupo_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    grupo = cancelar_grupo(db, grupo_id, current_user.id)
+    return mapear_grupo_resumen(db, grupo)
+
+@router.post("/{grupo_id}/prepagar", response_model=GrupoCuotasResumen)
+def prepagar_grupo_cuotas(
+    grupo_id: UUID,
+    datos: PrepagoDatos,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    grupo = prepagar_grupo(db, grupo_id, current_user.id, datos.billetera_id, datos.categoria_id)
+    return mapear_grupo_resumen(db, grupo)

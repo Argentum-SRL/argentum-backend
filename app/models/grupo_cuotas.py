@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import enum
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -17,6 +18,12 @@ if TYPE_CHECKING:
     from app.models.cuota import Cuota
     from app.models.usuario import Usuario
     from app.models.transaccion import Transaccion
+
+
+class EstadoGrupoCuotas(str, enum.Enum):
+    ACTIVO = "activo"
+    CANCELADO = "cancelado"
+    COMPLETADO = "completado"
 
 
 class GrupoCuotas(Base):
@@ -39,6 +46,12 @@ class GrupoCuotas(Base):
     tasa_interes: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
     total_financiado: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     moneda: Mapped[Moneda] = mapped_column(SAEnum(Moneda, values_callable=lambda obj: [e.value for e in obj], name="moneda_enum"), nullable=False)
+    estado: Mapped[EstadoGrupoCuotas] = mapped_column(
+        SAEnum(EstadoGrupoCuotas, values_callable=lambda obj: [e.value for e in obj], name="estado_grupo_cuotas_enum"),
+        nullable=False,
+        default=EstadoGrupoCuotas.ACTIVO,
+        server_default="activo"
+    )
     primer_vencimiento: Mapped[date | None] = mapped_column(Date, nullable=True)
     fecha_creacion: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)

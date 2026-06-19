@@ -143,6 +143,24 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
             )
             
         billetera.saldo_actual -= data.monto
+        if billetera.saldo_actual <= 0:
+            try:
+                from app.services.notificacion_service import crear_notificacion
+                from app.models.notificacion import TipoNotificacion, NivelNotificacion
+                crear_notificacion(
+                    db=db,
+                    usuario_id=usuario_id,
+                    tipo=TipoNotificacion.SALDO_CERO,
+                    nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                    mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
+                    entidad_tipo="billetera",
+                    entidad_id=billetera.id,
+                    deep_link="/app/billeteras",
+                    canal_web=True,
+                    canal_whatsapp=True,
+                )
+            except Exception:
+                pass
         meta.monto_actual += monto_impacto_meta
     else:
         # Validar que no se retire más de lo que hay (opcional, dependiendo de política)
@@ -154,7 +172,26 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
     
     # Actualizar estado si se completó (Lógica automática)
     if meta.monto_actual >= meta.monto_objetivo:
+        estado_anterior = meta.estado  # capturar ANTES de cambiar
         meta.estado = EstadoMeta.COMPLETADA
+        if estado_anterior != EstadoMeta.COMPLETADA:  # solo si recién se completó
+            try:
+                from app.services.notificacion_service import crear_notificacion
+                from app.models.notificacion import TipoNotificacion, NivelNotificacion
+                crear_notificacion(
+                    db=db,
+                    usuario_id=usuario_id,
+                    tipo=TipoNotificacion.META_ALCANZADA,
+                    nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                    mensaje=f"¡Completaste tu meta '{meta.nombre}'! Ahorraste ${meta.monto_objetivo:,.0f}.",
+                    entidad_tipo="meta",
+                    entidad_id=meta.id,
+                    deep_link="/app/metas",
+                    canal_web=True,
+                    canal_whatsapp=True,
+                )
+            except Exception:
+                pass
     elif meta.estado == EstadoMeta.COMPLETADA and meta.monto_actual < meta.monto_objetivo:
         meta.estado = EstadoMeta.ACTIVA
 

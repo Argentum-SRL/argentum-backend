@@ -39,7 +39,7 @@ from app.models.usuario import Usuario
 # ---------------------------------------------------------------------------
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 
 def _refresh_secret_hash(secret: str) -> str:
@@ -245,10 +245,23 @@ def limpiar_tokens_expirados(db: Session) -> int:
 # Dependencies de FastAPI
 # ---------------------------------------------------------------------------
 
+from typing import Optional
+from fastapi import Response
+
 def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    request: Request,
     db: Session = Depends(get_db),
+    token_header: Optional[str] = Depends(oauth2_scheme),
 ) -> Usuario:
+    token = request.cookies.get("access_token") or token_header
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No autenticado",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     usuario_id_str = verificar_access_token(token)
 
     usuario = db.execute(
@@ -299,11 +312,15 @@ def get_optional_user(
     request: Request,
     db: Session = Depends(get_db),
 ) -> Usuario | None:
-    auth_header = request.headers.get("authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return None
+    # Intentar leer desde cookie primero, luego desde header
+    token = request.cookies.get("access_token")
+    if not token:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
 
-    token = auth_header[7:]
+    if not token:
+        return None
 
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
@@ -321,3 +338,34 @@ def get_optional_user(
 
     except (JWTError, Exception):
         return None
+
+
+def setear_cookies_auth(response: Response, access_token: str, refresh_token: str, settings) -> None:
+    is_production = getattr(settings, 'ENVIRONMENT', 'development') == 'production'
+    
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=is_production,
+        samesite="lax",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        path="/",
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        httponly=True,
+        secure=is_production,
+        samesite="lax",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/",
+    )
+
+
+def limpiar_cookies_auth(response: Response) -> None:
+    """
+    Elimina las cookies de autenticación.
+    """
+    response.delete_cookie(key="access_token", path="/")
+    response.delete_cookie(key="refresh_token", path="/")
