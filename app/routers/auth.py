@@ -24,7 +24,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, BackgroundTasks, Cookie
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.core.config import settings
@@ -50,9 +50,7 @@ from app.schemas.auth import (
     EnviarCodigoRequest,
     GoogleLoginRequest,
     LoginRequest,
-    LogoutRequest,
     RecuperarPasswordRequest,
-    RefreshRequest,
     RegisterRequest,
     TokenResponse,
     VerificarCodigoEmailRequest,
@@ -193,7 +191,6 @@ def login(user_in: LoginRequest, request: Request, response: Response, db: Sessi
     setear_cookies_auth(response, access, refresh, settings)
     return AuthResponse(
         access_token=access,
-        refresh_token=refresh,
         usuario=UsuarioRead.model_validate(user),
         requiere_onboarding=_requiere_onboarding(user),
     )
@@ -296,7 +293,6 @@ def confirmar_token(
     setear_cookies_auth(response, access, refresh, settings)
     return AuthResponse(
         access_token=access,
-        refresh_token=refresh,
         usuario=UsuarioRead.model_validate(usuario),
         requiere_onboarding=_requiere_onboarding(usuario),
     )
@@ -388,7 +384,6 @@ def verificar_email(
         setear_cookies_auth(response, access, refresh, settings)
         return AuthResponse(
             access_token=access,
-            refresh_token=refresh,
             usuario=UsuarioRead.model_validate(user),
             requiere_onboarding=_requiere_onboarding(user),
         )
@@ -497,7 +492,6 @@ def login_google(
 
     return AuthResponse(
         access_token=access,
-        refresh_token=refresh,
         usuario=UsuarioRead.model_validate(user),
         requiere_telefono=False,
         requiere_onboarding=_requiere_onboarding(user),
@@ -615,7 +609,6 @@ def verificar_codigo_telefono(
         setear_cookies_auth(response, access, refresh, settings)
         return AuthResponse(
             access_token=access,
-            refresh_token=refresh,
             usuario=UsuarioRead.model_validate(user),
             requiere_datos=True,
         )
@@ -672,7 +665,6 @@ def verificar_codigo_telefono(
 
     return AuthResponse(
         access_token=access,
-        refresh_token=refresh,
         usuario=UsuarioRead.model_validate(user),
         requiere_datos=req_datos,
         requiere_onboarding=req_onboarding,
@@ -724,27 +716,34 @@ def completar_perfil(
 def refresh(
     request: Request,
     response: Response,
-    body: Optional[RefreshRequest] = None,
     db: Session = Depends(get_db),
+    refresh_token: Optional[str] = Cookie(default=None, alias="refresh_token"),
 ):
     """Renueva los tokens usando rotation. El token usado se revoca."""
-    refresh_token_value = (body.refresh_token if body else None) or request.cookies.get("refresh_token")
-    if not refresh_token_value:
-        raise HTTPException(status_code=401, detail="Refresh token no encontrado")
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Tu sesión expiró. Iniciá sesión nuevamente.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
-    nuevos = renovar_tokens(refresh_token_value, db, device_info=_device_info(request))
+    nuevos = renovar_tokens(refresh_token, db, device_info=_device_info(request))
     setear_cookies_auth(response, nuevos["access_token"], nuevos["refresh_token"], settings)
-    return TokenResponse(**nuevos)
+    return TokenResponse(
+        access_token=nuevos["access_token"],
+        token_type=nuevos["token_type"]
+    )
 
 
 @router.post("/logout", status_code=status.HTTP_200_OK)
 def logout(
-    body: LogoutRequest,
     response: Response,
     db: Session = Depends(get_db),
+    refresh_token: Optional[str] = Cookie(default=None, alias="refresh_token"),
 ):
     """Cierra la sesión del dispositivo actual revocando el refresh token."""
-    revocar_refresh_token(body.refresh_token, db)
+    if refresh_token:
+        revocar_refresh_token(refresh_token, db)
     limpiar_cookies_auth(response)
     return {"detail": "Sesión cerrada correctamente."}
 

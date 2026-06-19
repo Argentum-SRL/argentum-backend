@@ -17,13 +17,6 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class RefreshRequest(BaseModel):
-    refresh_token: str
-
-
-class LogoutRequest(BaseModel):
-    refresh_token: str
-
 
 class EnviarCodigoRequest(BaseModel):
     telefono: str
@@ -116,7 +109,6 @@ class AuthResponse(BaseModel):
     El frontend debe leer los flags y redirigir según corresponda.
     """
     access_token: str | None = None
-    refresh_token: str | None = None
     token_type: str = "bearer"
     usuario: UsuarioRead | None = None
     requiere_telefono: bool = False
@@ -129,7 +121,6 @@ class AuthResponse(BaseModel):
 class TokenResponse(BaseModel):
     """Respuesta de /auth/refresh con los nuevos tokens."""
     access_token: str
-    refresh_token: str
     token_type: str = "bearer"
 
 
