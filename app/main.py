@@ -506,6 +506,9 @@ app.include_router(whatsapp_ia.router, prefix="/api")
 app.include_router(admin.router, prefix="/v1", tags=["admin"])
 app.include_router(perfil_financiero.router, prefix="/api/v1", tags=["perfil"])
 
+from app.routers.analisis_ia import router as analisis_ia_router
+app.include_router(analisis_ia_router)
+
 # Servir archivos estáticos de media (Ignorado por git)
 os.makedirs("media/fotos", exist_ok=True)
 app.mount("/media", StaticFiles(directory="media"), name="media")
