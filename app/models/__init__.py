@@ -1,3 +1,4 @@
+from app.models.analisis_ia import AnalisisIA
 from app.models.billetera import Billetera
 from app.models.categoria import Categoria
 from app.models.categoria_excluida import CategoriaExcluida
@@ -26,6 +27,7 @@ from app.models.usuario import Usuario
 from app.models.tools import IPCCache
 
 __all__ = [
+    "AnalisisIA",
     "Usuario",
     "Billetera",
     "TarjetaCredito",
