@@ -65,3 +65,18 @@ def get_proyeccion(
     Retorna la proyección financiera para el ciclo actual.
     """
     return proyeccion_service.calcular_proyeccion(db, current_user)
+
+@router.get("/categorias/{categoria_id}/subcategorias")
+def get_subcategorias_gasto(
+    categoria_id: str,
+    billetera_ids: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+) -> Any:
+    """
+    Retorna los gastos por subcategoría de una categoría específica en el ciclo actual.
+    """
+    import uuid
+    ids_lista = [uuid.UUID(i.strip()) for i in billetera_ids.split(',')] if billetera_ids else None
+    return dashboard_service.get_subcategorias_gasto(db, current_user, categoria_id, billetera_ids=ids_lista)
+

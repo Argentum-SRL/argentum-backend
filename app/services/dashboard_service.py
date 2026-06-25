@@ -16,7 +16,7 @@ from app.models.usuario import Usuario, CicloTipo
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion, MetodoPago
 from app.models.categoria import Categoria
-from app.models.subcategoria import Subcategoria
+from app.models.subcategoria import Subcategoria, EstadoSubcategoria
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion
 from app.models.cuota import Cuota
 from app.models.grupo_cuotas import GrupoCuotas
@@ -439,3 +439,92 @@ async def get_resumen_completo(
     cotizacion = await get_cotizacion_usuario(usuario)
 
     return {"billeteras": billeteras_data, "resumen": resumen, "cotizacion": cotizacion}
+
+def get_subcategorias_gasto(
+    db: Session,
+    usuario: Usuario,
+    categoria_id: str,
+    billetera_ids: Optional[List[UUID]] = None
+) -> List[Dict[str, Any]]:
+    """
+    Retorna los gastos por subcategoría de una categoría específica en el ciclo actual.
+    """
+    import uuid
+    try:
+        cat_uuid = uuid.UUID(categoria_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid UUID format")
+
+    hoy = (datetime.now(timezone.utc) - timedelta(hours=3)).date()
+    fecha_inicio, fecha_fin = get_ciclo_fechas(usuario, hoy)
+
+    # 1. Obtener todas las subcategorías activas de la categoría
+    subcategorias_stmt = select(Subcategoria).where(
+        and_(
+            Subcategoria.categoria_id == cat_uuid,
+            Subcategoria.estado == EstadoSubcategoria.ACTIVA,
+            or_(
+                Subcategoria.es_global == True,
+                Subcategoria.creador_id == usuario.id
+            )
+        )
+    )
+    subcategorias = db.execute(subcategorias_stmt).scalars().all()
+    sub_map = {sub.id: sub.nombre for sub in subcategorias}
+
+    # 2. Agrupar gastos de transacciones por subcategoria_id en el ciclo actual
+    tx_where = and_(
+        Transaccion.usuario_id == usuario.id,
+        Transaccion.categoria_id == cat_uuid,
+        Transaccion.fecha >= fecha_inicio,
+        Transaccion.fecha <= hoy,
+        Transaccion.tipo == TipoTransaccion.EGRESO,
+        Transaccion.es_padre_cuotas == False,
+        Transaccion.metodo_pago != MetodoPago.CREDITO,
+        or_(
+            Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
+            Transaccion.estado_verificacion == None
+        )
+    )
+    if billetera_ids:
+        tx_where = and_(tx_where, Transaccion.billetera_id.in_(billetera_ids))
+
+    stmt = (
+        select(
+            Transaccion.subcategoria_id,
+            func.sum(Transaccion.monto).label("total")
+        )
+        .where(tx_where)
+        .group_by(Transaccion.subcategoria_id)
+    )
+    res = db.execute(stmt).all()
+
+    # 3. Consolidar resultados
+    sub_gastos = {}
+    otros_total = Decimal("0")
+    for row in res:
+        sub_id = row.subcategoria_id
+        total = row.total or Decimal("0")
+        if sub_id in sub_map:
+            sub_gastos[sub_id] = total
+        else:
+            otros_total += total
+
+    desglose = []
+    for sub in subcategorias:
+        gasto = sub_gastos.get(sub.id, Decimal("0"))
+        desglose.append({
+            "subcategoria_id": str(sub.id),
+            "subcategoria_nombre": sub.nombre,
+            "gasto_actual_ciclo": float(gasto)
+        })
+
+    if otros_total > 0:
+        desglose.append({
+            "subcategoria_id": "otros",
+            "subcategoria_nombre": "Otros",
+            "gasto_actual_ciclo": float(otros_total)
+        })
+
+    desglose.sort(key=lambda x: (-x["gasto_actual_ciclo"], x["subcategoria_nombre"]))
+    return desglose
