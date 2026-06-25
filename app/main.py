@@ -405,7 +405,10 @@ app = FastAPI(title="Argentum API", version="1.0.0", lifespan=lifespan)
 #   3. CORSMiddleware  ← último registrado = primero en ejecutar
 _origins = [settings.FRONTEND_URL]
 if settings.ENVIRONMENT == "development":
-    _origins.extend(["http://localhost:5173", "http://localhost:3000", "http://localhost:5174"])
+    _origins.extend([
+        "http://localhost:5173", "http://localhost:3000", "http://localhost:5174",
+        "http://127.0.0.1:5173", "http://127.0.0.1:3000", "http://127.0.0.1:5174"
+    ])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
