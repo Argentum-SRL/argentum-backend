@@ -342,13 +342,14 @@ def get_optional_user(
 
 def setear_cookies_auth(response: Response, access_token: str, refresh_token: str, settings) -> None:
     is_production = getattr(settings, 'ENVIRONMENT', 'development') == 'production'
+    samesite_val = "none" if is_production else "lax"
     
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
         secure=is_production,
-        samesite="lax",
+        samesite=samesite_val,
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
     )
@@ -357,7 +358,7 @@ def setear_cookies_auth(response: Response, access_token: str, refresh_token: st
         value=refresh_token,
         httponly=True,
         secure=is_production,
-        samesite="lax",
+        samesite=samesite_val,
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
         path="/",
     )
@@ -367,5 +368,18 @@ def limpiar_cookies_auth(response: Response) -> None:
     """
     Elimina las cookies de autenticación.
     """
-    response.delete_cookie(key="access_token", path="/")
-    response.delete_cookie(key="refresh_token", path="/")
+    is_production = getattr(settings, 'ENVIRONMENT', 'development') == 'production'
+    samesite_val = "none" if is_production else "lax"
+    
+    response.delete_cookie(
+        key="access_token",
+        path="/",
+        secure=is_production,
+        samesite=samesite_val
+    )
+    response.delete_cookie(
+        key="refresh_token",
+        path="/",
+        secure=is_production,
+        samesite=samesite_val
+    )
