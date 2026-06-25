@@ -220,22 +220,27 @@ def _calcular_cumplimiento_presupuesto_sync(db, usuario_id: UUID, fecha_inicio: 
     return Decimal(str(ciclos_dentro_del_limite)) / Decimal(str(total_ciclos_evaluados))
 
 
-def _calcular_consistencia_registro_sync(db, usuario_id: UUID, fecha_inicio: date) -> Decimal:
+def _calcular_consistencia_registro_sync(
+    db, usuario_id: UUID, fecha_inicio: date, primera_fecha: date | datetime | None = None
+) -> Decimal | None:
     hoy = date.today()
 
-    primera_fecha = db.execute(
-        select(func.min(Transaccion.fecha)).where(Transaccion.usuario_id == usuario_id)
-    ).scalar()
+    if primera_fecha is None:
+        primera_fecha = db.execute(
+            select(func.min(Transaccion.fecha)).where(Transaccion.usuario_id == usuario_id)
+        ).scalar()
 
-    if not primera_fecha:
-        return Decimal("0.0")
+    if primera_fecha is None:
+        return None
+
+    primera_fecha_date = primera_fecha.date() if isinstance(primera_fecha, datetime) else primera_fecha
 
     dias = (hoy - fecha_inicio).days
     dias = max(1, dias)
 
     inicio_periodo = fecha_inicio
 
-    dias_reales = (hoy - primera_fecha).days + 1
+    dias_reales = (hoy - primera_fecha_date).days + 1
     dias_evaluados = min(dias, dias_reales)
     dias_evaluados = max(1, dias_evaluados)
 
@@ -251,6 +256,9 @@ def _calcular_consistencia_registro_sync(db, usuario_id: UUID, fecha_inicio: dat
     ).scalars().all()
 
     dias_con_transacciones = len(fechas_unicas)
+    if dias_con_transacciones == 0:
+        return None
+
     consistencia = Decimal(str(dias_con_transacciones)) / Decimal(str(dias_evaluados))
     return min(Decimal("1.0"), consistencia)
 
@@ -261,7 +269,7 @@ def _calcular_porcentaje_suscripciones_sync(db, usuario_id: UUID, fecha_inicio: 
     total_usd_subs = Decimal(str(suscripciones_data.get("total_usd") or 0))
 
     if total_ars_subs == 0 and total_usd_subs == 0:
-        return Decimal("0.0")
+        return None
 
     usuario = db.get(Usuario, usuario_id)
     if not usuario:
@@ -297,12 +305,28 @@ def _calcular_porcentaje_suscripciones_sync(db, usuario_id: UUID, fecha_inicio: 
     return costo_mensual_suscripciones / gasto_promedio_mensual
 
 
-def _calcular_y_persistir_perfil_sync(db, usuario_id: UUID) -> PerfilFinanciero:
+def _obtener_primera_fecha_sync(db, usuario_id: UUID):
+    return db.execute(
+        select(func.min(Transaccion.fecha)).where(Transaccion.usuario_id == usuario_id)
+    ).scalar()
+
+
+def _calcular_y_persistir_perfil_sync(db, usuario_id: UUID) -> PerfilFinanciero | None:
     usuario = db.get(Usuario, usuario_id)
     if not usuario:
         raise ValueError(f"Usuario {usuario_id} no encontrado")
 
     hoy = date.today()
+
+    # Obtener primera_fecha
+    primera_fecha = _obtener_primera_fecha_sync(db, usuario_id)
+
+    # Guard de historial insuficiente
+    primera_fecha_date = primera_fecha.date() if isinstance(primera_fecha, datetime) else primera_fecha
+    hoy_date = hoy.date() if isinstance(hoy, datetime) else hoy
+    if primera_fecha is None or (hoy_date - primera_fecha_date).days < 90:
+        return None
+
     try:
         dia_inicio = int(usuario.ciclo_valor) if usuario.ciclo_valor else 1
     except ValueError:
@@ -328,7 +352,7 @@ def _calcular_y_persistir_perfil_sync(db, usuario_id: UUID) -> PerfilFinanciero:
     score_impulsividad = _calcular_score_impulsividad_sync(db, usuario_id, inicio_analisis)
     ratio_cuotas = _calcular_ratio_cuotas_sync(db, usuario_id, inicio_analisis)
     cumplimiento_presupuesto = _calcular_cumplimiento_presupuesto_sync(db, usuario_id, inicio_analisis)
-    consistencia_registro = _calcular_consistencia_registro_sync(db, usuario_id, inicio_analisis)
+    consistencia_registro = _calcular_consistencia_registro_sync(db, usuario_id, inicio_analisis, primera_fecha)
     porcentaje_suscripciones = _calcular_porcentaje_suscripciones_sync(db, usuario_id, inicio_analisis)
 
     perfil = db.execute(
@@ -368,9 +392,15 @@ def _obtener_perfil_sync(db, usuario_id: UUID) -> PerfilFinanciero | None:
         select(PerfilFinanciero).where(PerfilFinanciero.usuario_id == usuario_id)
     ).scalar_one_or_none()
 
-    if not perfil:
-        perfil = _calcular_y_persistir_perfil_sync(db, usuario_id)
+    if perfil:
+        primera_fecha = _obtener_primera_fecha_sync(db, usuario_id)
+        hoy = date.today()
+        primera_fecha_date = primera_fecha.date() if hasattr(primera_fecha, 'date') else primera_fecha
+        if primera_fecha is None or (hoy - primera_fecha_date).days < 90:
+            return None
+        return perfil
 
+    perfil = _calcular_y_persistir_perfil_sync(db, usuario_id)
     return perfil
 
 
@@ -412,12 +442,56 @@ async def calcular_porcentaje_suscripciones(db, usuario_id: UUID, fecha_inicio: 
     return _calcular_porcentaje_suscripciones_sync(db, usuario_id, fecha_inicio)
 
 
-async def calcular_y_persistir_perfil(db, usuario_id: UUID) -> PerfilFinanciero:
-    return _calcular_y_persistir_perfil_sync(db, usuario_id)
+async def calcular_y_persistir_perfil(db, usuario_id: UUID) -> PerfilFinanciero | None:
+    res = _calcular_y_persistir_perfil_sync(db, usuario_id)
+    if res is None:
+        usuario = db.get(Usuario, usuario_id)
+        if not usuario:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=404,
+                detail="Usuario no encontrado."
+            )
+        from uuid import uuid4
+        return PerfilFinanciero(
+            id=uuid4(),
+            usuario_id=usuario_id,
+            tasa_ahorro=None,
+            score_impulsividad=None,
+            ratio_cuotas=None,
+            cumplimiento_presupuesto=None,
+            consistencia_registro=None,
+            porcentaje_suscripciones=None,
+            ultima_actualizacion=None,
+            fecha_creacion=datetime.now(timezone.utc)
+        )
+    return res
 
 
 async def obtener_perfil(db, usuario_id: UUID) -> PerfilFinanciero | None:
-    return _obtener_perfil_sync(db, usuario_id)
+    res = _obtener_perfil_sync(db, usuario_id)
+    if res is None:
+        usuario = db.get(Usuario, usuario_id)
+        if not usuario:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=404,
+                detail="Usuario no encontrado."
+            )
+        from uuid import uuid4
+        return PerfilFinanciero(
+            id=uuid4(),
+            usuario_id=usuario_id,
+            tasa_ahorro=None,
+            score_impulsividad=None,
+            ratio_cuotas=None,
+            cumplimiento_presupuesto=None,
+            consistencia_registro=None,
+            porcentaje_suscripciones=None,
+            ultima_actualizacion=None,
+            fecha_creacion=datetime.now(timezone.utc)
+        )
+    return res
 
 
 def generar_texto_contexto_ia(perfil: PerfilFinanciero) -> str:
