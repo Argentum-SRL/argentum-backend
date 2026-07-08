@@ -6,6 +6,7 @@ from app.models.conversacion_wpp import ConversacionWpp
 from app.models.cuota import Cuota
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.historial_suscripcion import HistorialSuscripcion
+from app.models.importacion import ImportacionResumen, CorreccionImportacion
 from app.models.meta import Meta
 from app.models.movimiento_meta import MovimientoMeta
 from app.models.notificacion import Notificacion
@@ -37,6 +38,8 @@ __all__ = [
     "Cuota",
     "GrupoCuotas",
     "HistorialSuscripcion",
+    "ImportacionResumen",
+    "CorreccionImportacion",
     "Meta",
     "MovimientoMeta",
     "Notificacion",
