@@ -11,6 +11,8 @@ if TYPE_CHECKING:
     from app.models.categoria import Categoria
     from app.models.subcategoria import Subcategoria
     from app.models.billetera import Billetera
+    from app.models.importacion import ImportacionResumen
+    from app.models.tarjeta_credito import TarjetaCredito
 
 from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
@@ -92,6 +94,9 @@ class Transaccion(Base):
         SAEnum(EstadoVerificacionTransaccion, values_callable=lambda obj: [e.value for e in obj], name="estado_verificacion_transaccion_enum"),
         nullable=True,
     )
+    import_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    importacion_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("importaciones_resumen.id"), nullable=True)
+    titular_pdf: Mapped[str | None] = mapped_column(String(150), nullable=True)
     fecha_creacion: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -101,6 +106,7 @@ class Transaccion(Base):
     subcategoria: Mapped[Subcategoria | None] = relationship("Subcategoria")
     billetera: Mapped[Billetera] = relationship("Billetera")
     tarjeta: Mapped[TarjetaCredito | None] = relationship("TarjetaCredito")
+    importacion: Mapped[ImportacionResumen | None] = relationship("ImportacionResumen", back_populates="transacciones")
 
     def __repr__(self) -> str:
         return (

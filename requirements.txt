@@ -33,3 +33,7 @@ apscheduler==3.11.2
 # Image processing (GPT-4o Vision)
 pillow==12.2.0
 python-dateutil==2.9.0
+
+# PDF parsing
+pdfplumber==0.11.0
+
