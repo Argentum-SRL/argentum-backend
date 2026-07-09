@@ -2,6 +2,7 @@ import re
 import hashlib
 from decimal import Decimal
 from datetime import date
+from dateutil.relativedelta import relativedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -254,10 +255,23 @@ def importar_transacciones_resumen(
     # Recuperamos el registro de control de la importación
     importacion = db.query(ImportacionResumen).filter(ImportacionResumen.id == imp_id).first()
     
+    tarjeta = None
+    if t_id:
+        from app.models.tarjeta_credito import TarjetaCredito
+        tarjeta = db.query(TarjetaCredito).filter(TarjetaCredito.id == t_id).first()
+    
     try:
         # Abrimos un bloque de savepoint anidado para poder hacer rollback total del lote de inserciones
         with db.begin_nested():
             for cruda in transacciones_crudas:
+                # Calcular primer vencimiento si es tarjeta de crédito
+                primer_venc_calc = cruda.fecha
+                if t_id and tarjeta:
+                    from app.services.tarjeta_service import calcular_primer_vencimiento
+                    primer_venc_calc = calcular_primer_vencimiento(
+                        cruda.fecha, tarjeta.dia_cierre, tarjeta.dia_vencimiento
+                    )
+
                 # 1. Calcular hash unívoco para control de duplicados
                 hash_val = calcular_import_hash(
                     usuario_id=u_id,
@@ -357,7 +371,7 @@ def importar_transacciones_resumen(
                         total_financiado=monto_total,
                         moneda=cruda.moneda,
                         estado=EstadoGrupoCuotas.ACTIVO,
-                        primer_vencimiento=cruda.fecha
+                        primer_vencimiento=primer_venc_calc
                     )
                     db.add(grupo)
                     db.flush()
@@ -371,7 +385,7 @@ def importar_transacciones_resumen(
                         transaccion_padre=tx_padre,
                         grupo=grupo,
                         cantidad_cuotas=total_cuotas,
-                        primer_vencimiento=cruda.fecha,
+                        primer_vencimiento=primer_venc_calc,
                         monto_cuota=monto_round,
                         usuario_id=u_id,
                         cuota_inicial=1
@@ -416,7 +430,6 @@ def importar_transacciones_resumen(
                                 tx_hija = cuota.transaccion
                                 if tx_hija:
                                     tx_hija.monto = monto_round
-                                    tx_hija.fecha = cruda.fecha
                                     tx_hija.origen = OrigenTransaccion.IA_PDF
                                     tx_hija.estado_verificacion = EstadoVerificacionTransaccion.CONFIRMADA
                                     tx_hija.import_hash = hash_val
@@ -428,12 +441,13 @@ def importar_transacciones_resumen(
                         # Si por algún motivo la cuota actual no estaba pre-generada en el grupo,
                         # la creamos dinámicamente y la vinculamos
                         if not cuota_encontrada:
+                            venc_cuota = grupo_existente.primer_vencimiento + relativedelta(months=cruda.cuota_actual - 1)
                             tx_hija = Transaccion(
                                 usuario_id=u_id,
                                 tipo=tipo_tx,
                                 monto=monto_round,
                                 moneda=cruda.moneda,
-                                fecha=cruda.fecha,
+                                fecha=venc_cuota,
                                 descripcion=f"{grupo_existente.descripcion} (Cuota {cruda.cuota_actual}/{total_cuotas})",
                                 metodo_pago=MetodoPago.CREDITO,
                                 billetera_id=billetera_actual_id,
@@ -455,7 +469,7 @@ def importar_transacciones_resumen(
                                 numero_cuota=cruda.cuota_actual,
                                 monto_proyectado=monto_round,
                                 monto_real=monto_round,
-                                fecha_vencimiento=cruda.fecha,
+                                fecha_vencimiento=venc_cuota,
                                 pagada=True
                             )
                             db.add(cuota_reg)
@@ -501,7 +515,7 @@ def importar_transacciones_resumen(
                             total_financiado=monto_total,
                             moneda=cruda.moneda,
                             estado=EstadoGrupoCuotas.ACTIVO,
-                            primer_vencimiento=cruda.fecha
+                            primer_vencimiento=primer_venc_calc
                         )
                         db.add(grupo)
                         db.flush()
@@ -514,7 +528,7 @@ def importar_transacciones_resumen(
                             transaccion_padre=tx_padre,
                             grupo=grupo,
                             cantidad_cuotas=total_cuotas,
-                            primer_vencimiento=cruda.fecha,
+                            primer_vencimiento=primer_venc_calc,
                             monto_cuota=monto_round,
                             usuario_id=u_id, # Pasamos UUID directamente
                             cuota_inicial=cruda.cuota_actual
