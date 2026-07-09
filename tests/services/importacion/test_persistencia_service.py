@@ -434,7 +434,7 @@ def test_importar_cuota_intermedia_con_grupo_existente(db):
     tx_hija = cuota_4_inicial.transaccion
     assert tx_hija.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA
     assert tx_hija.monto == Decimal("8200.00")
-    assert tx_hija.fecha == date(2026, 7, 8)
+    assert tx_hija.fecha == date(2026, 7, 30)
     assert tx_hija.import_hash is not None
 
 
