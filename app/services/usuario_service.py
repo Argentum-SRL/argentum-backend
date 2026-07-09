@@ -30,6 +30,7 @@ from app.models.movimiento_meta import MovimientoMeta
 from app.models.periodo_presupuesto import PeriodoPresupuesto
 from app.models.presupuesto_categoria import PresupuestoCategoria
 from app.models.tarjeta_credito import TarjetaCredito
+from app.models.importacion import ImportacionResumen, CorreccionImportacion
 from app.core.security import get_password_hash, verify_password
 from app.services import email_service, whatsapp_service
 from app.schemas.usuario import (
@@ -55,6 +56,20 @@ def actualizar_datos_personales(
 ) -> Usuario:
     if not datos.nombre.strip() or not datos.apellido.strip():
         raise HTTPException(status_code=400, detail="Nombre y apellido son obligatorios")
+    
+    if datos.fecha_nacimiento:
+        from datetime import date
+        if datos.fecha_nacimiento > date.today():
+            raise HTTPException(status_code=400, detail="La fecha de nacimiento no puede ser futura.")
+        
+        # Decisión de diseño: fecha_nacimiento es obligatoria en el flujo de onboarding (datos personales),
+        # por lo que se valida siempre allí. En la actualización del perfil, es opcional en el esquema para permitir
+        # actualizaciones parciales, pero si se provee una fecha, se aplica la validación de manera estricta.
+        # Esto garantiza el cumplimiento legal sin romper la flexibilidad de la API.
+        hoy = date.today()
+        edad = hoy.year - datos.fecha_nacimiento.year - ((hoy.month, hoy.day) < (datos.fecha_nacimiento.month, datos.fecha_nacimiento.day))
+        if edad < 18:
+            raise HTTPException(status_code=400, detail="Tenés que ser mayor de 18 años para crear una cuenta en Argentum")
     
     usuario.nombre = datos.nombre
     usuario.apellido = datos.apellido
@@ -289,6 +304,14 @@ def eliminar_usuario(db: Session, usuario: Usuario) -> dict:
                 logger.warning("Error al eliminar archivo de foto del usuario", exc_info=True)
 
     try:
+        # Reasignar admin_id de importaciones de otros usuarios donde este usuario sea admin para evitar violación de FK
+        db.execute(
+            update(ImportacionResumen)
+            .where(ImportacionResumen.admin_id == usuario_id)
+            .where(ImportacionResumen.usuario_id != usuario_id)
+            .values(admin_id=ImportacionResumen.usuario_id)
+        )
+
         # 0. Romper referencia circular de transacciones → grupos_cuotas para permitir el borrado
         db.execute(update(Transaccion).where(Transaccion.usuario_id == usuario_id).values(grupo_cuotas_id=None))
         db.flush()
@@ -319,12 +342,17 @@ def eliminar_usuario(db: Session, usuario: Usuario) -> dict:
             HistorialSuscripcion.suscripcion_id.in_(select(Suscripcion.id).where(Suscripcion.usuario_id == usuario_id))
         ))
 
+        # Correcciones de Importación (vía ImportacionResumen)
+        db.execute(delete(CorreccionImportacion).where(
+            CorreccionImportacion.importacion_id.in_(select(ImportacionResumen.id).where(ImportacionResumen.usuario_id == usuario_id))
+        ))
+
         # 2. Modelos con usuario_id
         modelos_usuario = [
             ConversacionWpp, Notificacion, RefreshToken, Suscripcion,
             Presupuesto, Meta, GrupoCuotas, TransaccionRecurrente, 
             TransferenciaInterna, CategoriaExcluida, ConfiguracionNotificacion,
-            Transaccion, TarjetaCredito, Billetera, PerfilFinanciero
+            Transaccion, ImportacionResumen, TarjetaCredito, Billetera, PerfilFinanciero
         ]
         
         for modelo in modelos_usuario:

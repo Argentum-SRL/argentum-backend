@@ -77,8 +77,13 @@ class TimeoutMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # Para las rutas bajo /importacion, permitimos hasta 100 segundos
+        timeout = self.timeout
+        if path.startswith("/importacion") or "/importacion" in path:
+            timeout = 100.0
+
         try:
-            with anyio.fail_after(self.timeout):
+            with anyio.fail_after(timeout):
                 await self.app(scope, receive, send)
         except TimeoutError:
             if scope["type"] == "http":
@@ -487,7 +492,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 
-from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin, perfil_financiero
+from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin, perfil_financiero, importacion
 
 app.include_router(auth.router)
 app.include_router(onboarding.router)
@@ -508,6 +513,7 @@ app.include_router(grupos_cuotas.router)
 app.include_router(whatsapp_ia.router, prefix="/api")
 app.include_router(admin.router, prefix="/v1", tags=["admin"])
 app.include_router(perfil_financiero.router, prefix="/api/v1", tags=["perfil"])
+app.include_router(importacion.router)
 
 # Servir archivos estáticos de media (Ignorado por git)
 os.makedirs("media/fotos", exist_ok=True)

@@ -56,6 +56,11 @@ def post_datos_personales(
     if body.fecha_nacimiento > date.today():
         raise HTTPException(status_code=400, detail="La fecha de nacimiento no puede ser futura.")
     
+    hoy = date.today()
+    edad = hoy.year - body.fecha_nacimiento.year - ((hoy.month, hoy.day) < (body.fecha_nacimiento.month, body.fecha_nacimiento.day))
+    if edad < 18:
+        raise HTTPException(status_code=400, detail="Tenés que ser mayor de 18 años para crear una cuenta en Argentum")
+    
     # El sexo ya viene validado por el Enum en el schema (Pydantic devuelve 422)
     # Pero si queremos forzar el 400 como pide el usuario:
     from app.models.usuario import Sexo

@@ -454,6 +454,14 @@ def _extraer_transaccion_de_imagen(media_url: str, media_content_type: str, usua
     from app.core.config import settings
     from openai import OpenAI
 
+    nombre_anonimo = ""
+    if usuario_nombre:
+        partes = usuario_nombre.strip().split()
+        if len(partes) > 1:
+            nombre_anonimo = " ".join(partes[:-1]) + f" {partes[-1][0]}."
+        elif partes:
+            nombre_anonimo = partes[0]
+
     try:
         twilio_sid = settings.TWILIO_ACCOUNT_SID
         twilio_token = settings.TWILIO_AUTH_TOKEN
@@ -487,10 +495,10 @@ def _extraer_transaccion_de_imagen(media_url: str, media_content_type: str, usua
                         "\n- Si hay fecha distinta a hoy, mencionala al final: 'el [fecha]'"
                         "\n- Incluí el monto exacto con el símbolo $ tal como aparece en el comprobante"
                         "\n- Si no podés identificar el monto, respondé exactamente: NO_IDENTIFICADO"
-                        + (f"\n\nNOMBRE DEL USUARIO DE LA APP: '{usuario_nombre}'. "
+                        + (f"\n\nNOMBRE DEL USUARIO DE LA APP (ANONIMIZADO): '{nombre_anonimo}'. "
                            "Comparalo con los nombres en el comprobante para determinar si es ingreso o egreso. "
-                           "Variaciones del nombre son válidas (ej: 'Sebastian' = 'Sebastián', apellidos parciales, etc)." 
-                           if usuario_nombre else "")
+                           "Buscá coincidencias en el comprobante (ej: si el nombre es 'Sebastián G.', puede coincidir con 'Sebastián Gómez', 'Sebastián Ariel Gómez', etc)."
+                           if nombre_anonimo else "")
                     )
                 },
                 {
@@ -507,11 +515,11 @@ def _extraer_transaccion_de_imagen(media_url: str, media_content_type: str, usua
                             "type": "text",
                             "text": (
                                 "Analizá este comprobante y describí la transacción. "
-                                + (f"IMPORTANTE: el usuario de la app se llama '{usuario_nombre}'. "
-                                   f"Buscá ese nombre (o variaciones sin tilde, apellidos parciales) en el comprobante. "
-                                   f"Si aparece en el campo 'Para' o 'Destinatario', es un INGRESO: respondé 'me entraron [monto] de [origen]'. "
-                                   f"Si aparece en el campo 'De' u 'Origen', es un EGRESO: respondé 'transferí [monto] a [destinatario]'."
-                                   if usuario_nombre else "")
+                                + (f"IMPORTANTE: el usuario de la app se llama '{nombre_anonimo}' (nombre minimizado por privacidad). "
+                                   f"Buscá coincidencias con este nombre en el comprobante (ej: si es 'Sebastián G.', puede coincidir con 'Sebastián Gómez', 'SEBASTIAN ARIEL GOMEZ', etc.). "
+                                   f"Si el usuario aparece como destinatario (en el campo 'Para', 'A', o 'Destinatario'), es un INGRESO: respondé 'me entraron [monto] de [origen]'. "
+                                   f"Si el usuario aparece como origen (en el campo 'De', 'Desde', o 'Remitente'), es un EGRESO: respondé 'transferí [monto] a [destinatario]'."
+                                   if nombre_anonimo else "")
                             )
                         }
                     ]
