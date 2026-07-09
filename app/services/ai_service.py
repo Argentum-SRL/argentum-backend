@@ -24,14 +24,13 @@ from app.services.proyeccion_service import calcular_proyeccion
 
 logger = logging.getLogger(__name__)
 
+from app.services.openai_client import get_openai_client
+
 _openai_client: OpenAI | None = None
 
 
 def _get_client() -> OpenAI:
-    global _openai_client
-    if _openai_client is None:
-        _openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
-    return _openai_client
+    return get_openai_client()
 
 
 SYSTEM_PROMPT = """Sos el asistente financiero de Argentum, una app de finanzas personales para Argentina.
