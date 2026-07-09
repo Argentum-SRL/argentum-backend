@@ -39,22 +39,30 @@ def calcular_primer_vencimiento(
 ) -> date:
     """
     Calcula la fecha del primer vencimiento de una compra con tarjeta.
-    Si la compra es antes o el mismo día del cierre, vence el mes siguiente.
-    Si es después del cierre, vence a los dos meses.
-    Si proximo_resumen es True, se le suma un mes adicional.
+    Si la compra es antes o el mismo día del cierre, entra en el cierre de ese mes.
+    Si es después del cierre, entra en el cierre del mes siguiente.
+    La fecha de vencimiento dependerá de si el vencimiento es en el mismo mes del cierre o al siguiente.
     """
+    # 1. Determinar el mes de cierre correspondiente a la compra
     if fecha_compra.day <= dia_cierre:
-        base = fecha_compra + relativedelta(months=1)
+        mes_cierre = fecha_compra
     else:
-        base = fecha_compra + relativedelta(months=2)
+        mes_cierre = fecha_compra + relativedelta(months=1)
 
+    # 2. Determinar el mes de vencimiento a partir del mes de cierre
+    if dia_vencimiento <= dia_cierre:
+        mes_vencimiento = mes_cierre + relativedelta(months=1)
+    else:
+        mes_vencimiento = mes_cierre
+
+    # 3. Sumar mes adicional si se solicita diferir al próximo resumen
     if proximo_resumen:
-        base = base + relativedelta(months=1)
+        mes_vencimiento = mes_vencimiento + relativedelta(months=1)
 
-    ultimo_dia = monthrange(base.year, base.month)[1]
+    ultimo_dia = monthrange(mes_vencimiento.year, mes_vencimiento.month)[1]
     dia_real = min(dia_vencimiento, ultimo_dia)
 
-    return base.replace(day=dia_real)
+    return mes_vencimiento.replace(day=dia_real)
 
 
 def calcular_fecha_vencimiento_proximo(tarjeta: TarjetaCredito, hoy: date | None = None) -> date:
