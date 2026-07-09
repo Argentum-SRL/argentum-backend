@@ -455,6 +455,53 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID):
             db.commit()
             return {"detail": "Grupo de cuotas eliminado exitosamente"}
 
+    # Revertir impacto en metas si es una transacción vinculada a una meta
+    if transaccion.descripcion.startswith("Aporte a la meta:") or transaccion.descripcion.startswith("Retiro de la meta:"):
+        from app.models.meta import Meta, EstadoMeta
+        from app.models.movimiento_meta import MovimientoMeta, TipoMovimientoMeta
+        from app.models.usuario import Moneda
+        
+        prefix_aporte = "Aporte a la meta: "
+        prefix_retiro = "Retiro de la meta: "
+        
+        if transaccion.descripcion.startswith(prefix_aporte):
+            meta_nombre = transaccion.descripcion[len(prefix_aporte):]
+            tipo_mov = TipoMovimientoMeta.APORTE
+        else:
+            meta_nombre = transaccion.descripcion[len(prefix_retiro):]
+            tipo_mov = TipoMovimientoMeta.RETIRO
+            
+        meta = db.query(Meta).filter(Meta.usuario_id == usuario_id, Meta.nombre == meta_nombre).first()
+        if meta:
+            movimiento = db.query(MovimientoMeta).filter(
+                MovimientoMeta.meta_id == meta.id,
+                MovimientoMeta.billetera_id == transaccion.billetera_id,
+                MovimientoMeta.monto == transaccion.monto,
+                MovimientoMeta.fecha == transaccion.fecha,
+                MovimientoMeta.tipo == tipo_mov
+            ).first()
+            
+            if movimiento:
+                monto_impacto_meta = movimiento.monto
+                if movimiento.moneda_movimiento != meta.moneda:
+                    if meta.moneda == Moneda.USD and movimiento.moneda_movimiento == Moneda.ARS:
+                        monto_impacto_meta = movimiento.monto / movimiento.cotizacion_usada
+                    elif meta.moneda == Moneda.ARS and movimiento.moneda_movimiento == Moneda.USD:
+                        monto_impacto_meta = movimiento.monto * movimiento.cotizacion_usada
+
+                if tipo_mov == TipoMovimientoMeta.APORTE:
+                    meta.monto_actual -= monto_impacto_meta
+                else:
+                    meta.monto_actual += monto_impacto_meta
+                    
+                # Ajustar estado de la meta
+                if meta.monto_actual >= meta.monto_objetivo:
+                    meta.estado = EstadoMeta.COMPLETADA
+                else:
+                    meta.estado = EstadoMeta.ACTIVA
+                    
+                db.delete(movimiento)
+
     # Transaccion normal
     if _afecta_saldo(transaccion):
         billetera = db.get(Billetera, transaccion.billetera_id)

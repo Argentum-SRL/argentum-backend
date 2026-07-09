@@ -142,32 +142,54 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
                 detail=f"Saldo insuficiente en la billetera '{billetera.nombre}'"
             )
             
-        billetera.saldo_actual -= data.monto
-        if billetera.saldo_actual <= 0:
-            try:
-                from app.services.notificacion_service import crear_notificacion
-                from app.models.notificacion import TipoNotificacion, NivelNotificacion
-                crear_notificacion(
-                    db=db,
-                    usuario_id=usuario_id,
-                    tipo=TipoNotificacion.SALDO_CERO,
-                    nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                    mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
-                    entidad_tipo="billetera",
-                    entidad_id=billetera.id,
-                    deep_link="/app/billeteras",
-                    canal_web=True,
-                    canal_whatsapp=True,
-                )
-            except Exception:
-                pass
+        # Crear la transacción vinculada (EGRESO)
+        from app.schemas.transaccion import TransaccionCreate
+        from app.models.transaccion import TipoTransaccion, MetodoPago, OrigenTransaccion
+        from app.services.transaccion_service import crear_transaccion
+
+        cat_id = obtener_o_crear_categoria_ahorro(db, usuario_id, "egreso")
+        tx_create = TransaccionCreate(
+            tipo=TipoTransaccion.EGRESO,
+            monto=data.monto,
+            moneda=data.moneda_movimiento,
+            fecha=data.fecha,
+            descripcion=f"Aporte a la meta: {meta.nombre}",
+            categoria_id=cat_id,
+            subcategoria_id=None,
+            metodo_pago=MetodoPago.TRANSFERENCIA,
+            billetera_id=data.billetera_id,
+            tarjeta_id=None,
+            origen=OrigenTransaccion.MANUAL,
+            estado_verificacion=None
+        )
+        crear_transaccion(db, usuario_id, tx_create, commit=False)
         meta.monto_actual += monto_impacto_meta
     else:
-        # Validar que no se retire más de lo que hay (opcional, dependiendo de política)
+        # Validar que no se retire más de lo que hay
         if meta.monto_actual < monto_impacto_meta:
              raise HTTPException(status_code=400, detail="Monto insuficiente en la meta")
         
-        billetera.saldo_actual += data.monto
+        # Crear la transacción vinculada (INGRESO)
+        from app.schemas.transaccion import TransaccionCreate
+        from app.models.transaccion import TipoTransaccion, MetodoPago, OrigenTransaccion
+        from app.services.transaccion_service import crear_transaccion
+
+        cat_id = obtener_o_crear_categoria_ahorro(db, usuario_id, "ingreso")
+        tx_create = TransaccionCreate(
+            tipo=TipoTransaccion.INGRESO,
+            monto=data.monto,
+            moneda=data.moneda_movimiento,
+            fecha=data.fecha,
+            descripcion=f"Retiro de la meta: {meta.nombre}",
+            categoria_id=cat_id,
+            subcategoria_id=None,
+            metodo_pago=MetodoPago.TRANSFERENCIA,
+            billetera_id=data.billetera_id,
+            tarjeta_id=None,
+            origen=OrigenTransaccion.MANUAL,
+            estado_verificacion=None
+        )
+        crear_transaccion(db, usuario_id, tx_create, commit=False)
         meta.monto_actual -= monto_impacto_meta
     
     # Actualizar estado si se completó (Lógica automática)
@@ -217,13 +239,34 @@ def eliminar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, movimiento
         elif meta.moneda == Moneda.ARS and movimiento.moneda_movimiento == Moneda.USD:
             monto_impacto_meta = movimiento.monto * movimiento.cotizacion_usada
 
+    # Revertir impacto en saldo / transacciones
+    from app.models.transaccion import Transaccion
+    from app.services.transaccion_service import eliminar_transaccion
+    
+    desc_buscada = f"Aporte a la meta: {meta.nombre}" if movimiento.tipo == TipoMovimientoMeta.APORTE else f"Retiro de la meta: {meta.nombre}"
+    tx = db.query(Transaccion).filter(
+        Transaccion.usuario_id == usuario_id,
+        Transaccion.billetera_id == movimiento.billetera_id,
+        Transaccion.monto == movimiento.monto,
+        Transaccion.fecha == movimiento.fecha,
+        Transaccion.descripcion == desc_buscada
+    ).first()
+
+    if tx:
+        eliminar_transaccion(db, usuario_id, tx.id)
+    else:
+        # Fallback sin transaccion vinculada
+        if movimiento.tipo == TipoMovimientoMeta.APORTE:
+            if billetera:
+                billetera.saldo_actual += movimiento.monto
+        else:
+            if billetera:
+                billetera.saldo_actual -= movimiento.monto
+
+    # Revertir en la meta
     if movimiento.tipo == TipoMovimientoMeta.APORTE:
-        if billetera:
-            billetera.saldo_actual += movimiento.monto
         meta.monto_actual -= monto_impacto_meta
     else:
-        if billetera:
-            billetera.saldo_actual -= movimiento.monto
         meta.monto_actual += monto_impacto_meta
 
     # Actualizar estado
@@ -321,3 +364,30 @@ def obtener_summary(db: Session, usuario_id: UUID) -> Dict[str, Any]:
         "completadas": count_completadas,
         "proximo_vencimiento": min([m.fecha_limite for m in metas if m.fecha_limite and m.fecha_limite >= date.today()], default=None)
     }
+
+def obtener_o_crear_categoria_ahorro(db: Session, usuario_id: UUID, tipo: str) -> UUID:
+    from app.models.categoria import Categoria, TipoCategoria, EstadoCategoria
+    
+    tipo_cat = TipoCategoria.EGRESO if tipo == "egreso" else TipoCategoria.INGRESO
+    
+    # Buscar si ya existe
+    categoria = db.query(Categoria).filter(
+        (Categoria.creador_id == usuario_id) | (Categoria.es_global == True),
+        Categoria.nombre == "Ahorro",
+        Categoria.tipo == tipo_cat
+    ).first()
+    
+    if not categoria:
+        categoria = Categoria(
+            nombre="Ahorro",
+            tipo=tipo_cat,
+            icono="ahorro",
+            color="#2563EB",
+            es_global=False,
+            creador_id=usuario_id,
+            estado=EstadoCategoria.ACTIVA
+        )
+        db.add(categoria)
+        db.flush()
+        
+    return categoria.id
