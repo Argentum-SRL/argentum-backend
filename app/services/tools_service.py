@@ -209,33 +209,11 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
     hoy = (datetime.now(timezone.utc) - timedelta(hours=3)).date()
     fecha_inicio_curr, fecha_fin_curr = get_ciclo_fechas(usuario, hoy)
 
-    # 1. Saldo disponible actual
-    # Saldo total de billeteras ARS activas
-    total_billeteras_ars = db.query(func.sum(Billetera.saldo_actual)).filter(
-        Billetera.usuario_id == user_id,
-        Billetera.estado == EstadoBilletera.ACTIVA,
-        Billetera.moneda == Moneda.ARS
-    ).scalar() or Decimal("0")
-
-    # Cuotas comprometidas próximo ciclo (unpaid, ARS)
-    fecha_inicio_prox, fecha_fin_prox = get_ciclo_fechas(usuario, fecha_fin_curr + timedelta(days=1))
-    cuotas_comprometidas_ars = db.query(func.sum(Cuota.monto_proyectado)).join(
-        GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id
-    ).filter(
-        GrupoCuotas.usuario_id == user_id,
-        GrupoCuotas.moneda == Moneda.ARS,
-        Cuota.pagada == False,
-        Cuota.fecha_vencimiento >= fecha_inicio_prox,
-        Cuota.fecha_vencimiento <= fecha_fin_prox
-    ).scalar() or Decimal("0")
-
-    # Suscripciones normalizadas a mensual en ARS
-    suscripciones_data = obtener_total_mensual(db, user_id)
-    suscripciones_ars = suscripciones_data.get("total_ars") or Decimal("0")
-
-    # Saldo disponible = total_billeteras - cuotas_comprometidas_proximo - suscripciones
-    saldo_disponible = float(total_billeteras_ars - cuotas_comprometidas_ars - suscripciones_ars)
-    carga_mensual_comprometida = float(cuotas_comprometidas_ars + suscripciones_ars)
+    # 1. Saldo disponible actual mediante servicio canónico
+    from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
+    disponible_res = _calcular_saldo_disponible_sync(db, usuario.id, Moneda.ARS)
+    saldo_disponible = float(disponible_res["saldo_disponible"])
+    carga_mensual_comprometida = float(disponible_res["cuotas_comprometidas"] + disponible_res["suscripciones_mensuales"])
 
     # 2. Ciclos con historia
     primera_tx = db.query(func.min(Transaccion.fecha)).filter(
