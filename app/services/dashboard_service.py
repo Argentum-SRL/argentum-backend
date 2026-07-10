@@ -115,19 +115,6 @@ def get_dashboard_resumen(
     # --- QUERY 1: Balances, Totales y Estadísticas Globales ---
     cycle_actual_cond = and_(Transaccion.fecha >= fecha_inicio, Transaccion.fecha <= fecha_fin)
     cycle_ant_cond = and_(Transaccion.fecha >= fecha_inicio_ant, Transaccion.fecha <= fecha_fin_ant)
-    
-    billeteras_filter = and_(
-        Billetera.usuario_id == usuario.id,
-        Billetera.estado == EstadoBilletera.ACTIVA
-    )
-    if billetera_ids:
-        billeteras_filter = and_(billeteras_filter, Billetera.id.in_(billetera_ids))
-
-    sub_total_billeteras = literal(total_billeteras_override) if total_billeteras_override is not None else (
-        select(func.sum(Billetera.saldo_actual))
-        .where(billeteras_filter)
-        .scalar_subquery()
-    )
 
     res_stmt_where = and_(
         Transaccion.usuario_id == usuario.id,
@@ -144,7 +131,7 @@ def get_dashboard_resumen(
         func.sum(case((cycle_actual_cond, case((Transaccion.tipo == TipoTransaccion.EGRESO, Transaccion.monto), else_=0)), else_=0)).label("egr_actual"),
         func.sum(case((cycle_ant_cond, case((Transaccion.tipo == TipoTransaccion.INGRESO, Transaccion.monto), else_=0)), else_=0)).label("ing_ant"),
         func.sum(case((cycle_ant_cond, case((Transaccion.tipo == TipoTransaccion.EGRESO, Transaccion.monto), else_=0)), else_=0)).label("egr_ant"),
-        sub_total_billeteras.label("total_billeteras"),
+        literal(0).label("total_billeteras"),
         literal(0).label("cuotas_comprometidas")
     ).where(res_stmt_where)
     res = db.execute(res_stmt).one()
@@ -310,19 +297,12 @@ def get_dashboard_resumen(
             cuotas_por_tarjeta[tid] = []
         cuotas_por_tarjeta[tid].append(c)
 
-    cuotas_comprometidas_tarjetas = Decimal("0")
-    fecha_limite = hoy + timedelta(days=35)
-
     for tarjeta in tarjetas:
         resumen_t = calcular_resumen_actual(db, tarjeta, cuotas_preloaded=cuotas_por_tarjeta.get(tarjeta.id, []))
         total_t = resumen_t.total_comprometido_resumen_actual
         total_siguiente = resumen_t.total_comprometido_resumen_siguiente if hasattr(resumen_t, 'total_comprometido_resumen_siguiente') else 0
 
         d_venc = resumen_t.fecha_vencimiento_proximo
-        if d_venc and d_venc <= fecha_limite:
-            if total_t:
-                cuotas_comprometidas_tarjetas += Decimal(str(total_t))
-
         if not d_venc:
             continue
 
@@ -371,7 +351,12 @@ def get_dashboard_resumen(
                 "billetera_id": str(tarjeta.billetera_id)
             })
 
-    cuotas_c = cuotas_comprometidas_tarjetas
+    from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
+    from app.models.usuario import Moneda
+    target_moneda = usuario.moneda_principal or Moneda.ARS
+    disp_ctx = _calcular_saldo_disponible_sync(db, usuario.id, target_moneda, billetera_ids)
+    total_b = disp_ctx["total_billeteras"]
+    cuotas_c = disp_ctx["cuotas_comprometidas"] + disp_ctx["suscripciones_mensuales"]
     proximos_pagos = sorted(proximos_pagos, key=lambda x: x["fecha_cobro"])[:5]
 
     return {
