@@ -115,5 +115,6 @@ def pagar_tarjeta(
     current_user: Usuario = Depends(get_current_user)
 ):
     fecha_pago = body.fecha_pago if body else None
-    return tarjeta_service.pagar_resumen_tarjeta(db, current_user.id, tarjeta_id, fecha_pago)
+    fecha_resumen = body.fecha_resumen if body else None
+    return tarjeta_service.pagar_resumen_tarjeta(db, current_user.id, tarjeta_id, fecha_pago, fecha_resumen)
 
