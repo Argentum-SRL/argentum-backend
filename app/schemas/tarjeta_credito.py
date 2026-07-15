@@ -81,6 +81,7 @@ class TarjetaCreditoResponse(TarjetaCreditoBase):
 
 class PagarTarjetaBody(BaseModel):
     fecha_pago: date | None = None
+    fecha_resumen: date | None = None
 
 
 class DetalleTarjetaMes(BaseModel):

@@ -388,7 +388,8 @@ def pagar_resumen_tarjeta(
     db: Session,
     usuario_id: UUID,
     tarjeta_id: UUID,
-    fecha_pago: date | None = None
+    fecha_pago: date | None = None,
+    fecha_resumen: date | None = None
 ) -> Transaccion:
     # 1. Obtener la tarjeta
     tarjeta = db.query(TarjetaCredito).filter(
@@ -398,18 +399,21 @@ def pagar_resumen_tarjeta(
     if not tarjeta:
         raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
 
-    # 2. Calcular la fecha de vencimiento próximo para saber qué cuotas entran
-    hoy = date.today()
-    fecha_vencimiento_proximo = calcular_fecha_vencimiento_proximo(tarjeta, hoy)
+    # 2. Calcular la fecha de vencimiento límite a pagar
+    if fecha_resumen is not None:
+        limite_vencimiento = fecha_resumen
+    else:
+        hoy = date.today()
+        limite_vencimiento = calcular_fecha_vencimiento_proximo(tarjeta, hoy)
 
-    # 3. Obtener todas las cuotas de esta tarjeta que no estén pagadas y venzan en o antes de la fecha de vencimiento próximo
+    # 3. Obtener todas las cuotas de esta tarjeta que no estén pagadas y venzan en o antes del límite
     cuotas_a_pagar = (
         db.query(Cuota)
         .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
         .filter(
             GrupoCuotas.tarjeta_id == tarjeta.id,
             Cuota.pagada == False,
-            Cuota.fecha_vencimiento <= fecha_vencimiento_proximo
+            Cuota.fecha_vencimiento <= limite_vencimiento
         )
         .all()
     )
