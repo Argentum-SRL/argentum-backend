@@ -170,7 +170,7 @@ def _job_notificaciones_presupuestos(db_session_factory):
                     periodo_activo = obtener_periodo_activo(db, pres)
                     if not periodo_activo:
                         continue
-                    gastado = float(calcular_gasto_en_periodo(db, pres.usuario_id, pres.categorias, periodo_activo.fecha_inicio, periodo_activo.fecha_fin))
+                    gastado = float(calcular_gasto_en_periodo(db, pres.usuario_id, pres.categorias, periodo_activo.fecha_inicio, periodo_activo.fecha_fin, moneda=pres.moneda))
                 except Exception as e:
                     logger.warning("No se pudo calcular gasto del presupuesto %s: %s", pres.id, e)
                     continue
@@ -457,6 +457,14 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                 fecha_inicio, fecha_fin = get_ciclo_fechas(usuario, ayer)
                 if fecha_fin != ayer:
                     continue
+
+                # Guardar snapshot del historial financiero del usuario para el ciclo cerrado
+                try:
+                    from app.services.perfil_financiero_service import guardar_snapshot_historial
+                    guardar_snapshot_historial(db, usuario.id, fecha_inicio, fecha_fin)
+                except Exception as e:
+                    logger.error("Error al guardar snapshot historial para usuario %s: %s", usuario.id, e)
+
 
                 # Verificar que no mandamos este resumen ya hoy
                 ya_enviado = db.query(Notificacion).filter(

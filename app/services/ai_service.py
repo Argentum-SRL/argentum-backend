@@ -193,12 +193,16 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
 
     try:
         resumen = get_dashboard_resumen(db, usuario)
-        saldo_disponible = resumen["disponible_real"]["total_billeteras"]
-        disponible_real = resumen["disponible_real"]["disponible"]
+        saldo_disponible_ars = resumen["disponible_real"]["ars"]["saldo_billeteras"]
+        disponible_real_ars = resumen["disponible_real"]["ars"]["disponible"]
+        saldo_disponible_usd = resumen["disponible_real"]["usd"]["saldo_billeteras"]
+        disponible_real_usd = resumen["disponible_real"]["usd"]["disponible"]
     except Exception:
         logger.exception("Error al obtener resumen del dashboard en ai_service")
-        saldo_disponible = 0.0
-        disponible_real = 0.0
+        saldo_disponible_ars = 0.0
+        disponible_real_ars = 0.0
+        saldo_disponible_usd = 0.0
+        disponible_real_usd = 0.0
 
     res = {
         "billeteras": [
@@ -225,8 +229,10 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
             {"nombre": p.nombre, "limite": float(p.monto), "moneda": p.moneda.value}
             for p in presupuestos
         ],
-        "saldo_total_billeteras": saldo_disponible,
-        "disponible_real": disponible_real,
+        "saldo_total_billeteras_pesos": saldo_disponible_ars,
+        "disponible_real_pesos": disponible_real_ars,
+        "saldo_total_billeteras_dolares": saldo_disponible_usd,
+        "disponible_real_dolares": disponible_real_usd,
     }
 
     try:
@@ -247,16 +253,30 @@ def construir_contexto_proyeccion(usuario: Usuario, db: Session) -> dict:
     try:
         proyeccion = calcular_proyeccion(db, usuario)
         return {
-            "gasto_proyectado_total": proyeccion.get("gasto_proyectado_total"),
-            "balance_proyectado": proyeccion.get("balance_proyectado"),
-            "ingresos_proyectados": proyeccion.get("ingresos_proyectados"),
-            "nivel_confianza": proyeccion.get("nivel_confianza"),
-            "advertencias": proyeccion.get("advertencias", []),
-            "dias_restantes": proyeccion.get("periodo", {}).get("dias_restantes"),
-            "certezas_total": proyeccion.get("certezas", {}).get("total"),
+            "ars": {
+                "gasto_proyectado_total": proyeccion["ars"].get("gasto_proyectado_total"),
+                "balance_proyectado": proyeccion["ars"].get("balance_proyectado"),
+                "ingresos_proyectados": proyeccion["ars"].get("ingresos_proyectados"),
+                "nivel_confianza": proyeccion["ars"].get("nivel_confianza"),
+                "advertencias": proyeccion["ars"].get("advertencias", []),
+                "dias_restantes": proyeccion["ars"].get("periodo", {}).get("dias_restantes"),
+                "certezas_total": proyeccion["ars"].get("certezas", {}).get("total"),
+                "datos_suficientes": proyeccion["ars"].get("datos_suficientes", True)
+            },
+            "usd": {
+                "gasto_proyectado_total": proyeccion["usd"].get("gasto_proyectado_total"),
+                "balance_proyectado": proyeccion["usd"].get("balance_proyectado"),
+                "ingresos_proyectados": proyeccion["usd"].get("ingresos_proyectados"),
+                "nivel_confianza": proyeccion["usd"].get("nivel_confianza"),
+                "advertencias": proyeccion["usd"].get("advertencias", []),
+                "dias_restantes": proyeccion["usd"].get("periodo", {}).get("dias_restantes"),
+                "certezas_total": proyeccion["usd"].get("certezas", {}).get("total"),
+                "datos_suficientes": proyeccion["usd"].get("datos_suficientes", True)
+            }
         }
     except Exception:
         logger.exception("Error al construir contexto de proyección")
+        return {}
         return {}
 
 
