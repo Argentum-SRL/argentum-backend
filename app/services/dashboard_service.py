@@ -12,7 +12,7 @@ from sqlalchemy import and_, func, select, desc, or_, case, literal, null, Strin
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
-from app.models.usuario import Usuario, CicloTipo
+from app.models.usuario import Usuario, CicloTipo, Moneda
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion, MetodoPago
 from app.models.categoria import Categoria
@@ -127,12 +127,18 @@ def get_dashboard_resumen(
 
     res_stmt = select(
         func.min(Transaccion.fecha).label("primera_tx"),
-        func.sum(case((cycle_actual_cond, case((Transaccion.tipo == TipoTransaccion.INGRESO, Transaccion.monto), else_=0)), else_=0)).label("ing_actual"),
-        func.sum(case((cycle_actual_cond, case((Transaccion.tipo == TipoTransaccion.EGRESO, Transaccion.monto), else_=0)), else_=0)).label("egr_actual"),
-        func.sum(case((cycle_ant_cond, case((Transaccion.tipo == TipoTransaccion.INGRESO, Transaccion.monto), else_=0)), else_=0)).label("ing_ant"),
-        func.sum(case((cycle_ant_cond, case((Transaccion.tipo == TipoTransaccion.EGRESO, Transaccion.monto), else_=0)), else_=0)).label("egr_ant"),
-        literal(0).label("total_billeteras"),
-        literal(0).label("cuotas_comprometidas")
+        # ARS actual
+        func.sum(case((and_(cycle_actual_cond, Transaccion.moneda == Moneda.ARS, Transaccion.tipo == TipoTransaccion.INGRESO), Transaccion.monto), else_=0)).label("ing_actual_ars"),
+        func.sum(case((and_(cycle_actual_cond, Transaccion.moneda == Moneda.ARS, Transaccion.tipo == TipoTransaccion.EGRESO), Transaccion.monto), else_=0)).label("egr_actual_ars"),
+        # ARS anterior
+        func.sum(case((and_(cycle_ant_cond, Transaccion.moneda == Moneda.ARS, Transaccion.tipo == TipoTransaccion.INGRESO), Transaccion.monto), else_=0)).label("ing_ant_ars"),
+        func.sum(case((and_(cycle_ant_cond, Transaccion.moneda == Moneda.ARS, Transaccion.tipo == TipoTransaccion.EGRESO), Transaccion.monto), else_=0)).label("egr_ant_ars"),
+        # USD actual
+        func.sum(case((and_(cycle_actual_cond, Transaccion.moneda == Moneda.USD, Transaccion.tipo == TipoTransaccion.INGRESO), Transaccion.monto), else_=0)).label("ing_actual_usd"),
+        func.sum(case((and_(cycle_actual_cond, Transaccion.moneda == Moneda.USD, Transaccion.tipo == TipoTransaccion.EGRESO), Transaccion.monto), else_=0)).label("egr_actual_usd"),
+        # USD anterior
+        func.sum(case((and_(cycle_ant_cond, Transaccion.moneda == Moneda.USD, Transaccion.tipo == TipoTransaccion.INGRESO), Transaccion.monto), else_=0)).label("ing_ant_usd"),
+        func.sum(case((and_(cycle_ant_cond, Transaccion.moneda == Moneda.USD, Transaccion.tipo == TipoTransaccion.EGRESO), Transaccion.monto), else_=0)).label("egr_ant_usd")
     ).where(res_stmt_where)
     res = db.execute(res_stmt).one()
 
@@ -238,12 +244,23 @@ def get_dashboard_resumen(
     actividad = db.execute(m_stmt.union_all(s_stmt, c_stmt)).all()
 
     # --- Procesamiento de Resultados ---
-    ingresos, egresos = res.ing_actual or Decimal("0"), res.egr_actual or Decimal("0")
-    ing_ant, egr_ant = res.ing_ant or Decimal("0"), res.egr_ant or Decimal("0")
-    balance, balance_ant = ingresos - egresos, ing_ant - egr_ant
-    total_b, cuotas_c = res.total_billeteras or Decimal("0"), res.cuotas_comprometidas or Decimal("0")
-    
-    variacion = round(float(((balance - balance_ant) / abs(balance_ant)) * 100), 1) if balance_ant != 0 else None
+    # ARS
+    ing_actual_ars = res.ing_actual_ars or Decimal("0")
+    egr_actual_ars = res.egr_actual_ars or Decimal("0")
+    ing_ant_ars = res.ing_ant_ars or Decimal("0")
+    egr_ant_ars = res.egr_ant_ars or Decimal("0")
+    balance_ars = ing_actual_ars - egr_actual_ars
+    balance_ant_ars = ing_ant_ars - egr_ant_ars
+    variacion_ars = round(float(((balance_ars - balance_ant_ars) / abs(balance_ant_ars)) * 100), 1) if balance_ant_ars != 0 else None
+
+    # USD
+    ing_actual_usd = res.ing_actual_usd or Decimal("0")
+    egr_actual_usd = res.egr_actual_usd or Decimal("0")
+    ing_ant_usd = res.ing_ant_usd or Decimal("0")
+    egr_ant_usd = res.egr_ant_usd or Decimal("0")
+    balance_usd = ing_actual_usd - egr_actual_usd
+    balance_ant_usd = ing_ant_usd - egr_ant_usd
+    variacion_usd = round(float(((balance_usd - balance_ant_usd) / abs(balance_ant_usd)) * 100), 1) if balance_ant_usd != 0 else None
 
     movimientos_data = [{
         "id": r.id, "descripcion": r.nombre, "fecha": r.fecha.isoformat(), "monto": float(r.monto),
@@ -352,11 +369,7 @@ def get_dashboard_resumen(
             })
 
     from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
-    from app.models.usuario import Moneda
-    target_moneda = usuario.moneda_principal or Moneda.ARS
-    disp_ctx = _calcular_saldo_disponible_sync(db, usuario.id, target_moneda, billetera_ids)
-    total_b = disp_ctx["total_billeteras"]
-    cuotas_c = disp_ctx["cuotas_comprometidas"] + disp_ctx["suscripciones_mensuales"]
+    disp_ctx = _calcular_saldo_disponible_sync(db, usuario.id, billetera_ids)
     proximos_pagos = sorted(proximos_pagos, key=lambda x: x["fecha_cobro"])[:5]
 
     return {
@@ -365,12 +378,32 @@ def get_dashboard_resumen(
             "primera_transaccion": res.primera_tx.isoformat() if res.primera_tx else None
         },
         "balance": {
-            "ingresos": float(ingresos), "egresos": float(egresos), "balance": float(balance),
-            "variacion_vs_ciclo_anterior": variacion
+            "ars": {
+                "ingresos": float(ing_actual_ars),
+                "egresos": float(egr_actual_ars),
+                "balance": float(balance_ars),
+                "variacion_vs_ciclo_anterior": variacion_ars
+            },
+            "usd": {
+                "ingresos": float(ing_actual_usd),
+                "egresos": float(egr_actual_usd),
+                "balance": float(balance_usd),
+                "variacion_vs_ciclo_anterior": variacion_usd
+            }
         },
         "disponible_real": {
-            "total_billeteras": float(total_b), "cuotas_comprometidas_proximo_ciclo": float(cuotas_c),
-            "disponible": float(total_b - cuotas_c)
+            "ars": {
+                "saldo_billeteras": float(disp_ctx["ars"]["total_billeteras"]),
+                "cuotas_proximo_ciclo": float(disp_ctx["ars"]["cuotas_comprometidas"]),
+                "suscripciones_mensuales": float(disp_ctx["ars"]["suscripciones_mensuales"]),
+                "disponible": float(disp_ctx["ars"]["saldo_disponible"])
+            },
+            "usd": {
+                "saldo_billeteras": float(disp_ctx["usd"]["total_billeteras"]),
+                "cuotas_proximo_ciclo": float(disp_ctx["usd"]["cuotas_comprometidas"]),
+                "suscripciones_mensuales": float(disp_ctx["usd"]["suscripciones_mensuales"]),
+                "disponible": float(disp_ctx["usd"]["saldo_disponible"])
+            }
         },
         "ultimos_movimientos": movimientos_data,
         "proximos_pagos": proximos_pagos

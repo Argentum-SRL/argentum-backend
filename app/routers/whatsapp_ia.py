@@ -646,6 +646,43 @@ async def whatsapp_webhook(
                 historial=_obtener_historial_reciente(usuario.id, db),
             )
 
+        # Enforce category checking for WhatsApp transaction registration
+        if resultado_ia.get("intent") == "registrar_transaccion":
+            entidades = resultado_ia.get("entidades", {})
+            categoria_raw = entidades.get("categoria")
+            if categoria_raw is None:
+                # Contar cuántos intentos consecutivos de categoría lleva en conversaciones recientes
+                from datetime import datetime, timezone, timedelta
+                limite_tiempo_intentos = datetime.now(timezone.utc) - timedelta(minutes=10)
+                
+                convs_recientes = db.execute(
+                    select(ConversacionWpp)
+                    .where(
+                        ConversacionWpp.usuario_id == usuario.id,
+                        ConversacionWpp.fecha >= limite_tiempo_intentos
+                    )
+                    .order_by(ConversacionWpp.fecha.desc())
+                ).scalars().all()
+                
+                intentos_previos = 0
+                for c in convs_recientes:
+                    if c.slot_filling_activo and c.intent_detectado == "registrar_transaccion":
+                        entidades_c = c.entidades or {}
+                        if entidades_c.get("categoria") is None:
+                            intentos_previos += 1
+                        else:
+                            break
+                    else:
+                        break
+                
+                if intentos_previos < 1:
+                    resultado_ia["slot_filling"] = True
+                    resultado_ia["respuesta_usuario"] = "¿En qué categoría?"
+                    if "datos_faltantes" not in resultado_ia:
+                        resultado_ia["datos_faltantes"] = []
+                    if "categoria" not in resultado_ia["datos_faltantes"]:
+                        resultado_ia["datos_faltantes"].append("categoria")
+
         # Enriquecer respuesta con datos reales para intents de consulta
         intent_detectado = resultado_ia.get("intent")
 
@@ -653,20 +690,42 @@ async def whatsapp_webhook(
             try:
                 from app.services.proyeccion_service import calcular_proyeccion
                 proyeccion = calcular_proyeccion(db, usuario)
-                balance_proy = proyeccion.get("balance_proyectado", 0)
-                dias_rest = proyeccion.get("periodo", {}).get("dias_restantes", 0)
-                confianza_proy = proyeccion.get("nivel_confianza", "bajo")
-                advertencias = proyeccion.get("advertencias", [])
                 
-                if confianza_proy == "bajo":
-                    msg = "Todavía no tenés suficiente historial para una proyección confiable."
-                elif balance_proy >= 0:
-                    msg = f"Si seguís así, terminás el ciclo con aproximadamente {_fmt(balance_proy)} disponibles ({dias_rest} días restantes)."
+                # Pesos
+                p_ars = proyeccion["ars"]
+                balance_ars = p_ars.get("balance_proyectado", 0)
+                dias_rest = p_ars.get("periodo", {}).get("dias_restantes", 0)
+                confianza_ars = p_ars.get("nivel_confianza", "bajo")
+                advertencias_ars = p_ars.get("advertencias", [])
+                
+                # Dolares
+                p_usd = proyeccion["usd"]
+                balance_usd = p_usd.get("balance_proyectado", 0)
+                confianza_usd = p_usd.get("nivel_confianza", "bajo")
+                advertencias_usd = p_usd.get("advertencias", [])
+                
+                if confianza_ars == "bajo":
+                    msg = "Todavía no tenés suficiente historial para una proyección confiable en pesos."
+                elif balance_ars >= 0:
+                    msg = f"Si seguís así en pesos, terminás el ciclo con aproximadamente {_fmt(balance_ars)} disponibles ({dias_rest} días restantes)."
                 else:
-                    msg = f"Ojo — si seguís así, terminarías el ciclo con {_fmt(abs(balance_proy))} en rojo ({dias_rest} días restantes)."
+                    msg = f"Ojo — si seguís así en pesos, terminarías el ciclo con {_fmt(abs(balance_ars))} en rojo ({dias_rest} días restantes)."
                 
-                if advertencias:
-                    msg += f" {advertencias[0]}"
+                if advertencias_ars:
+                    msg += f" {advertencias_ars[0]}"
+                
+                # USD
+                tiene_usd = (p_usd.get("gasto_proyectado_total", 0) > 0 or p_usd.get("ingresos_proyectados", 0) > 0)
+                if tiene_usd:
+                    if confianza_usd == "bajo":
+                        msg += " Aún no tenés historial suficiente para una proyección en dólares."
+                    elif balance_usd >= 0:
+                        msg += f" En dólares, terminarías con aproximadamente US$ {balance_usd:,.2f}."
+                    else:
+                        msg += f" Ojo: en dólares terminarías con US$ {abs(balance_usd):,.2f} en rojo."
+                        
+                    if advertencias_usd:
+                        msg += f" {advertencias_usd[0]}"
                 
                 resultado_ia["respuesta_usuario"] = msg
             except Exception:
@@ -676,9 +735,15 @@ async def whatsapp_webhook(
             try:
                 from app.services.dashboard_service import get_dashboard_resumen
                 resumen = get_dashboard_resumen(db, usuario)
-                total = resumen["disponible_real"]["total_billeteras"]
-                disponible = resumen["disponible_real"]["disponible"]
-                resultado_ia["respuesta_usuario"] = f"Tenés {_fmt(total)} en tus billeteras. Disponible real (descontando cuotas): {_fmt(disponible)}."
+                ars_total = resumen["disponible_real"]["ars"]["saldo_billeteras"]
+                ars_disp = resumen["disponible_real"]["ars"]["disponible"]
+                usd_total = resumen["disponible_real"]["usd"]["saldo_billeteras"]
+                usd_disp = resumen["disponible_real"]["usd"]["disponible"]
+                
+                msg = f"Tenés {_fmt(ars_total)} en tus billeteras en pesos. Disponible real (descontando cuotas): {_fmt(ars_disp)}."
+                if usd_total > 0 or usd_disp > 0:
+                    msg += f" Y tenés US$ {usd_total:,.2f} en tus billeteras en dólares. Disponible real: US$ {usd_disp:,.2f}."
+                resultado_ia["respuesta_usuario"] = msg
             except Exception:
                 logger.exception("Error al calcular saldo para WhatsApp")
 
