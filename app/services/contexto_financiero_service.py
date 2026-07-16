@@ -2,7 +2,7 @@ from decimal import Decimal
 from uuid import UUID
 from typing import List, Optional
 from datetime import date, datetime, timezone, timedelta
-from sqlalchemy import select, func, or_, and_
+from sqlalchemy import select, or_, and_
 from sqlalchemy.orm import Session
 
 from app.models.usuario import Usuario, Moneda
@@ -13,22 +13,15 @@ from app.models.tarjeta_credito import TarjetaCredito
 from app.models.transaccion import Transaccion
 from app.services.suscripcion_service import obtener_suscripciones
 from app.services.dashboard_service import get_ciclo_fechas
-from app.services.perfil_financiero_service import obtener_cotizacion_dolar
 
 def _calcular_saldo_disponible_sync(
     db: Session,
     usuario_id: UUID,
-    target_moneda: Moneda,
     billetera_ids: Optional[List[UUID]] = None
 ) -> dict:
     usuario = db.get(Usuario, usuario_id)
     if not usuario:
         raise ValueError(f"Usuario {usuario_id} no encontrado")
-
-    if isinstance(target_moneda, str):
-        target_moneda = Moneda(target_moneda.upper())
-
-    cotizacion = obtener_cotizacion_dolar(usuario)
 
     # 1. Saldo de Billeteras activas
     query_b = db.query(Billetera).filter(
@@ -39,15 +32,13 @@ def _calcular_saldo_disponible_sync(
         query_b = query_b.filter(Billetera.id.in_(billetera_ids))
     wallets = query_b.all()
 
-    total_billeteras = Decimal("0")
+    total_billeteras_ars = Decimal("0")
+    total_billeteras_usd = Decimal("0")
     for w in wallets:
-        monto = w.saldo_actual
-        if w.moneda != target_moneda:
-            if target_moneda == Moneda.ARS:
-                monto = w.saldo_actual * cotizacion
-            else:
-                monto = w.saldo_actual / cotizacion
-        total_billeteras += monto
+        if w.moneda == Moneda.ARS:
+            total_billeteras_ars += w.saldo_actual
+        elif w.moneda == Moneda.USD:
+            total_billeteras_usd += w.saldo_actual
 
     # 2. Ciclo financiero y fechas
     hoy = (datetime.now(timezone.utc) - timedelta(hours=3)).date()
@@ -80,15 +71,14 @@ def _calcular_saldo_disponible_sync(
 
     cuotas = query_c.all()
 
-    total_cuotas = Decimal("0")
+    total_cuotas_ars = Decimal("0")
+    total_cuotas_usd = Decimal("0")
     for c in cuotas:
         monto = c.monto_real if c.monto_real is not None else c.monto_proyectado or Decimal("0")
-        if c.grupo.moneda != target_moneda:
-            if target_moneda == Moneda.ARS:
-                monto = monto * cotizacion
-            else:
-                monto = monto / cotizacion
-        total_cuotas += monto
+        if c.grupo.moneda == Moneda.ARS:
+            total_cuotas_ars += monto
+        elif c.grupo.moneda == Moneda.USD:
+            total_cuotas_usd += monto
 
     # 4. Suscripciones activas
     suscripciones_activas = obtener_suscripciones(db, usuario_id, estado='activa')
@@ -103,31 +93,38 @@ def _calcular_saldo_disponible_sync(
             if (s.billetera_id in billetera_ids) or (s.tarjeta_id in tarjeta_ids)
         ]
 
-    total_suscripciones = Decimal("0")
+    total_suscripciones_ars = Decimal("0")
+    total_suscripciones_usd = Decimal("0")
     for s in suscripciones_activas:
         if s.precio_actual and s.costo_mensual_equivalente:
             monto = s.costo_mensual_equivalente
-            if s.precio_actual.moneda != target_moneda:
-                if target_moneda == Moneda.ARS:
-                    monto = monto * cotizacion
-                else:
-                    monto = monto / cotizacion
-            total_suscripciones += monto
+            if s.precio_actual.moneda == Moneda.ARS:
+                total_suscripciones_ars += monto
+            elif s.precio_actual.moneda == Moneda.USD:
+                total_suscripciones_usd += monto
 
     # Disponible = Billeteras - Cuotas - Suscripciones
-    saldo_disponible = total_billeteras - total_cuotas - total_suscripciones
+    saldo_disponible_ars = total_billeteras_ars - total_cuotas_ars - total_suscripciones_ars
+    saldo_disponible_usd = total_billeteras_usd - total_cuotas_usd - total_suscripciones_usd
 
     return {
-        "total_billeteras": total_billeteras,
-        "cuotas_comprometidas": total_cuotas,
-        "suscripciones_mensuales": total_suscripciones,
-        "saldo_disponible": saldo_disponible
+        "ars": {
+            "total_billeteras": total_billeteras_ars,
+            "cuotas_comprometidas": total_cuotas_ars,
+            "suscripciones_mensuales": total_suscripciones_ars,
+            "saldo_disponible": saldo_disponible_ars,
+        },
+        "usd": {
+            "total_billeteras": total_billeteras_usd,
+            "cuotas_comprometidas": total_cuotas_usd,
+            "suscripciones_mensuales": total_suscripciones_usd,
+            "saldo_disponible": saldo_disponible_usd,
+        }
     }
 
 async def calcular_saldo_disponible(
     db: Session,
     usuario_id: UUID,
-    target_moneda: Moneda,
     billetera_ids: Optional[List[UUID]] = None
 ) -> dict:
-    return _calcular_saldo_disponible_sync(db, usuario_id, target_moneda, billetera_ids)
+    return _calcular_saldo_disponible_sync(db, usuario_id, billetera_ids)

@@ -3,131 +3,174 @@ import requests
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, or_
 
 from app.models.tools import IPCCache
 from app.schemas.tools import InstallmentConvenienceRequest
 from app.models.usuario import Usuario, Moneda
-from app.models.billetera import Billetera, EstadoBilletera
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion, MetodoPago
-from app.models.cuota import Cuota
-from app.models.grupo_cuotas import GrupoCuotas
 from app.services.dashboard_service import get_ciclo_fechas
-from app.services.suscripcion_service import obtener_total_mensual
 
 
 logger = logging.getLogger("tools_service")
 
 
+class AjusteIPCFloat(float):
+    ajuste_posible: bool = True
+
+    def __new__(cls, value, ajuste_posible=True):
+        obj = super().__new__(cls, value)
+        obj.ajuste_posible = ajuste_posible
+        return obj
+
+
+def _parse_month_str(date_input: str) -> str:
+    if not date_input:
+        raise ValueError("Fecha vacía o inválida")
+    val = str(date_input).strip()
+    if len(val) >= 7 and val[4] == '-':
+        return val[:7]
+    try:
+        dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+        return dt.strftime("%Y-%m")
+    except ValueError:
+        pass
+    try:
+        dt = datetime.strptime(val, "%Y-%m-%d")
+        return dt.strftime("%Y-%m")
+    except ValueError:
+        pass
+    try:
+        dt = datetime.strptime(val, "%d/%m/%Y")
+        return dt.strftime("%Y-%m")
+    except ValueError:
+        pass
+    raise ValueError(f"Formato de fecha no reconocido: {date_input}")
+
+
+def _get_closest_ipc_record(db: Session, target_fecha: str) -> IPCCache:
+    exact = db.execute(select(IPCCache).where(IPCCache.fecha_dato == target_fecha)).scalars().first()
+    if exact:
+        return exact
+
+    records = db.execute(select(IPCCache).order_by(IPCCache.fecha_dato)).scalars().all()
+    if not records:
+        raise ValueError("No hay datos de IPC cargados en la base de datos")
+
+    ty, tm = map(int, target_fecha.split('-'))
+    target_val = ty * 12 + tm
+
+    closest_record = None
+    min_dist = float('inf')
+
+    for r in records:
+        ry, rm = map(int, r.fecha_dato.split('-'))
+        r_val = ry * 12 + rm
+        dist = abs(target_val - r_val)
+        if dist < min_dist:
+            min_dist = dist
+            closest_record = r
+
+    logger.info(f"Fecha exacta {target_fecha} no encontrada. Usando la más cercana disponible: {closest_record.fecha_dato} (distancia: {min_dist} meses).")
+    return closest_record
+
+
+def _calcular_y_asignar_valor_mensual(db: Session, record: IPCCache) -> IPCCache:
+    if not record:
+        return record
+    prev_record = db.execute(
+        select(IPCCache)
+        .where(IPCCache.fecha_dato < record.fecha_dato)
+        .order_by(IPCCache.fecha_dato.desc())
+    ).scalars().first()
+
+    if prev_record and prev_record.indice_acumulado > 0:
+        record.valor_mensual = round(((record.indice_acumulado / prev_record.indice_acumulado) - 1.0) * 100, 2)
+    else:
+        record.valor_mensual = 3.0
+    return record
+
+
 def get_current_ipc(db: Session) -> IPCCache:
     """
-    Obtiene el último IPC mensual de la base de datos (si tiene menos de 24 horas)
-    o consulta las APIs externas en orden (argly -> datos.gob.ar),
-    cacheando el resultado si tiene éxito.
+    Obtiene el último IPC de la base de datos (si tiene menos de 24 horas)
+    o realiza upsert contra la API de datos.gob.ar únicamente, cacheando
+    el resultado en la base de datos.
     """
     ahora = datetime.now(timezone.utc)
     limite_cache = ahora - timedelta(hours=24)
 
-    # 1. Verificar caché en base de datos
     logger.info("Buscando IPC en caché de base de datos...")
     ultimo_cache = db.execute(
-        select(IPCCache).order_by(IPCCache.fecha_actualizacion.desc())
+        select(IPCCache).order_by(IPCCache.fecha_dato.desc())
     ).scalars().first()
 
     if ultimo_cache and ultimo_cache.fecha_actualizacion >= limite_cache and not ultimo_cache.es_estimado:
-        logger.info(f"Caché válido encontrado: {ultimo_cache.valor_mensual}% ({ultimo_cache.fecha_dato})")
-        return ultimo_cache
+        logger.info(f"Caché válido encontrado: {ultimo_cache.fecha_dato} (actualizado hace menos de 24hs)")
+        return _calcular_y_asignar_valor_mensual(db, ultimo_cache)
 
-    # 2. Intentar API Argly (Principal)
+    # Consultar API de datos.gob.ar
     try:
-        logger.info("Consultando API principal: api.argly.com.ar...")
-        response = requests.get("https://api.argly.com.ar/v1/ipc", timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        ipc_data = data.get("data", {})
-        
-        valor = float(ipc_data["indice_ipc"])
-        anio = int(ipc_data["anio"])
-        mes = int(ipc_data["mes"])
-        fecha_dato = f"{anio}-{mes:02d}"
-
-        logger.info(f"Dato obtenido exitosamente de Argly: {valor}% para {fecha_dato}")
-        
-        # Guardar/Actualizar en base de datos
-        nuevo_ipc = IPCCache(
-            valor_mensual=valor,
-            fecha_dato=fecha_dato,
-            fecha_actualizacion=ahora,
-            fuente="argly",
-            es_estimado=False
-        )
-        db.add(nuevo_ipc)
-        db.commit()
-        db.refresh(nuevo_ipc)
-        return nuevo_ipc
-    except Exception as e:
-        logger.error(f"Error al consultar api.argly.com.ar: {str(e)}")
-
-    # 3. Intentar API Datos Gob (Fallback)
-    try:
-        logger.info("Consultando API fallback: apis.datos.gob.ar...")
-        url_fallback = (
+        logger.info("Consultando API oficial: apis.datos.gob.ar...")
+        url = (
             "https://apis.datos.gob.ar/series/api/series/"
-            "?ids=148.3_INIVELNAL_DICI_M_26&limit=2&sort=desc&format=json"
+            "?ids=148.3_INIVELNAL_DICI_M_26&limit=3&sort=desc&format=json"
         )
-        response = requests.get(url_fallback, timeout=10)
+        response = requests.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
         series_data = data.get("data", [])
-        
-        if len(series_data) >= 2:
-            latest_point = series_data[0]
-            prev_point = series_data[1]
-            
-            date_str = latest_point[0]  # "YYYY-MM-DD"
-            val_latest = float(latest_point[1])
-            val_prev = float(prev_point[1])
-            
-            # Calcular variación mensual
-            valor = round(((val_latest / val_prev) - 1.0) * 100, 2)
+
+        for point in series_data:
+            date_str = point[0]  # "YYYY-MM-DD"
+            value = float(point[1])
             fecha_dato = date_str[:7]  # "YYYY-MM"
-            
-            logger.info(f"Dato calculado exitosamente de Datos Gob: {valor}% para {fecha_dato}")
-            
-            nuevo_ipc = IPCCache(
-                valor_mensual=valor,
-                fecha_dato=fecha_dato,
-                fecha_actualizacion=ahora,
-                fuente="datos.gob.ar",
-                es_estimado=False
-            )
-            db.add(nuevo_ipc)
-            db.commit()
-            db.refresh(nuevo_ipc)
-            return nuevo_ipc
+
+            existente = db.execute(
+                select(IPCCache).where(IPCCache.fecha_dato == fecha_dato)
+            ).scalars().first()
+
+            if existente:
+                existente.indice_acumulado = value
+                existente.fecha_actualizacion = ahora
+                existente.es_estimado = False
+                existente.fuente = "datos.gob.ar"
+            else:
+                nuevo = IPCCache(
+                    indice_acumulado=value,
+                    fecha_dato=fecha_dato,
+                    fecha_actualizacion=ahora,
+                    fuente="datos.gob.ar",
+                    es_estimado=False
+                )
+                db.add(nuevo)
+        
+        db.commit()
+
+        latest = db.execute(
+            select(IPCCache).order_by(IPCCache.fecha_dato.desc())
+        ).scalars().first()
+        return _calcular_y_asignar_valor_mensual(db, latest)
+
     except Exception as e:
         logger.error(f"Error al consultar apis.datos.gob.ar: {str(e)}")
+        if ultimo_cache:
+            logger.warning(
+                f"Fallo la obtención externa. Retornando el último caché disponible "
+                f"({ultimo_cache.fecha_dato}) marcado como estimado."
+            )
+            ultimo_cache.es_estimado = True
+            ultimo_cache.fecha_actualizacion = ahora
+            db.commit()
+            return _calcular_y_asignar_valor_mensual(db, ultimo_cache)
 
-    # 4. Fallback final
-    if ultimo_cache:
-        logger.warning(
-            f"Fallo la obtención externa. Retornando el último caché disponible "
-            f"({ultimo_cache.valor_mensual}% - {ultimo_cache.fecha_dato}) marcado como estimado."
-        )
-        # Retornamos el último caché marcándolo como estimado para alertar al front
-        ultimo_cache.es_estimado = True
-        ultimo_cache.fecha_actualizacion = ahora
-        db.commit()
-        db.refresh(ultimo_cache)
-        return ultimo_cache
-
-    # Si nunca hubo caché, crear uno por defecto estimado
-    logger.warning("No hay caché disponible. Retornando valor de IPC por defecto (3.0%) como estimado.")
+    # Si nunca hubo caché ni datos, crear uno por defecto estimado
+    logger.warning("No hay datos disponibles en la base de datos. Retornando valor por defecto estimado.")
     mes_anterior = datetime.now() - timedelta(days=30)
     fecha_dato_default = mes_anterior.strftime("%Y-%m")
     
     nuevo_ipc = IPCCache(
-        valor_mensual=3.0,
+        indice_acumulado=11607.39,
         fecha_dato=fecha_dato_default,
         fecha_actualizacion=ahora,
         fuente="default",
@@ -136,7 +179,107 @@ def get_current_ipc(db: Session) -> IPCCache:
     db.add(nuevo_ipc)
     db.commit()
     db.refresh(nuevo_ipc)
-    return nuevo_ipc
+    return _calcular_y_asignar_valor_mensual(db, nuevo_ipc)
+
+
+def ejecutar_backfill_ipc(db: Session) -> dict:
+    """
+    Realiza un backfill histórico completo de los datos de IPC desde la API oficial de datos.gob.ar
+    y los persiste de manera única en la base de datos.
+    """
+    ahora = datetime.now(timezone.utc)
+    logger.info("Iniciando backfill completo de IPC desde datos.gob.ar...")
+    url = (
+        "https://apis.datos.gob.ar/series/api/series/"
+        "?ids=148.3_INIVELNAL_DICI_M_26&limit=1000&sort=asc&format=json"
+    )
+    response = requests.get(url, timeout=15)
+    response.raise_for_status()
+    data = response.json()
+    series_data = data.get("data", [])
+
+    total_records = len(series_data)
+    if total_records == 0:
+        return {"status": "error", "message": "No se obtuvieron datos de la API"}
+
+    for point in series_data:
+        date_str = point[0]
+        value = float(point[1])
+        fecha_dato = date_str[:7]
+
+        existente = db.execute(
+            select(IPCCache).where(IPCCache.fecha_dato == fecha_dato)
+        ).scalars().first()
+
+        if existente:
+            existente.indice_acumulado = value
+            existente.fecha_actualizacion = ahora
+            existente.es_estimado = False
+            existente.fuente = "datos.gob.ar"
+        else:
+            nuevo = IPCCache(
+                indice_acumulado=value,
+                fecha_dato=fecha_dato,
+                fecha_actualizacion=ahora,
+                fuente="datos.gob.ar",
+                es_estimado=False
+            )
+            db.add(nuevo)
+
+    db.commit()
+    
+    first_fecha = series_data[0][0][:7]
+    last_fecha = series_data[-1][0][:7]
+    logger.info(f"Backfill finalizado con éxito. {total_records} registros cargados/actualizados (rango: {first_fecha} a {last_fecha}).")
+    return {
+        "status": "success",
+        "total_records": total_records,
+        "range": [first_fecha, last_fecha]
+    }
+
+
+def ajustar_por_ipc(monto: float, fecha_origen: str, fecha_destino: str | None = None, db: Session = None) -> float:
+    """
+    Ajusta un monto monetario por inflación desde una fecha de origen hasta una fecha de destino
+    utilizando la serie del índice acumulado oficial.
+    """
+    if db is None:
+        raise ValueError("Se requiere una sesión de base de datos para realizar el ajuste por IPC")
+
+    try:
+        fo_str = _parse_month_str(fecha_origen)
+    except Exception as e:
+        logger.error(f"Error al parsear fecha_origen: {e}")
+        return AjusteIPCFloat(monto, ajuste_posible=False)
+
+    oldest_record = db.execute(select(IPCCache).order_by(IPCCache.fecha_dato.asc())).scalars().first()
+    if not oldest_record:
+        logger.warning("Base de datos de IPC vacía. No es posible realizar el ajuste.")
+        return AjusteIPCFloat(monto, ajuste_posible=False)
+
+    if fo_str < oldest_record.fecha_dato:
+        logger.warning(f"La fecha de origen {fo_str} es anterior al inicio de la serie disponible ({oldest_record.fecha_dato}). Sin ajuste posible.")
+        return AjusteIPCFloat(monto, ajuste_posible=False)
+
+    record_origen = _get_closest_ipc_record(db, fo_str)
+
+    if fecha_destino is not None:
+        try:
+            fd_str = _parse_month_str(fecha_destino)
+        except Exception as e:
+            logger.error(f"Error al parsear fecha_destino: {e}")
+            return AjusteIPCFloat(monto, ajuste_posible=False)
+        record_destino = _get_closest_ipc_record(db, fd_str)
+    else:
+        # Usa el período disponible más reciente en la tabla
+        record_destino = db.execute(select(IPCCache).order_by(IPCCache.fecha_dato.desc())).scalars().first()
+        if not record_destino:
+            logger.warning("No hay registros de IPC destino disponibles.")
+            return AjusteIPCFloat(monto, ajuste_posible=False)
+
+    factor = record_destino.indice_acumulado / record_origen.indice_acumulado
+    monto_ajustado = float(monto) * factor
+    return AjusteIPCFloat(monto_ajustado, ajuste_posible=True)
 
 
 def calcular_conveniencia_cuotas(req: InstallmentConvenienceRequest) -> dict:
@@ -211,9 +354,8 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
 
     # 1. Saldo disponible actual mediante servicio canónico
     from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
-    disponible_res = _calcular_saldo_disponible_sync(db, usuario.id, Moneda.ARS)
-    saldo_disponible = float(disponible_res["saldo_disponible"])
-    carga_mensual_comprometida = float(disponible_res["cuotas_comprometidas"] + disponible_res["suscripciones_mensuales"])
+    disponible_res = _calcular_saldo_disponible_sync(db, usuario.id)
+    carga_mensual_comprometida_ars = float(disponible_res["ars"]["cuotas_comprometidas"] + disponible_res["ars"]["suscripciones_mensuales"])
 
     # 2. Ciclos con historia
     primera_tx = db.query(func.min(Transaccion.fecha)).filter(
@@ -301,13 +443,23 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
     # Margen libre mensual
     margen_libre_mensual = None
     if ingreso_promedio_mensual is not None:
-        margen_libre_mensual = ingreso_promedio_mensual - carga_mensual_comprometida - gasto_promedio_variable
+        margen_libre_mensual = ingreso_promedio_mensual - carga_mensual_comprometida_ars - gasto_promedio_variable
 
     return {
-        "saldo_disponible": round(saldo_disponible, 2),
+        "ars": {
+            "total_billeteras": round(float(disponible_res["ars"]["total_billeteras"]), 2),
+            "cuotas_comprometidas": round(float(disponible_res["ars"]["cuotas_comprometidas"]), 2),
+            "suscripciones_mensuales": round(float(disponible_res["ars"]["suscripciones_mensuales"]), 2),
+            "saldo_disponible": round(float(disponible_res["ars"]["saldo_disponible"]), 2),
+        },
+        "usd": {
+            "total_billeteras": round(float(disponible_res["usd"]["total_billeteras"]), 2),
+            "cuotas_comprometidas": round(float(disponible_res["usd"]["cuotas_comprometidas"]), 2),
+            "suscripciones_mensuales": round(float(disponible_res["usd"]["suscripciones_mensuales"]), 2),
+            "saldo_disponible": round(float(disponible_res["usd"]["saldo_disponible"]), 2),
+        },
         "ingreso_promedio_mensual": round(ingreso_promedio_mensual, 2) if ingreso_promedio_mensual is not None else None,
         "ingreso_es_estimacion_parcial": ingreso_es_estimacion_parcial,
-        "carga_mensual_comprometida": round(carga_mensual_comprometida, 2),
         "gasto_promedio_variable": round(gasto_promedio_variable, 2),
         "ciclos_con_historia": ciclos_con_historia,
         "margen_libre_mensual": round(margen_libre_mensual, 2) if margen_libre_mensual is not None else None
@@ -329,8 +481,8 @@ def calcular_puede_permitirse(
     ctx = obtener_contexto_financiero(user_id, db)
     
     ingreso = ingreso_manual if ctx['ingreso_promedio_mensual'] is None else ctx['ingreso_promedio_mensual']
-    saldo = ctx['saldo_disponible']
-    carga_actual = ctx['carga_mensual_comprometida']
+    saldo = ctx['ars']['saldo_disponible']
+    carga_actual = ctx['ars']['cuotas_comprometidas'] + ctx['ars']['suscripciones_mensuales']
     gasto_variable = ctx['gasto_promedio_variable']
 
     if modo == 'contado':
