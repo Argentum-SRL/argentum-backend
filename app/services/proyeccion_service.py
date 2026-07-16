@@ -306,7 +306,8 @@ def _calcular_proyeccion_por_moneda(db: Session, usuario: Usuario, moneda: Moned
                 Suscripcion.usuario_id == usuario.id,
                 Suscripcion.estado == EstadoSuscripcion.ACTIVA,
                 Suscripcion.proximo_cobro > hoy,
-                Suscripcion.proximo_cobro <= fecha_fin_actual
+                Suscripcion.proximo_cobro <= fecha_fin_actual,
+                HistorialSuscripcion.moneda == moneda
             )
         )
     )
