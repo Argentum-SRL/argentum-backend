@@ -1,4 +1,5 @@
 import calendar
+import logging
 from uuid import UUID
 from datetime import date
 from fastapi import HTTPException
@@ -10,6 +11,8 @@ from app.models.billetera import Billetera
 from app.models.transaccion_recurrente import TransaccionRecurrente, EstadoTransaccionRecurrente
 from app.schemas.transaccion_recurrente import TransaccionRecurrenteCreate, TransaccionRecurrenteUpdate
 from app.services import presupuesto_service
+
+logger = logging.getLogger(__name__)
 
 
 def obtener_recurrentes(db: Session, usuario_id: UUID, skip: int = 0, limit: int = 50):
@@ -142,6 +145,17 @@ def procesar_recurrentes(db: Session):
                 debe_generar = True
 
         if debe_generar and rec.id not in existentes_set:
+            billetera = billeteras_map.get(rec.billetera_id)
+            if billetera:
+                try:
+                    from app.services.transaccion_service import _validar_moneda_coincide
+                    _validar_moneda_coincide(rec.moneda, billetera)
+                except Exception as e:
+                    logger.error(
+                        f"Error de consistencia de moneda al procesar recurrente {rec.id} del usuario {rec.usuario_id}: {e}"
+                    )
+                    continue
+
             nueva_tx = Transaccion(
                 usuario_id=rec.usuario_id,
                 tipo=rec.tipo,
@@ -159,7 +173,6 @@ def procesar_recurrentes(db: Session):
             nuevas_txs.append(nueva_tx)
             
             # Impactar saldo en memoria (el objeto está trackeado por SQLAlchemy)
-            billetera = billeteras_map.get(rec.billetera_id)
             if billetera:
                 if rec.tipo == "ingreso":
                     billetera.saldo_actual += rec.monto

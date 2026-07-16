@@ -173,6 +173,9 @@ def prepagar_grupo(
     if not billetera:
         raise HTTPException(status_code=404, detail="Billetera no encontrada")
 
+    from app.services.transaccion_service import _validar_moneda_coincide
+    _validar_moneda_coincide(grupo.moneda, billetera)
+
     # 7. Crear una transacción de egreso por el monto total pendiente:
     nueva_transaccion = Transaccion(
         usuario_id=usuario_id,

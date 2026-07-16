@@ -1,4 +1,5 @@
 from datetime import date
+import logging
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
@@ -9,6 +10,8 @@ from app.models.tarjeta_credito import TarjetaCredito
 from app.models.billetera import Billetera
 from app.services.suscripcion_service import obtener_precio_vigente, calcular_siguiente_cobro
 from app.services import cuotas_service, tarjeta_service
+
+logger = logging.getLogger(__name__)
 
 
 def _cobrar_suscripcion(db: Session, suscripcion: Suscripcion, hoy: date, primer_vencimiento: date | None = None) -> bool:
@@ -30,6 +33,9 @@ def _cobrar_suscripcion(db: Session, suscripcion: Suscripcion, hoy: date, primer
         billetera = db.query(Billetera).filter(Billetera.id == suscripcion.billetera_id).first()
         if not billetera:
             return False
+
+        from app.services.transaccion_service import _validar_moneda_coincide
+        _validar_moneda_coincide(precio.moneda, billetera)
 
         tx = Transaccion(
             usuario_id=suscripcion.usuario_id,
@@ -142,6 +148,11 @@ def procesar_cobros_suscripciones(db: Session) -> None:
         if query_existe.first():
             continue
 
-        _cobrar_suscripcion(db, suscripcion, hoy)
+        try:
+            _cobrar_suscripcion(db, suscripcion, hoy)
+        except Exception as e:
+            logger.error(
+                f"Error al cobrar suscripción {suscripcion.id} del usuario {suscripcion.usuario_id}: {e}"
+            )
 
     db.commit()
