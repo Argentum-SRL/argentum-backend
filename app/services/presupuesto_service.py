@@ -1,6 +1,6 @@
 import logging
 from uuid import UUID
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 import calendar
 from typing import Optional, List
@@ -13,9 +13,8 @@ from app.models.presupuesto_categoria import PresupuestoCategoria
 from app.models.periodo_presupuesto import PeriodoPresupuesto
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion
 from app.models.subcategoria import Subcategoria
-from app.models.notificacion import Notificacion, TipoNotificacion, NivelNotificacion
-from app.models.configuracion_notificacion import ConfiguracionNotificacion
-from app.models.usuario import Usuario
+from app.models.notificacion import TipoNotificacion, NivelNotificacion
+from app.models.usuario import Usuario, Moneda
 from app.schemas.presupuesto import PresupuestoCreate, PresupuestoUpdate
 from app.services.whatsapp_service import enviar_mensaje_whatsapp
 
@@ -56,7 +55,8 @@ def calcular_gasto_en_periodo(
     usuario_id: UUID, 
     categorias_input: List, 
     fecha_inicio: date, 
-    fecha_fin: date
+    fecha_fin: date,
+    moneda: Optional[Moneda] = None
 ) -> Decimal:
     # categorías_input puede ser PresupuestoCategoriaInput (schema) o PresupuestoCategoria (modelo)
     cat_ids = [c.categoria_id for c in categorias_input if c.categoria_id]
@@ -73,6 +73,9 @@ def calcular_gasto_en_periodo(
         Transaccion.fecha >= fecha_inicio,
         Transaccion.fecha <= fecha_fin
     )
+    
+    if moneda is not None:
+        query = query.where(Transaccion.moneda == moneda)
     
     conditions = []
     if cat_ids:
@@ -144,7 +147,7 @@ def crear_presupuesto(db: Session, usuario_id: UUID, data: PresupuestoCreate) ->
     
     # 5. Calcular monto_usado inicial
     monto_usado = calcular_gasto_en_periodo(
-        db, usuario_id, data.categorias, fecha_inicio, fecha_fin
+        db, usuario_id, data.categorias, fecha_inicio, fecha_fin, moneda=data.moneda
     )
     
     # 6. Crear PeriodoPresupuesto
@@ -216,7 +219,7 @@ def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: Presup
         periodo_actual = obtener_periodo_activo(db, presupuesto)
         if periodo_actual:
             periodo_actual.monto_usado = calcular_gasto_en_periodo(
-                db, usuario_id, data.categorias, periodo_actual.fecha_inicio, periodo_actual.fecha_fin
+                db, usuario_id, data.categorias, periodo_actual.fecha_inicio, periodo_actual.fecha_fin, moneda=presupuesto.moneda
             )
             periodo_actual.superado = periodo_actual.monto_usado > periodo_actual.monto_limite
 
@@ -247,7 +250,7 @@ def reanudar_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto
     if not periodo_actual:
         fecha_inicio, fecha_fin = calcular_fechas_periodo(presupuesto.periodo, hoy)
         monto_usado = calcular_gasto_en_periodo(
-            db, usuario_id, presupuesto.categorias, fecha_inicio, fecha_fin
+            db, usuario_id, presupuesto.categorias, fecha_inicio, fecha_fin, moneda=presupuesto.moneda
         )
         nuevo_periodo = PeriodoPresupuesto(
             presupuesto_id=presupuesto.id,
@@ -308,6 +311,9 @@ def registrar_impacto_presupuesto(db: Session, transaccion: Transaccion, reverti
             tx_cat_id = sub.categoria_id
 
     for presu in presupuestos:
+        if transaccion.moneda != presu.moneda:
+            continue
+            
         aplica = any(
             (c.categoria_id == tx_cat_id and c.categoria_id is not None) or
             (c.subcategoria_id == transaccion.subcategoria_id and c.subcategoria_id is not None)

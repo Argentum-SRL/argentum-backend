@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 from datetime import date
 from fastapi import HTTPException
@@ -7,6 +8,8 @@ from sqlalchemy.orm import Session
 from app.models.billetera import Billetera
 from app.models.transferencia_interna import TransferenciaInterna
 from app.schemas.transferencia_interna import TransferenciaInternaCreate
+
+logger = logging.getLogger(__name__)
 
 
 def obtener_transferencias(db: Session, usuario_id: UUID):
@@ -48,6 +51,15 @@ def crear_transferencia(db: Session, usuario_id: UUID, data: TransferenciaIntern
     if not b_destino:
         raise HTTPException(status_code=404, detail="No encontramos la billetera de destino.")
 
+    from app.services.transaccion_service import _validar_moneda_coincide
+    _validar_moneda_coincide(data.moneda, b_origen)
+    if b_origen.moneda != b_destino.moneda:
+        raise HTTPException(
+            status_code=400,
+            detail="No se permiten transferencias entre billeteras de distinta moneda."
+        )
+    _validar_moneda_coincide(data.moneda, b_destino)
+
     # 2. Crear registro
     nueva_tr = TransferenciaInterna(
         **data.model_dump(exclude={"usuario_id"}),
@@ -55,8 +67,7 @@ def crear_transferencia(db: Session, usuario_id: UUID, data: TransferenciaIntern
     )
 
     # 3. Impactar saldos
-    # Se permite distinta moneda. Se impacta el "monto" (en la moneda de la transferencia) 
-    # en ambas billeteras. El usuario es responsable del tipo de cambio si las billeteras difieren.
+    # Solo se permiten transferencias de la misma moneda.
     b_origen.saldo_actual -= data.monto
     if b_origen.saldo_actual <= 0:
         try:
@@ -92,9 +103,19 @@ def eliminar_transferencia(db: Session, usuario_id: UUID, transferencia_id: UUID
     b_destino = db.get(Billetera, tr.billetera_destino_id)
 
     if b_origen:
-        b_origen.saldo_actual += tr.monto
+        try:
+            from app.services.transaccion_service import _validar_moneda_coincide
+            _validar_moneda_coincide(tr.moneda, b_origen)
+            b_origen.saldo_actual += tr.monto
+        except Exception as e:
+            logger.critical(f"Error crítico de inconsistencia de moneda al revertir origen de transferencia {tr.id}: {e}")
     if b_destino:
-        b_destino.saldo_actual -= tr.monto
+        try:
+            from app.services.transaccion_service import _validar_moneda_coincide
+            _validar_moneda_coincide(tr.moneda, b_destino)
+            b_destino.saldo_actual -= tr.monto
+        except Exception as e:
+            logger.critical(f"Error crítico de inconsistencia de moneda al revertir destino de transferencia {tr.id}: {e}")
 
     db.delete(tr)
     db.commit()

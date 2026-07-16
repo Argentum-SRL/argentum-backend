@@ -1,8 +1,9 @@
+import logging
 from uuid import UUID
-from datetime import date, datetime, timezone, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Optional, List, Dict, Any
-from sqlalchemy import select, func, desc, extract
+from typing import List, Dict, Any
+from sqlalchemy import select, func, desc
 from sqlalchemy.orm import Session, joinedload
 from fastapi import HTTPException
 
@@ -12,6 +13,8 @@ from app.models.billetera import Billetera
 from app.models.usuario import Moneda
 from app.schemas.meta import MetaCreate, MetaUpdate
 from app.schemas.movimiento_meta import MovimientoMetaCreate
+
+logger = logging.getLogger(__name__)
 
 def obtener_metas(db: Session, usuario_id: UUID, activas_solo: bool = False, skip: int = 0, limit: int = 50) -> List[Meta]:
     query = select(Meta).where(Meta.usuario_id == usuario_id)
@@ -109,6 +112,9 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
     billetera = db.get(Billetera, data.billetera_id)
     if not billetera or billetera.usuario_id != usuario_id:
         raise HTTPException(status_code=404, detail="Billetera no encontrada")
+
+    from app.services.transaccion_service import _validar_moneda_coincide
+    _validar_moneda_coincide(data.moneda_movimiento, billetera)
     
     # El monto que impacta la META debe ser en la moneda de la META.
     monto_impacto_meta = data.monto
@@ -258,10 +264,20 @@ def eliminar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, movimiento
         # Fallback sin transaccion vinculada
         if movimiento.tipo == TipoMovimientoMeta.APORTE:
             if billetera:
-                billetera.saldo_actual += movimiento.monto
+                try:
+                    from app.services.transaccion_service import _validar_moneda_coincide
+                    _validar_moneda_coincide(movimiento.moneda_movimiento, billetera)
+                    billetera.saldo_actual += movimiento.monto
+                except Exception as e:
+                    logger.critical(f"Error crítico de inconsistencia de moneda al revertir aporte de meta {movimiento.id}: {e}")
         else:
             if billetera:
-                billetera.saldo_actual -= movimiento.monto
+                try:
+                    from app.services.transaccion_service import _validar_moneda_coincide
+                    _validar_moneda_coincide(movimiento.moneda_movimiento, billetera)
+                    billetera.saldo_actual -= movimiento.monto
+                except Exception as e:
+                    logger.critical(f"Error crítico de inconsistencia de moneda al revertir retiro de meta {movimiento.id}: {e}")
 
     # Revertir en la meta
     if movimiento.tipo == TipoMovimientoMeta.APORTE:
