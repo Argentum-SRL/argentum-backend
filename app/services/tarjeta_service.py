@@ -506,6 +506,7 @@ def calcular_presion_futura(
     from decimal import Decimal
     from collections import defaultdict
     from sqlalchemy.orm import joinedload
+    from app.models.usuario import Moneda
 
     hoy = date.today()
     fecha_limite = hoy + relativedelta(months=meses)
@@ -517,7 +518,7 @@ def calcular_presion_futura(
     ).all()
 
     if not tarjetas:
-        return {"meses": [], "total_comprometido": 0}
+        return {"meses": [], "total_comprometido": {"ars": 0.0, "usd": 0.0}}
 
     tarjeta_ids = [t.id for t in tarjetas]
     tarjeta_map = {t.id: t for t in tarjetas}
@@ -551,10 +552,14 @@ def calcular_presion_futura(
 
     # Construir la respuesta ordenada
     resultado_meses = []
+    total_comprometido_ars = Decimal("0")
+    total_comprometido_usd = Decimal("0")
+
     for mes_key in sorted(por_mes.keys()):
         año, mes = mes_key
         detalle_tarjetas = []
-        total_mes = Decimal("0")
+        total_mes_ars = Decimal("0")
+        total_mes_usd = Decimal("0")
 
         for tarjeta_id, monto in por_mes[mes_key].items():
             tarjeta = tarjeta_map.get(tarjeta_id)
@@ -564,8 +569,12 @@ def calcular_presion_futura(
                 "tarjeta_id": str(tarjeta_id),
                 "tarjeta_nombre": tarjeta.nombre,
                 "total": float(monto),
+                "moneda": tarjeta.moneda.value,
             })
-            total_mes += monto
+            if tarjeta.moneda == Moneda.ARS:
+                total_mes_ars += monto
+            elif tarjeta.moneda == Moneda.USD:
+                total_mes_usd += monto
 
         # Ordenar tarjetas por monto descendente
         detalle_tarjetas.sort(key=lambda x: x["total"], reverse=True)
@@ -579,14 +588,20 @@ def calcular_presion_futura(
             "anio": año,
             "mes": mes,
             "mes_label": f"{mes_abr} {año}",
-            "total": float(total_mes),
+            "total": {
+                "ars": float(total_mes_ars),
+                "usd": float(total_mes_usd),
+            },
             "tarjetas": detalle_tarjetas,
         })
-
-    total_comprometido = sum(m["total"] for m in resultado_meses)
+        total_comprometido_ars += total_mes_ars
+        total_comprometido_usd += total_mes_usd
 
     return {
         "meses": resultado_meses,
-        "total_comprometido": float(total_comprometido),
+        "total_comprometido": {
+            "ars": float(total_comprometido_ars),
+            "usd": float(total_comprometido_usd),
+        },
     }
 

@@ -99,7 +99,7 @@ def get_dashboard_resumen(
     usuario: Usuario, 
     fecha_desde_override: Optional[date] = None, 
     fecha_hasta_override: Optional[date] = None,
-    total_billeteras_override: Optional[Decimal] = None,
+    total_billeteras_override: Optional[Dict[str, Decimal]] = None,
     billetera_ids: Optional[List[UUID]] = None
 ) -> Dict[str, Any]:
     """
@@ -370,6 +370,11 @@ def get_dashboard_resumen(
 
     from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
     disp_ctx = _calcular_saldo_disponible_sync(db, usuario.id, billetera_ids)
+    if total_billeteras_override:
+        disp_ctx["ars"]["total_billeteras"] = total_billeteras_override.get("ars", Decimal("0"))
+        disp_ctx["usd"]["total_billeteras"] = total_billeteras_override.get("usd", Decimal("0"))
+        disp_ctx["ars"]["saldo_disponible"] = disp_ctx["ars"]["total_billeteras"] - disp_ctx["ars"]["cuotas_comprometidas"] - disp_ctx["ars"]["suscripciones_mensuales"]
+        disp_ctx["usd"]["saldo_disponible"] = disp_ctx["usd"]["total_billeteras"] - disp_ctx["usd"]["cuotas_comprometidas"] - disp_ctx["usd"]["suscripciones_mensuales"]
     proximos_pagos = sorted(proximos_pagos, key=lambda x: x["fecha_cobro"])[:5]
 
     return {
@@ -442,11 +447,13 @@ async def get_resumen_completo(
     rows_billeteras = db.execute(stmt_billeteras).all()
     
     billeteras_data = []
-    total_saldo_activa = Decimal("0")
+    total_saldo_activa = {"ars": Decimal("0"), "usd": Decimal("0")}
     for b, has_tx in rows_billeteras:
         if b.estado == EstadoBilletera.ACTIVA:
             if not billetera_ids or b.id in billetera_ids:
-                total_saldo_activa += Decimal(str(b.saldo_actual))
+                moneda_key = b.moneda.value.lower()
+                if moneda_key in total_saldo_activa:
+                    total_saldo_activa[moneda_key] += Decimal(str(b.saldo_actual))
         billeteras_data.append({
             "id": str(b.id), "nombre": b.nombre, "moneda": b.moneda.value, "saldo_actual": float(b.saldo_actual),
             "es_principal": b.es_principal, "es_efectivo": b.es_efectivo, "estado": b.estado.value, "tiene_transacciones": has_tx
@@ -510,39 +517,54 @@ def get_subcategorias_gasto(
     stmt = (
         select(
             Transaccion.subcategoria_id,
+            Transaccion.moneda,
             func.sum(Transaccion.monto).label("total")
         )
         .where(tx_where)
-        .group_by(Transaccion.subcategoria_id)
+        .group_by(Transaccion.subcategoria_id, Transaccion.moneda)
     )
     res = db.execute(stmt).all()
 
     # 3. Consolidar resultados
     sub_gastos = {}
-    otros_total = Decimal("0")
+    otros_total = {"ars": Decimal("0"), "usd": Decimal("0")}
     for row in res:
         sub_id = row.subcategoria_id
+        moneda_val = row.moneda.value.lower() if row.moneda else "ars"
         total = row.total or Decimal("0")
         if sub_id in sub_map:
-            sub_gastos[sub_id] = total
+            if sub_id not in sub_gastos:
+                sub_gastos[sub_id] = {"ars": Decimal("0"), "usd": Decimal("0")}
+            if moneda_val in sub_gastos[sub_id]:
+                sub_gastos[sub_id][moneda_val] += total
         else:
-            otros_total += total
+            if moneda_val in otros_total:
+                otros_total[moneda_val] += total
 
     desglose = []
     for sub in subcategorias:
-        gasto = sub_gastos.get(sub.id, Decimal("0"))
+        gasto_dict = sub_gastos.get(sub.id, {"ars": Decimal("0"), "usd": Decimal("0")})
         desglose.append({
             "subcategoria_id": str(sub.id),
             "subcategoria_nombre": sub.nombre,
-            "gasto_actual_ciclo": float(gasto)
+            "gasto_actual_ciclo": {
+                "ars": float(gasto_dict["ars"]),
+                "usd": float(gasto_dict["usd"])
+            }
         })
 
-    if otros_total > 0:
+    if otros_total["ars"] > 0 or otros_total["usd"] > 0:
         desglose.append({
             "subcategoria_id": "otros",
             "subcategoria_nombre": "Otros",
-            "gasto_actual_ciclo": float(otros_total)
+            "gasto_actual_ciclo": {
+                "ars": float(otros_total["ars"]),
+                "usd": float(otros_total["usd"])
+            }
         })
 
-    desglose.sort(key=lambda x: (-x["gasto_actual_ciclo"], x["subcategoria_nombre"]))
+    desglose.sort(key=lambda x: (
+        -(x["gasto_actual_ciclo"]["ars"] + x["gasto_actual_ciclo"]["usd"] * 1000),
+        x["subcategoria_nombre"]
+    ))
     return desglose

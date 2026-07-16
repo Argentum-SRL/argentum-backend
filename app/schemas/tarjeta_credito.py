@@ -88,19 +88,20 @@ class DetalleTarjetaMes(BaseModel):
     tarjeta_id: str
     tarjeta_nombre: str
     total: float
+    moneda: str | None = None
 
 
 class MesPresionFutura(BaseModel):
     anio: int
     mes: int
     mes_label: str
-    total: float
+    total: dict[str, float]
     tarjetas: list[DetalleTarjetaMes]
 
 
 class PresionFuturaData(BaseModel):
     meses: list[MesPresionFutura]
-    total_comprometido: float
+    total_comprometido: dict[str, float]
 
     class Config:
         from_attributes = True
