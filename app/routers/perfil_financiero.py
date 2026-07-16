@@ -21,12 +21,16 @@ class InterpretacionDetalle(BaseModel):
 
 
 class PerfilInterpretaciones(BaseModel):
-    tasa_ahorro: InterpretacionDetalle
-    score_impulsividad: InterpretacionDetalle
-    ratio_cuotas: InterpretacionDetalle
+    tasa_ahorro_ars: InterpretacionDetalle
+    tasa_ahorro_usd: InterpretacionDetalle
+    score_impulsividad_ars: InterpretacionDetalle
+    score_impulsividad_usd: InterpretacionDetalle
+    ratio_cuotas_ars: InterpretacionDetalle
+    ratio_cuotas_usd: InterpretacionDetalle
     cumplimiento_presupuesto: InterpretacionDetalle
     consistencia_registro: InterpretacionDetalle
-    porcentaje_suscripciones: InterpretacionDetalle
+    porcentaje_suscripciones_ars: InterpretacionDetalle
+    porcentaje_suscripciones_usd: InterpretacionDetalle
 
 
 class PerfilFinancieroResponse(PerfilFinancieroRead):
@@ -36,39 +40,65 @@ class PerfilFinancieroResponse(PerfilFinancieroRead):
 def construir_interpretaciones(perfil) -> dict:
     from decimal import Decimal
 
-    # 1. Tasa de ahorro
-    if perfil.tasa_ahorro is None:
-        tasa_ahorro = {"label": "Sin datos de ingreso", "nivel": "sin_datos"}
-    elif perfil.tasa_ahorro >= Decimal("0.20"):
-        tasa_ahorro = {"label": "Excelente", "nivel": "excelente"}
-    elif perfil.tasa_ahorro >= Decimal("0.05"):
-        tasa_ahorro = {"label": "Bien", "nivel": "bien"}
-    elif perfil.tasa_ahorro >= Decimal("0.00"):
-        tasa_ahorro = {"label": "Ajustado", "nivel": "moderado"}
-    else:
-        tasa_ahorro = {"label": "Déficit", "nivel": "critico"}
+    # Helper function for tasa_ahorro
+    def interp_tasa_ahorro(val, coin):
+        if val is None:
+            return {"label": f"Sin datos de ingreso {coin}", "nivel": "sin_datos"}
+        elif val >= Decimal("0.20"):
+            return {"label": "Excelente", "nivel": "excelente"}
+        elif val >= Decimal("0.05"):
+            return {"label": "Bien", "nivel": "bien"}
+        elif val >= Decimal("0.00"):
+            return {"label": "Ajustado", "nivel": "moderado"}
+        else:
+            return {"label": "Déficit", "nivel": "critico"}
 
-    # 2. Impulsividad
-    if perfil.score_impulsividad is None:
-        score_impulsividad = {"label": "Pocos datos", "nivel": "sin_datos"}
-    elif perfil.score_impulsividad <= 30:
-        score_impulsividad = {"label": "Disciplinado", "nivel": "excelente"}
-    elif perfil.score_impulsividad <= 60:
-        score_impulsividad = {"label": "Moderado", "nivel": "moderado"}
-    else:
-        score_impulsividad = {"label": "Impulsivo", "nivel": "critico"}
+    # Helper function for impulsividad
+    def interp_impulsividad(val, coin):
+        if val is None:
+            return {"label": f"Pocos datos {coin}", "nivel": "sin_datos"}
+        elif val <= 30:
+            return {"label": "Disciplinado", "nivel": "excelente"}
+        elif val <= 60:
+            return {"label": "Moderado", "nivel": "moderado"}
+        else:
+            return {"label": "Impulsivo", "nivel": "critico"}
 
-    # 3. Ratio cuotas
-    if perfil.ratio_cuotas is None:
-        ratio_cuotas = {"label": "Sin datos", "nivel": "sin_datos"}
-    elif perfil.ratio_cuotas <= Decimal("0.25"):
-        ratio_cuotas = {"label": "Manejable", "nivel": "excelente"}
-    elif perfil.ratio_cuotas <= Decimal("0.40"):
-        ratio_cuotas = {"label": "Moderado", "nivel": "moderado"}
-    else:
-        ratio_cuotas = {"label": "Elevado", "nivel": "critico"}
+    # Helper function for ratio_cuotas
+    def interp_ratio_cuotas(val, coin):
+        if val is None:
+            return {"label": f"Sin datos {coin}", "nivel": "sin_datos"}
+        elif val <= Decimal("0.25"):
+            return {"label": "Manejable", "nivel": "excelente"}
+        elif val <= Decimal("0.40"):
+            return {"label": "Moderado", "nivel": "moderado"}
+        else:
+            return {"label": "Elevado", "nivel": "critico"}
 
-    # 4. Cumplimiento presupuesto
+    # Helper function for porcentaje_suscripciones
+    def interp_porcentaje_suscripciones(val, coin):
+        if val is None:
+            return {"label": f"Sin datos de gasto {coin}", "nivel": "sin_datos"}
+        elif val <= Decimal("0.10"):
+            return {"label": "Bajo", "nivel": "excelente"}
+        elif val <= Decimal("0.20"):
+            return {"label": "Moderado", "nivel": "moderado"}
+        else:
+            return {"label": "Alto", "nivel": "critico"}
+
+    tasa_ahorro_ars = interp_tasa_ahorro(perfil.tasa_ahorro_ars, "ARS")
+    tasa_ahorro_usd = interp_tasa_ahorro(perfil.tasa_ahorro_usd, "USD")
+
+    score_impulsividad_ars = interp_impulsividad(perfil.score_impulsividad_ars, "ARS")
+    score_impulsividad_usd = interp_impulsividad(perfil.score_impulsividad_usd, "USD")
+
+    ratio_cuotas_ars = interp_ratio_cuotas(perfil.ratio_cuotas_ars, "ARS")
+    ratio_cuotas_usd = interp_ratio_cuotas(perfil.ratio_cuotas_usd, "USD")
+
+    porcentaje_suscripciones_ars = interp_porcentaje_suscripciones(perfil.porcentaje_suscripciones_ars, "ARS")
+    porcentaje_suscripciones_usd = interp_porcentaje_suscripciones(perfil.porcentaje_suscripciones_usd, "USD")
+
+    # 4. Cumplimiento presupuesto (global)
     if perfil.cumplimiento_presupuesto is None:
         cumplimiento_presupuesto = {"label": "Sin presupuestos", "nivel": "sin_datos"}
     elif perfil.cumplimiento_presupuesto >= Decimal("0.80"):
@@ -78,7 +108,7 @@ def construir_interpretaciones(perfil) -> dict:
     else:
         cumplimiento_presupuesto = {"label": "Mejorar", "nivel": "critico"}
 
-    # 5. Consistencia registro
+    # 5. Consistencia registro (global)
     if perfil.consistencia_registro is None:
         consistencia_registro = {"label": "Sin datos", "nivel": "sin_datos"}
     elif perfil.consistencia_registro >= Decimal("0.80"):
@@ -88,23 +118,17 @@ def construir_interpretaciones(perfil) -> dict:
     else:
         consistencia_registro = {"label": "Esporádico", "nivel": "critico"}
 
-    # 6. Porcentaje suscripciones
-    if perfil.porcentaje_suscripciones is None:
-        porcentaje_suscripciones = {"label": "Sin datos de gasto", "nivel": "sin_datos"}
-    elif perfil.porcentaje_suscripciones <= Decimal("0.10"):
-        porcentaje_suscripciones = {"label": "Bajo", "nivel": "excelente"}
-    elif perfil.porcentaje_suscripciones <= Decimal("0.20"):
-        porcentaje_suscripciones = {"label": "Moderado", "nivel": "moderado"}
-    else:
-        porcentaje_suscripciones = {"label": "Alto", "nivel": "critico"}
-
     return {
-        "tasa_ahorro": tasa_ahorro,
-        "score_impulsividad": score_impulsividad,
-        "ratio_cuotas": ratio_cuotas,
+        "tasa_ahorro_ars": tasa_ahorro_ars,
+        "tasa_ahorro_usd": tasa_ahorro_usd,
+        "score_impulsividad_ars": score_impulsividad_ars,
+        "score_impulsividad_usd": score_impulsividad_usd,
+        "ratio_cuotas_ars": ratio_cuotas_ars,
+        "ratio_cuotas_usd": ratio_cuotas_usd,
         "cumplimiento_presupuesto": cumplimiento_presupuesto,
         "consistencia_registro": consistencia_registro,
-        "porcentaje_suscripciones": porcentaje_suscripciones,
+        "porcentaje_suscripciones_ars": porcentaje_suscripciones_ars,
+        "porcentaje_suscripciones_usd": porcentaje_suscripciones_usd,
     }
 
 

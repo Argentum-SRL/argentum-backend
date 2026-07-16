@@ -3,11 +3,10 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from math import ceil
-from typing import Any, Dict, List, Optional
-from uuid import UUID
+from typing import Any, Dict
 
-from sqlalchemy import and_, func, select, desc, or_, case
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_, func, select, or_, case
+from sqlalchemy.orm import Session
 
 from app.models.usuario import Usuario, Moneda
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion
@@ -18,7 +17,7 @@ from app.models.historial_suscripcion import HistorialSuscripcion
 from app.models.transaccion_recurrente import TransaccionRecurrente, EstadoTransaccionRecurrente, FrecuenciaTransaccionRecurrente, TipoTransaccionRecurrente
 from app.services.dashboard_service import get_ciclo_fechas
 
-def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
+def _calcular_proyeccion_por_moneda(db: Session, usuario: Usuario, moneda: Moneda) -> Dict[str, Any]:
     # Argentum usa UTC-3 para presentacion
     hoy = (datetime.now(timezone.utc) - timedelta(hours=3)).date()
     
@@ -26,22 +25,34 @@ def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
     fecha_inicio_actual, fecha_fin_actual = get_ciclo_fechas(usuario, hoy)
     
     # Calcular ciclos anteriores (hasta 6)
-    ciclos_anteriores = []
+    ciclos_anteriores_6 = []
     fecha_referencia = fecha_inicio_actual - timedelta(days=1)
     for _ in range(6):
         inicio_ant, fin_ant = get_ciclo_fechas(usuario, fecha_referencia)
         # Un ciclo es completo si su fecha de fin es menor a hoy
         if fin_ant < hoy:
-            ciclos_anteriores.append((inicio_ant, fin_ant))
+            ciclos_anteriores_6.append((inicio_ant, fin_ant))
         fecha_referencia = inicio_ant - timedelta(days=1)
 
-    n_ciclos = len(ciclos_anteriores)
+    # Determinar qué ciclos anteriores contienen transacciones en esta moneda
+    ciclos_con_datos = []
+    for inicio, fin in ciclos_anteriores_6:
+        exists = db.query(Transaccion.id).filter(
+            Transaccion.usuario_id == usuario.id,
+            Transaccion.moneda == moneda,
+            Transaccion.fecha >= inicio,
+            Transaccion.fecha <= fin
+        ).first()
+        if exists:
+            ciclos_con_datos.append((inicio, fin))
+
+    n_ciclos = len(ciclos_con_datos)
+    advertencias = []
 
     # Paso 2: Calcular promedio historico por categoria
-    # Agrupamos por categoria los egresos de cada ciclo completo
     categorias_nombres = {}
     if n_ciclos > 0:
-        cycle_case = case(*[(and_(Transaccion.fecha >= inicio, Transaccion.fecha <= fin), idx) for idx, (inicio, fin) in enumerate(ciclos_anteriores)], else_=-1)
+        cycle_case = case(*[(and_(Transaccion.fecha >= inicio, Transaccion.fecha <= fin), idx) for idx, (inicio, fin) in enumerate(ciclos_con_datos)], else_=-1)
         
         stmt = (
             select(
@@ -50,10 +61,11 @@ def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
                 cycle_case.label("cycle_idx"),
                 func.sum(Transaccion.monto).label("total")
             )
-            .join(Categoria, Transaccion.categoria_id == Categoria.id)
+            .outerjoin(Categoria, Transaccion.categoria_id == Categoria.id)
             .where(
                 and_(
                     Transaccion.usuario_id == usuario.id,
+                    Transaccion.moneda == moneda,
                     Transaccion.tipo == TipoTransaccion.EGRESO,
                     Transaccion.es_padre_cuotas == False,
                     or_(
@@ -71,7 +83,20 @@ def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
         totales_por_categoria_y_ciclo = [{} for _ in range(n_ciclos)]
         for row in res:
             if row.cycle_idx != -1:
-                totales_por_categoria_y_ciclo[row.cycle_idx][row.categoria_id] = row.total
+                inicio, fin = ciclos_con_datos[row.cycle_idx]
+                monto_final = row.total
+                if moneda == Moneda.ARS:
+                    from app.services.tools_service import ajustar_por_ipc
+                    midpoint_str = (inicio + (fin - inicio) // 2).strftime("%Y-%m-%d")
+                    adjusted = ajustar_por_ipc(monto=float(row.total), fecha_origen=midpoint_str, db=db)
+                    if getattr(adjusted, "ajuste_posible", True):
+                        monto_final = Decimal(str(adjusted))
+                    else:
+                        msg_warning = f"No se pudo ajustar el ciclo {inicio.strftime('%d/%m/%Y')} - {fin.strftime('%d/%m/%Y')} por falta de datos de IPC."
+                        if msg_warning not in advertencias:
+                            advertencias.append(msg_warning)
+
+                totales_por_categoria_y_ciclo[row.cycle_idx][row.categoria_id] = monto_final
                 categorias_nombres[row.categoria_id] = row.nombre
     else:
         totales_por_categoria_y_ciclo = []
@@ -104,10 +129,11 @@ def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
         # El ciclo ya termino, devolver datos reales
         stmt = (
             select(Transaccion.categoria_id, Categoria.nombre, func.sum(Transaccion.monto).label("total"))
-            .join(Categoria, Transaccion.categoria_id == Categoria.id)
+            .outerjoin(Categoria, Transaccion.categoria_id == Categoria.id)
             .where(
                 and_(
                     Transaccion.usuario_id == usuario.id,
+                    Transaccion.moneda == moneda,
                     Transaccion.fecha >= fecha_inicio_actual,
                     Transaccion.fecha <= fecha_fin_actual,
                     Transaccion.tipo == TipoTransaccion.EGRESO,
@@ -129,6 +155,7 @@ def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
             .where(
                 and_(
                     Transaccion.usuario_id == usuario.id,
+                    Transaccion.moneda == moneda,
                     Transaccion.fecha >= fecha_inicio_actual,
                     Transaccion.fecha <= fecha_fin_actual,
                     Transaccion.tipo == TipoTransaccion.INGRESO,
@@ -156,16 +183,18 @@ def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
             "nivel_confianza": "alto",
             "ciclos_analizados": n_ciclos,
             "pesos": {"historial": 1.0, "ciclo_actual": 0.0},
-            "advertencias": ["El ciclo actual ya finalizó."]
+            "advertencias": ["El ciclo actual ya finalizó."],
+            "datos_suficientes": True
         }
 
     # Gasto actual por categoria
     stmt_actual = (
         select(Transaccion.categoria_id, Categoria.nombre, func.sum(Transaccion.monto).label("total"))
-        .join(Categoria, Transaccion.categoria_id == Categoria.id)
+        .outerjoin(Categoria, Transaccion.categoria_id == Categoria.id)
         .where(
             and_(
                 Transaccion.usuario_id == usuario.id,
+                Transaccion.moneda == moneda,
                 Transaccion.fecha >= fecha_inicio_actual,
                 Transaccion.fecha <= hoy,
                 Transaccion.tipo == TipoTransaccion.EGRESO,
@@ -225,8 +254,8 @@ def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
         gasto_proyectado_categorias += proyectado
         
         desglose.append({
-            "categoria_id": str(cat_id),
-            "categoria_nombre": categorias_nombres.get(cat_id, "Sin nombre"),
+            "categoria_id": str(cat_id) if cat_id is not None else None,
+            "categoria_nombre": categorias_nombres.get(cat_id) or "Sin categoría",
             "gasto_actual_ciclo": float(actual),
             "promedio_historico": float(promedio_hist),
             "proyectado": float(proyectado),
@@ -243,6 +272,7 @@ def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
         .where(
             and_(
                 Transaccion.usuario_id == usuario.id,
+                Transaccion.moneda == moneda,
                 Cuota.pagada == False,
                 Cuota.fecha_vencimiento > hoy,
                 Cuota.fecha_vencimiento <= fecha_fin_actual
@@ -292,6 +322,7 @@ def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
         .where(
             and_(
                 Transaccion.usuario_id == usuario.id,
+                Transaccion.moneda == moneda,
                 Transaccion.fecha >= fecha_inicio_actual,
                 Transaccion.fecha <= hoy,
                 Transaccion.tipo == TipoTransaccion.INGRESO,
@@ -309,6 +340,7 @@ def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
         .where(
             and_(
                 TransaccionRecurrente.usuario_id == usuario.id,
+                TransaccionRecurrente.moneda == moneda,
                 TransaccionRecurrente.tipo == TipoTransaccionRecurrente.INGRESO,
                 TransaccionRecurrente.estado == EstadoTransaccionRecurrente.ACTIVA
             )
@@ -329,28 +361,17 @@ def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
         recurrentes_hoy = set(db.execute(stmt_hoy).scalars().all())
 
     for rec in recurrentes_activas:
-        # Verificar si ya genero transaccion hoy para no duplicar
         ya_genero_hoy = rec.id in recurrentes_hoy
-
-        start_check = hoy + timedelta(days=1) if ya_genero_hoy or True else hoy # El requerimiento dice hoy+1
-        # Re-leemos el requerimiento: "Verificar si su dia_registro todavia no ocurrio en el ciclo actual (entre hoy+1 y fecha_fin_ciclo)"
-        start_check = hoy + (timedelta(days=0) if not ya_genero_hoy else timedelta(days=1))
-        # Para simplificar segun el prompt: entre hoy+1 y fecha_fin_ciclo
         start_date = hoy + timedelta(days=1)
         
         if start_date > fecha_fin_actual:
             continue
 
         if rec.frecuencia == FrecuenciaTransaccionRecurrente.MENSUAL:
-            # rec.dia_registro es el dia del mes
             if rec.dia_registro >= start_date.day and rec.dia_registro <= fecha_fin_actual.day:
-                # Ojo con meses de distinta longitud, pero dia_registro es int.
-                # Si el mes actual tiene menos dias que dia_registro, se asume el ultimo dia.
-                # Pero la logica del prompt es simple: dia_registro > hoy.day y <= ultimo_dia_ciclo
                 ingresos_recurrentes_pendientes += rec.monto
         
         elif rec.frecuencia == FrecuenciaTransaccionRecurrente.SEMANAL:
-            # rec.dia_registro es weekday (0-6)
             current = start_date
             while current <= fecha_fin_actual:
                 if current.weekday() == rec.dia_registro:
@@ -358,11 +379,6 @@ def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
                 current += timedelta(days=1)
 
         elif rec.frecuencia == FrecuenciaTransaccionRecurrente.QUINCENAL:
-            # dia_registro y dia_registro + 15
-            dias = [rec.dia_registro, (rec.dia_registro + 15) % 30 or 30]
-            # Simplificamos: si cae en el rango
-            # El prompt dice: verificar si dia_registro o dia_registro+15 caen entre hoy+1 y fecha_fin_ciclo
-            # Vamos a iterar los dias del rango para ser precisos
             current = start_date
             while current <= fecha_fin_actual:
                 if current.day == rec.dia_registro or current.day == ((rec.dia_registro + 15) % 30 or 30):
@@ -371,22 +387,29 @@ def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
 
     ingresos_proyectados = ingresos_actuales + ingresos_recurrentes_pendientes
 
-    # Paso 8: Nivel de confianza
-    if n_ciclos >= 4 and dias_transcurridos >= 5:
-        nivel_confianza = "alto"
-    elif n_ciclos == 0:
+    # Paso 8: Nivel de confianza y Gate de datos insuficientes
+    datos_suficientes = True
+    if n_ciclos == 0 and dias_transcurridos < 5:
+        datos_suficientes = False
         nivel_confianza = "bajo"
+        msg_insuficiente = "sin historial suficiente para proyectar con confianza"
+        if msg_insuficiente not in advertencias:
+            advertencias.append(msg_insuficiente)
     else:
-        nivel_confianza = "medio"
+        if n_ciclos >= 4 and dias_transcurridos >= 5:
+            nivel_confianza = "alto"
+        elif n_ciclos == 0:
+            nivel_confianza = "bajo"
+        else:
+            nivel_confianza = "medio"
 
-    # Paso 9: Advertencias
-    advertencias = []
-    if n_ciclos == 0:
+    # Paso 9: Advertencias adicionales
+    if n_ciclos == 0 and datos_suficientes:
         advertencias.append("Proyección basada solo en este ciclo. Mejorará con el tiempo.")
-    elif n_ciclos <= 2:
+    elif 1 <= n_ciclos <= 2:
         advertencias.append("Todavía tenemos poco historial tuyo. La proyección va a mejorar.")
     
-    if dias_transcurridos < 5:
+    if dias_transcurridos < 5 and datos_suficientes:
         advertencias.append("Recién empieza el ciclo. La proyección se basa principalmente en tus ciclos anteriores.")
 
     categorias_fuera = [d["categoria_nombre"] for d in desglose if d["fuera_de_patron"]]
@@ -420,5 +443,13 @@ def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
             "historial": float(peso_historial),
             "ciclo_actual": float(peso_actual)
         },
-        "advertencias": advertencias
+        "advertencias": advertencias,
+        "datos_suficientes": datos_suficientes
+    }
+
+
+def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
+    return {
+        "ars": _calcular_proyeccion_por_moneda(db, usuario, Moneda.ARS),
+        "usd": _calcular_proyeccion_por_moneda(db, usuario, Moneda.USD)
     }
