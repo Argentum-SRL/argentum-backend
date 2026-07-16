@@ -160,11 +160,18 @@ class CanAffordResponse(BaseModel):
     data: CanAffordContadoData | CanAffordCuotasData
 
 
-class FinancialContextResponseData(BaseModel):
+class CurrencyFinancialData(BaseModel):
+    total_billeteras: float
+    cuotas_comprometidas: float
+    suscripciones_mensuales: float
     saldo_disponible: float
+
+
+class FinancialContextResponseData(BaseModel):
+    ars: CurrencyFinancialData
+    usd: CurrencyFinancialData
     ingreso_promedio_mensual: float | None = None
     ingreso_es_estimacion_parcial: bool
-    carga_mensual_comprometida: float
     gasto_promedio_variable: float
     ciclos_con_historia: int
     margen_libre_mensual: float | None = None
