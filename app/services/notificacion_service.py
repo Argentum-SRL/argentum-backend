@@ -230,3 +230,94 @@ def actualizar_configuracion(
     db.commit()
     db.refresh(config)
     return config
+
+
+def resolver_canales_notificacion(
+    config: Optional[ConfiguracionNotificacion],
+    tipo: TipoNotificacion
+) -> Optional[tuple[bool, bool]]:
+    """
+    Resuelve si una notificación está activa y por qué canales debe enviarse.
+    Retorna None si la notificación está desactivada en la configuración.
+    De lo contrario, retorna (canal_web, canal_whatsapp).
+    """
+    if not config:
+        return (True, False)
+
+    # 1. Gasto Inusual
+    if tipo == TipoNotificacion.GASTO_INUSUAL:
+        if not getattr(config, "gasto_inusual_activo", True):
+            return None
+        return (
+            getattr(config, "gasto_inusual_web", True),
+            getattr(config, "gasto_inusual_whatsapp", False),
+        )
+
+    # 2. Meta Alcanzada
+    elif tipo == TipoNotificacion.META_ALCANZADA:
+        if not getattr(config, "meta_alcanzada_activo", True):
+            return None
+        return (
+            getattr(config, "meta_alcanzada_web", True),
+            getattr(config, "meta_alcanzada_whatsapp", True),
+        )
+
+    # 3. Saldo en Cero
+    elif tipo == TipoNotificacion.SALDO_CERO:
+        if not getattr(config, "saldo_cero_activo", True):
+            return None
+        return (
+            getattr(config, "saldo_cero_web", True),
+            getattr(config, "saldo_cero_whatsapp", True),
+        )
+
+    # 4. Resumen de Ciclo
+    elif tipo == TipoNotificacion.RESUMEN_CICLO:
+        if not getattr(config, "resumen_ciclo_activo", True):
+            return None
+        return (
+            getattr(config, "resumen_ciclo_web", False),
+            getattr(config, "resumen_ciclo_whatsapp", True),
+        )
+
+    # 5. Proyección Negativa
+    elif tipo == TipoNotificacion.PROYECCION_NEGATIVA:
+        if not getattr(config, "proyeccion_negativa_activo", True):
+            return None
+        return (
+            getattr(config, "proyeccion_negativa_web", True),
+            getattr(config, "proyeccion_negativa_whatsapp", True),
+        )
+
+    # Otros tipos de notificación (para soporte completo)
+    elif tipo == TipoNotificacion.CUOTA_VENCE:
+        return (config.cuota_vence_web, config.cuota_vence_whatsapp)
+
+    elif tipo == TipoNotificacion.PRESUPUESTO_AGOTADO:
+        return (config.presupuesto_umbral_2_web, config.presupuesto_umbral_2_whatsapp)
+
+    elif tipo == TipoNotificacion.PRESUPUESTO_LIMITE:
+        if not config.presupuesto_umbral_1_activo:
+            return None
+        return (config.presupuesto_umbral_1_web, config.presupuesto_umbral_1_whatsapp)
+
+    elif tipo == TipoNotificacion.SUSCRIPCION_HOY:
+        return (config.suscripcion_hoy_web, config.suscripcion_hoy_whatsapp)
+
+    elif tipo == TipoNotificacion.SUSCRIPCION_PROXIMA:
+        if not config.suscripcion_recordatorio_activo:
+            return None
+        return (config.suscripcion_recordatorio_web, config.suscripcion_recordatorio_whatsapp)
+
+    elif tipo == TipoNotificacion.RESUMEN_SEMANAL:
+        if not config.resumen_semanal_activo:
+            return None
+        return (config.resumen_semanal_web, config.resumen_semanal_whatsapp)
+
+    elif tipo == TipoNotificacion.INACTIVIDAD:
+        if not config.inactividad_activo:
+            return None
+        return (config.inactividad_web, config.inactividad_whatsapp)
+
+    return (True, False)
+

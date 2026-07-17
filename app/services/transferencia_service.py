@@ -1,6 +1,5 @@
 import logging
 from uuid import UUID
-from datetime import date
 from fastapi import HTTPException
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
@@ -71,20 +70,24 @@ def crear_transferencia(db: Session, usuario_id: UUID, data: TransferenciaIntern
     b_origen.saldo_actual -= data.monto
     if b_origen.saldo_actual <= 0:
         try:
-            from app.services.notificacion_service import crear_notificacion
+            from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
             from app.models.notificacion import TipoNotificacion, NivelNotificacion
-            crear_notificacion(
-                db=db,
-                usuario_id=usuario_id,
-                tipo=TipoNotificacion.SALDO_CERO,
-                nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                mensaje=f"Tu billetera '{b_origen.nombre}' quedó sin saldo disponible.",
-                entidad_tipo="billetera",
-                entidad_id=b_origen.id,
-                deep_link="/app/billeteras",
-                canal_web=True,
-                canal_whatsapp=True,
-            )
+            config = obtener_configuracion(db, usuario_id)
+            canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
+            if canales is not None:
+                canal_web, canal_whatsapp = canales
+                crear_notificacion(
+                    db=db,
+                    usuario_id=usuario_id,
+                    tipo=TipoNotificacion.SALDO_CERO,
+                    nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                    mensaje=f"Tu billetera '{b_origen.nombre}' quedó sin saldo disponible.",
+                    entidad_tipo="billetera",
+                    entidad_id=b_origen.id,
+                    deep_link="/app/billeteras",
+                    canal_web=canal_web,
+                    canal_whatsapp=canal_whatsapp,
+                )
         except Exception:
             pass
     b_destino.saldo_actual += data.monto

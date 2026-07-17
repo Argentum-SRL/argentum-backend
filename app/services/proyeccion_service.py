@@ -81,16 +81,20 @@ def _calcular_proyeccion_por_moneda(db: Session, usuario: Usuario, moneda: Moned
         
         # Inicializar la lista de diccionarios por ciclo
         totales_por_categoria_y_ciclo = [{} for _ in range(n_ciclos)]
+        ipc_cache_local = {}
         for row in res:
             if row.cycle_idx != -1:
                 inicio, fin = ciclos_con_datos[row.cycle_idx]
                 monto_final = row.total
                 if moneda == Moneda.ARS:
-                    from app.services.tools_service import ajustar_por_ipc
                     midpoint_str = (inicio + (fin - inicio) // 2).strftime("%Y-%m-%d")
-                    adjusted = ajustar_por_ipc(monto=float(row.total), fecha_origen=midpoint_str, db=db)
-                    if getattr(adjusted, "ajuste_posible", True):
-                        monto_final = Decimal(str(adjusted))
+                    if midpoint_str not in ipc_cache_local:
+                        from app.services.tools_service import ajustar_por_ipc
+                        ipc_cache_local[midpoint_str] = ajustar_por_ipc(monto=1.0, fecha_origen=midpoint_str, db=db)
+                    
+                    adjusted_factor = ipc_cache_local[midpoint_str]
+                    if getattr(adjusted_factor, "ajuste_posible", True):
+                        monto_final = Decimal(str(float(row.total) * float(adjusted_factor)))
                     else:
                         msg_warning = f"No se pudo ajustar el ciclo {inicio.strftime('%d/%m/%Y')} - {fin.strftime('%d/%m/%Y')} por falta de datos de IPC."
                         if msg_warning not in advertencias:

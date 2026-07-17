@@ -35,6 +35,7 @@ class TipoNotificacion(str, enum.Enum):
     GASTO_INUSUAL = "GASTO_INUSUAL"
     INACTIVIDAD = "INACTIVIDAD"
     RESUMEN_CICLO = "RESUMEN_CICLO"
+    PROYECCION_NEGATIVA = "PROYECCION_NEGATIVA"
 
 
 class Notificacion(Base):

@@ -42,7 +42,8 @@ class ConfiguracionNotificacion(Base):
     meta_alcanzada_web = Column(Boolean, default=True, nullable=False)
     meta_alcanzada_whatsapp = Column(Boolean, default=True, nullable=False)
 
-    # --- SALDO EN CERO (no desactivable, solo canal) ---
+    # --- SALDO EN CERO ---
+    saldo_cero_activo = Column(Boolean, default=True, nullable=False)
     saldo_cero_web = Column(Boolean, default=True, nullable=False)
     saldo_cero_whatsapp = Column(Boolean, default=True, nullable=False)
 
@@ -61,6 +62,16 @@ class ConfiguracionNotificacion(Base):
     inactividad_dias = Column(Integer, default=7, nullable=False)
     inactividad_web = Column(Boolean, default=True, nullable=False)
     inactividad_whatsapp = Column(Boolean, default=False, nullable=False)
+
+    # --- RESUMEN DE CICLO ---
+    resumen_ciclo_activo = Column(Boolean, default=True, nullable=False)
+    resumen_ciclo_web = Column(Boolean, default=False, nullable=False)
+    resumen_ciclo_whatsapp = Column(Boolean, default=True, nullable=False)
+
+    # --- PROYECCION NEGATIVA ---
+    proyeccion_negativa_activo = Column(Boolean, default=True, nullable=False)
+    proyeccion_negativa_web = Column(Boolean, default=True, nullable=False)
+    proyeccion_negativa_whatsapp = Column(Boolean, default=True, nullable=False)
 
     # --- WHATSAPP: horario de envío ---
     whatsapp_hora_envio = Column(Integer, default=9, nullable=False)
