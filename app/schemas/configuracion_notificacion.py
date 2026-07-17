@@ -31,6 +31,7 @@ class ConfiguracionNotificacionBase(BaseModel):
     meta_alcanzada_web: bool = True
     meta_alcanzada_whatsapp: bool = True
 
+    saldo_cero_activo: bool = True
     saldo_cero_web: bool = True
     saldo_cero_whatsapp: bool = True
 
@@ -46,6 +47,14 @@ class ConfiguracionNotificacionBase(BaseModel):
     inactividad_dias: int = 7
     inactividad_web: bool = True
     inactividad_whatsapp: bool = False
+
+    resumen_ciclo_activo: bool = True
+    resumen_ciclo_web: bool = False
+    resumen_ciclo_whatsapp: bool = True
+
+    proyeccion_negativa_activo: bool = True
+    proyeccion_negativa_web: bool = True
+    proyeccion_negativa_whatsapp: bool = True
 
     whatsapp_hora_envio: int = 9
     whatsapp_minuto_envio: int = 0
@@ -80,6 +89,7 @@ class ConfiguracionNotificacionUpdate(BaseModel):
     meta_alcanzada_web: bool | None = None
     meta_alcanzada_whatsapp: bool | None = None
 
+    saldo_cero_activo: bool | None = None
     saldo_cero_web: bool | None = None
     saldo_cero_whatsapp: bool | None = None
 
@@ -95,6 +105,14 @@ class ConfiguracionNotificacionUpdate(BaseModel):
     inactividad_dias: int | None = None
     inactividad_web: bool | None = None
     inactividad_whatsapp: bool | None = None
+
+    resumen_ciclo_activo: bool | None = None
+    resumen_ciclo_web: bool | None = None
+    resumen_ciclo_whatsapp: bool | None = None
+
+    proyeccion_negativa_activo: bool | None = None
+    proyeccion_negativa_web: bool | None = None
+    proyeccion_negativa_whatsapp: bool | None = None
 
     whatsapp_hora_envio: int | None = None
     whatsapp_minuto_envio: int | None = None

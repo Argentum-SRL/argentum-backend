@@ -198,20 +198,24 @@ def prepagar_grupo(
     # Chequeo de saldo cero manualmente después de debitar
     if billetera.saldo_actual <= 0:
         try:
-            from app.services.notificacion_service import crear_notificacion
+            from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
             from app.models.notificacion import TipoNotificacion, NivelNotificacion
-            crear_notificacion(
-                db=db,
-                usuario_id=usuario_id,
-                tipo=TipoNotificacion.SALDO_CERO,
-                nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
-                entidad_tipo="billetera",
-                entidad_id=billetera.id,
-                deep_link="/app/billeteras",
-                canal_web=True,
-                canal_whatsapp=True,
-            )
+            config = obtener_configuracion(db, usuario_id)
+            canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
+            if canales is not None:
+                canal_web, canal_whatsapp = canales
+                crear_notificacion(
+                    db=db,
+                    usuario_id=usuario_id,
+                    tipo=TipoNotificacion.SALDO_CERO,
+                    nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                    mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
+                    entidad_tipo="billetera",
+                    entidad_id=billetera.id,
+                    deep_link="/app/billeteras",
+                    canal_web=canal_web,
+                    canal_whatsapp=canal_whatsapp,
+                )
         except Exception:
             pass
 

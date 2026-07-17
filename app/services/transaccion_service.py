@@ -248,20 +248,24 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, co
             billetera.saldo_actual -= nueva_transaccion.monto
             if billetera.saldo_actual <= 0:
                 try:
-                    from app.services.notificacion_service import crear_notificacion
+                    from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
                     from app.models.notificacion import TipoNotificacion, NivelNotificacion
-                    crear_notificacion(
-                        db=db,
-                        usuario_id=usuario_id,
-                        tipo=TipoNotificacion.SALDO_CERO,
-                        nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                        mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
-                        entidad_tipo="billetera",
-                        entidad_id=billetera.id,
-                        deep_link="/app/billeteras",
-                        canal_web=True,
-                        canal_whatsapp=True,
-                    )
+                    config = obtener_configuracion(db, usuario_id)
+                    canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
+                    if canales is not None:
+                        canal_web, canal_whatsapp = canales
+                        crear_notificacion(
+                            db=db,
+                            usuario_id=usuario_id,
+                            tipo=TipoNotificacion.SALDO_CERO,
+                            nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                            mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
+                            entidad_tipo="billetera",
+                            entidad_id=billetera.id,
+                            deep_link="/app/billeteras",
+                            canal_web=canal_web,
+                            canal_whatsapp=canal_whatsapp,
+                        )
                 except Exception:
                     pass
 
@@ -369,20 +373,24 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
                 billetera_nueva.saldo_actual -= transaccion.monto
                 if billetera_nueva.saldo_actual <= 0:
                     try:
-                        from app.services.notificacion_service import crear_notificacion
+                        from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
                         from app.models.notificacion import TipoNotificacion, NivelNotificacion
-                        crear_notificacion(
-                            db=db,
-                            usuario_id=usuario_id,
-                            tipo=TipoNotificacion.SALDO_CERO,
-                            nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                            mensaje=f"Tu billetera '{billetera_nueva.nombre}' quedó sin saldo disponible.",
-                            entidad_tipo="billetera",
-                            entidad_id=billetera_nueva.id,
-                            deep_link="/app/billeteras",
-                            canal_web=True,
-                            canal_whatsapp=True,
-                        )
+                        config = obtener_configuracion(db, usuario_id)
+                        canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
+                        if canales is not None:
+                            canal_web, canal_whatsapp = canales
+                            crear_notificacion(
+                                db=db,
+                                usuario_id=usuario_id,
+                                tipo=TipoNotificacion.SALDO_CERO,
+                                nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                                mensaje=f"Tu billetera '{billetera_nueva.nombre}' quedó sin saldo disponible.",
+                                entidad_tipo="billetera",
+                                entidad_id=billetera_nueva.id,
+                                deep_link="/app/billeteras",
+                                canal_web=canal_web,
+                                canal_whatsapp=canal_whatsapp,
+                            )
                     except Exception:
                         pass
     else:
@@ -553,20 +561,24 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
             billetera.saldo_actual -= transaccion.monto
             if billetera.saldo_actual <= 0:
                 try:
-                    from app.services.notificacion_service import crear_notificacion
+                    from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
                     from app.models.notificacion import TipoNotificacion, NivelNotificacion
-                    crear_notificacion(
-                        db=db,
-                        usuario_id=usuario_id,
-                        tipo=TipoNotificacion.SALDO_CERO,
-                        nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                        mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
-                        entidad_tipo="billetera",
-                        entidad_id=billetera.id,
-                        deep_link="/app/billeteras",
-                        canal_web=True,
-                        canal_whatsapp=True,
-                    )
+                    config = obtener_configuracion(db, usuario_id)
+                    canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
+                    if canales is not None:
+                        canal_web, canal_whatsapp = canales
+                        crear_notificacion(
+                            db=db,
+                            usuario_id=usuario_id,
+                            tipo=TipoNotificacion.SALDO_CERO,
+                            nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                            mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
+                            entidad_tipo="billetera",
+                            entidad_id=billetera.id,
+                            deep_link="/app/billeteras",
+                            canal_web=canal_web,
+                            canal_whatsapp=canal_whatsapp,
+                        )
                 except Exception:
                     pass
 
@@ -695,18 +707,23 @@ def evaluar_gasto_inusual(db: Session, usuario_id: UUID, transaccion: Transaccio
 
         if dispara:
             mensaje = f"Registramos un gasto inusual: gastaste {simbolo}{monto_actual:,.0f} en {categoria_nombre}, pero tu gasto habitual en esa categoría es de {simbolo}{mediana:,.0f}."
-            crear_notificacion(
-                db=db,
-                usuario_id=usuario_id,
-                tipo=TipoNotificacion.GASTO_INUSUAL,
-                nivel=NivelNotificacion.FINANCIERA_INFORMATIVA,
-                mensaje=mensaje,
-                entidad_tipo="transaccion",
-                entidad_id=transaccion.id,
-                deep_link="/app/transacciones",
-                canal_web=True,
-                canal_whatsapp=True,
-            )
+            from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion
+            config = obtener_configuracion(db, usuario_id)
+            canales = resolver_canales_notificacion(config, TipoNotificacion.GASTO_INUSUAL)
+            if canales is not None:
+                canal_web, canal_whatsapp = canales
+                crear_notificacion(
+                    db=db,
+                    usuario_id=usuario_id,
+                    tipo=TipoNotificacion.GASTO_INUSUAL,
+                    nivel=NivelNotificacion.FINANCIERA_INFORMATIVA,
+                    mensaje=mensaje,
+                    entidad_tipo="transaccion",
+                    entidad_id=transaccion.id,
+                    deep_link="/app/transacciones",
+                    canal_web=canal_web,
+                    canal_whatsapp=canal_whatsapp,
+                )
     else:
         # NIVEL 2 y 3: count >= 30
         # Basado en promedio ajustado y perfil financiero (tasa de ahorro + saldo disponible)
@@ -811,16 +828,21 @@ def evaluar_gasto_inusual(db: Session, usuario_id: UUID, transaccion: Transaccio
 
         if monto_actual > promedio_ajustado * multiplicador:
             mensaje = f"Registramos un gasto inusual: gastaste {simbolo}{monto_actual:,.0f} en {categoria_nombre}, pero tu gasto habitual en esa categoría es de {simbolo}{promedio_ajustado:,.0f}."
-            crear_notificacion(
-                db=db,
-                usuario_id=usuario_id,
-                tipo=TipoNotificacion.GASTO_INUSUAL,
-                nivel=nivel,
-                mensaje=mensaje,
-                entidad_tipo="transaccion",
-                entidad_id=transaccion.id,
-                deep_link="/app/transacciones",
-                canal_web=True,
-                canal_whatsapp=True,
-            )
+            from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion
+            config = obtener_configuracion(db, usuario_id)
+            canales = resolver_canales_notificacion(config, TipoNotificacion.GASTO_INUSUAL)
+            if canales is not None:
+                canal_web, canal_whatsapp = canales
+                crear_notificacion(
+                    db=db,
+                    usuario_id=usuario_id,
+                    tipo=TipoNotificacion.GASTO_INUSUAL,
+                    nivel=nivel,
+                    mensaje=mensaje,
+                    entidad_tipo="transaccion",
+                    entidad_id=transaccion.id,
+                    deep_link="/app/transacciones",
+                    canal_web=canal_web,
+                    canal_whatsapp=canal_whatsapp,
+                )
 
