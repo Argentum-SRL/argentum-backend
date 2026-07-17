@@ -208,6 +208,8 @@ def verificar_codigo_recuperacion(email: str, codigo: str) -> bool:
     Verifica el código de recuperación.
     Uso único: si es correcto, se borra.
     """
+    from fastapi import HTTPException
+
     _limpiar(_recuperacion_cache)
 
     entrada = _recuperacion_cache.get(email)
@@ -219,6 +221,13 @@ def verificar_codigo_recuperacion(email: str, codigo: str) -> bool:
         return False
 
     if entrada.codigo != codigo:
+        entrada.intentos_fallidos += 1
+        if entrada.intentos_fallidos >= MAX_INTENTOS:
+            del _recuperacion_cache[email]
+            raise HTTPException(
+                status_code=400,
+                detail="El código de verificación ya no es válido. Por favor, solicitá un código nuevo."
+            )
         return False
 
     # Éxito: borrar y devolver OK
