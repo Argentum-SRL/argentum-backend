@@ -393,7 +393,6 @@ def _job_entrega_whatsapp_batched(db_session_factory):
                     Notificacion.usuario_id == u.id,
                     Notificacion.canal_whatsapp == True,
                     Notificacion.enviada_whatsapp == False,
-                    Notificacion.archivada == False,
                     (Notificacion.silenciada_hasta == None) | (Notificacion.silenciada_hasta < ahora_utc)
                 )
                 .all()

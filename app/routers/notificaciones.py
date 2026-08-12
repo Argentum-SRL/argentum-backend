@@ -24,7 +24,6 @@ router = APIRouter(prefix="/notificaciones", tags=["notificaciones"])
 @router.get("", response_model=List[NotificacionRead])
 def listar_notificaciones(
     solo_no_leidas: bool = Query(default=False),
-    incluir_archivadas: bool = Query(default=False),
     limite: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -34,7 +33,6 @@ def listar_notificaciones(
         db=db,
         usuario_id=usuario.id,
         solo_no_leidas=solo_no_leidas,
-        incluir_archivadas=incluir_archivadas,
         limite=limite,
         offset=offset,
     )
@@ -73,18 +71,6 @@ def marcar_notificacion_no_leida(
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@router.put("/{id}/archivar", response_model=NotificacionRead)
-def archivar_notificacion(
-    id: UUID,
-    db: Session = Depends(get_db),
-    usuario: Usuario = Depends(get_current_user),
-):
-    try:
-        return notificacion_service.archivar_notificacion(db, usuario.id, id)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-
 @router.put("/{id}/silenciar", response_model=NotificacionRead)
 def silenciar_notificacion(
     id: UUID,
@@ -119,15 +105,6 @@ def marcar_todas_leidas(
     usuario: Usuario = Depends(get_current_user),
 ):
     notificacion_service.marcar_todas_leidas(db, usuario.id)
-    return {"success": True}
-
-
-@router.post("/archivar-todas")
-def archivar_todas(
-    db: Session = Depends(get_db),
-    usuario: Usuario = Depends(get_current_user),
-):
-    notificacion_service.archivar_todas(db, usuario.id)
     return {"success": True}
 
 

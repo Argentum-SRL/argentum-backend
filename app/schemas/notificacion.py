@@ -12,7 +12,6 @@ class NotificacionBase(BaseModel):
     nivel: NivelNotificacion
     mensaje: str
     leida: bool = False
-    archivada: bool = False
     canal_web: bool = True
     canal_whatsapp: bool = False
     canal_email: bool = False
@@ -31,7 +30,6 @@ class NotificacionCreate(NotificacionBase):
 
 class NotificacionUpdate(BaseModel):
     leida: bool | None = None
-    archivada: bool | None = None
     silenciada_hasta: datetime | None = None
 
 
