@@ -73,14 +73,10 @@ def obtener_notificaciones(
     db: Session,
     usuario_id: UUID,
     solo_no_leidas: bool = False,
-    incluir_archivadas: bool = False,
     limite: int = 50,
     offset: int = 0,
 ) -> List[Notificacion]:
     query = db.query(Notificacion).filter(Notificacion.usuario_id == usuario_id)
-
-    if not incluir_archivadas:
-        query = query.filter(Notificacion.archivada == False)
 
     if solo_no_leidas:
         query = query.filter(Notificacion.leida == False)
@@ -100,7 +96,6 @@ def contar_no_leidas(db: Session, usuario_id: UUID) -> int:
     return db.query(Notificacion).filter(
         Notificacion.usuario_id == usuario_id,
         Notificacion.leida == False,
-        Notificacion.archivada == False,
         (Notificacion.silenciada_hasta == None) |
         (Notificacion.silenciada_hasta < ahora)
     ).count()
@@ -132,19 +127,6 @@ def marcar_no_leida(db: Session, usuario_id: UUID, notificacion_id: UUID) -> Not
     return notif
 
 
-def archivar_notificacion(db: Session, usuario_id: UUID, notificacion_id: UUID) -> Notificacion:
-    notif = db.query(Notificacion).filter(
-        Notificacion.id == notificacion_id,
-        Notificacion.usuario_id == usuario_id,
-    ).first()
-    if not notif:
-        raise ValueError("Notificación no encontrada")
-    notif.archivada = True
-    db.commit()
-    db.refresh(notif)
-    return notif
-
-
 def silenciar_notificacion(
     db: Session,
     usuario_id: UUID,
@@ -171,8 +153,6 @@ def eliminar_notificacion(db: Session, usuario_id: UUID, notificacion_id: UUID) 
     ).first()
     if not notif:
         raise ValueError("Notificación no encontrada")
-    if notif.nivel == NivelNotificacion.CRITICA:
-        raise PermissionError("Las notificaciones críticas no se pueden eliminar")
     db.delete(notif)
     db.commit()
 
@@ -181,17 +161,7 @@ def marcar_todas_leidas(db: Session, usuario_id: UUID) -> None:
     db.query(Notificacion).filter(
         Notificacion.usuario_id == usuario_id,
         Notificacion.leida == False,
-        Notificacion.archivada == False,
     ).update({"leida": True})
-    db.commit()
-
-
-def archivar_todas(db: Session, usuario_id: UUID) -> None:
-    db.query(Notificacion).filter(
-        Notificacion.usuario_id == usuario_id,
-        Notificacion.archivada == False,
-        Notificacion.nivel != NivelNotificacion.CRITICA,
-    ).update({"archivada": True})
     db.commit()
 
 
