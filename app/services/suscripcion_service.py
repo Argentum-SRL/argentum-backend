@@ -73,11 +73,24 @@ def crear_suscripcion(db: Session, usuario_id: UUID, data: SuscripcionCreate) ->
         if not tarjeta:
             raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
 
-    # 2. Crear suscripción
+    # 2. Validar subcategoría (si fue enviada)
+    if data.subcategoria_id:
+        from app.models.subcategoria import Subcategoria
+        sub = db.query(Subcategoria).filter(
+            Subcategoria.id == data.subcategoria_id,
+            (Subcategoria.creador_id == usuario_id) | (Subcategoria.es_global == True)
+        ).first()
+        if not sub:
+            raise HTTPException(status_code=404, detail="Subcategoría no encontrada.")
+        if data.categoria_id and sub.categoria_id != data.categoria_id:
+            raise HTTPException(status_code=400, detail="La subcategoría seleccionada no pertenece a la categoría.")
+
+    # 3. Crear suscripción
     nueva_suscripcion = Suscripcion(
         usuario_id=usuario_id,
         nombre=data.nombre,
         categoria_id=data.categoria_id,
+        subcategoria_id=data.subcategoria_id,
         frecuencia=FrecuenciaSuscripcion(data.frecuencia),
         proximo_cobro=data.proximo_cobro,
         billetera_id=data.billetera_id,
@@ -87,7 +100,7 @@ def crear_suscripcion(db: Session, usuario_id: UUID, data: SuscripcionCreate) ->
     db.add(nueva_suscripcion)
     db.flush() # Para tener el ID
 
-    # 3. Crear primer registro de historial
+    # 4. Crear primer registro de historial
     primer_precio = HistorialSuscripcion(
         suscripcion_id=nueva_suscripcion.id,
         monto=data.monto,
@@ -165,6 +178,21 @@ def actualizar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID, 
         raise HTTPException(status_code=404, detail="No encontramos esa suscripción.")
 
     update_data = data.model_dump(exclude_unset=True)
+
+    nueva_cat_id = update_data.get('categoria_id', suscripcion.categoria_id)
+    nueva_sub_id = update_data.get('subcategoria_id', suscripcion.subcategoria_id)
+
+    if 'subcategoria_id' in update_data and update_data['subcategoria_id'] is not None:
+        from app.models.subcategoria import Subcategoria
+        sub = db.query(Subcategoria).filter(
+            Subcategoria.id == update_data['subcategoria_id'],
+            (Subcategoria.creador_id == usuario_id) | (Subcategoria.es_global == True)
+        ).first()
+        if not sub:
+            raise HTTPException(status_code=404, detail="Subcategoría no encontrada.")
+        if nueva_cat_id and sub.categoria_id != nueva_cat_id:
+            raise HTTPException(status_code=400, detail="La subcategoría seleccionada no pertenece a la categoría.")
+
     for key, value in update_data.items():
         if key == 'estado':
             setattr(suscripcion, key, EstadoSuscripcion(value))

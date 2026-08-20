@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.usuario import Usuario
     from app.models.categoria import Categoria
+    from app.models.subcategoria import Subcategoria
     from app.models.billetera import Billetera
     from app.models.tarjeta_credito import TarjetaCredito
     from app.models.historial_suscripcion import HistorialSuscripcion
@@ -50,6 +51,9 @@ class Suscripcion(Base):
     categoria_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("categorias.id"), nullable=True
     )
+    subcategoria_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("subcategorias.id"), nullable=True
+    )
     frecuencia: Mapped[FrecuenciaSuscripcion] = mapped_column(
         SAEnum(FrecuenciaSuscripcion, values_callable=lambda obj: [e.value for e in obj], name="frecuencia_suscripcion_enum"), nullable=False
     )
@@ -67,6 +71,7 @@ class Suscripcion(Base):
     historial: Mapped[list["HistorialSuscripcion"]] = relationship("HistorialSuscripcion", back_populates="suscripcion", cascade="all, delete-orphan")
     usuario: Mapped[Usuario] = relationship("Usuario")
     categoria: Mapped[Categoria | None] = relationship("Categoria")
+    subcategoria: Mapped[Subcategoria | None] = relationship("Subcategoria")
     billetera: Mapped[Billetera | None] = relationship("Billetera")
     tarjeta: Mapped[TarjetaCredito | None] = relationship("TarjetaCredito")
 
