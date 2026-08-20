@@ -17,6 +17,7 @@ class HistorialSuscripcionResponse(BaseModel):
 class SuscripcionBase(BaseModel):
     nombre: str
     categoria_id: Optional[UUID] = None
+    subcategoria_id: Optional[UUID] = None
     frecuencia: str                        # mensual|bimestral|trimestral|semestral|anual
     proximo_cobro: date
     billetera_id: Optional[UUID] = None
@@ -30,6 +31,7 @@ class SuscripcionCreate(SuscripcionBase):
 class SuscripcionUpdate(BaseModel):
     nombre: Optional[str] = None
     categoria_id: Optional[UUID] = None
+    subcategoria_id: Optional[UUID] = None
     frecuencia: Optional[str] = None
     proximo_cobro: Optional[date] = None
     billetera_id: Optional[UUID] = None
