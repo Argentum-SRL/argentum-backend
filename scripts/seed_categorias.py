@@ -135,6 +135,13 @@ CATEGORIAS_SEED = [
             "Venta de bienes", "Reintegros", "Regalos recibidos", "Otros"
         ]
     },
+    {
+        "nombre": "Banco",
+        "tipo": "ingreso",
+        "icono": "banco",
+        "color": "#64748B",
+        "subcategorias": ["Ahorros"]
+    },
 ]
 
 def seed_categorias(db: Session):

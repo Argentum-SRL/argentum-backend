@@ -145,7 +145,7 @@ MAPPING_RULES = {
     ("Alimentación", "Verdulería"): ("Alimentación", "Verdulería", "egreso"),
 
     # Banco
-    ("Banco", "Ahorros"): ("Banco", "Comisiones y gastos bancarios", "egreso"),
+    ("Banco", "Ahorros"): ("Ahorro", None, "egreso"),
     ("Banco", "Comisiones bancarias"): ("Banco", "Comisiones y gastos bancarios", "egreso"),
     ("Banco", "Gastos bancarios y comisiones"): ("Banco", "Comisiones y gastos bancarios", "egreso"),
     ("Banco", "Inversiones"): ("Banco", "Comisiones y gastos bancarios", "egreso"),
