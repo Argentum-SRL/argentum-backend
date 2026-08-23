@@ -152,7 +152,6 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
         from app.schemas.transaccion import TransaccionCreate
         from app.models.transaccion import TipoTransaccion, MetodoPago, OrigenTransaccion
         from app.services.transaccion_service import crear_transaccion
-
         cat_id = obtener_o_crear_categoria_ahorro(db, usuario_id, "egreso")
         tx_create = TransaccionCreate(
             tipo=TipoTransaccion.EGRESO,
@@ -390,21 +389,21 @@ def obtener_o_crear_categoria_ahorro(db: Session, usuario_id: UUID, tipo: str) -
     
     tipo_cat = TipoCategoria.EGRESO if tipo == "egreso" else TipoCategoria.INGRESO
     
-    # Buscar si ya existe
+    # Buscar categoría "Ahorro"
     categoria = db.query(Categoria).filter(
         (Categoria.creador_id == usuario_id) | (Categoria.es_global == True),
         Categoria.nombre == "Ahorro",
         Categoria.tipo == tipo_cat
     ).first()
-    
+
     if not categoria:
         categoria = Categoria(
             nombre="Ahorro",
             tipo=tipo_cat,
             icono="ahorro",
             color="#2563EB",
-            es_global=False,
-            creador_id=usuario_id,
+            es_global=True,
+            creador_id=None,
             estado=EstadoCategoria.ACTIVA
         )
         db.add(categoria)
