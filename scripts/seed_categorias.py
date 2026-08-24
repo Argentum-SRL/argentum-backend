@@ -125,6 +125,13 @@ CATEGORIAS_SEED = [
         "color": "#9CA3AF",
         "subcategorias": ["Regalos", "Reintegros", "Otros"]
     },
+    {
+        "nombre": "Banco",
+        "tipo": "ingreso",
+        "icono": "banco",
+        "color": "#64748B",
+        "subcategorias": ["Ahorros"]
+    },
 ]
 
 

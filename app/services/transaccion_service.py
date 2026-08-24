@@ -3,7 +3,7 @@ from uuid import UUID
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Optional
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy import select, desc, or_, delete, not_, and_
 from sqlalchemy.orm import Session, joinedload
 from dateutil.relativedelta import relativedelta
@@ -121,7 +121,21 @@ def _validar_moneda_coincide(moneda_operacion, billetera: Billetera) -> None:
         )
 
 
-def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, commit: bool = True) -> Transaccion:
+def _evaluar_gasto_inusual_safe(usuario_id: UUID, transaccion_id: UUID) -> None:
+    """Wrapper seguro para evaluar_gasto_inusual en background tasks. Abre su propia sesión de DB."""
+    from app.core.database import SessionLocal
+    db = SessionLocal()
+    try:
+        transaccion = db.get(Transaccion, transaccion_id)
+        if transaccion:
+            evaluar_gasto_inusual(db, usuario_id, transaccion)
+    except Exception as e:
+        logger.warning(f"Error en background evaluar_gasto_inusual para tx {transaccion_id}: {e}")
+    finally:
+        db.close()
+
+
+def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, commit: bool = True, background_tasks: Optional[BackgroundTasks] = None) -> Transaccion:
     # 1. Validar billetera
     billetera = db.execute(
         select(Billetera).where(
@@ -271,10 +285,14 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, co
 
             # Solo si tiene categoría asignada y hay suficiente historial
             if nueva_transaccion.categoria_id is not None:
-                try:
-                    evaluar_gasto_inusual(db, usuario_id, nueva_transaccion)
-                except Exception:
-                    pass
+                if background_tasks is not None:
+                    # Ejecutar en background para no bloquear el request (evita llamadas HTTP externas lentas)
+                    background_tasks.add_task(_evaluar_gasto_inusual_safe, usuario_id, nueva_transaccion.id)
+                else:
+                    try:
+                        evaluar_gasto_inusual(db, usuario_id, nueva_transaccion)
+                    except Exception:
+                        pass
         
     # Impacto en presupuestos
     presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False)

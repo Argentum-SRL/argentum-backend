@@ -78,9 +78,9 @@ categorias_data = [
     {
         "nombre": "Otros",
         "tipo": TipoCategoria.EGRESO,
-        "icono": "ellipsis-horizontal",
-        "color": "#999999",
-        "subcategorias": []
+        "icono": "options",
+        "color": "#8E9198",
+        "subcategorias": ["Varios"]
     }
 ]
 
