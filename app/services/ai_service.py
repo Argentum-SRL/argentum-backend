@@ -20,11 +20,10 @@ from app.models.presupuesto import Presupuesto, EstadoPresupuesto
 from app.models.subcategoria import Subcategoria
 from app.models.usuario import Usuario
 from app.services.dashboard_service import get_ciclo_fechas, get_dashboard_resumen
+from app.services.openai_client import get_openai_client
 from app.services.proyeccion_service import calcular_proyeccion
 
 logger = logging.getLogger(__name__)
-
-from app.services.openai_client import get_openai_client
 
 _openai_client: OpenAI | None = None
 
@@ -105,12 +104,28 @@ Cuando tenés todos los datos para registrar una transacción (monto + tipo + bi
 3. Esperá que el usuario confirme con "sí", "dale", "ok", etc.
 4. Recién entonces el intent es "confirmar" y el backend ejecuta
 
-FLUJO DE SLOT FILLING:
-- Si falta el monto → preguntá solo "¿Cuánto fue?"
-- Si falta la categoría → preguntá solo "¿En qué categoría?"  
-- Si falta la billetera y tiene más de una → preguntá solo "¿Desde qué billetera?"
-- Si faltan monto Y billetera → preguntá "¿Cuánto fue y desde qué billetera?"
-- Nunca hagas más de una pregunta de slot filling por turno salvo que sean exactamente 2 cosas faltantes
+FLUJO DE SLOT FILLING Y CATEGORIZACIÓN AUTOMÁTICA:
+1. CATEGORIZACIÓN SIEMPRE AUTOMÁTICA (NUNCA PREGUNTAR CATEGORÍA):
+   - La categoría NUNCA se pregunta al usuario bajo ninguna circunstancia.
+   - Si el mensaje contiene alguna pista, concepto, rubro o comercio (ej: "nafta", "coto", "almuerzo", "farmacity", "gym", "sueldo"), asigná SIEMPRE de forma automática la categoría y subcategoría canónica más semejante del contexto (formato "Categoría > Subcategoría").
+   - Si el mensaje NO contiene ninguna pista (ej: monto pelado como "gasté 500", "pagué 2000", "me entraron 10000"), asigná SIEMPRE:
+     * Para egresos: "Otros > Otros"
+     * Para ingresos: "Otros > Otros"
+   - No generes NUNCA preguntas tipo "¿En qué categoría?".
+2. BILLETERA (NO ASUMIR SI HAY VARIAS):
+   - Si el usuario tiene más de una billetera activa y no la especificó, preguntá "¿Desde qué billetera?" (o "¿A qué billetera?" si es ingreso). NUNCA asumas una billetera por tu cuenta si no fue indicada y hay múltiples opciones.
+3. MONTO:
+   - Si falta el monto → preguntá solo "¿Cuánto fue?".
+4. PREGUNTAS POR TURNO:
+   - Si faltan monto Y billetera → preguntá "¿Cuánto fue y desde qué billetera?".
+   - Nunca hagas más de una pregunta de slot filling por turno salvo que sean exactamente 2 cosas faltantes.
+
+MANEJO DE ESTADO PREVIO Y RESPUESTAS A MENÚS / SELECCIONES:
+- Si se te proporciona un bloque de "DATOS YA CONFIRMADOS/RESUELTOS EN ESTA CONVERSACIÓN", esos datos son la verdad establecida:
+  * NO los descartes, NO los pises con null, NO los vuelvas a preguntar.
+  * Si el usuario responde a una pregunta de billetera con un número o texto (ej: "1", "1 (billetera: Mercado Pago)", "mercado pago"), interpretalo como la selección de la billetera que faltaba para completar la transacción previa, NUNCA como un nuevo monto ni como una transacción nueva de $1.
+  * Devolvé en el JSON de salida TODAS las entidades acumuladas (monto previo, tipo previo, categoría previa + la nueva billetera resuelta).
+  * Si con este dato ya contás con monto, tipo y billetera, establecé intent="registrar_transaccion", confianza >= 0.85, slot_filling=false, y generá la propuesta pidiendo confirmación: "Voy a anotar $X en [Categoría] desde [Billetera]. ¿Va?".
 
 FORMATO DE RESPUESTA — siempre respondé con un JSON válido con exactamente esta estructura, sin texto fuera del JSON:
 {
@@ -277,7 +292,6 @@ def construir_contexto_proyeccion(usuario: Usuario, db: Session) -> dict:
     except Exception:
         logger.exception("Error al construir contexto de proyección")
         return {}
-        return {}
 
 
 def procesar_mensaje(
@@ -285,6 +299,7 @@ def procesar_mensaje(
     usuario: Usuario,
     db: Session,
     historial: list[dict] | None = None,
+    estado_previo: dict | None = None,
 ) -> dict:
     fallback_res = {
         "intent": "desconocido",
@@ -306,6 +321,20 @@ def procesar_mensaje(
         contexto_msg = f"CONTEXTO FINANCIERO ACTUAL DEL USUARIO:\n{json.dumps(contexto, ensure_ascii=False)}"
         messages_openai.append({"role": "user", "content": contexto_msg})
         messages_openai.append({"role": "assistant", "content": "Contexto recibido. Listo para procesar mensajes."})
+
+        # Si hay estado previo acumulado de slot filling, inyectarlo explícitamente como sistema
+        if estado_previo:
+            estado_limpio = {
+                k: v for k, v in estado_previo.items()
+                if v is not None and k != "datos_faltantes"
+            }
+            if estado_limpio:
+                estado_msg = (
+                    "DATOS YA CONFIRMADOS/RESUELTOS EN ESTA CONVERSACIÓN (NO los vuelvas a preguntar, NO los pierdas, usalos para completar la transacción):\n"
+                    f"{json.dumps(estado_limpio, ensure_ascii=False)}\n"
+                    "Completá los campos faltantes con el nuevo mensaje del usuario y devolvé el set completo de entidades acumuladas."
+                )
+                messages_openai.append({"role": "system", "content": estado_msg})
 
         # Agregar historial de conversación (últimos N turnos)
         if historial:

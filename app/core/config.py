@@ -23,12 +23,19 @@ class Settings(BaseSettings):
     DOLAR_API_BASE_URL: str = "https://dolarapi.com"
     DOLAR_API_TIMEOUT_SECONDS: int = 10
 
-    # Twilio / WhatsApp
+    # Twilio / WhatsApp (Legacy)
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""
     TWILIO_WHATSAPP_FROM: str = ""
     # Compatibilidad hacia atras con implementaciones previas
     TWILIO_WHATSAPP_NUMBER: str = ""
+
+    # Meta WhatsApp Cloud API
+    WHATSAPP_ACCESS_TOKEN: str = ""
+    WHATSAPP_PHONE_NUMBER_ID: str = ""
+    WHATSAPP_BUSINESS_ACCOUNT_ID: str = ""
+    WHATSAPP_APP_SECRET: str = ""
+    WHATSAPP_VERIFY_TOKEN: str = ""
 
     # Google
     GOOGLE_CLIENT_ID: str = ""

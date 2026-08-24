@@ -1,5 +1,5 @@
 """
-app/services/whatsapp_service.py — Servicio de verificación por WhatsApp con Twilio Sandbox.
+app/services/whatsapp_service.py — Servicio de mensajería y verificación por WhatsApp con Meta Cloud API.
 """
 
 import logging
@@ -7,9 +7,7 @@ import random
 import time
 from dataclasses import dataclass, field
 
-from twilio.base.exceptions import TwilioRestException
-from twilio.http.http_client import TwilioHttpClient
-from twilio.rest import Client
+import httpx
 
 from app.core.config import settings
 
@@ -27,7 +25,6 @@ class EntradaCodigo:
 
 
 _codigo_cache: dict[str, EntradaCodigo] = {}
-_twilio_client: Client | None = None
 
 
 def _limpiar_expirados() -> None:
@@ -78,87 +75,120 @@ def verificar_codigo(telefono: str, codigo: str) -> tuple[bool, str | None]:
 
 def formatear_numero_whatsapp(telefono: str) -> str:
     """
-    Formatea un número para Twilio WhatsApp.
-    - Si ya tiene 'whatsapp:': devolver como esta
-    - Si empieza con '+': agregar 'whatsapp:' adelante
-    - Si empieza con '0': reemplazar '0' por 'whatsapp:+549'
-    - Si empieza con '15': agregar 'whatsapp:+549' adelante
+    Formatea un número para WhatsApp Meta Cloud API (formato E.164 plano de solo dígitos, sin prefijo whatsapp:).
+    - Remueve 'whatsapp:' si existe
+    - Remueve espacios, guiones y caracteres no numéricos
+    - Si empieza con '0' (formato local ej. 011...): convierte a '549' + número sin el 0
+    - Si empieza con '15' (formato local ej. 15...): convierte a '549' + número
     """
-    if telefono.startswith("whatsapp:"):
-        return telefono
-    if telefono.startswith("+"):
-        return f"whatsapp:{telefono}"
-    if telefono.startswith("0"):
-        return f"whatsapp:+549{telefono[1:]}"
-    if telefono.startswith("15"):
-        return f"whatsapp:+549{telefono}"
-    
-    # Caso por defecto si no cumple ninguno de los anteriores pero queremos ser seguros
-    return f"whatsapp:{telefono}"
+    if not telefono:
+        return ""
 
+    tel = telefono.strip()
+    if tel.startswith("whatsapp:"):
+        tel = tel[9:].strip()
 
-def _from_whatsapp() -> str:
-    if settings.TWILIO_WHATSAPP_FROM:
-        return settings.TWILIO_WHATSAPP_FROM
+    if tel.startswith("+"):
+        tel = tel[1:].strip()
+    elif tel.startswith("0"):
+        tel = f"549{tel[1:]}"
+    elif tel.startswith("15"):
+        tel = f"549{tel}"
 
-    if settings.TWILIO_WHATSAPP_NUMBER:
-        numero = settings.TWILIO_WHATSAPP_NUMBER
-        return numero if numero.startswith("whatsapp:") else f"whatsapp:{numero}"
-
-    return "whatsapp:+14155238886"
-
-
-def _get_twilio_client() -> Client | None:
-    global _twilio_client
-
-    if not settings.TWILIO_ACCOUNT_SID or not settings.TWILIO_AUTH_TOKEN:
-        return None
-
-    if _twilio_client is None:
-        http_client = TwilioHttpClient(timeout=15)
-        _twilio_client = Client(
-            settings.TWILIO_ACCOUNT_SID,
-            settings.TWILIO_AUTH_TOKEN,
-            http_client=http_client,
-        )
-    return _twilio_client
+    digitos = "".join(c for c in tel if c.isdigit())
+    return digitos
 
 
 def enviar_whatsapp(numero: str, mensaje: str) -> bool:
     """
-    Envía un mensaje por WhatsApp usando Twilio.
-    - Usar formatear_numero_whatsapp() para el to
-    - Usar 'whatsapp:+14155238886' como from_
-    - Manejar errores de Twilio con try/except
-    - Devolver True si se envio, False si fallo
+    Envía un mensaje por WhatsApp usando Meta WhatsApp Cloud API (Graph API).
+    Incluye 3 reintentos con backoff exponencial ante timeouts o errores 5xx de Meta.
     """
     to_whatsapp = formatear_numero_whatsapp(numero)
-    from_whatsapp = _from_whatsapp()
-    client = _get_twilio_client()
 
-    if client is None:
+    if not settings.WHATSAPP_ACCESS_TOKEN or not settings.WHATSAPP_PHONE_NUMBER_ID:
         logger.warning(
-            "Twilio no configurado; mensaje de WhatsApp simulado para %s",
+            "WhatsApp / Meta API no configurado; mensaje simulado para %s",
             numero,
         )
-        logger.info("[WHATSAPP-DEV] from=%s to=%s body=%s", from_whatsapp, to_whatsapp, mensaje)
+        logger.info("[WHATSAPP-DEV] to=%s body=%s", to_whatsapp, mensaje)
         return True
 
-    try:
-        logger.debug("USANDO TWILIO REAL - De: %s Para: %s", from_whatsapp, to_whatsapp)
-        msg = client.messages.create(
-            body=mensaje,
-            from_=from_whatsapp,
-            to=to_whatsapp,
-        )
-        logger.info("WhatsApp enviado exitosamente a %s. SID: %s", numero, msg.sid)
-        return True
-    except TwilioRestException as e:
-        logger.error("Error al enviar WhatsApp a %s: %s", numero, e)
-        return False
-    except Exception as e:
-        logger.error("Error inesperado al enviar WhatsApp a %s: %s", numero, e)
-        return False
+    url = f"https://graph.facebook.com/v21.0/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to_whatsapp,
+        "type": "text",
+        "text": {"body": mensaje},
+    }
+
+    max_intentos = 3
+    backoff = 0.5
+
+    for intento in range(1, max_intentos + 1):
+        try:
+            logger.debug(
+                "Enviando WhatsApp vía Meta (intento %d/%d) a %s",
+                intento,
+                max_intentos,
+                to_whatsapp,
+            )
+            with httpx.Client(timeout=15) as client:
+                response = client.post(url, headers=headers, json=payload)
+
+                if response.is_success:
+                    res_json = response.json()
+                    msg_id = (
+                        res_json.get("messages", [{}])[0].get("id", "N/A")
+                        if res_json.get("messages")
+                        else "N/A"
+                    )
+                    logger.info(
+                        "WhatsApp enviado exitosamente a %s vía Meta. Message ID: %s",
+                        to_whatsapp,
+                        msg_id,
+                    )
+                    return True
+
+                # Si es error 4xx de cliente (bad request, auth error, etc.), no reintentar
+                if 400 <= response.status_code < 500:
+                    logger.error(
+                        "Error de cliente al enviar WhatsApp a %s (HTTP %d): %s",
+                        to_whatsapp,
+                        response.status_code,
+                        response.text,
+                    )
+                    return False
+
+                # Error 5xx del servidor de Meta
+                logger.warning(
+                    "Error de servidor de Meta al enviar WhatsApp a %s (HTTP %d): %s. Reintentando...",
+                    to_whatsapp,
+                    response.status_code,
+                    response.text,
+                )
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            logger.warning(
+                "Timeout o error de red al enviar WhatsApp a %s (intento %d/%d): %s",
+                to_whatsapp,
+                intento,
+                max_intentos,
+                exc,
+            )
+        except Exception as exc:
+            logger.error("Error inesperado al enviar WhatsApp a %s: %s", to_whatsapp, exc)
+            return False
+
+        if intento < max_intentos:
+            time.sleep(backoff)
+            backoff *= 2
+
+    logger.error("Fallaron todos los intentos (%d) para enviar WhatsApp a %s", max_intentos, to_whatsapp)
+    return False
 
 
 def enviar_mensaje_whatsapp(telefono: str, mensaje: str) -> bool:
