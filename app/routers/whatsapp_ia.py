@@ -1,34 +1,41 @@
 """
-app/routers/whatsapp_ia.py — Webhook de WhatsApp para IA conversacional de Argentum.
-Recibe mensajes de Twilio, los procesa con ai_service y responde en TwiML.
+app/routers/whatsapp_ia.py — Webhook de WhatsApp para IA conversacional de Argentum con Meta Cloud API.
+Recibe webhooks JSON de Meta, los procesa con ai_service y responde vía Graph API.
 """
+import hashlib
+import hmac
+import json
 import logging
+import os
+import tempfile
+import time
+import unicodedata
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from uuid import UUID, uuid4
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse
+from openai import OpenAI
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from twilio.twiml.messaging_response import MessagingResponse
-from twilio.request_validator import RequestValidator
 
-from app.core.config import settings
 from app.core.auth import get_current_admin_user, get_db
+from app.core.config import settings
 from app.models.billetera import Billetera, EstadoBilletera
-from app.models.categoria import Categoria, EstadoCategoria
+from app.models.categoria import Categoria, EstadoCategoria, TipoCategoria
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
+from app.models.subcategoria import EstadoSubcategoria, Subcategoria
 from app.models.transaccion import (
     EstadoVerificacionTransaccion,
     OrigenTransaccion,
     TipoTransaccion,
     Transaccion,
 )
-from app.models.usuario import Usuario, Moneda
+from app.models.usuario import Moneda, Usuario
 from app.services import ai_service
-from app.services.whatsapp_service import enviar_whatsapp, formatear_numero_whatsapp
-from app.services.proyeccion_service import calcular_proyeccion
+from app.services.whatsapp_service import enviar_whatsapp
 
 logger = logging.getLogger(__name__)
 
@@ -38,29 +45,50 @@ def _fmt(monto: float) -> str:
     return f"${monto:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def _nombre_corto_categoria(nombre: str | None) -> str | None:
+def _normalizar_texto(texto: str | None) -> str:
+    """Normaliza texto: quita acentos/diacríticos, pasa a minúsculas y elimina espacios sobrantes."""
+    if not texto:
+        return ""
+    nfkd = unicodedata.normalize("NFD", str(texto))
+    sin_diacriticos = "".join(c for c in nfkd if unicodedata.category(c) != "Mn")
+    return sin_diacriticos.lower().strip()
+
+
+def _nombre_corto_categoria(nombre: str | None) -> str:
     """
     Si la categoría viene en formato 'Categoría > Subcategoría',
     devuelve solo 'Subcategoría'. Si no tiene '>', devuelve el nombre tal cual.
     """
     if not nombre:
-        return None
+        return "Otros"
     if ">" in nombre:
         return nombre.split(">", 1)[1].strip()
-    return nombre
+    return nombre.strip()
 
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp-ia"])
 
 
 def _buscar_usuario_por_telefono(telefono_raw: str, db: Session) -> Usuario | None:
-    telefono_limpio = telefono_raw
-    if telefono_raw.startswith("whatsapp:"):
-        telefono_limpio = telefono_raw[9:]
+    telefono_limpio = telefono_raw.replace("whatsapp:", "").strip()
     
     usuario = db.execute(
         select(Usuario).where(Usuario.telefono == telefono_limpio)
     ).scalar_one_or_none()
+    if usuario:
+        return usuario
+
+    if telefono_limpio.startswith("+"):
+        sin_plus = telefono_limpio[1:]
+        usuario = db.execute(
+            select(Usuario).where(Usuario.telefono == sin_plus)
+        ).scalar_one_or_none()
+    else:
+        con_plus = f"+{telefono_limpio}"
+        usuario = db.execute(
+            select(Usuario).where(Usuario.telefono == con_plus)
+        ).scalar_one_or_none()
+
     return usuario
 
 
@@ -71,6 +99,26 @@ def _buscar_slot_filling_activo(usuario_id: UUID, db: Session) -> ConversacionWp
         .order_by(ConversacionWpp.fecha.desc())
     ).scalars().first()
     return conv
+
+
+def _merge_entidades(estado_previo: dict | None, entidades_nuevas: dict | None) -> dict:
+    """
+    Fusiona el estado previo de entidades con las nuevas entidades detectadas por la IA.
+    Los campos no-nulos nuevos pisan a los viejos; los campos que la IA omite o devuelve como null
+    conservan el valor previamente resuelto.
+    """
+    if not estado_previo:
+        return entidades_nuevas or {}
+    if not entidades_nuevas:
+        return dict(estado_previo)
+
+    merged = dict(estado_previo)
+    for k, v in entidades_nuevas.items():
+        if k == "datos_faltantes":
+            continue
+        if v is not None:
+            merged[k] = v
+    return merged
 
 
 def _resolver_billetera(nombre: str | None, usuario_id: UUID, db: Session) -> UUID | None:
@@ -87,66 +135,132 @@ def _resolver_billetera(nombre: str | None, usuario_id: UUID, db: Session) -> UU
     return billetera.id if billetera else None
 
 
-def _resolver_categoria(nombre: str | None, usuario_id: UUID, db: Session) -> UUID | None:
-    if not nombre:
-        return None
-    categoria = db.execute(
-        select(Categoria)
-        .where(
-            Categoria.estado == EstadoCategoria.ACTIVA,
-            (Categoria.es_global == True) | (Categoria.creador_id == usuario_id),
-            Categoria.nombre.ilike(f"%{nombre}%")
-        )
-    ).scalars().first()
-    return categoria.id if categoria else None
-
-
 def _resolver_categoria_y_subcategoria(
     nombre: str | None,
     usuario_id: UUID,
     db: Session,
+    tipo: str = "egreso",
 ) -> tuple[UUID | None, UUID | None]:
     """
-    Parsea el campo categoria que puede venir en formato:
-    - "Alimentación" → solo categoría
-    - "Alimentación > Verdulería" → categoría + subcategoría
-    Retorna (categoria_id, subcategoria_id).
+    Parsea y valida el campo categoría/subcategoría contra las tablas reales de la base de datos.
+    1. Filtra categorías por tipo (egreso vs ingreso) y visibilidad (globales o del usuario).
+    2. Realiza matching exacto por nombre, normalizado (sin tildes/mayúsculas) o substring.
+    3. Si no hay coincidencia o si no viene categoría, cae al default real de 'Otros' (con subcategoría 'Otros').
+    Retorna siempre (categoria_id, subcategoria_id) válidos de la base de datos.
     """
+    tipo_enum = TipoCategoria.INGRESO if tipo == "ingreso" else TipoCategoria.EGRESO
+
+    # 1. Obtener todas las categorías activas para este tipo y usuario
+    categorias = db.execute(
+        select(Categoria).where(
+            Categoria.estado == EstadoCategoria.ACTIVA,
+            Categoria.tipo == tipo_enum,
+            (Categoria.es_global == True) | (Categoria.creador_id == usuario_id)
+        )
+    ).scalars().all()
+
+    def _obtener_fallback_otros() -> tuple[UUID | None, UUID | None]:
+        cat_otros = next((c for c in categorias if _normalizar_texto(c.nombre) == "otros"), None)
+        if not cat_otros and categorias:
+            cat_otros = categorias[0]
+
+        if not cat_otros:
+            return None, None
+
+        sub_otros = db.execute(
+            select(Subcategoria).where(
+                Subcategoria.categoria_id == cat_otros.id,
+                Subcategoria.estado == EstadoSubcategoria.ACTIVA,
+                Subcategoria.nombre.ilike("otros")
+            )
+        ).scalars().first()
+
+        if not sub_otros:
+            sub_otros = db.execute(
+                select(Subcategoria).where(
+                    Subcategoria.categoria_id == cat_otros.id,
+                    Subcategoria.estado == EstadoSubcategoria.ACTIVA
+                )
+            ).scalars().first()
+
+        return cat_otros.id, (sub_otros.id if sub_otros else None)
+
     if not nombre:
-        return None, None
+        return _obtener_fallback_otros()
 
-    from app.models.subcategoria import Subcategoria
-
+    # 2. Separar categoría y subcategoría si viene con formato "Cat > Subcat"
     if ">" in nombre:
         partes = [p.strip() for p in nombre.split(">", 1)]
         nombre_cat = partes[0]
         nombre_subcat = partes[1]
     else:
-        nombre_cat = nombre
+        nombre_cat = nombre.strip()
         nombre_subcat = None
 
-    categoria = db.execute(
-        select(Categoria).where(
-            Categoria.estado == EstadoCategoria.ACTIVA,
-            (Categoria.es_global == True) | (Categoria.creador_id == usuario_id),
-            Categoria.nombre.ilike(f"%{nombre_cat}%")
-        )
-    ).scalars().first()
+    norm_cat = _normalizar_texto(nombre_cat)
 
-    if not categoria:
-        return None, None
+    # 3. Match de categoría (exacto -> normalizado -> substring)
+    categoria_match = None
+    for c in categorias:
+        if c.nombre == nombre_cat:
+            categoria_match = c
+            break
+
+    if not categoria_match:
+        for c in categorias:
+            if _normalizar_texto(c.nombre) == norm_cat:
+                categoria_match = c
+                break
+
+    if not categoria_match:
+        for c in categorias:
+            c_norm = _normalizar_texto(c.nombre)
+            if norm_cat in c_norm or c_norm in norm_cat:
+                categoria_match = c
+                break
+
+    if not categoria_match:
+        return _obtener_fallback_otros()
+
+    # 4. Match de subcategoría
+    subcategorias = db.execute(
+        select(Subcategoria).where(
+            Subcategoria.categoria_id == categoria_match.id,
+            Subcategoria.estado == EstadoSubcategoria.ACTIVA,
+            (Subcategoria.es_global == True) | (Subcategoria.creador_id == usuario_id)
+        )
+    ).scalars().all()
 
     if not nombre_subcat:
-        return categoria.id, None
+        sub_default = next((s for s in subcategorias if _normalizar_texto(s.nombre) == "otros"), None)
+        return categoria_match.id, (sub_default.id if sub_default else None)
 
-    subcategoria = db.execute(
-        select(Subcategoria).where(
-            Subcategoria.categoria_id == categoria.id,
-            Subcategoria.nombre.ilike(f"%{nombre_subcat}%")
-        )
-    ).scalars().first()
+    norm_subcat = _normalizar_texto(nombre_subcat)
+    subcat_match = None
 
-    return categoria.id, (subcategoria.id if subcategoria else None)
+    for s in subcategorias:
+        if s.nombre == nombre_subcat:
+            subcat_match = s
+            break
+
+    if not subcat_match:
+        for s in subcategorias:
+            if _normalizar_texto(s.nombre) == norm_subcat:
+                subcat_match = s
+                break
+
+    if not subcat_match:
+        for s in subcategorias:
+            s_norm = _normalizar_texto(s.nombre)
+            if norm_subcat in s_norm or s_norm in norm_subcat:
+                subcat_match = s
+                break
+
+    if not subcat_match:
+        # Fallback a "Otros" dentro de esta categoría si existe
+        subcat_match = next((s for s in subcategorias if _normalizar_texto(s.nombre) == "otros"), None)
+
+    return categoria_match.id, (subcat_match.id if subcat_match else None)
 
 
 def _obtener_billeteras_activas(usuario_id: UUID, db: Session) -> list[Billetera]:
@@ -329,7 +443,7 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                         return None
 
                     categoria_id, subcategoria_id = _resolver_categoria_y_subcategoria(
-                        entidades.get("categoria"), usuario.id, db
+                        entidades.get("categoria"), usuario.id, db, tipo=tipo_val
                     )
                     moneda_val = Moneda.USD if entidades.get("moneda") == "USD" else Moneda.ARS
 
@@ -347,7 +461,7 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                         monto=Decimal(str(monto)),
                         moneda=moneda_val,
                         fecha=fecha_obj,
-                        descripcion=entidades.get("descripcion") or _nombre_corto_categoria(entidades.get("categoria")) or "Transacción por WhatsApp",
+                        descripcion=entidades.get("descripcion") or _nombre_corto_categoria(entidades.get("categoria")),
                         billetera_id=billetera_id,
                         categoria_id=categoria_id,
                         subcategoria_id=subcategoria_id,
@@ -386,29 +500,52 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
         return None
 
 
-def _transcribir_audio(media_url: str, media_content_type: str) -> str | None:
+def _descargar_medio_meta(media_id: str) -> tuple[bytes | None, str | None]:
     """
-    Descarga un audio de Twilio y lo transcribe con Whisper.
+    Descarga un archivo multimedia desde Meta WhatsApp Cloud API en dos pasos:
+    1. Obtener la URL temporal del medio vía Graph API.
+    2. Descargar los bytes del medio usando el Bearer token.
+    Retorna (bytes, mime_type) o (None, None) si falla.
+    """
+    if not settings.WHATSAPP_ACCESS_TOKEN or not media_id:
+        logger.warning("No se puede descargar medio de Meta: WHATSAPP_ACCESS_TOKEN o media_id no configurado")
+        return None, None
+
+    headers = {"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"}
+    try:
+        with httpx.Client(timeout=30, follow_redirects=True) as client:
+            # Paso 1: Consultar metadata del medio para obtener la URL de descarga
+            meta_url = f"https://graph.facebook.com/v21.0/{media_id}"
+            res_meta = client.get(meta_url, headers=headers)
+            res_meta.raise_for_status()
+            data = res_meta.json()
+            download_url = data.get("url")
+            mime_type = data.get("mime_type")
+
+            if not download_url:
+                logger.error("Meta Graph API no devolvió URL de descarga para media_id %s", media_id)
+                return None, None
+
+            # Paso 2: Descargar el contenido binario con el Bearer token
+            res_media = client.get(download_url, headers=headers)
+            res_media.raise_for_status()
+            return res_media.content, mime_type
+    except Exception as e:
+        logger.exception("Error al descargar medio de Meta (media_id=%s): %s", media_id, e)
+        return None, None
+
+
+def _transcribir_audio(media_id: str, media_content_type: str = "audio/ogg") -> str | None:
+    """
+    Descarga un audio de Meta Cloud API en dos pasos y lo transcribe con Whisper.
     Retorna el texto transcripto o None si falla.
     """
-    import httpx
-    import tempfile
-    import os
-    from app.core.config import settings
-    from openai import OpenAI
-
     try:
-        # Descargar el audio desde Twilio con autenticación básica
-        twilio_sid = settings.TWILIO_ACCOUNT_SID
-        twilio_token = settings.TWILIO_AUTH_TOKEN
+        audio_bytes, mime = _descargar_medio_meta(media_id)
+        if not audio_bytes:
+            return None
 
-        with httpx.Client(timeout=30, follow_redirects=True) as client:
-            response = client.get(
-                media_url,
-                auth=(twilio_sid, twilio_token),
-            )
-            response.raise_for_status()
-            audio_bytes = response.content
+        content_type = mime or media_content_type or "audio/ogg"
 
         # Determinar extensión según content type
         ext_map = {
@@ -418,8 +555,13 @@ def _transcribir_audio(media_url: str, media_content_type: str) -> str | None:
             "audio/wav": ".wav",
             "audio/webm": ".webm",
             "audio/amr": ".amr",
+            "audio/aac": ".aac",
         }
-        ext = ext_map.get(media_content_type, ".ogg")
+        ext = ".ogg"
+        for k, v in ext_map.items():
+            if k in content_type:
+                ext = v
+                break
 
         # Guardar en archivo temporal y transcribir
         with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
@@ -436,23 +578,23 @@ def _transcribir_audio(media_url: str, media_content_type: str) -> str | None:
                 )
             return transcripcion.text
         finally:
-            os.unlink(tmp_path)
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
     except Exception:
         logger.exception("Error al transcribir audio de WhatsApp")
         return None
 
 
-def _extraer_transaccion_de_imagen(media_url: str, media_content_type: str, usuario_nombre: str = "") -> str | None:
+def _extraer_transaccion_de_imagen(
+    media_id: str, media_content_type: str = "image/jpeg", usuario_nombre: str = ""
+) -> str | None:
     """
-    Descarga una imagen de Twilio y usa GPT-4o Vision para extraer
+    Descarga una imagen de Meta Cloud API en dos pasos y usa GPT-4o Vision para extraer
     información de un ticket, factura o comprobante.
     Retorna una descripción en texto de lo que encontró, o None si falla.
     """
-    import httpx
     import base64
-    from app.core.config import settings
-    from openai import OpenAI
 
     nombre_anonimo = ""
     if usuario_nombre:
@@ -463,16 +605,13 @@ def _extraer_transaccion_de_imagen(media_url: str, media_content_type: str, usua
             nombre_anonimo = partes[0]
 
     try:
-        twilio_sid = settings.TWILIO_ACCOUNT_SID
-        twilio_token = settings.TWILIO_AUTH_TOKEN
+        image_bytes, mime = _descargar_medio_meta(media_id)
+        if not image_bytes:
+            return None
 
-        with httpx.Client(timeout=30, follow_redirects=True) as client:
-            response = client.get(
-                media_url,
-                auth=(twilio_sid, twilio_token),
-            )
-            response.raise_for_status()
-            image_bytes = response.content
+        content_type = mime or media_content_type or "image/jpeg"
+        if ";" in content_type:
+            content_type = content_type.split(";")[0].strip()
 
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
@@ -507,7 +646,7 @@ def _extraer_transaccion_de_imagen(media_url: str, media_content_type: str, usua
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:{media_content_type};base64,{image_b64}",
+                                "url": f"data:{content_type};base64,{image_b64}",
                                 "detail": "high"
                             }
                         },
@@ -540,72 +679,168 @@ def _extraer_transaccion_de_imagen(media_url: str, media_content_type: str, usua
         return None
 
 
+@router.get("/webhook", response_class=PlainTextResponse)
+async def verify_webhook(request: Request) -> PlainTextResponse:
+    """
+    Handshake de verificación de webhook de Meta (WhatsApp Business Cloud API).
+    Meta envía hub.mode, hub.verify_token y hub.challenge por GET.
+    """
+    mode = request.query_params.get("hub.mode")
+    verify_token = request.query_params.get("hub.verify_token")
+    challenge = request.query_params.get("hub.challenge")
+
+    if mode and verify_token:
+        if mode == "subscribe" and verify_token == settings.WHATSAPP_VERIFY_TOKEN:
+            logger.info("Webhook de WhatsApp verificado exitosamente.")
+            return PlainTextResponse(content=challenge or "", status_code=status.HTTP_200_OK)
+        else:
+            logger.warning("Fallo en verificación de Webhook: token incorrecto.")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Verificación fallida")
+
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Parámetros inválidos")
+
 
 @router.post("/webhook", response_class=PlainTextResponse)
 async def whatsapp_webhook(
     request: Request,
-    Body: str = Form(default=""),
-    From: str = Form(default=""),
-    NumMedia: str = Form(default="0"),
-    MediaUrl0: str = Form(default=""),
-    MediaContentType0: str = Form(default=""),
     db: Session = Depends(get_db),
 ) -> PlainTextResponse:
-    # Validación de firma Twilio (solo si el token está configurado)
-    if settings.TWILIO_AUTH_TOKEN:
-        twilio_signature = request.headers.get("X-Twilio-Signature", "")
-        webhook_url = str(request.url)
-        form_params = {
-            "Body": Body,
-            "From": From,
-            "NumMedia": NumMedia,
-            "MediaUrl0": MediaUrl0,
-            "MediaContentType0": MediaContentType0,
-        }
-        validator = RequestValidator(settings.TWILIO_AUTH_TOKEN)
-        if not validator.validate(webhook_url, form_params, twilio_signature):
-            raise HTTPException(status_code=403, detail="Firma Twilio inválida")
+    """
+    Webhook de WhatsApp Cloud API (Meta Graph API).
+    Valida firma HMAC-SHA256, procesa mensajes entrantes (texto/audio/imagen),
+    ejecuta IA conversacional y envía respuesta de forma asíncrona vía Graph API.
+    """
+    t_inicio = time.perf_counter()
+    body_bytes = await request.body()
+
+    # Validación de firma Meta HMAC-SHA256 (si APP_SECRET está configurado)
+    if settings.WHATSAPP_APP_SECRET:
+        signature_header = request.headers.get("X-Hub-Signature-256", "")
+        if not signature_header or not signature_header.startswith("sha256="):
+            logger.warning("Falta o es inválido el header X-Hub-Signature-256")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Firma inválida")
+
+        expected_sig = signature_header.split("sha256=", 1)[1]
+        calculated_sig = hmac.new(
+            settings.WHATSAPP_APP_SECRET.encode("utf-8"),
+            body_bytes,
+            hashlib.sha256,
+        ).hexdigest()
+
+        if not hmac.compare_digest(expected_sig, calculated_sig):
+            logger.warning("Firma Meta HMAC-SHA256 no coincide")
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Firma inválida")
 
     try:
-        usuario = _buscar_usuario_por_telefono(From, db)
-        if not usuario:
-            resp = MessagingResponse()
-            resp.message("No encontramos tu cuenta. Registrate en argentum.app")
-            return PlainTextResponse(content=str(resp), media_type="application/xml")
+        payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+    except Exception:
+        logger.warning("Error al decodificar JSON del webhook")
+        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
-        # Procesar audio si viene un mensaje de voz
-        mensaje_texto = Body.strip()
+    # Extraer mensajes del payload de Meta
+    entries = payload.get("entry", [])
+    if not entries:
+        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+    changes = entries[0].get("changes", [])
+    if not changes:
+        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+    value = changes[0].get("value", {})
+    messages = value.get("messages", [])
+    if not messages:
+        # Eventos de estado (sent, delivered, read, etc.)
+        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+    msg = messages[0]
+    from_number = msg.get("from", "")
+    msg_type = msg.get("type", "text")
+
+    try:
+        usuario = _buscar_usuario_por_telefono(from_number, db)
+        if not usuario:
+            enviar_whatsapp(from_number, "No encontramos tu cuenta. Registrate en argentum.app")
+            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+        mensaje_texto = ""
         transcripcion = None
 
-        if NumMedia != "0" and MediaUrl0:
-            if MediaContentType0.startswith("audio"):
-                transcripcion = _transcribir_audio(MediaUrl0, MediaContentType0)
+        if msg_type == "text":
+            mensaje_texto = msg.get("text", {}).get("body", "").strip()
+
+        elif msg_type == "audio":
+            audio_obj = msg.get("audio", {})
+            media_id = audio_obj.get("id")
+            mime_type = audio_obj.get("mime_type", "audio/ogg")
+
+            if media_id:
+                t_media_start = time.perf_counter()
+                transcripcion = _transcribir_audio(media_id, mime_type)
+                t_media_end = time.perf_counter()
+                logger.info(
+                    "[LATENCIA][MEDIA-AUDIO] Transcripción Whisper: %.2fs",
+                    t_media_end - t_media_start,
+                )
+
                 if transcripcion:
                     mensaje_texto = transcripcion
-                    logger.info(f"Audio transcripto: '{transcripcion[:100]}'")
+                    logger.info("Audio transcripto: '%s'", transcripcion[:100])
                 else:
-                    resp = MessagingResponse()
-                    resp.message("No pude escuchar el audio. Mandame el mensaje en texto.")
-                    return PlainTextResponse(content=str(resp), media_type="application/xml")
+                    enviar_whatsapp(
+                        from_number, "No pude escuchar el audio. Mandame el mensaje en texto."
+                    )
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+            else:
+                enviar_whatsapp(
+                    from_number, "No pude escuchar el audio. Mandame el mensaje en texto."
+                )
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
-            elif MediaContentType0.startswith("image"):
-                nombre_usuario = f"{usuario.nombre or ''} {usuario.apellido or ''}".strip()
-                descripcion_imagen = _extraer_transaccion_de_imagen(MediaUrl0, MediaContentType0, nombre_usuario)
+        elif msg_type == "image":
+            image_obj = msg.get("image", {})
+            media_id = image_obj.get("id")
+            mime_type = image_obj.get("mime_type", "image/jpeg")
+            nombre_usuario = f"{usuario.nombre or ''} {usuario.apellido or ''}".strip()
+
+            if media_id:
+                t_media_start = time.perf_counter()
+                descripcion_imagen = _extraer_transaccion_de_imagen(
+                    media_id, mime_type, nombre_usuario
+                )
+                t_media_end = time.perf_counter()
+                logger.info(
+                    "[LATENCIA][MEDIA-IMAGEN] Análisis GPT-4o Vision: %.2fs",
+                    t_media_end - t_media_start,
+                )
+
                 if descripcion_imagen:
                     mensaje_texto = descripcion_imagen
-                    logger.info(f"Imagen analizada: '{descripcion_imagen[:100]}'")
+                    logger.info("Imagen analizada: '%s'", descripcion_imagen[:100])
                 else:
-                    resp = MessagingResponse()
-                    resp.message("No pude leer el comprobante. Mandame los datos en texto.")
-                    return PlainTextResponse(content=str(resp), media_type="application/xml")
-        
-        if not mensaje_texto:
-            resp = MessagingResponse()
-            resp.message("No entendí bien lo que quisiste decir. Podés contarme qué gastaste, por ejemplo: *Almuerzo $1500*")
-            return PlainTextResponse(content=str(resp), media_type="application/xml")
+                    enviar_whatsapp(
+                        from_number, "No pude leer el comprobante. Mandame los datos en texto."
+                    )
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+            else:
+                enviar_whatsapp(
+                    from_number, "No pude leer el comprobante. Mandame los datos en texto."
+                )
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
-        # Solo para menú numérico de billeteras
+        if not mensaje_texto:
+            enviar_whatsapp(
+                from_number,
+                "No entendí bien lo que quisiste decir. Podés contarme qué gastaste, por ejemplo: *Almuerzo $1500*",
+            )
+            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+        # Buscar conversación activa previa con slot_filling
         conv_activa = _buscar_slot_filling_activo(usuario.id, db)
+        estado_previo = (
+            dict(conv_activa.slot_filling_estado)
+            if conv_activa and conv_activa.slot_filling_estado
+            else None
+        )
 
         # Detectar selección numérica de billetera
         es_seleccion, nombre_billetera = _resolver_seleccion_numerica(
@@ -615,73 +850,66 @@ async def whatsapp_webhook(
             if nombre_billetera is None:
                 # Número fuera de rango
                 billeteras = _obtener_billeteras_activas(usuario.id, db)
-                resp = MessagingResponse()
-                resp.message(f"Opción inválida. Elegí un número del 1 al {len(billeteras)}.")
-                return PlainTextResponse(content=str(resp), media_type="application/xml")
-            
+                enviar_whatsapp(
+                    from_number, f"Opción inválida. Elegí un número del 1 al {len(billeteras)}."
+                )
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
             # Inyectar la billetera seleccionada en el mensaje para que la IA lo procese
             mensaje_enriquecido = f"{mensaje_texto} (billetera: {nombre_billetera})"
-            if conv_activa and conv_activa.slot_filling_estado:
-                estado_previo = dict(conv_activa.slot_filling_estado)
-                estado_previo["billetera_origen"] = nombre_billetera
-                if "datos_faltantes" in estado_previo:
-                    estado_previo["datos_faltantes"] = [
-                        d for d in estado_previo["datos_faltantes"]
-                        if d not in ("billetera_origen", "billetera")
-                    ]
-            else:
-                estado_previo = None
-            
+            if estado_previo is None:
+                estado_previo = {}
+            estado_previo["billetera_origen"] = nombre_billetera
+            if "datos_faltantes" in estado_previo:
+                estado_previo["datos_faltantes"] = [
+                    d for d in estado_previo["datos_faltantes"]
+                    if d not in ("billetera_origen", "billetera")
+                ]
+
+            t_ia_start = time.perf_counter()
             resultado_ia = ai_service.procesar_mensaje(
                 mensaje=mensaje_enriquecido,
                 usuario=usuario,
                 db=db,
                 historial=_obtener_historial_reciente(usuario.id, db),
+                estado_previo=estado_previo,
             )
+            t_ia_end = time.perf_counter()
+            logger.info("[LATENCIA][IA] Procesamiento con menú de billeteras: %.2fs", t_ia_end - t_ia_start)
         else:
+            t_ia_start = time.perf_counter()
             resultado_ia = ai_service.procesar_mensaje(
                 mensaje=mensaje_texto,
                 usuario=usuario,
                 db=db,
                 historial=_obtener_historial_reciente(usuario.id, db),
+                estado_previo=estado_previo,
             )
+            t_ia_end = time.perf_counter()
+            logger.info("[LATENCIA][IA] Procesamiento: %.2fs", t_ia_end - t_ia_start)
 
-        # Enforce category checking for WhatsApp transaction registration
-        if resultado_ia.get("intent") == "registrar_transaccion":
-            entidades = resultado_ia.get("entidades", {})
-            categoria_raw = entidades.get("categoria")
-            if categoria_raw is None:
-                # Contar cuántos intentos consecutivos de categoría lleva en conversaciones recientes
-                from datetime import datetime, timezone, timedelta
-                limite_tiempo_intentos = datetime.now(timezone.utc) - timedelta(minutes=10)
-                
-                convs_recientes = db.execute(
-                    select(ConversacionWpp)
-                    .where(
-                        ConversacionWpp.usuario_id == usuario.id,
-                        ConversacionWpp.fecha >= limite_tiempo_intentos
-                    )
-                    .order_by(ConversacionWpp.fecha.desc())
-                ).scalars().all()
-                
-                intentos_previos = 0
-                for c in convs_recientes:
-                    if c.slot_filling_activo and c.intent_detectado == "registrar_transaccion":
-                        entidades_c = c.entidades or {}
-                        if entidades_c.get("categoria") is None:
-                            intentos_previos += 1
-                        else:
-                            break
-                    else:
-                        break
-                
-                if intentos_previos < 1:
-                    resultado_ia["slot_filling"] = True
-                    resultado_ia["respuesta_usuario"] = "¿En qué categoría?"
-                    if "datos_faltantes" not in resultado_ia:
-                        resultado_ia["datos_faltantes"] = []
-                    if "categoria" not in resultado_ia["datos_faltantes"]:
-                        resultado_ia["datos_faltantes"].append("categoria")
+        # Mergear determinísticamente entidades para no perder campos de turnos previos
+        if estado_previo:
+            resultado_ia["entidades"] = _merge_entidades(estado_previo, resultado_ia.get("entidades", {}))
+
+        # Categorización automática por defecto si no viene ninguna categoría
+        entidades_actuales = resultado_ia.get("entidades", {})
+        if not entidades_actuales.get("categoria"):
+            entidades_actuales["categoria"] = "Otros > Otros"
+            resultado_ia["entidades"] = entidades_actuales
+
+        # Si tenemos las entidades mínimas (monto + billetera), asegurar transición a registrar_transaccion
+        tiene_monto = entidades_actuales.get("monto") is not None
+        tipo_act = entidades_actuales.get("tipo") or "egreso"
+        tiene_billetera = bool(
+            entidades_actuales.get("billetera_origen")
+            if tipo_act == "egreso"
+            else (entidades_actuales.get("billetera_destino") or entidades_actuales.get("billetera_origen"))
+        )
+        if tiene_monto and tiene_billetera and resultado_ia.get("intent") in ("slot_filling", "registrar_transaccion"):
+            resultado_ia["intent"] = "registrar_transaccion"
+            resultado_ia["slot_filling"] = False
+            resultado_ia["confianza"] = max(float(resultado_ia.get("confianza", 0.0)), 0.85)
 
         # Enriquecer respuesta con datos reales para intents de consulta
         intent_detectado = resultado_ia.get("intent")
@@ -690,30 +918,30 @@ async def whatsapp_webhook(
             try:
                 from app.services.proyeccion_service import calcular_proyeccion
                 proyeccion = calcular_proyeccion(db, usuario)
-                
+
                 # Pesos
                 p_ars = proyeccion["ars"]
                 balance_ars = p_ars.get("balance_proyectado", 0)
                 dias_rest = p_ars.get("periodo", {}).get("dias_restantes", 0)
                 confianza_ars = p_ars.get("nivel_confianza", "bajo")
                 advertencias_ars = p_ars.get("advertencias", [])
-                
+
                 # Dolares
                 p_usd = proyeccion["usd"]
                 balance_usd = p_usd.get("balance_proyectado", 0)
                 confianza_usd = p_usd.get("nivel_confianza", "bajo")
                 advertencias_usd = p_usd.get("advertencias", [])
-                
+
                 if confianza_ars == "bajo":
                     msg = "Todavía no tenés suficiente historial para una proyección confiable en pesos."
                 elif balance_ars >= 0:
                     msg = f"Si seguís así en pesos, terminás el ciclo con aproximadamente {_fmt(balance_ars)} disponibles ({dias_rest} días restantes)."
                 else:
                     msg = f"Ojo — si seguís así en pesos, terminarías el ciclo con {_fmt(abs(balance_ars))} en rojo ({dias_rest} días restantes)."
-                
+
                 if advertencias_ars:
                     msg += f" {advertencias_ars[0]}"
-                
+
                 # USD
                 tiene_usd = (p_usd.get("gasto_proyectado_total", 0) > 0 or p_usd.get("ingresos_proyectados", 0) > 0)
                 if tiene_usd:
@@ -723,10 +951,10 @@ async def whatsapp_webhook(
                         msg += f" En dólares, terminarías con aproximadamente US$ {balance_usd:,.2f}."
                     else:
                         msg += f" Ojo: en dólares terminarías con US$ {abs(balance_usd):,.2f} en rojo."
-                        
+
                     if advertencias_usd:
                         msg += f" {advertencias_usd[0]}"
-                
+
                 resultado_ia["respuesta_usuario"] = msg
             except Exception:
                 logger.exception("Error al calcular proyección para WhatsApp")
@@ -739,7 +967,7 @@ async def whatsapp_webhook(
                 ars_disp = resumen["disponible_real"]["ars"]["disponible"]
                 usd_total = resumen["disponible_real"]["usd"]["saldo_billeteras"]
                 usd_disp = resumen["disponible_real"]["usd"]["disponible"]
-                
+
                 msg = f"Tenés {_fmt(ars_total)} en tus billeteras en pesos. Disponible real (descontando cuotas): {_fmt(ars_disp)}."
                 if usd_total > 0 or usd_disp > 0:
                     msg += f" Y tenés US$ {usd_total:,.2f} en tus billeteras en dólares. Disponible real: US$ {usd_disp:,.2f}."
@@ -766,10 +994,10 @@ async def whatsapp_webhook(
 
                 if monto is not None:
                     monto_str = _fmt(float(monto))
-                    
+
                     # Nombre corto de categoría
-                    cat_display = _nombre_corto_categoria(categoria_raw) if categoria_raw else None
-                    
+                    cat_display = _nombre_corto_categoria(categoria_raw)
+
                     # Nombre de billetera
                     bill_display = None
                     if billetera_raw:
@@ -833,11 +1061,10 @@ async def whatsapp_webhook(
                 if tx:
                     tipo_str = "ingreso" if tx.tipo == TipoTransaccion.INGRESO else "egreso"
                     monto_str = _fmt(float(tx.monto))
-                    
+
                     # Obtener nombre de categoría
                     cat_nombre = None
                     if tx.categoria_id:
-                        from app.models.categoria import Categoria
                         cat = db.execute(
                             select(Categoria).where(Categoria.id == tx.categoria_id)
                         ).scalars().first()
@@ -846,14 +1073,13 @@ async def whatsapp_webhook(
                     # Si hay subcategoría, mostrar su nombre en vez de la categoría principal
                     subcat_nombre = None
                     if tx.subcategoria_id:
-                        from app.models.subcategoria import Subcategoria
                         subcat = db.execute(
                             select(Subcategoria).where(Subcategoria.id == tx.subcategoria_id)
                         ).scalars().first()
                         subcat_nombre = subcat.nombre if subcat else None
 
-                    nombre_categoria_display = subcat_nombre or cat_nombre
-                    
+                    nombre_categoria_display = subcat_nombre or cat_nombre or "Otros"
+
                     # Obtener nombre de billetera
                     bill_nombre = None
                     if tx.billetera_id:
@@ -861,7 +1087,7 @@ async def whatsapp_webhook(
                             select(Billetera).where(Billetera.id == tx.billetera_id)
                         ).scalars().first()
                         bill_nombre = bill.nombre if bill else None
-                    
+
                     if tx.tipo == TipoTransaccion.INGRESO:
                         partes = [f"Listo. Ingreso de {monto_str}"]
                         if nombre_categoria_display:
@@ -876,7 +1102,7 @@ async def whatsapp_webhook(
                         if bill_nombre:
                             partes.append(f"desde {bill_nombre}")
                         partes.append("— registrado.")
-                    
+
                     resultado_ia["respuesta_usuario"] = " ".join(partes)
             except Exception:
                 logger.exception("Error al construir mensaje de confirmación")
@@ -885,6 +1111,7 @@ async def whatsapp_webhook(
         if intent_detectado == "cancelar":
             resultado_ia["respuesta_usuario"] = "Listo, cancelado."
 
+        slot_activo = resultado_ia.get("slot_filling", False)
         nueva_conv = ConversacionWpp(
             usuario_id=usuario.id,
             mensaje_usuario=mensaje_texto,
@@ -895,22 +1122,38 @@ async def whatsapp_webhook(
             entidades=resultado_ia.get("entidades"),
             accion_ejecutada=str(transaccion_id) if transaccion_id else None,
             confianza=Decimal(str(resultado_ia.get("confianza", 0))),
-            slot_filling_activo=resultado_ia.get("slot_filling", False),
-            slot_filling_estado=resultado_ia.get("entidades") if resultado_ia.get("slot_filling") else None,
+            slot_filling_activo=slot_activo,
+            slot_filling_estado=resultado_ia.get("entidades") if slot_activo else None,
         )
         db.add(nueva_conv)
         db.commit()
 
-        resp = MessagingResponse()
-        resp.message(resultado_ia["respuesta_usuario"])
-        return PlainTextResponse(content=str(resp), media_type="application/xml")
+        # Envío saliente vía Meta Graph API
+        t_envio_start = time.perf_counter()
+        enviar_whatsapp(from_number, resultado_ia["respuesta_usuario"])
+        t_envio_end = time.perf_counter()
+        logger.info("[LATENCIA][ENVIO_META] Envío de mensaje: %.2fs", t_envio_end - t_envio_start)
+
+        t_total = time.perf_counter() - t_inicio
+        logger.info(
+            "[LATENCIA][TOTAL][TIPO=%s] Duración total del webhook: %.2fs",
+            msg_type.upper(),
+            t_total,
+        )
+
+        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
     except Exception as e:
         db.rollback()
         logger.exception("Error procesando mensaje en webhook")
-        resp = MessagingResponse()
-        resp.message("Hubo un problema al procesar tu mensaje. Intentá de nuevo.")
-        return PlainTextResponse(content=str(resp), media_type="application/xml")
+        try:
+            if from_number:
+                enviar_whatsapp(
+                    from_number, "Hubo un problema al procesar tu mensaje. Intentá de nuevo."
+                )
+        except Exception:
+            logger.exception("Error al enviar mensaje de fallback")
+        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
 
 @router.post("/test")
@@ -924,4 +1167,5 @@ def test_ia(
         usuario=current_user,
         db=db,
         historial=None,
+        estado_previo=None,
     )

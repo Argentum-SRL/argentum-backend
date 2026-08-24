@@ -9,137 +9,134 @@ from app.models.categoria import Categoria
 from app.models.subcategoria import Subcategoria
 from sqlalchemy.orm import Session
 
+# 16 CATEGORÍAS CANÓNICAS OFICIALES DE ARGENTUM (12 Egresos + 4 Ingresos)
 CATEGORIAS_SEED = [
-    # ── EGRESOS ──────────────────────────────────────────
+    # ── EGRESOS (12) ──────────────────────────────────────
     {
         "nombre": "Alimentación",
         "tipo": "egreso",
         "icono": "alimentacion",
-        "color": "#3B6D11",
-        "subcategorias": [
-            "Supermercado", "Verdulería", "Carnicería", "Pollería",
-            "Panadería", "Pescadería", "Dietética", "Restaurante",
-            "Delivery", "Cafetería", "Bar", "Heladería"
-        ]
+        "color": "#F97316",
+        "subcategorias": ["Supermercado", "Verdulería", "Carnicería", "Kiosco", "Otros"]
+    },
+    {
+        "nombre": "Indumentaria",
+        "tipo": "egreso",
+        "icono": "remera",
+        "color": "#7C3AED",
+        "subcategorias": ["Ropa", "Calzado", "Accesorios"]
+    },
+    {
+        "nombre": "Servicios",
+        "tipo": "egreso",
+        "icono": "luz",
+        "color": "#EAB308",
+        "subcategorias": ["Alquiler", "Expensas", "Luz", "Gas", "Agua", "Seguros", "Impuestos"]
+    },
+    {
+        "nombre": "Hogar",
+        "tipo": "egreso",
+        "icono": "casa",
+        "color": "#8B5CF6",
+        "subcategorias": ["Muebles y electrodomésticos", "Reparaciones", "Limpieza"]
+    },
+    {
+        "nombre": "Salud",
+        "tipo": "egreso",
+        "icono": "medicina",
+        "color": "#10B981",
+        "subcategorias": ["Médico / Consulta", "Odontología", "Estudios y análisis", "Farmacia", "Obra social / Prepaga", "Terapias"]
     },
     {
         "nombre": "Transporte",
         "tipo": "egreso",
         "icono": "transporte",
-        "color": "#52565F",
-        "subcategorias": [
-            "Transporte público", "Taxi / Remis", "Combustible",
-            "Peaje", "Estacionamiento", "Mantenimiento del auto",
-            "Seguro del auto", "Bicicleta / Patineta"
-        ]
+        "color": "#0284C7",
+        "subcategorias": ["Combustible", "Transporte público", "Taxi / Apps", "Mantenimiento y seguro del auto", "Peajes", "Estacionamiento"]
     },
     {
-        "nombre": "Vivienda",
-        "tipo": "egreso",
-        "icono": "casa",
-        "color": "#92400E",
-        "subcategorias": [
-            "Alquiler", "Expensas", "Electricidad", "Gas", "Agua",
-            "Internet", "Teléfono fijo", "Cable / TV",
-            "Limpieza", "Mantenimiento", "Muebles y decoración"
-        ]
-    },
-    {
-        "nombre": "Salud y cuidado personal",
-        "tipo": "egreso",
-        "icono": "medicina",
-        "color": "#D97706",
-        "subcategorias": [
-            "Farmacia", "Médico / Consulta", "Obra social / Prepaga",
-            "Dentista", "Óptica", "Terapia",
-            "Kinesiología", "Estudios médicos", "Peluquería", "Gimnasio", "Spa"
-        ]
-    },
-    {
-        "nombre": "Servicios digitales",
+        "nombre": "Comunicación",
         "tipo": "egreso",
         "icono": "serviciosdigitales",
-        "color": "#4F46E5",
-        "subcategorias": [
-            "Streaming", "Música", "Software / Apps",
-            "Almacenamiento en la nube", "Dominio / Hosting"
-        ]
+        "color": "#6366F1",
+        "subcategorias": ["Celular", "Internet y cable"]
+    },
+    {
+        "nombre": "Recreativo",
+        "tipo": "egreso",
+        "icono": "entretenimiento",
+        "color": "#EC4899",
+        "subcategorias": ["Suscripciones", "Salidas y entretenimiento", "Deportes y gimnasio", "Hobbies y juegos", "Viajes"]
     },
     {
         "nombre": "Educación",
         "tipo": "egreso",
         "icono": "libros",
-        "color": "#16A34A",
-        "subcategorias": [
-            "Cuotas escolares / universitarias", "Cursos y capacitaciones",
-            "Libros y materiales", "Idiomas", "Guardería / Jardín"
-        ]
+        "color": "#DC2626",
+        "subcategorias": ["Cuotas", "Materiales y libros", "Idiomas"]
     },
     {
-        "nombre": "Ropa e indumentaria",
+        "nombre": "Restaurantes y delivery",
         "tipo": "egreso",
-        "icono": "remera",
-        "color": "#7C3AED",
-        "subcategorias": [
-            "Ropa", "Calzado", "Accesorios",
-            "Ropa deportiva", "Ropa interior"
-        ]
+        "icono": "hamburguesa",
+        "color": "#F59E0B",
+        "subcategorias": ["Restaurantes", "Delivery", "Cafetería"]
     },
     {
-        "nombre": "Entretenimiento y salidas",
+        "nombre": "Otros",
         "tipo": "egreso",
-        "icono": "entretenimiento",
-        "color": "#993C1D",
-        "subcategorias": [
-            "Cine / Teatro / Recitales", "Salidas con amigos",
-            "Vacaciones y viajes", "Hobbies",
-            "Juegos y videojuegos", "Deportes", "Gimnasio"
-        ]
+        "icono": "herramienta",
+        "color": "#6B7280",
+        "subcategorias": ["Cuidado personal", "Mascotas", "Regalos", "Otros"]
     },
     {
-        "nombre": "Otros gastos",
+        "nombre": "Banco",
         "tipo": "egreso",
-        "icono": "default",
-        "color": "#8E9198",
-        "subcategorias": [
-            "Mascotas", "Regalos y donaciones", "Impuestos y tasas",
-            "Seguro de vida / hogar", "Gastos bancarios y comisiones", "Otros"
-        ]
+        "icono": "banco",
+        "color": "#64748B",
+        "subcategorias": ["Comisiones y gastos bancarios", "Préstamos", "Intereses pagados", "Impuesto al cheque / movimientos"]
     },
-    # ── INGRESOS ─────────────────────────────────────────
+    # ── INGRESOS (4) ─────────────────────────────────────
     {
-        "nombre": "Trabajo en relación de dependencia",
+        "nombre": "Empleo",
         "tipo": "ingreso",
         "icono": "salario",
-        "color": "#185FA5",
-        "subcategorias": [
-            "Sueldo", "Aguinaldo", "Horas extra", "Bonos"
-        ]
+        "color": "#16A34A",
+        "subcategorias": ["Sueldo", "Aguinaldo", "Bonos y horas extras"]
     },
     {
         "nombre": "Trabajo independiente",
         "tipo": "ingreso",
         "icono": "trato",
-        "color": "#16A34A",
-        "subcategorias": [
-            "Freelance", "Honorarios", "Consultoría", "Venta de productos"
-        ]
+        "color": "#0D9488",
+        "subcategorias": ["Honorarios", "Venta de productos/servicios"]
     },
     {
-        "nombre": "Otros ingresos",
+        "nombre": "Inversiones y rentas",
         "tipo": "ingreso",
         "icono": "dineroenmano",
-        "color": "#D97706",
-        "subcategorias": [
-            "Alquiler cobrado", "Dividendos / inversiones",
-            "Venta de bienes", "Reintegros", "Regalos recibidos", "Otros"
-        ]
+        "color": "#2563EB",
+        "subcategorias": ["Dividendos e intereses", "Alquileres cobrados"]
+    },
+    {
+        "nombre": "Otros",
+        "tipo": "ingreso",
+        "icono": "dineroenmano",
+        "color": "#9CA3AF",
+        "subcategorias": ["Regalos", "Reintegros", "Otros"]
     },
 ]
 
+
 def seed_categorias(db: Session):
+    """
+    Seed idempotente de las 16 categorías canónicas y sus 61 subcategorías oficiales.
+    - Idempotencia estricta en categorías: busca por nombre, tipo y es_global.
+    - Idempotencia estricta en subcategorías: busca por categoria_id, nombre y es_global.
+    - Actualiza icono y color si ya existían.
+    """
     for cat_data in CATEGORIAS_SEED:
-        # Buscar si ya existe por nombre + tipo
+        # 1. Buscar si ya existe la categoría por nombre, tipo y global
         existente = db.query(Categoria).filter(
             Categoria.nombre == cat_data["nombre"],
             Categoria.tipo == cat_data["tipo"],
@@ -157,15 +154,14 @@ def seed_categorias(db: Session):
                 estado="activa"
             )
             db.add(categoria)
-            db.flush()  # para obtener el id antes del commit
-            print(f"✔ Categoría creada: {categoria.nombre}")
+            db.flush()  # Para obtener categoria.id
+            print(f"[+] Categoria creada: {categoria.nombre} ({categoria.tipo})")
         else:
             categoria = existente
-            # Actualizamos también el color y el icono de la categoría global si cambió
             categoria.icono = cat_data["icono"]
             categoria.color = cat_data["color"]
 
-        # Seedear subcategorías
+        # 2. Seedear subcategorías con idempotencia estricta por categoría
         for nombre_sub in cat_data["subcategorias"]:
             sub_existente = db.query(Subcategoria).filter(
                 Subcategoria.categoria_id == categoria.id,
@@ -182,10 +178,11 @@ def seed_categorias(db: Session):
                     estado="activa"
                 )
                 db.add(subcategoria)
-                print(f"  ✔ Subcategoría creada: {nombre_sub}")
+                print(f"  [+] Subcategoria creada: {nombre_sub} en {categoria.nombre}")
 
     db.commit()
-    print(f"\n✅ Seed de categorías completado: {len(CATEGORIAS_SEED)} categorías, {sum(len(c['subcategorias']) for c in CATEGORIAS_SEED)} subcategorías totales contempladas.")
+    print(f"[OK] Seed de categorias completado: {len(CATEGORIAS_SEED)} categorias canonicas contempladas.")
+
 
 if __name__ == "__main__":
     db = SessionLocal()
