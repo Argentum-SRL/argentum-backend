@@ -2,7 +2,7 @@ from typing import List, Optional
 from uuid import UUID
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
@@ -81,13 +81,14 @@ def get_transaccion(
 @router.post("", response_model=TransaccionRead, status_code=status.HTTP_201_CREATED)
 def create_transaccion(
     data: TransaccionCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
     """
     Crea una nueva transacción (normal o padre de cuotas).
     """
-    return transaccion_service.crear_transaccion(db, current_user.id, data)
+    return transaccion_service.crear_transaccion(db, current_user.id, data, background_tasks=background_tasks)
 
 
 @router.patch("/{transaccion_id}", response_model=TransaccionRead)
