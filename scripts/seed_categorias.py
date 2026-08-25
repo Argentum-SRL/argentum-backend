@@ -62,7 +62,7 @@ CATEGORIAS_SEED = [
         "subcategorias": ["Celular", "Internet y cable"]
     },
     {
-        "nombre": "Recreativo",
+        "nombre": "Entretenimiento",
         "tipo": "egreso",
         "icono": "entretenimiento",
         "color": "#EC4899",
@@ -76,7 +76,7 @@ CATEGORIAS_SEED = [
         "subcategorias": ["Cuotas", "Materiales y libros", "Idiomas"]
     },
     {
-        "nombre": "Restaurantes y delivery",
+        "nombre": "Restaurante",
         "tipo": "egreso",
         "icono": "hamburguesa",
         "color": "#F59E0B",
