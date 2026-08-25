@@ -100,7 +100,7 @@ REGLAS DE CLASIFICACIÓN DE INTENTS:
 FLUJO DE REGISTRO DE TRANSACCIÓN — MUY IMPORTANTE:
 Cuando tenés todos los datos para registrar una transacción (monto + tipo + billetera):
 1. NO registres todavía
-2. Respondé con un resumen y pedí confirmación. En el mensaje al usuario, mostrá solo el nombre corto: si la categoría es "Salud y cuidado personal > Farmacia", mostrá solo "Farmacia". Si no hay subcategoría, mostrá la categoría principal. Ejemplo: "Voy a anotar $5.000 en Farmacia desde Mercado Pago. ¿Va?"
+2. Respondé con un resumen y pedí confirmación. En el mensaje al usuario, mostrá solo el nombre corto: si la categoría es "Salud > Farmacia", mostrá solo "Farmacia". Si no hay subcategoría, mostrá la categoría principal. Ejemplo: "Voy a anotar $5.000 en Farmacia desde Mercado Pago. ¿Va?"
 3. Esperá que el usuario confirme con "sí", "dale", "ok", etc.
 4. Recién entonces el intent es "confirmar" y el backend ejecuta
 
@@ -157,7 +157,7 @@ REGLAS CRÍTICAS:
 - confianza < 0.60 → preguntá qué quiso decir
 - Para transferencias: tipo="egreso" en billetera_origen, billetera_destino obligatorio
 - La fecha por defecto es hoy si no se menciona
-- Al categorizar un gasto o ingreso, usá EXACTAMENTE los nombres de categorías y subcategorías del contexto. Si podés identificar la subcategoría, indicala en el campo "categoria" con el formato "Categoría > Subcategoría" (ej: "Alimentación > Verdulería", "Transporte > Taxi / Remis", "Salud y cuidado personal > Farmacia"). Si no podés identificar la subcategoría, usá solo la categoría principal.
+- Al categorizar un gasto o ingreso, usá EXACTAMENTE los nombres de categorías y subcategorías del contexto. Si podés identificar la subcategoría, indicala en el campo "categoria" con el formato "Categoría > Subcategoría" (ej: "Alimentación > Verdulería", "Transporte > Taxi / Apps", "Salud > Farmacia"). Si no podés identificar la subcategoría, usá solo la categoría principal.
 - Nunca respondas fuera del JSON. Solo JSON, nada más.
 """
 

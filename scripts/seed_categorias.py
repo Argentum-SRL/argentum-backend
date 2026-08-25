@@ -62,11 +62,11 @@ CATEGORIAS_SEED = [
         "subcategorias": ["Celular", "Internet y cable"]
     },
     {
-        "nombre": "Entretenimiento",
+        "nombre": "Recreativo",
         "tipo": "egreso",
         "icono": "entretenimiento",
         "color": "#EC4899",
-        "subcategorias": ["Suscripciones", "Salidas y entretenimiento", "Deportes y gimnasio", "Hobbies y juegos", "Viajes"]
+        "subcategorias": ["Suscripciones", "Salidas", "Deportes y gimnasio", "Hobbies y juegos", "Viajes"]
     },
     {
         "nombre": "Educación",
@@ -76,7 +76,7 @@ CATEGORIAS_SEED = [
         "subcategorias": ["Cuotas", "Materiales y libros", "Idiomas"]
     },
     {
-        "nombre": "Restaurante",
+        "nombre": "Restaurantes y delivery",
         "tipo": "egreso",
         "icono": "hamburguesa",
         "color": "#F59E0B",
@@ -125,15 +125,21 @@ CATEGORIAS_SEED = [
         "color": "#9CA3AF",
         "subcategorias": ["Regalos", "Reintegros", "Otros"]
     },
-    {
-        "nombre": "Banco",
-        "tipo": "ingreso",
-        "icono": "banco",
-        "color": "#64748B",
-        "subcategorias": ["Ahorros"]
-    },
 ]
 
+
+# ==============================================================================
+# ADVERTENCIA PREVENTIVA:
+# Este seed busca categorías y subcategorías por NOMBRE, no por un identificador
+# inmutable (slug o UUID). Es puramente aditivo: si no encuentra el nombre exacto,
+# lo INSERTA como nuevo y NUNCA borra ni reconcilia registros que sobren.
+#
+# Si en el futuro renombrás una categoría o subcategoría en la lista CATEGORIAS_SEED
+# de este archivo, tenés que ejecutar también un UPDATE manual/migración en la base
+# de datos para la fila existente. Si solo cambiás el string acá y reiniciás el
+# backend, el seeder insertará la nueva entidad y dejará la vieja huérfana y
+# duplicada en la base de datos (consecuencia sufrida en agosto 2026).
+# ==============================================================================
 
 def seed_categorias(db: Session):
     """

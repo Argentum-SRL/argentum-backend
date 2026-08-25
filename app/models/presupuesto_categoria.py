@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, ForeignKey
+from sqlalchemy import CheckConstraint, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import TYPE_CHECKING
@@ -21,6 +21,12 @@ class PresupuestoCategoria(Base):
         CheckConstraint(
             "categoria_id IS NOT NULL OR subcategoria_id IS NOT NULL",
             name="ck_presupuesto_categoria_categoria_or_subcategoria",
+        ),
+        UniqueConstraint(
+            "presupuesto_id",
+            "categoria_id",
+            "subcategoria_id",
+            name="uq_presupuestos_categorias_presupuesto_cat_subcat",
         ),
     )
 
