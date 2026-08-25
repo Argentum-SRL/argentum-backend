@@ -384,6 +384,17 @@ def obtener_summary(db: Session, usuario_id: UUID) -> Dict[str, Any]:
         "proximo_vencimiento": min([m.fecha_limite for m in metas if m.fecha_limite and m.fecha_limite >= date.today()], default=None)
     }
 
+# ==============================================================================
+# ADVERTENCIA PREVENTIVA:
+# Esta función busca la categoría contable "Ahorro" por NOMBRE (nombre == "Ahorro").
+# Si no existe, la crea dinámicamente en tiempo de ejecución.
+# 
+# Esta categoría es la que utiliza el flujo de Metas para registrar las transacciones
+# espejo de egreso (aportes) e ingreso (retiros) que impactan el saldo de las billeteras.
+# NO debe eliminarse ni renombrarse en código sin una migración previa que actualice
+# también las transacciones históricas existentes vinculadas a su ID.
+# ==============================================================================
+
 def obtener_o_crear_categoria_ahorro(db: Session, usuario_id: UUID, tipo: str) -> UUID:
     from app.models.categoria import Categoria, TipoCategoria, EstadoCategoria
     
