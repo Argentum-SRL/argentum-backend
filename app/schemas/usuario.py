@@ -13,6 +13,7 @@ class UsuarioBase(BaseModel):
     apellido: str | None = None
     email: str | None = None
     telefono: str | None = None
+    telefono_normalizado: str | None = None
     foto_url: str | None = None
     password_configurada: bool = False
     auth_provider: AuthProvider
