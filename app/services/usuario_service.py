@@ -33,6 +33,7 @@ from app.models.tarjeta_credito import TarjetaCredito
 from app.models.importacion import ImportacionResumen, CorreccionImportacion
 from app.core.security import get_password_hash, verify_password
 from app.services import email_service, whatsapp_service
+from app.utils.telefono import normalizar_telefono_ar
 from app.schemas.usuario import (
     EditarDatosPersonales,
     EditarEmail,
@@ -192,6 +193,7 @@ def actualizar_telefono(
         raise HTTPException(status_code=400, detail="El teléfono ya está en uso")
     
     usuario.telefono = datos.telefono_nuevo
+    usuario.telefono_normalizado = normalizar_telefono_ar(datos.telefono_nuevo) if datos.telefono_nuevo else None
     usuario.telefono_verificado = False
     db.commit()
     

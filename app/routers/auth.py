@@ -43,6 +43,7 @@ from app.core.auth import (
 from app.core.database import get_db
 from app.core.security import get_password_hash, verify_password
 from app.models.usuario import AuthProvider, EstadoUsuario, Usuario
+from app.utils.telefono import normalizar_telefono_ar
 from app.schemas.auth import (
     AuthResponse,
     CompletarPerfilRequest,
@@ -135,6 +136,7 @@ def register(user_in: RegisterRequest, background_tasks: BackgroundTasks, db: Se
         apellido=user_in.apellido,
         email=user_in.email,
         telefono=user_in.telefono,
+        telefono_normalizado=normalizar_telefono_ar(user_in.telefono) if user_in.telefono else None,
         password_hash=get_password_hash(user_in.password),
         password_configurada=True, # Ya la puso en el registro
         auth_provider=AuthProvider.EMAIL,
@@ -461,6 +463,7 @@ def login_google(
             apellido=apellido or None,
             email=email,
             telefono=None,
+            telefono_normalizado=None,
             foto_url=token_info.get("picture"),
             auth_provider=AuthProvider.GOOGLE,
             estado=EstadoUsuario.ACTIVO,
@@ -556,6 +559,7 @@ def verificar_codigo_telefono(
             raise HTTPException(status_code=400, detail="Ese número de teléfono ya está registrado.")
 
         usuario_autenticado.telefono = body.telefono
+        usuario_autenticado.telefono_normalizado = normalizar_telefono_ar(body.telefono) if body.telefono else None
         usuario_autenticado.telefono_verificado = True
         db.commit()
 
@@ -587,6 +591,7 @@ def verificar_codigo_telefono(
         # Caso D: nuevo usuario por teléfono
         user = Usuario(
             telefono=body.telefono,
+            telefono_normalizado=normalizar_telefono_ar(body.telefono) if body.telefono else None,
             auth_provider=AuthProvider.TELEFONO,
             estado=EstadoUsuario.ACTIVO,
             telefono_verificado=True,

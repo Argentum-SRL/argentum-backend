@@ -24,6 +24,9 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 
+from app.core.logging_config import configurar_structlog
+configurar_structlog()
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)

@@ -57,6 +57,7 @@ class Usuario(Base):
     apellido: Mapped[str | None] = mapped_column(String(100), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     telefono: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
+    telefono_normalizado: Mapped[str | None] = mapped_column(String(20), index=True, nullable=True)
     fecha_nacimiento: Mapped[date | None] = mapped_column(
         Date, nullable=True
     )

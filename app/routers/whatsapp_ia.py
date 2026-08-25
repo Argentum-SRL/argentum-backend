@@ -10,7 +10,7 @@ import os
 import tempfile
 import time
 import unicodedata
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
@@ -33,11 +33,13 @@ from app.models.transaccion import (
     TipoTransaccion,
     Transaccion,
 )
-from app.models.usuario import Moneda, Usuario
+from app.models.usuario import EstadoUsuario, Moneda, Usuario
 from app.services import ai_service
 from app.services.whatsapp_service import enviar_whatsapp
+from app.utils.telefono import normalizar_telefono_ar
+import structlog
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger("whatsapp")
 
 
 def _fmt(monto: float) -> str:
@@ -68,26 +70,44 @@ def _nombre_corto_categoria(nombre: str | None) -> str:
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp-ia"])
 
+_cooldown_no_registrados: dict[str, datetime] = {}
+COOLDOWN_MINUTOS_NO_REGISTRADO = 15
+
+
+def _purgar_cooldown_vencido() -> None:
+    if len(_cooldown_no_registrados) < 1000:
+        return
+    ahora = datetime.now(timezone.utc)
+    vencidos = [
+        tel for tel, ts in _cooldown_no_registrados.items()
+        if (ahora - ts) >= timedelta(minutes=COOLDOWN_MINUTOS_NO_REGISTRADO)
+    ]
+    for tel in vencidos:
+        del _cooldown_no_registrados[tel]
+
+
+def _debe_responder_no_registrado(telefono_normalizado: str) -> bool:
+    _purgar_cooldown_vencido()
+    ahora = datetime.now(timezone.utc)
+    ultimo_envio = _cooldown_no_registrados.get(telefono_normalizado)
+    if ultimo_envio and (ahora - ultimo_envio) < timedelta(minutes=COOLDOWN_MINUTOS_NO_REGISTRADO):
+        return False
+    _cooldown_no_registrados[telefono_normalizado] = ahora
+    return True
+
 
 def _buscar_usuario_por_telefono(telefono_raw: str, db: Session) -> Usuario | None:
-    telefono_limpio = telefono_raw.replace("whatsapp:", "").strip()
-    
-    usuario = db.execute(
-        select(Usuario).where(Usuario.telefono == telefono_limpio)
-    ).scalar_one_or_none()
-    if usuario:
-        return usuario
+    telefono_norm = normalizar_telefono_ar(telefono_raw)
+    if not telefono_norm:
+        return None
 
-    if telefono_limpio.startswith("+"):
-        sin_plus = telefono_limpio[1:]
-        usuario = db.execute(
-            select(Usuario).where(Usuario.telefono == sin_plus)
-        ).scalar_one_or_none()
-    else:
-        con_plus = f"+{telefono_limpio}"
-        usuario = db.execute(
-            select(Usuario).where(Usuario.telefono == con_plus)
-        ).scalar_one_or_none()
+    usuario = db.execute(
+        select(Usuario).where(
+            Usuario.telefono_normalizado == telefono_norm,
+            Usuario.estado == EstadoUsuario.ACTIVO,
+            Usuario.telefono_verificado.is_(True),
+        )
+    ).scalar_one_or_none()
 
     return usuario
 
@@ -759,8 +779,22 @@ async def whatsapp_webhook(
     try:
         usuario = _buscar_usuario_por_telefono(from_number, db)
         if not usuario:
-            enviar_whatsapp(from_number, "No encontramos tu cuenta. Registrate en argentum.app")
+            telefono_norm = normalizar_telefono_ar(from_number)
+            debe_responder = _debe_responder_no_registrado(telefono_norm)
+            logger.warning(
+                "whatsapp_usuario_no_encontrado",
+                telefono_ultimos_4=telefono_norm[-4:] if telefono_norm else None,
+                respondido=debe_responder,
+            )
+            if debe_responder:
+                enviar_whatsapp(from_number, "No encontramos tu cuenta. Registrate en argentum.app")
             return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+        logger.info(
+            "whatsapp_mensaje_recibido",
+            usuario_id=str(usuario.id),
+            tipo_mensaje=msg_type,
+        )
 
         mensaje_texto = ""
         transcripcion = None
@@ -1145,7 +1179,7 @@ async def whatsapp_webhook(
 
     except Exception as e:
         db.rollback()
-        logger.exception("Error procesando mensaje en webhook")
+        logger.error("whatsapp_webhook_error", error=str(e), exc_info=True)
         try:
             if from_number:
                 enviar_whatsapp(
