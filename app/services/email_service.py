@@ -260,3 +260,37 @@ def enviar_reset_password_email(email: str, nombre: str, reset_url: str) -> bool
     )
     cuerpo_html = template_reset_password_email(nombre=nombre, reset_url=reset_url)
     return _enviar_email(email, asunto, cuerpo, cuerpo_html)
+
+
+def enviar_email_aviso_google(destinatario: str) -> bool:
+    asunto = "Acceso a tu cuenta de Argentum con Google"
+    nombre = _obtener_nombre_usuario(destinatario)
+    login_url = f"{settings.FRONTEND_URL}/login"
+    cuerpo = (
+        f"Hola {nombre},\n\n"
+        f"Recibimos una solicitud para recuperar la contraseña de tu cuenta en Argentum.\n\n"
+        f"Tu cuenta está vinculada a Google OAuth, por lo que no necesitás una contraseña local. "
+        f"Podés iniciar sesión directamente haciendo clic en el botón 'Continuar con Google' en la pantalla de inicio de sesión:\n"
+        f"{login_url}\n\n"
+        f"Si no realizaste esta solicitud, podés ignorar este mensaje de forma segura."
+    )
+    cuerpo_html = f"""
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 32px 24px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px;">
+        <h2 style="color: #0f172a; margin-top: 0; font-size: 22px; font-weight: 700;">Acceso mediante Google en Argentum</h2>
+        <p style="color: #475569; font-size: 15px; line-height: 1.6;">Hola <strong>{nombre}</strong>,</p>
+        <p style="color: #475569; font-size: 15px; line-height: 1.6;">Recibimos una solicitud para restablecer la contraseña de tu cuenta.</p>
+        <div style="background-color: #f8fafc; border-left: 4px solid #4285f4; padding: 16px; border-radius: 8px; margin: 20px 0;">
+            <p style="color: #1e293b; font-size: 14px; margin: 0; font-weight: 500;">
+                Tu cuenta utiliza autenticación directa con <strong>Google OAuth</strong>, por lo que no utiliza una contraseña local en Argentum.
+            </p>
+        </div>
+        <p style="color: #475569; font-size: 15px; line-height: 1.6;">Podés ingresar a tu cuenta directamente tocando el botón de Google en el inicio de sesión:</p>
+        <div style="text-align: center; margin: 32px 0;">
+            <a href="{login_url}" style="background-color: #0f172a; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 600; font-size: 15px; display: inline-block;">Iniciar sesión con Google</a>
+        </div>
+        <p style="color: #94a3b8; font-size: 13px; line-height: 1.5; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 16px;">
+            Si no fuiste vos quien solicitó esto, podés ignorar este correo con total tranquilidad.
+        </p>
+    </div>
+    """
+    return _enviar_email(destinatario, asunto, cuerpo, cuerpo_html)

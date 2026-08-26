@@ -67,6 +67,7 @@ from app.services.auth_service import (
 )
 from app.services.email_service import (
     enviar_email_recuperacion,
+    enviar_email_aviso_google,
     generar_codigo_recuperacion,
     generar_y_enviar_verificacion_email,
     guardar_codigo_recuperacion,
@@ -199,13 +200,20 @@ def login(user_in: LoginRequest, request: Request, response: Response, db: Sessi
 
 
 @router.post("/recuperar-password")
-def recuperar_password(body: RecuperarPasswordRequest, db: Session = Depends(get_db)):
+def recuperar_password(
+    body: RecuperarPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
     """Inicia recuperación de contraseña. No revela si el email existe."""
     user = db.execute(select(Usuario).where(Usuario.email == body.email)).scalar_one_or_none()
-    if user and user.auth_provider == AuthProvider.EMAIL:
-        codigo = generar_codigo_recuperacion()
-        guardar_codigo_recuperacion(body.email, codigo)
-        enviar_email_recuperacion(body.email, codigo)
+    if user:
+        if user.auth_provider == AuthProvider.EMAIL:
+            codigo = generar_codigo_recuperacion()
+            guardar_codigo_recuperacion(body.email, codigo)
+            background_tasks.add_task(enviar_email_recuperacion, body.email, codigo)
+        elif user.auth_provider == AuthProvider.GOOGLE:
+            background_tasks.add_task(enviar_email_aviso_google, body.email)
     return {"detail": "Si el email existe, te enviamos un código de recuperación."}
 
 

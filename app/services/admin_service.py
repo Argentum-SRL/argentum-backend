@@ -124,6 +124,18 @@ def cambiar_estado_usuario(
 def enviar_reset_password(db: Session, usuario_id: UUID, frontend_url: str) -> None:
     user = obtener_usuario(db, usuario_id)
 
+    if user.auth_provider == AuthProvider.GOOGLE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "USER_IS_GOOGLE_AUTH",
+                    "message": "Este usuario utiliza Google OAuth como método de autenticación y no requiere contraseña.",
+                },
+            },
+        )
+
     if not user.email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

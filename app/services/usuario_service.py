@@ -89,14 +89,22 @@ def actualizar_email(
             detail="Tu cuenta usa Google para autenticarse. El email lo gestiona Google directamente."
         )
     
-    if not usuario.password_hash or not verify_password(datos.password_actual, usuario.password_hash):
-        raise HTTPException(status_code=400, detail="La contraseña actual no es correcta.")
+    email_limpio = datos.email_nuevo.strip().lower()
+    if not email_limpio or "@" not in email_limpio or "." not in email_limpio.split("@")[-1]:
+        raise HTTPException(status_code=400, detail="Ingresá un formato de email válido.")
     
-    result = db.execute(select(Usuario).where(Usuario.email == datos.email_nuevo))
+    if usuario.email and email_limpio == usuario.email.lower():
+        raise HTTPException(status_code=400, detail="El email ingresado es igual a tu email actual.")
+    
+    if usuario.password_configurada and usuario.password_hash:
+        if not datos.password_actual or not verify_password(datos.password_actual, usuario.password_hash):
+            raise HTTPException(status_code=400, detail="La contraseña actual no es correcta.")
+    
+    result = db.execute(select(Usuario).where(Usuario.email == email_limpio, Usuario.id != usuario.id))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Ese email ya está siendo usado por otra cuenta.")
     
-    usuario.email = datos.email_nuevo
+    usuario.email = email_limpio
     usuario.email_verificado = False
     db.commit()
 
@@ -116,7 +124,7 @@ def actualizar_email(
     except Exception:
         pass
     
-    email_service.generar_y_enviar_verificacion_email(datos.email_nuevo)
+    email_service.generar_y_enviar_verificacion_email(email_limpio)
     
     return {"confirmacion": "Email actualizado exitosamente. Verificá tu nueva casilla.", "requiere_verificacion_email": True}
 
@@ -126,23 +134,25 @@ def actualizar_password(
     if usuario.auth_provider == AuthProvider.GOOGLE:
         raise HTTPException(
             status_code=400,
-            detail="Tu cuenta usa Google para autenticarse. Las contrasenas las gestiona Google directamente."
+            detail="Tu cuenta utiliza Google OAuth. La contraseña es administrada directamente por Google."
         )
     
-    if usuario.password_hash:
+    if usuario.password_configurada and usuario.password_hash:
         if not datos.password_actual:
-            raise HTTPException(status_code=400, detail="La contraseña actual es obligatoria")
+            raise HTTPException(status_code=400, detail="La contraseña actual es obligatoria.")
         if not verify_password(datos.password_actual, usuario.password_hash):
             raise HTTPException(status_code=400, detail="La contraseña actual no es correcta.")
+        if datos.password_actual == datos.password_nueva:
+            raise HTTPException(status_code=400, detail="La nueva contraseña no puede ser igual a la actual.")
     
     if datos.password_nueva != datos.password_nueva_confirmacion:
-        raise HTTPException(status_code=400, detail="Las contraseñas no coinciden")
+        raise HTTPException(status_code=400, detail="Las contraseñas no coinciden.")
     
     pw = datos.password_nueva
     if len(pw) < 8 or not any(c.isupper() for c in pw) or not any(c.islower() for c in pw) or not any(c.isdigit() for c in pw):
         raise HTTPException(
             status_code=400,
-            detail="La contraseña debe tener al menos 8 caracteres, una mayúscula, una minúscula y un número"
+            detail="La contraseña debe tener al menos 8 caracteres, una mayúscula, una minúscula y un número."
         )
     
     usuario.password_hash = get_password_hash(pw)
@@ -165,17 +175,17 @@ def actualizar_password(
     except Exception:
         pass
     
-    # Enviar email de notificación de cambio de contraseña
     try:
         from app.services.notificacion_email_service import (
             enviar_email_notificacion,
             generar_email_cambio_contrasena,
         )
-        asunto, html, texto = generar_email_cambio_contrasena(
-            usuario_nombre=usuario.nombre or "Usuario",
-            dispositivo="Web browser"
-        )
-        enviar_email_notificacion(usuario.email, asunto, html, texto)
+        if usuario.email:
+            asunto, html, texto = generar_email_cambio_contrasena(
+                usuario_nombre=usuario.nombre or "Usuario",
+                dispositivo="Web browser"
+            )
+            enviar_email_notificacion(usuario.email, asunto, html, texto)
     except Exception as e:
         logger.error("Error al enviar email de cambio de contraseña: %s", e)
     
@@ -184,23 +194,37 @@ def actualizar_password(
 def actualizar_telefono(
     db: Session, usuario: Usuario, datos: EditarTelefono
 ) -> dict:
-    if usuario.auth_provider != AuthProvider.GOOGLE:
-        if not usuario.password_hash or not verify_password(datos.password_actual, usuario.password_hash):
+    tel_limpio = datos.telefono_nuevo.strip() if datos.telefono_nuevo else ""
+    if not tel_limpio:
+        raise HTTPException(status_code=400, detail="El número de teléfono es obligatorio.")
+    
+    tel_norm = normalizar_telefono_ar(tel_limpio)
+    if len(tel_norm) < 8:
+        raise HTTPException(status_code=400, detail="Ingresá un número de teléfono válido.")
+    
+    if usuario.auth_provider != AuthProvider.GOOGLE and usuario.password_configurada and usuario.password_hash:
+        if not datos.password_actual or not verify_password(datos.password_actual, usuario.password_hash):
             raise HTTPException(status_code=400, detail="La contraseña actual no es correcta.")
     
-    result = db.execute(select(Usuario).where(Usuario.telefono == datos.telefono_nuevo))
+    # Verificar que no esté en uso por otra cuenta
+    result = db.execute(
+        select(Usuario).where(
+            (Usuario.telefono == tel_limpio) | (Usuario.telefono_normalizado == tel_norm),
+            Usuario.id != usuario.id
+        )
+    )
     if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="El teléfono ya está en uso")
+        raise HTTPException(status_code=400, detail="Ese número de teléfono ya está registrado en otra cuenta.")
     
-    usuario.telefono = datos.telefono_nuevo
-    usuario.telefono_normalizado = normalizar_telefono_ar(datos.telefono_nuevo) if datos.telefono_nuevo else None
+    usuario.telefono = tel_limpio
+    usuario.telefono_normalizado = tel_norm
     usuario.telefono_verificado = False
     db.commit()
     
     codigo = whatsapp_service.generar_codigo()
-    whatsapp_service.guardar_codigo(datos.telefono_nuevo, codigo)
+    whatsapp_service.guardar_codigo(tel_limpio, codigo)
     whatsapp_service.enviar_mensaje_whatsapp(
-        datos.telefono_nuevo, 
+        tel_limpio, 
         f"Tu código de verificación de Argentum es *{codigo}*. Expira en 10 minutos."
     )
     
@@ -245,6 +269,12 @@ def actualizar_moneda(
 def actualizar_foto(
     db: Session, usuario: Usuario, archivo: UploadFile
 ) -> str:
+    if usuario.auth_provider == AuthProvider.GOOGLE:
+        raise HTTPException(
+            status_code=400,
+            detail="Tu cuenta utiliza Google OAuth. La foto de perfil se sincroniza desde tu cuenta de Google."
+        )
+
     extension = archivo.filename.split(".")[-1].lower()
     if extension not in ["jpg", "jpeg", "png", "webp"]:
         raise HTTPException(status_code=400, detail="Formato de imagen no permitido (jpg, jpeg, png, webp)")
@@ -280,6 +310,12 @@ def actualizar_foto(
     return usuario.foto_url
 
 def eliminar_foto(db: Session, usuario: Usuario) -> dict:
+    if usuario.auth_provider == AuthProvider.GOOGLE:
+        raise HTTPException(
+            status_code=400,
+            detail="Tu cuenta utiliza Google OAuth. La foto de perfil se sincroniza desde tu cuenta de Google."
+        )
+
     if usuario.foto_url and not usuario.foto_url.startswith("http"):
         clean_url = usuario.foto_url.split("?")[0]
         path = os.path.join(os.getcwd(), clean_url.lstrip("/"))
