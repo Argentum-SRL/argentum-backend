@@ -3,12 +3,15 @@ from datetime import datetime
 from uuid import UUID
 from pydantic import BaseModel, Field, ConfigDict
 
+from app.models.usuario import AuthProvider
+
 class UsuarioAdminListResponse(BaseModel):
     id: UUID
     nombre: str | None
     apellido: str | None = None
     email: str | None
     telefono: str | None
+    auth_provider: AuthProvider | None = None
     is_active: bool
     is_admin: bool
     onboarding_completado: bool
