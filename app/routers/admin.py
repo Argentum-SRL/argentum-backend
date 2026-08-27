@@ -210,3 +210,26 @@ def get_stats(
         "data": stats,
         "message": "Estadísticas obtenidas correctamente."
     }
+
+
+@router.post("/feriados/refresh", response_model=dict)
+async def refresh_feriados_admin(
+    anio: int | None = None,
+    admin: Usuario = Depends(get_current_admin_user),
+):
+    """Fuerza la recarga de feriados de un año desde la API externa y actualiza BD y caché."""
+    from datetime import date
+    from app.services.dias_habiles_service import recargar_feriados_anio
+
+    target_anio = anio or date.today().year
+    logger.info("[ADMIN] Admin %s (%s) solicitó refresh de feriados para año %s", admin.id, admin.email, target_anio)
+
+    res = await recargar_feriados_anio(target_anio)
+    return {
+        "success": res["success"],
+        "data": res,
+        "message": f"Feriados para el año {target_anio} actualizados. Se encontraron {res['cantidad']} feriados."
+        if res["success"]
+        else f"Error al actualizar feriados: {res['error']}",
+    }
+

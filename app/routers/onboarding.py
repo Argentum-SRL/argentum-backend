@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.auth import get_current_user
 from app.core.database import get_db
-from app.models.usuario import Usuario
+from app.models.usuario import Usuario, CicloTipo, CicloAjusteDireccion
 from app.schemas.onboarding import (
     EstadoOnboardingResponse,
     CotizacionesDolarResponse,
@@ -148,36 +148,92 @@ def post_moneda(
 
 @router.get("/preview-fecha-cobro")
 async def preview_fecha_cobro(
-    dia: int,
+    tipo: CicloTipo,
+    valor: str,
+    direccion: CicloAjusteDireccion = CicloAjusteDireccion.ANTERIOR,
     current_user: Usuario = Depends(get_current_user)
 ):
     _ = current_user
-    if not (1 <= dia <= 31):
-        raise HTTPException(status_code=400, detail="El día debe estar entre 1 y 31.")
-    try:
-        from app.services import dias_habiles_service
-        import calendar
-        from datetime import date
-        
-        proxima_fecha = await dias_habiles_service.calcular_proxima_fecha_cobro(dia)
-        
-        ultimo_dia_mes = calendar.monthrange(proxima_fecha.year, proxima_fecha.month)[1]
-        dia_real_nominal = min(dia, ultimo_dia_mes)
-        fecha_nominal = date(proxima_fecha.year, proxima_fecha.month, dia_real_nominal)
-        
-        feriados = await dias_habiles_service.obtener_feriados_argentina(proxima_fecha.year)
-        es_habil = dias_habiles_service.es_dia_habil(fecha_nominal, feriados)
-        
-        return {
-            "dia_nominal": dia,
-            "proxima_fecha_cobro": proxima_fecha.isoformat(),
-            "es_dia_habil": es_habil
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error al calcular la fecha de cobro: {str(e)}"
-        )
+    from app.services import dias_habiles_service
+    from datetime import date
+    import calendar
+
+    dir_val = direccion.value if isinstance(direccion, CicloAjusteDireccion) else str(direccion)
+
+    if tipo == CicloTipo.DIA_FIJO:
+        try:
+            dia = int(valor)
+            if not (1 <= dia <= 31):
+                raise ValueError()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="El día debe ser un número entre 1 y 31.")
+
+        try:
+            proxima_fecha = await dias_habiles_service.calcular_proxima_fecha_cobro(dia, direccion=dir_val)
+            ultimo_dia_mes = calendar.monthrange(proxima_fecha.year, proxima_fecha.month)[1]
+            dia_real_nominal = min(dia, ultimo_dia_mes)
+            fecha_nominal = date(proxima_fecha.year, proxima_fecha.month, dia_real_nominal)
+            fue_ajustada = (proxima_fecha != fecha_nominal)
+
+            return {
+                "tipo": tipo.value,
+                "valor": valor,
+                "direccion": dir_val,
+                "proxima_fecha_cobro": proxima_fecha.isoformat(),
+                "fecha_nominal": fecha_nominal.isoformat(),
+                "fue_ajustada": fue_ajustada,
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error al calcular la fecha de cobro: {str(e)}")
+
+    elif tipo == CicloTipo.REGLA:
+        reglas_validas = [
+            'primer_lunes', 'primer_martes', 'primer_miercoles', 'primer_jueves', 'primer_viernes',
+            'ultimo_lunes', 'ultimo_martes', 'ultimo_miercoles', 'ultimo_jueves', 'ultimo_viernes'
+        ]
+        if valor not in reglas_validas:
+            raise HTTPException(status_code=400, detail="Regla de ciclo no válida.")
+
+        try:
+            from app.services.dashboard_service import get_date_by_rule
+            hoy = date.today()
+
+            await dias_habiles_service.obtener_feriados_argentina(hoy.year)
+            fecha_nominal_este_mes = get_date_by_rule(valor, hoy.month, hoy.year)
+            fecha_ajustada_este_mes = dias_habiles_service.ajustar_fecha_habil_sync(
+                fecha_nominal_este_mes, direccion=dir_val
+            )
+
+            if fecha_ajustada_este_mes >= hoy:
+                proxima_fecha = fecha_ajustada_este_mes
+                fecha_nominal = fecha_nominal_este_mes
+            else:
+                if hoy.month == 12:
+                    prox_month, prox_year = 1, hoy.year + 1
+                else:
+                    prox_month, prox_year = hoy.month + 1, hoy.year
+
+                await dias_habiles_service.obtener_feriados_argentina(prox_year)
+                fecha_nominal_prox = get_date_by_rule(valor, prox_month, prox_year)
+                proxima_fecha = dias_habiles_service.ajustar_fecha_habil_sync(
+                    fecha_nominal_prox, direccion=dir_val
+                )
+                fecha_nominal = fecha_nominal_prox
+
+            fue_ajustada = (proxima_fecha != fecha_nominal)
+            return {
+                "tipo": tipo.value,
+                "valor": valor,
+                "direccion": dir_val,
+                "proxima_fecha_cobro": proxima_fecha.isoformat(),
+                "fecha_nominal": fecha_nominal.isoformat(),
+                "fue_ajustada": fue_ajustada,
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error al calcular la fecha de cobro: {str(e)}")
+
+    raise HTTPException(status_code=400, detail="Tipo de ciclo no válido.")
+
 
 
 

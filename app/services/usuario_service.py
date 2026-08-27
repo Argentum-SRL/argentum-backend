@@ -250,6 +250,8 @@ def actualizar_ciclo_financiero(
     
     usuario.ciclo_tipo = datos.ciclo_tipo
     usuario.ciclo_valor = datos.ciclo_valor
+    if datos.ciclo_ajuste_direccion is not None:
+        usuario.ciclo_ajuste_direccion = datos.ciclo_ajuste_direccion
     db.commit()
     db.refresh(usuario)
     return usuario
