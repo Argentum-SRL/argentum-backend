@@ -60,7 +60,8 @@ def mapear_grupo_resumen(db: Session, grupo: GrupoCuotas) -> dict:
         "fecha_compra": grupo.transaccion_padre.fecha if grupo.transaccion_padre else _hoy_argentina(),
         "transaccion_padre_id": grupo.transaccion_padre_id,
         "tiene_interes": grupo.tiene_interes,
-        "tasa_interes": grupo.tasa_interes
+        "tasa_interes": grupo.tasa_interes,
+        "estado": grupo.estado.value if hasattr(grupo.estado, "value") else str(grupo.estado)
     }
 
 @router.get("", response_model=list[GrupoCuotasResumen])
