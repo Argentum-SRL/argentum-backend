@@ -25,6 +25,7 @@ from app.models.transaccion_recurrente import TransaccionRecurrente
 from app.models.transferencia_interna import TransferenciaInterna
 from app.models.usuario import Usuario
 from app.models.tools import IPCCache
+from app.models.feriado import FeriadoAR
 
 __all__ = [
     "Usuario",
@@ -55,5 +56,7 @@ __all__ = [
     "TransaccionRecurrente",
     "TransferenciaInterna",
     "IPCCache",
+    "FeriadoAR",
 ]
+
 

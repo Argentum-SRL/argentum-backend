@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-from app.models.usuario import AuthProvider, CicloTipo, EstadoUsuario, Moneda, RolUsuario, Sexo
+from app.models.usuario import AuthProvider, CicloTipo, EstadoUsuario, Moneda, RolUsuario, Sexo, CicloAjusteDireccion
 
 
 class UsuarioBase(BaseModel):
@@ -24,6 +24,7 @@ class UsuarioBase(BaseModel):
     tipo_dolar: str = "blue"
     ciclo_tipo: CicloTipo | None = None
     ciclo_valor: str | None = None
+    ciclo_ajuste_direccion: CicloAjusteDireccion | None = None
     onboarding_completo: bool = False
     email_verificado: bool = False
     telefono_verificado: bool = False
@@ -53,6 +54,7 @@ class UsuarioUpdate(BaseModel):
     tipo_dolar: str | None = None
     ciclo_tipo: CicloTipo | None = None
     ciclo_valor: str | None = None
+    ciclo_ajuste_direccion: CicloAjusteDireccion | None = None
     onboarding_completo: bool | None = None
     email_verificado: bool | None = None
     telefono_verificado: bool | None = None
@@ -94,6 +96,7 @@ class EditarTelefono(BaseModel):
 class EditarCicloFinanciero(BaseModel):
     ciclo_tipo: CicloTipo
     ciclo_valor: str
+    ciclo_ajuste_direccion: CicloAjusteDireccion | None = None
 
 
 class EditarMoneda(BaseModel):

@@ -42,6 +42,11 @@ class CicloTipo(str, Enum):
     REGLA = "regla"
 
 
+class CicloAjusteDireccion(str, Enum):
+    ANTERIOR = "anterior"
+    POSTERIOR = "posterior"
+
+
 class Sexo(str, Enum):
     MASCULINO = "masculino"
     FEMENINO = "femenino"
@@ -86,6 +91,15 @@ class Usuario(Base):
         SAEnum(CicloTipo, values_callable=lambda obj: [e.value for e in obj], name="ciclo_tipo_enum"), nullable=True
     )
     ciclo_valor: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    ciclo_ajuste_direccion: Mapped[CicloAjusteDireccion | None] = mapped_column(
+        SAEnum(
+            CicloAjusteDireccion,
+            values_callable=lambda obj: [e.value for e in obj],
+            name="ciclo_ajuste_direccion_enum",
+        ),
+        nullable=True,
+        default=None,
+    )
     onboarding_completo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     email_verificado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     telefono_verificado: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

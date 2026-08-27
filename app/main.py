@@ -247,6 +247,15 @@ async def _job_actualizar_perfiles():
         logger.exception("Error en job _job_actualizar_perfiles")
 
 
+async def _job_refresh_feriados():
+    """Tarea programada diaria: verifica y asegura que los feriados estén persistidos y cacheados."""
+    from app.services.dias_habiles_service import asegurar_feriados_cargados
+    try:
+        await asegurar_feriados_cargados()
+    except Exception:
+        logger.exception("Error en job _job_refresh_feriados")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Crear el scheduler y registrar jobs aquí para evitar que se
@@ -298,8 +307,8 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(
         _job_cobros_suscripciones,
         "cron",
-        hour=6,
-        minute=30,
+        hour=0,
+        minute=20,
         id="cobros_suscripciones",
         misfire_grace_time=300,
         max_instances=1,
@@ -395,19 +404,35 @@ async def lifespan(app: FastAPI):
         max_instances=1,
         replace_existing=True,
     )
+    scheduler.add_job(
+        _job_refresh_feriados,
+        "cron",
+        hour=3,
+        minute=0,
+        id="refresh_feriados_argentina",
+        misfire_grace_time=300,
+        max_instances=1,
+        replace_existing=True,
+    )
     scheduler.start()
-    # Pre-cargar feriados argentinos en cache para
-    # que calcular_fecha_cobro_sync funcione sin async
-    try:
-        from app.services.dias_habiles_service import obtener_feriados_argentina
-        from datetime import date as _date
-        anio_actual = _date.today().year
-        await obtener_feriados_argentina(anio_actual)
-        await obtener_feriados_argentina(anio_actual + 1)
-        logger.info("Feriados argentinos pre-cargados en cache.")
-    except Exception:
-        logger.warning("No se pudieron pre-cargar feriados. "
-                      "El ciclo usará fechas nominales como fallback.")
+
+    # Pre-cargar feriados argentinos en cache y BD
+    from app.services.dias_habiles_service import obtener_feriados_argentina
+    from datetime import date as _date
+    anio_actual = _date.today().year
+    for anio in (anio_actual, anio_actual + 1):
+        try:
+            feriados = await obtener_feriados_argentina(anio)
+            if not feriados:
+                logger.error(
+                    f"Fallo en la precarga de feriados para el año {anio}: lista vacía o API no disponible. "
+                    f"El ciclo usará fechas nominales como fallback para {anio}."
+                )
+            else:
+                logger.info(f"Feriados argentinos precargados para el año {anio} ({len(feriados)} feriados).")
+        except Exception as e:
+            logger.error(f"Excepción al precargar feriados para el año {anio}: {e}")
+
     logger.info("Backend listo: servidor y tareas automáticas activas.")
     try:
         yield

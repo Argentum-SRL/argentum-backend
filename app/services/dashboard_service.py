@@ -58,6 +58,12 @@ def get_ciclo_fechas(usuario: Usuario, hoy: date) -> tuple[date, date]:
         fin = (inicio + relativedelta(months=1)) - timedelta(days=1)
         return inicio, fin
 
+    direccion = (
+        usuario.ciclo_ajuste_direccion.value
+        if getattr(usuario, "ciclo_ajuste_direccion", None)
+        else "anterior"
+    )
+
     if usuario.ciclo_tipo == CicloTipo.DIA_FIJO:
         from app.services.dias_habiles_service import calcular_fecha_cobro_sync
         try:
@@ -68,28 +74,33 @@ def get_ciclo_fechas(usuario: Usuario, hoy: date) -> tuple[date, date]:
         # Calcular inicio del ciclo actual con ajuste de día hábil
         if hoy.day >= dia:
             # El ciclo comenzó este mes
-            inicio = calcular_fecha_cobro_sync(dia, hoy.month, hoy.year)
+            inicio = calcular_fecha_cobro_sync(dia, hoy.month, hoy.year, direccion=direccion)
         else:
             # El ciclo comenzó el mes anterior
             prev_month = hoy - relativedelta(months=1)
-            inicio = calcular_fecha_cobro_sync(dia, prev_month.month, prev_month.year)
+            inicio = calcular_fecha_cobro_sync(dia, prev_month.month, prev_month.year, direccion=direccion)
         
         # El ciclo termina el día antes del próximo inicio
         proximo_mes = inicio + relativedelta(months=1)
-        proximo_inicio = calcular_fecha_cobro_sync(dia, proximo_mes.month, proximo_mes.year)
+        proximo_inicio = calcular_fecha_cobro_sync(dia, proximo_mes.month, proximo_mes.year, direccion=direccion)
         fin = proximo_inicio - timedelta(days=1)
         
         return inicio, fin
 
     if usuario.ciclo_tipo == CicloTipo.REGLA:
-        d_regla = get_date_by_rule(usuario.ciclo_valor, hoy.month, hoy.year)
+        from app.services.dias_habiles_service import ajustar_fecha_habil_sync
+        d_nominal_este_mes = get_date_by_rule(usuario.ciclo_valor, hoy.month, hoy.year)
+        d_regla = ajustar_fecha_habil_sync(d_nominal_este_mes, direccion=direccion)
         if hoy >= d_regla:
             inicio = d_regla
         else:
             prev = hoy - relativedelta(months=1)
-            inicio = get_date_by_rule(usuario.ciclo_valor, prev.month, prev.year)
+            d_nominal_prev = get_date_by_rule(usuario.ciclo_valor, prev.month, prev.year)
+            inicio = ajustar_fecha_habil_sync(d_nominal_prev, direccion=direccion)
         prox = inicio + relativedelta(months=1)
-        fin = get_date_by_rule(usuario.ciclo_valor, prox.month, prox.year) - timedelta(days=1)
+        d_nominal_prox = get_date_by_rule(usuario.ciclo_valor, prox.month, prox.year)
+        proximo_inicio = ajustar_fecha_habil_sync(d_nominal_prox, direccion=direccion)
+        fin = proximo_inicio - timedelta(days=1)
         return inicio, fin
 
     return hoy.replace(day=1), (hoy.replace(day=1) + relativedelta(months=1)) - timedelta(days=1)
