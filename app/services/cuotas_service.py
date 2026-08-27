@@ -112,8 +112,7 @@ def cancelar_grupo(db: Session, grupo_id: any, usuario_id: any) -> GrupoCuotas:
                 presupuesto_service.registrar_impacto_presupuesto(db, tx_hija, revertir=True)
             except Exception:
                 pass
-            # Marcar la transacción hija como cancelada con monto cero
-            tx_hija.estado_verificacion = EstadoVerificacionTransaccion.CANCELADA
+            # Marcar la transacción hija con monto cero y descripción cancelada
             tx_hija.monto = Decimal("0.00")
             tx_hija.descripcion = f"{tx_hija.descripcion} (Cancelada)"
         # Marcar la cuota como pagada con monto real cero

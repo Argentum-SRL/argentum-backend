@@ -4,7 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.transaccion import (
     EstadoVerificacionTransaccion,
@@ -17,21 +17,29 @@ from app.schemas.subcategoria import SubcategoriaRead
 
 
 class InfoCuotas(BaseModel):
-    cantidad_cuotas: int
-    cuota_inicial: int = 1
+    cantidad_cuotas: int = Field(ge=1, le=120, description="Cantidad total de cuotas (1 a 120)")
+    cuota_inicial: int = Field(default=1, ge=1, le=120, description="Número de cuota inicial")
     tiene_interes: bool = False
-    tasa_interes: Decimal | None = None
-    monto_total: Decimal # El monto base sin interes (o el total si no hay interes)
+    tasa_interes: Decimal | None = Field(default=None, ge=0, le=1000, description="Tasa de interés mensual %")
+    monto_total: Decimal = Field(gt=0, max_digits=15, decimal_places=2, description="Monto base total")
     proximo_resumen: bool = False
+
+    @model_validator(mode="after")
+    def validar_cuotas(self) -> InfoCuotas:
+        if self.cuota_inicial > self.cantidad_cuotas:
+            raise ValueError("La cuota inicial no puede ser mayor a la cantidad total de cuotas.")
+        if self.tiene_interes and self.tasa_interes is not None and self.tasa_interes < 0:
+            raise ValueError("La tasa de interés no puede ser negativa.")
+        return self
 
 
 class TransaccionBase(BaseModel):
     usuario_id: UUID | None = None
     tipo: TipoTransaccion
-    monto: Decimal
+    monto: Decimal = Field(gt=0, max_digits=15, decimal_places=2, description="Monto mayor a 0")
     moneda: Moneda
     fecha: date
-    descripcion: str
+    descripcion: str = Field(min_length=1, max_length=300)
     categoria_id: UUID | None = None
     subcategoria_id: UUID | None = None
     metodo_pago: MetodoPago | None = None
@@ -46,6 +54,14 @@ class TransaccionBase(BaseModel):
     origen: OrigenTransaccion
     estado_verificacion: EstadoVerificacionTransaccion | None = None
 
+    @field_validator("descripcion")
+    @classmethod
+    def validar_descripcion(cls, v: str) -> str:
+        clean = v.strip()
+        if not clean:
+            raise ValueError("La descripción no puede estar vacía.")
+        return clean
+
 
 class TransaccionCreate(TransaccionBase):
     info_cuotas: InfoCuotas | None = None
@@ -53,10 +69,10 @@ class TransaccionCreate(TransaccionBase):
 
 class TransaccionUpdate(BaseModel):
     tipo: TipoTransaccion | None = None
-    monto: Decimal | None = None
+    monto: Decimal | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
     moneda: Moneda | None = None
     fecha: date | None = None
-    descripcion: str | None = None
+    descripcion: str | None = Field(default=None, min_length=1, max_length=300)
     categoria_id: UUID | None = None
     subcategoria_id: UUID | None = None
     metodo_pago: MetodoPago | None = None
@@ -70,6 +86,16 @@ class TransaccionUpdate(BaseModel):
     grupo_cuotas_id: UUID | None = None
     origen: OrigenTransaccion | None = None
     estado_verificacion: EstadoVerificacionTransaccion | None = None
+
+    @field_validator("descripcion")
+    @classmethod
+    def validar_descripcion_update(cls, v: str | None) -> str | None:
+        if v is not None:
+            clean = v.strip()
+            if not clean:
+                raise ValueError("La descripción no puede estar vacía.")
+            return clean
+        return v
 
 
 class TransaccionRead(TransaccionBase):
