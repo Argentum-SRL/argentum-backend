@@ -6,9 +6,20 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 
+from app.models.usuario import Moneda
+from app.models.presupuesto import PeriodoPresupuestoTipo, RenovacionPresupuesto
+
+
 class PresupuestoCategoriaInput(BaseModel):
     categoria_id: Optional[UUID] = None
     subcategoria_id: Optional[UUID] = None
+
+    @field_validator("categoria_id", "subcategoria_id", mode="before")
+    @classmethod
+    def empty_str_to_none(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
 
     @model_validator(mode="after")
     def check_at_least_one(self) -> "PresupuestoCategoriaInput":
@@ -18,20 +29,73 @@ class PresupuestoCategoriaInput(BaseModel):
 
 
 class PresupuestoCreate(BaseModel):
-    nombre: str = Field(..., min_length=1)
-    monto: Decimal = Field(..., gt=0)
-    moneda: str # ARS o USD
-    periodo: str # semanal, quincenal, mensual
-    renovacion: str # automatica, manual
+    nombre: str = Field(..., min_length=1, max_length=100)
+    monto: Decimal = Field(..., gt=0, le=Decimal("999999999999.99"))
+    moneda: Moneda
+    periodo: PeriodoPresupuestoTipo
+    renovacion: RenovacionPresupuesto
     categorias: List[PresupuestoCategoriaInput] = Field(..., min_length=1)
+
+    @field_validator("nombre")
+    @classmethod
+    def validate_nombre(cls, v: str) -> str:
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("El nombre del presupuesto no puede estar vacío")
+        if len(cleaned) > 100:
+            raise ValueError("El nombre no puede superar los 100 caracteres")
+        return cleaned
+
+    @field_validator("categorias")
+    @classmethod
+    def validate_categorias(cls, v: List[PresupuestoCategoriaInput]) -> List[PresupuestoCategoriaInput]:
+        if not v:
+            raise ValueError("Debe seleccionar al menos una categoría")
+        seen = set()
+        deduped = []
+        for cat in v:
+            key = (cat.categoria_id, cat.subcategoria_id)
+            if key not in seen:
+                seen.add(key)
+                deduped.append(cat)
+        return deduped
 
 
 class PresupuestoUpdate(BaseModel):
-    nombre: Optional[str] = None
-    monto: Optional[Decimal] = None
-    moneda: Optional[str] = None
-    renovacion: Optional[str] = None
+    nombre: Optional[str] = Field(None, max_length=100)
+    monto: Optional[Decimal] = Field(None, gt=0, le=Decimal("999999999999.99"))
+    moneda: Optional[Moneda] = None
+    periodo: Optional[PeriodoPresupuestoTipo] = None
+    renovacion: Optional[RenovacionPresupuesto] = None
     categorias: Optional[List[PresupuestoCategoriaInput]] = None
+
+    @field_validator("nombre")
+    @classmethod
+    def validate_nombre_update(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("El nombre del presupuesto no puede estar vacío")
+        if len(cleaned) > 100:
+            raise ValueError("El nombre no puede superar los 100 caracteres")
+        return cleaned
+
+    @field_validator("categorias")
+    @classmethod
+    def validate_categorias_update(cls, v: Optional[List[PresupuestoCategoriaInput]]) -> Optional[List[PresupuestoCategoriaInput]]:
+        if v is None:
+            return None
+        if not v:
+            raise ValueError("Debe seleccionar al menos una categoría")
+        seen = set()
+        deduped = []
+        for cat in v:
+            key = (cat.categoria_id, cat.subcategoria_id)
+            if key not in seen:
+                seen.add(key)
+                deduped.append(cat)
+        return deduped
 
 
 class PresupuestoCategoriaResponse(BaseModel):

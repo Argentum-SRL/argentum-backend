@@ -1,8 +1,8 @@
 from uuid import UUID
 from typing import List, Optional
+from datetime import date, timedelta
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
-from datetime import date
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
@@ -23,7 +23,7 @@ def _map_presupuesto_response(p) -> PresupuestoResponse:
     
     periodo_actual_resp = None
     if periodo_actual:
-        dias_restantes = (periodo_actual.fecha_fin - date.today()).days
+        dias_restantes = max(0, (periodo_actual.fecha_fin - date.today()).days)
         porcentaje_usado = float((periodo_actual.monto_usado / periodo_actual.monto_limite) * 100) if periodo_actual.monto_limite > 0 else 0
         
         periodo_actual_resp = PeriodoPresupuestoResponse(
@@ -40,7 +40,7 @@ def _map_presupuesto_response(p) -> PresupuestoResponse:
 
     categorias_resp = []
     for pc in p.categorias:
-        nombre = pc.subcategoria.nombre if pc.subcategoria else pc.categoria.nombre
+        nombre = pc.subcategoria.nombre if pc.subcategoria else (pc.categoria.nombre if pc.categoria else "")
         categorias_resp.append(PresupuestoCategoriaResponse(
             categoria_id=pc.categoria_id,
             subcategoria_id=pc.subcategoria_id,
@@ -48,27 +48,28 @@ def _map_presupuesto_response(p) -> PresupuestoResponse:
             es_subcategoria=pc.subcategoria_id is not None
         ))
 
-    # Próxima renovación
-    # Si es mensual, el 1 del mes que viene. Si es quincenal, el 16 o el 1 del mes que viene.
-    # En realidad, es fecha_fin + 1 día del periodo actual.
+    # Próxima renovación: fecha_fin + 1 día del periodo actual
     proxima = (periodo_actual.fecha_fin + timedelta(days=1)) if periodo_actual else None
+
+    moneda_val = p.moneda.value if hasattr(p.moneda, "value") else str(p.moneda)
+    periodo_val = p.periodo.value if hasattr(p.periodo, "value") else str(p.periodo)
+    renovacion_val = p.renovacion.value if hasattr(p.renovacion, "value") else str(p.renovacion)
+    estado_val = p.estado.value if hasattr(p.estado, "value") else str(p.estado)
 
     return PresupuestoResponse(
         id=p.id,
         usuario_id=p.usuario_id,
         nombre=p.nombre,
         monto=p.monto,
-        moneda=p.moneda.value,
-        periodo=p.periodo.value,
-        renovacion=p.renovacion.value,
-        estado=p.estado.value,
+        moneda=moneda_val,
+        periodo=periodo_val,
+        renovacion=renovacion_val,
+        estado=estado_val,
         fecha_creacion=p.fecha_creacion,
         categorias=categorias_resp,
         periodo_actual=periodo_actual_resp,
         proxima_renovacion=proxima
     )
-
-from datetime import timedelta
 
 @router.get("", response_model=List[PresupuestoResponse])
 def listar_presupuestos(

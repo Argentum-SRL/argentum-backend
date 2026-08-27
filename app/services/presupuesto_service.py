@@ -12,6 +12,7 @@ from app.models.presupuesto import Presupuesto, PeriodoPresupuestoTipo, Renovaci
 from app.models.presupuesto_categoria import PresupuestoCategoria
 from app.models.periodo_presupuesto import PeriodoPresupuesto
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion
+from app.models.categoria import Categoria, TipoCategoria
 from app.models.subcategoria import Subcategoria
 from app.models.notificacion import TipoNotificacion, NivelNotificacion
 from app.models.usuario import Usuario, Moneda
@@ -19,6 +20,41 @@ from app.schemas.presupuesto import PresupuestoCreate, PresupuestoUpdate
 from app.services.whatsapp_service import enviar_mensaje_whatsapp
 
 logger = logging.getLogger(__name__)
+
+def _validar_categorias_presupuesto(db: Session, categorias_input: List) -> None:
+    if not categorias_input:
+        raise HTTPException(status_code=400, detail="Debe seleccionar al menos una categoría")
+
+    cat_ids = {c.categoria_id for c in categorias_input if c.categoria_id}
+    subcat_ids = {c.subcategoria_id for c in categorias_input if getattr(c, 'subcategoria_id', None)}
+
+    if cat_ids:
+        cats = db.execute(
+            select(Categoria).where(Categoria.id.in_(cat_ids))
+        ).scalars().all()
+        found_cat_ids = {c.id for c in cats}
+        if len(found_cat_ids) != len(cat_ids):
+            raise HTTPException(status_code=404, detail="Categoría no encontrada")
+        for cat in cats:
+            if cat.tipo != TipoCategoria.EGRESO:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Los presupuestos solo pueden asociarse a categorías de egreso"
+                )
+
+    if subcat_ids:
+        subs = db.execute(
+            select(Subcategoria).options(joinedload(Subcategoria.categoria)).where(Subcategoria.id.in_(subcat_ids))
+        ).scalars().all()
+        found_subcat_ids = {s.id for s in subs}
+        if len(found_subcat_ids) != len(subcat_ids):
+            raise HTTPException(status_code=404, detail="Categoría no encontrada")
+        for sub in subs:
+            if sub.categoria and sub.categoria.tipo != TipoCategoria.EGRESO:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Los presupuestos solo pueden asociarse a categorías de egreso"
+                )
 
 def formatear_monto(monto: Decimal) -> str:
     # Formato simple para notificaciones
@@ -56,11 +92,13 @@ def calcular_gasto_en_periodo(
     categorias_input: List, 
     fecha_inicio: date, 
     fecha_fin: date,
-    moneda: Optional[Moneda] = None
+    moneda: Optional[Moneda | str] = None
 ) -> Decimal:
     # categorías_input puede ser PresupuestoCategoriaInput (schema) o PresupuestoCategoria (modelo)
-    cat_ids = [c.categoria_id for c in categorias_input if c.categoria_id]
-    subcat_ids = [c.subcategoria_id for c in categorias_input if c.subcategoria_id]
+    # Regla: Si tiene subcategoria_id especificado, aplica solo a esa subcategoría.
+    # Si tiene categoria_id pero no subcategoria_id, aplica a toda la categoría padre.
+    cat_ids = [c.categoria_id for c in categorias_input if c.categoria_id and not getattr(c, 'subcategoria_id', None)]
+    subcat_ids = [c.subcategoria_id for c in categorias_input if getattr(c, 'subcategoria_id', None)]
     
     query = select(func.sum(Transaccion.monto)).where(
         Transaccion.usuario_id == usuario_id,
@@ -75,7 +113,8 @@ def calcular_gasto_en_periodo(
     )
     
     if moneda is not None:
-        query = query.where(Transaccion.moneda == moneda)
+        moneda_enum = moneda if isinstance(moneda, Moneda) else Moneda(moneda)
+        query = query.where(Transaccion.moneda == moneda_enum)
     
     conditions = []
     if cat_ids:
@@ -96,8 +135,10 @@ def calcular_gasto_en_periodo(
     resultado = db.execute(query).scalar()
     return resultado if resultado else Decimal("0")
 
-def obtener_periodo_activo(db: Session, presupuesto: Presupuesto) -> Optional[PeriodoPresupuesto]:
+def obtener_periodo_activo(db: Optional[Session], presupuesto: Presupuesto) -> Optional[PeriodoPresupuesto]:
     hoy = date.today()
+    if not presupuesto.periodos:
+        return None
     return next(
         (p for p in presupuesto.periodos if p.fecha_inicio <= hoy <= p.fecha_fin),
         None
@@ -120,20 +161,38 @@ def obtener_presupuestos(db: Session, usuario_id: UUID, estado: Optional[str] = 
     return db.execute(query).scalars().all()
 
 def crear_presupuesto(db: Session, usuario_id: UUID, data: PresupuestoCreate) -> Presupuesto:
-    # 2. Crear registro Presupuesto
+    if data.monto <= 0:
+        raise HTTPException(status_code=400, detail="Monto límite debe ser positivo")
+
+    _validar_categorias_presupuesto(db, data.categorias)
+
+    try:
+        moneda_enum = Moneda(data.moneda)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Moneda inválida")
+    try:
+        periodo_enum = PeriodoPresupuestoTipo(data.periodo)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Periodo inválido")
+    try:
+        renovacion_enum = RenovacionPresupuesto(data.renovacion)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Tipo de renovación inválido")
+
+    # 1. Crear registro Presupuesto
     nuevo_presupuesto = Presupuesto(
         usuario_id=usuario_id,
         nombre=data.nombre,
         monto=data.monto,
-        moneda=data.moneda,
-        periodo=data.periodo,
-        renovacion=data.renovacion,
+        moneda=moneda_enum,
+        periodo=periodo_enum,
+        renovacion=renovacion_enum,
         estado=EstadoPresupuesto.ACTIVO
     )
     db.add(nuevo_presupuesto)
     db.flush()
     
-    # 3. Crear registros PresupuestoCategoria
+    # 2. Crear registros PresupuestoCategoria
     for cat_data in data.categorias:
         pc = PresupuestoCategoria(
             presupuesto_id=nuevo_presupuesto.id,
@@ -142,15 +201,15 @@ def crear_presupuesto(db: Session, usuario_id: UUID, data: PresupuestoCreate) ->
         )
         db.add(pc)
     
-    # 4. Calcular fechas del primer periodo
-    fecha_inicio, fecha_fin = calcular_fechas_periodo(data.periodo, date.today())
+    # 3. Calcular fechas del primer periodo
+    fecha_inicio, fecha_fin = calcular_fechas_periodo(data.periodo.value if hasattr(data.periodo, "value") else str(data.periodo), date.today())
     
-    # 5. Calcular monto_usado inicial
+    # 4. Calcular monto_usado inicial
     monto_usado = calcular_gasto_en_periodo(
-        db, usuario_id, data.categorias, fecha_inicio, fecha_fin, moneda=data.moneda
+        db, usuario_id, data.categorias, fecha_inicio, fecha_fin, moneda=moneda_enum
     )
     
-    # 6. Crear PeriodoPresupuesto
+    # 5. Crear PeriodoPresupuesto
     periodo = PeriodoPresupuesto(
         presupuesto_id=nuevo_presupuesto.id,
         fecha_inicio=fecha_inicio,
@@ -162,13 +221,14 @@ def crear_presupuesto(db: Session, usuario_id: UUID, data: PresupuestoCreate) ->
     db.add(periodo)
     db.commit()
     
+    # 6. Cargar presupuesto completo con relaciones
+    presupuesto_cargado = obtener_presupuesto(db, usuario_id, nuevo_presupuesto.id)
+
     # 7. Verificar alertas iniciales
     if monto_usado > 0:
-        db.refresh(nuevo_presupuesto)
-        verificar_alertas_presupuesto(db, nuevo_presupuesto, periodo)
+        verificar_alertas_presupuesto(db, presupuesto_cargado, periodo)
         
-    db.refresh(nuevo_presupuesto)
-    return nuevo_presupuesto
+    return presupuesto_cargado
 
 def obtener_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto:
     query = (
@@ -191,12 +251,28 @@ def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: Presup
     if data.nombre is not None:
         presupuesto.nombre = data.nombre
     if data.moneda is not None:
-        presupuesto.moneda = data.moneda
+        try:
+            presupuesto.moneda = Moneda(data.moneda)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Moneda inválida")
     if data.renovacion is not None:
-        presupuesto.renovacion = data.renovacion
+        try:
+            presupuesto.renovacion = RenovacionPresupuesto(data.renovacion)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Tipo de renovación inválido")
         
-    recalcular_monto = False
+    periodo_cambio = False
+    if data.periodo is not None and data.periodo != (presupuesto.periodo.value if hasattr(presupuesto.periodo, "value") else str(presupuesto.periodo)):
+        try:
+            presupuesto.periodo = PeriodoPresupuestoTipo(data.periodo)
+            periodo_cambio = True
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Periodo inválido")
+
+    recalcular_monto = data.moneda is not None or periodo_cambio
+
     if data.categorias is not None:
+        _validar_categorias_presupuesto(db, data.categorias)
         from sqlalchemy import delete
         db.execute(delete(PresupuestoCategoria).where(PresupuestoCategoria.presupuesto_id == id))
         for cat_data in data.categorias:
@@ -208,37 +284,43 @@ def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: Presup
             db.add(pc)
         recalcular_monto = True
         
+    periodo_actual = obtener_periodo_activo(db, presupuesto)
+
     if data.monto is not None:
+        if data.monto <= 0:
+            raise HTTPException(status_code=400, detail="Monto límite debe ser positivo")
         presupuesto.monto = data.monto
-        periodo_actual = obtener_periodo_activo(db, presupuesto)
         if periodo_actual:
             periodo_actual.monto_limite = data.monto
             periodo_actual.superado = periodo_actual.monto_usado > periodo_actual.monto_limite
             
-    if recalcular_monto:
-        periodo_actual = obtener_periodo_activo(db, presupuesto)
-        if periodo_actual:
-            periodo_actual.monto_usado = calcular_gasto_en_periodo(
-                db, usuario_id, data.categorias, periodo_actual.fecha_inicio, periodo_actual.fecha_fin, moneda=presupuesto.moneda
-            )
-            periodo_actual.superado = periodo_actual.monto_usado > periodo_actual.monto_limite
+    if periodo_cambio and periodo_actual:
+        fecha_inicio, fecha_fin = calcular_fechas_periodo(presupuesto.periodo.value, date.today())
+        periodo_actual.fecha_inicio = fecha_inicio
+        periodo_actual.fecha_fin = fecha_fin
+
+    if recalcular_monto and periodo_actual:
+        cats_to_calc = data.categorias if data.categorias is not None else presupuesto.categorias
+        periodo_actual.monto_usado = calcular_gasto_en_periodo(
+            db, usuario_id, cats_to_calc, periodo_actual.fecha_inicio, periodo_actual.fecha_fin, moneda=presupuesto.moneda
+        )
+        periodo_actual.superado = periodo_actual.monto_usado > periodo_actual.monto_limite
 
     db.commit()
-    db.refresh(presupuesto)
     
-    if data.monto is not None or recalcular_monto:
-        periodo_actual = obtener_periodo_activo(db, presupuesto)
-        if periodo_actual:
-            verificar_alertas_presupuesto(db, presupuesto, periodo_actual)
+    presupuesto_cargado = obtener_presupuesto(db, usuario_id, id)
+    periodo_actual_cargado = obtener_periodo_activo(db, presupuesto_cargado)
+
+    if (data.monto is not None or recalcular_monto) and periodo_actual_cargado:
+        verificar_alertas_presupuesto(db, presupuesto_cargado, periodo_actual_cargado)
             
-    return presupuesto
+    return presupuesto_cargado
 
 def pausar_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto:
     presupuesto = obtener_presupuesto(db, usuario_id, id)
     presupuesto.estado = EstadoPresupuesto.PAUSADO
     db.commit()
-    db.refresh(presupuesto)
-    return presupuesto
+    return obtener_presupuesto(db, usuario_id, id)
 
 def reanudar_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto:
     presupuesto = obtener_presupuesto(db, usuario_id, id)
@@ -248,7 +330,8 @@ def reanudar_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto
     periodo_actual = obtener_periodo_activo(db, presupuesto)
     
     if not periodo_actual:
-        fecha_inicio, fecha_fin = calcular_fechas_periodo(presupuesto.periodo, hoy)
+        periodo_val = presupuesto.periodo.value if hasattr(presupuesto.periodo, "value") else str(presupuesto.periodo)
+        fecha_inicio, fecha_fin = calcular_fechas_periodo(periodo_val, hoy)
         monto_usado = calcular_gasto_en_periodo(
             db, usuario_id, presupuesto.categorias, fecha_inicio, fecha_fin, moneda=presupuesto.moneda
         )
@@ -263,8 +346,7 @@ def reanudar_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto
         db.add(nuevo_periodo)
         
     db.commit()
-    db.refresh(presupuesto)
-    return presupuesto
+    return obtener_presupuesto(db, usuario_id, id)
 
 def eliminar_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> None:
     presupuesto = obtener_presupuesto(db, usuario_id, id)
@@ -314,11 +396,16 @@ def registrar_impacto_presupuesto(db: Session, transaccion: Transaccion, reverti
         if transaccion.moneda != presu.moneda:
             continue
             
-        aplica = any(
-            (c.categoria_id == tx_cat_id and c.categoria_id is not None) or
-            (c.subcategoria_id == transaccion.subcategoria_id and c.subcategoria_id is not None)
-            for c in presu.categorias
-        )
+        aplica = False
+        for c in presu.categorias:
+            if c.subcategoria_id is not None:
+                if transaccion.subcategoria_id == c.subcategoria_id:
+                    aplica = True
+                    break
+            elif c.categoria_id is not None:
+                if tx_cat_id == c.categoria_id:
+                    aplica = True
+                    break
         
         if not aplica:
             continue
@@ -379,7 +466,7 @@ def verificar_alertas_presupuesto(db: Session, presupuesto: Presupuesto, periodo
         return
 
     # 3. Formatear nombres de las categorías para el mensaje
-    nombres_cats = ", ".join(set([c.categoria.nombre if c.categoria else c.subcategoria.nombre for c in presupuesto.categorias]))
+    nombres_cats = ", ".join(set([c.subcategoria.nombre if c.subcategoria else (c.categoria.nombre if c.categoria else "") for c in presupuesto.categorias]))
     
     if tipo == TipoNotificacion.PRESUPUESTO_AGOTADO:
         mensaje = f"Llevás {formatear_monto(periodo.monto_usado)} de {formatear_monto(periodo.monto_limite)} en {nombres_cats}. Ya superaste el límite."
