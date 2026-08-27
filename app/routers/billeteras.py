@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from typing import List
-
+from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, update, delete, exists
 from sqlalchemy.orm import Session
 
@@ -21,11 +21,20 @@ router = APIRouter(prefix="/billeteras", tags=["billeteras"])
 
 
 class CrearBilleteraRequest(BaseModel):
-    nombre: str
+    nombre: str = Field(..., min_length=1, max_length=100)
     moneda: Moneda
-    saldo_inicial: float = 0.0
+    saldo_inicial: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=2, max_digits=15)
     es_principal: bool = False
     es_efectivo: bool = False
+    bank_id: str | None = Field(default=None, max_length=50)
+
+    @field_validator("nombre")
+    @classmethod
+    def validate_nombre(cls, v: str) -> str:
+        v_clean = v.strip()
+        if not v_clean:
+            raise ValueError("El nombre de la billetera no puede estar vacío.")
+        return v_clean
 
 
 @router.get("", response_model=List[BilleteraRead])
@@ -125,6 +134,18 @@ def update_billetera(
             update(Billetera).where(Billetera.usuario_id == current_user.id).values(es_principal=False)
         )
 
+    if body.moneda is not None and body.moneda != billetera.moneda:
+        has_tx = db.query(exists().where(Transaccion.billetera_id == billetera_id)).scalar()
+        has_tr = db.query(exists().where(
+            (TransferenciaInterna.billetera_origen_id == billetera_id) |
+            (TransferenciaInterna.billetera_destino_id == billetera_id)
+        )).scalar()
+        if has_tx or has_tr:
+            raise HTTPException(
+                status_code=400,
+                detail="No podés cambiar la moneda de una billetera que ya tiene transacciones o transferencias asociadas."
+            )
+
     if billetera.es_efectivo:
         # Solo se permite cambiar el nombre y el estado
         if body.nombre is not None:
@@ -203,20 +224,14 @@ def delete_billetera(
             nombres = ", ".join(t.nombre for t in tarjetas_bloqueantes)
             raise HTTPException(
                 status_code=400,
-                detail={
-                    "success": False,
-                    "error": {
-                        "code": "BILLETERA_CON_TARJETAS",
-                        "message": (
-                            f"No podés eliminar esta billetera porque "
-                            f"{'la tarjeta' if len(tarjetas_bloqueantes) == 1 else 'las tarjetas'} "
-                            f"{nombres} "
-                            f"{'tiene' if len(tarjetas_bloqueantes) == 1 else 'tienen'} "
-                            f"transacciones registradas. "
-                            f"Archivá o eliminá {'esa tarjeta' if len(tarjetas_bloqueantes) == 1 else 'esas tarjetas'} primero."
-                        )
-                    }
-                }
+                detail=(
+                    f"No podés eliminar esta billetera porque "
+                    f"{'la tarjeta' if len(tarjetas_bloqueantes) == 1 else 'las tarjetas'} "
+                    f"{nombres} "
+                    f"{'tiene' if len(tarjetas_bloqueantes) == 1 else 'tienen'} "
+                    f"transacciones registradas. "
+                    f"Archivá o eliminá {'esa tarjeta' if len(tarjetas_bloqueantes) == 1 else 'esas tarjetas'} primero."
+                )
             )
         
         # Si las tarjetas no tienen consumos ni dependencias, las eliminamos automáticamente
