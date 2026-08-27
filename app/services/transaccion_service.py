@@ -24,12 +24,13 @@ def obtener_transacciones(
     db: Session, 
     usuario_id: UUID, 
     skip: int = 0, 
-    limit: int = 100,
+    limit: int = 500,
     billetera_id: Optional[UUID] = None,
     tipo: Optional[TipoTransaccion] = None,
     fecha_desde: Optional[date] = None,
     fecha_hasta: Optional[date] = None,
     categoria_id: Optional[UUID] = None,
+    categoria_ids: Optional[list] = None,
     subcategoria_id: Optional[UUID] = None,
     moneda: Optional[str] = None,
     estado_verificacion: Optional[str] = None,
@@ -53,7 +54,9 @@ def obtener_transacciones(
         query = query.where(Transaccion.fecha >= fecha_desde)
     if fecha_hasta:
         query = query.where(Transaccion.fecha <= fecha_hasta)
-    if categoria_id:
+    if categoria_ids and len(categoria_ids) > 0:
+        query = query.where(Transaccion.categoria_id.in_(categoria_ids))
+    elif categoria_id:
         query = query.where(Transaccion.categoria_id == categoria_id)
     if subcategoria_id:
         query = query.where(Transaccion.subcategoria_id == subcategoria_id)
@@ -61,14 +64,25 @@ def obtener_transacciones(
         query = query.where(Transaccion.moneda == moneda)
     if estado_verificacion:
         query = query.where(Transaccion.estado_verificacion == estado_verificacion)
-    if busqueda:
+    if busqueda and busqueda.strip():
         from app.models.categoria import Categoria
         from app.models.subcategoria import Subcategoria
-        query = query.outerjoin(Transaccion.categoria).outerjoin(Transaccion.subcategoria).where(
-            or_(
-                Transaccion.descripcion.ilike(f"%{busqueda}%"),
-                Categoria.nombre.ilike(f"%{busqueda}%"),
-                Subcategoria.nombre.ilike(f"%{busqueda}%")
+        from app.models.billetera import Billetera
+        
+        term = busqueda.strip()
+        query = (
+            query
+            .outerjoin(Transaccion.categoria)
+            .outerjoin(Transaccion.subcategoria)
+            .outerjoin(Transaccion.billetera)
+            .where(
+                or_(
+                    Transaccion.descripcion.ilike(f"%{term}%"),
+                    Categoria.nombre.ilike(f"%{term}%"),
+                    Subcategoria.nombre.ilike(f"%{term}%"),
+                    Billetera.nombre.ilike(f"%{term}%"),
+                    Transaccion.metodo_pago.ilike(f"%{term}%")
+                )
             )
         )
     if es_cuota_hija is not None:

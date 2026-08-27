@@ -18,12 +18,13 @@ router = APIRouter(prefix="/transacciones", tags=["transacciones"])
 @router.get("", response_model=List[TransaccionRead])
 def list_transacciones(
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(500, ge=1, le=1000),
     billetera_id: Optional[UUID] = None,
     tipo: Optional[TipoTransaccion] = None,
     fecha_desde: Optional[date] = None,
     fecha_hasta: Optional[date] = None,
     categoria_id: Optional[UUID] = None,
+    categoria_ids: Optional[str] = Query(None, description="IDs de categorías separados por coma"),
     subcategoria_id: Optional[UUID] = None,
     moneda: Optional[str] = None,
     estado_verificacion: Optional[str] = None,
@@ -35,6 +36,17 @@ def list_transacciones(
     """
     Lista las transacciones del usuario actual con filtros avanzados.
     """
+    parsed_cat_ids: Optional[List[UUID]] = None
+    if categoria_ids:
+        parsed_cat_ids = []
+        for raw_id in categoria_ids.split(","):
+            raw_id = raw_id.strip()
+            if raw_id:
+                try:
+                    parsed_cat_ids.append(UUID(raw_id))
+                except ValueError:
+                    pass
+
     return transaccion_service.obtener_transacciones(
         db=db,
         usuario_id=current_user.id,
@@ -45,6 +57,7 @@ def list_transacciones(
         fecha_desde=fecha_desde,
         fecha_hasta=fecha_hasta,
         categoria_id=categoria_id,
+        categoria_ids=parsed_cat_ids,
         subcategoria_id=subcategoria_id,
         moneda=moneda,
         estado_verificacion=estado_verificacion,
