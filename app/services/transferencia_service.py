@@ -1,4 +1,5 @@
 import logging
+from decimal import Decimal
 from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy import select, desc
@@ -33,6 +34,9 @@ def obtener_transferencia(db: Session, usuario_id: UUID, transferencia_id: UUID)
 
 
 def crear_transferencia(db: Session, usuario_id: UUID, data: TransferenciaInternaCreate) -> TransferenciaInterna:
+    if data.monto <= Decimal("0"):
+        raise HTTPException(status_code=400, detail="El monto de la transferencia debe ser mayor a cero.")
+
     if data.billetera_origen_id == data.billetera_destino_id:
         raise HTTPException(status_code=400, detail="La billetera de origen y destino no pueden ser la misma.")
 
