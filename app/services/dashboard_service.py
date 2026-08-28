@@ -73,9 +73,10 @@ def get_ciclo_fechas(usuario: Usuario, hoy: date) -> tuple[date, date]:
             dia = 1
         
         # Calcular inicio del ciclo actual con ajuste de día hábil
-        if hoy.day >= dia:
+        inicio_candidato_este_mes = calcular_fecha_cobro_sync(dia, hoy.month, hoy.year, direccion=direccion)
+        if hoy >= inicio_candidato_este_mes:
             # El ciclo comenzó este mes
-            inicio = calcular_fecha_cobro_sync(dia, hoy.month, hoy.year, direccion=direccion)
+            inicio = inicio_candidato_este_mes
         else:
             # El ciclo comenzó el mes anterior
             prev_month = hoy - relativedelta(months=1)
