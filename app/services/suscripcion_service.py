@@ -13,6 +13,7 @@ from app.models.historial_suscripcion import HistorialSuscripcion
 from app.models.billetera import Billetera
 from app.models.tarjeta_credito import TarjetaCredito
 from app.schemas.suscripcion import SuscripcionCreate, SuscripcionUpdate, ActualizarPrecioRequest, SuscripcionResponse
+from app.utils.fecha import hoy_argentina
 
 DIVISORES = {
     'mensual':    1,
@@ -44,7 +45,7 @@ def obtener_precio_vigente(
     fecha: date | None = None
 ) -> HistorialSuscripcion | None:
     if fecha is None:
-        fecha = date.today()
+        fecha = hoy_argentina()
     
     # Buscamos el precio cuya fecha de vigencia sea <= a la fecha consultada, 
     # ordenando por vigente_desde DESC y fecha_creacion DESC como desempate.
@@ -105,7 +106,7 @@ def crear_suscripcion(db: Session, usuario_id: UUID, data: SuscripcionCreate) ->
         suscripcion_id=nueva_suscripcion.id,
         monto=data.monto,
         moneda=data.moneda,
-        vigente_desde=data.vigente_desde or date.today()
+        vigente_desde=data.vigente_desde or hoy_argentina()
     )
     db.add(primer_precio)
     db.commit()

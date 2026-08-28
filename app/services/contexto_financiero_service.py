@@ -1,7 +1,7 @@
 from decimal import Decimal
 from uuid import UUID
 from typing import List, Optional
-from datetime import date, datetime, timezone, timedelta
+from datetime import date, timedelta
 from sqlalchemy import select, or_, and_
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from app.models.tarjeta_credito import TarjetaCredito
 from app.models.transaccion import Transaccion
 from app.services.suscripcion_service import obtener_suscripciones
 from app.services.dashboard_service import get_ciclo_fechas
+from app.utils.fecha import hoy_argentina
 
 def _calcular_saldo_disponible_sync(
     db: Session,
@@ -41,7 +42,7 @@ def _calcular_saldo_disponible_sync(
             total_billeteras_usd += w.saldo_actual
 
     # 2. Ciclo financiero y fechas
-    hoy = (datetime.now(timezone.utc) - timedelta(hours=3)).date()
+    hoy = hoy_argentina()
     fecha_inicio_curr, fecha_fin_curr = get_ciclo_fechas(usuario, hoy)
     fecha_inicio_prox, fecha_fin_prox = get_ciclo_fechas(usuario, fecha_fin_curr + timedelta(days=1))
 

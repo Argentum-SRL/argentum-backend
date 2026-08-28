@@ -418,8 +418,8 @@ async def lifespan(app: FastAPI):
 
     # Pre-cargar feriados argentinos en cache y BD
     from app.services.dias_habiles_service import obtener_feriados_argentina
-    from datetime import date as _date
-    anio_actual = _date.today().year
+    from app.utils.fecha import hoy_argentina
+    anio_actual = hoy_argentina().year
     for anio in (anio_actual, anio_actual + 1):
         try:
             feriados = await obtener_feriados_argentina(anio)

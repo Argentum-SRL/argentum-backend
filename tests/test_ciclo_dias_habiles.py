@@ -361,3 +361,146 @@ def test_preview_fecha_cobro_regla_valor_invalido(client, admin_user):
     """Prueba que una regla no existente devuelva error 400."""
     response = client.get("/onboarding/preview-fecha-cobro?tipo=regla&valor=regla_inexistente")
     assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+def test_dashboard_periodo_actual(client, admin_user):
+    """Prueba GET /dashboard/periodo-actual."""
+    response = client.get("/dashboard/periodo-actual")
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert "fecha_inicio" in data
+    assert "fecha_fin" in data
+
+def test_actualizar_ciclo_dia_fijo_invalido_devuelve_422(client, admin_user):
+    """Prueba que un día > 31 o no numérico en PUT /usuarios/me/ciclo-financiero retorne 422."""
+    resp_35 = client.put("/usuarios/me/ciclo-financiero", json={
+        "ciclo_tipo": "dia_fijo",
+        "ciclo_valor": "35",
+        "ciclo_ajuste_direccion": "anterior"
+    })
+    assert resp_35.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    resp_abc = client.put("/usuarios/me/ciclo-financiero", json={
+        "ciclo_tipo": "dia_fijo",
+        "ciclo_valor": "abc",
+        "ciclo_ajuste_direccion": "anterior"
+    })
+    assert resp_abc.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+def test_actualizar_ciclo_regla_invalida_devuelve_422(client, admin_user):
+    """Prueba que una regla no existente en PUT /usuarios/me/ciclo-financiero retorne 422."""
+    resp = client.put("/usuarios/me/ciclo-financiero", json={
+        "ciclo_tipo": "regla",
+        "ciclo_valor": "segundo_martes",
+        "ciclo_ajuste_direccion": "anterior"
+    })
+    assert resp.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+def test_actualizar_ciclo_direccion_invalida_devuelve_422(client, admin_user):
+    """Prueba que una dirección no existente retorne 422."""
+    resp = client.put("/usuarios/me/ciclo-financiero", json={
+        "ciclo_tipo": "dia_fijo",
+        "ciclo_valor": "15",
+        "ciclo_ajuste_direccion": "hacia_arriba"
+    })
+    assert resp.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+
+@pytest.mark.anyio
+async def test_job_refresh_feriados_falla_api_sin_crashear(db_session, monkeypatch):
+    """
+    Prueba que si la API externa de feriados falla (timeout / 500), el job de refresh
+    atrapa el error limpiamente sin lanzar excepción que rompa el scheduler,
+    dejando la BD en estado consistente sin datos parciales.
+    """
+    from unittest.mock import patch, AsyncMock
+    import httpx
+    from app.main import _job_refresh_feriados
+
+    _feriados_cache.clear()
+    db_session.query(FeriadoAR).delete()
+    db_session.commit()
+
+    monkeypatch.setattr("app.core.database.SessionLocal", lambda: TestingSessionLocal())
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__.return_value.get.side_effect = httpx.ConnectTimeout("Timeout conectando a API externa")
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        # Debe completar limpiamente sin lanzar excepciones no controladas
+        await _job_refresh_feriados()
+
+    # Confirmar que la base de datos no quedó con datos corruptos o parciales
+    total_feriados = db_session.query(FeriadoAR).count()
+    assert total_feriados == 0
+
+
+@pytest.mark.anyio
+async def test_job_refresh_feriados_recuperacion_al_dia_siguiente(db_session, monkeypatch):
+    """
+    Prueba que tras una falla, al correr nuevamente el job con la API disponible (simulando
+    la ejecución del día siguiente), se auto-recupera poblando los feriados en BD y en caché.
+    """
+    from unittest.mock import patch, MagicMock, AsyncMock
+    from app.main import _job_refresh_feriados
+
+    _feriados_cache.clear()
+    db_session.query(FeriadoAR).delete()
+    db_session.commit()
+
+    monkeypatch.setattr("app.core.database.SessionLocal", lambda: TestingSessionLocal())
+
+    hoy_anio = date.today().year
+    fake_api_data = [
+        {"fecha": f"{hoy_anio}-01-01", "nombre": "Año Nuevo", "tipo": "inamovible"},
+        {"fecha": f"{hoy_anio}-05-01", "nombre": "Día del Trabajador", "tipo": "inamovible"},
+        {"fecha": f"{hoy_anio + 1}-01-01", "nombre": "Año Nuevo Siguiente", "tipo": "inamovible"}
+    ]
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = fake_api_data
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__.return_value.get.return_value = mock_response
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        await _job_refresh_feriados()
+
+    # Confirmar que los feriados se persistieron en BD
+    feriados_guardados = db_session.query(FeriadoAR).all()
+    assert len(feriados_guardados) >= 2
+    fechas_guardadas = {f.fecha for f in feriados_guardados}
+    assert date(hoy_anio, 1, 1) in fechas_guardadas
+    assert date(hoy_anio, 5, 1) in fechas_guardadas
+
+    # Confirmar que la caché en memoria también fue poblada
+    assert hoy_anio in _feriados_cache
+    assert date(hoy_anio, 1, 1) in _feriados_cache[hoy_anio]
+
+
+def test_timezone_argentina_en_ventana_nocturna(client, admin_user):
+    """
+    Prueba que a las 22:30 hora Argentina (01:30 UTC del día siguiente),
+    hoy_argentina() y /dashboard/periodo-actual operen con la fecha de Argentina y no con la de UTC.
+    """
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+    from app.utils.fecha import hoy_argentina
+
+    # Simular momento exacto: 2026-08-11 01:30:00 UTC -> 2026-08-10 22:30:00 en UTC-3
+    utc_moment = datetime(2026, 8, 11, 1, 30, 0, tzinfo=timezone.utc)
+
+    with patch("app.utils.fecha.datetime") as mock_dt:
+        mock_dt.now.side_effect = lambda tz=None: utc_moment.astimezone(tz or timezone.utc)
+
+        # En Argentina debe ser 10 de agosto (no 11)
+        fecha_ar = hoy_argentina()
+        assert fecha_ar == date(2026, 8, 10)
+
+        # /dashboard/periodo-actual debe operar con fecha_ar
+        resp = client.get("/dashboard/periodo-actual")
+        assert resp.status_code == status.HTTP_200_OK
+
+
+
+

@@ -60,7 +60,7 @@ class Transaccion(Base):
     monto: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     moneda: Mapped[Moneda] = mapped_column(SAEnum(Moneda, values_callable=lambda obj: [e.value for e in obj], name="moneda_enum"), nullable=False)
     fecha: Mapped[date] = mapped_column(Date, nullable=False)
-    descripcion: Mapped[str] = mapped_column(String(300), nullable=False)
+    descripcion: Mapped[str] = mapped_column(String(300), nullable=False, default="")
     categoria_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("categorias.id"), nullable=True
     )

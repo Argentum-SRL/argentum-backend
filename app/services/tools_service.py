@@ -1,6 +1,6 @@
 import logging
 import requests
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, or_
@@ -10,6 +10,7 @@ from app.schemas.tools import InstallmentConvenienceRequest
 from app.models.usuario import Usuario, Moneda
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion, MetodoPago
 from app.services.dashboard_service import get_ciclo_fechas
+from app.utils.fecha import hoy_argentina
 
 
 logger = logging.getLogger("tools_service")
@@ -348,8 +349,8 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
     if not usuario:
         return {}
 
-    # Fecha actual ajustada (zona horaria -3 como en dashboard_service.py)
-    hoy = (datetime.now(timezone.utc) - timedelta(hours=3)).date()
+    # Fecha actual en zona horaria Argentina
+    hoy = hoy_argentina()
     fecha_inicio_curr, fecha_fin_curr = get_ciclo_fechas(usuario, hoy)
 
     # 1. Saldo disponible actual mediante servicio canónico

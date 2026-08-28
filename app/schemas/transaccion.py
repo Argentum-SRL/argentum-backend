@@ -39,7 +39,7 @@ class TransaccionBase(BaseModel):
     monto: Decimal = Field(gt=0, max_digits=15, decimal_places=2, description="Monto mayor a 0")
     moneda: Moneda
     fecha: date
-    descripcion: str = Field(min_length=1, max_length=300)
+    descripcion: str = Field(default="", max_length=300)
     categoria_id: UUID | None = None
     subcategoria_id: UUID | None = None
     metodo_pago: MetodoPago | None = None
@@ -54,17 +54,14 @@ class TransaccionBase(BaseModel):
     origen: OrigenTransaccion
     estado_verificacion: EstadoVerificacionTransaccion | None = None
 
-    @field_validator("descripcion")
-    @classmethod
-    def validar_descripcion(cls, v: str) -> str:
-        clean = v.strip()
-        if not clean:
-            raise ValueError("La descripción no puede estar vacía.")
-        return clean
-
 
 class TransaccionCreate(TransaccionBase):
     info_cuotas: InfoCuotas | None = None
+
+    @field_validator("descripcion")
+    @classmethod
+    def validar_descripcion(cls, v: str) -> str:
+        return v.strip() if v else ""
 
 
 class TransaccionUpdate(BaseModel):
@@ -72,7 +69,7 @@ class TransaccionUpdate(BaseModel):
     monto: Decimal | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
     moneda: Moneda | None = None
     fecha: date | None = None
-    descripcion: str | None = Field(default=None, min_length=1, max_length=300)
+    descripcion: str | None = Field(default=None, max_length=300)
     categoria_id: UUID | None = None
     subcategoria_id: UUID | None = None
     metodo_pago: MetodoPago | None = None
@@ -91,10 +88,7 @@ class TransaccionUpdate(BaseModel):
     @classmethod
     def validar_descripcion_update(cls, v: str | None) -> str | None:
         if v is not None:
-            clean = v.strip()
-            if not clean:
-                raise ValueError("La descripción no puede estar vacía.")
-            return clean
+            return v.strip()
         return v
 
 

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 
 logger = logging.getLogger(__name__)
 
+from app.utils.fecha import hoy_argentina
 from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
 from app.models.billetera import Billetera
 from app.models.transaccion import Transaccion
@@ -68,7 +69,7 @@ def calcular_primer_vencimiento(
 def calcular_fecha_vencimiento_proximo(tarjeta: TarjetaCredito, hoy: date | None = None) -> date:
     """Devuelve la fecha del próximo vencimiento de la tarjeta a partir de hoy."""
     if hoy is None:
-        hoy = date.today()
+        hoy = hoy_argentina()
     ultimo_dia_mes = monthrange(hoy.year, hoy.month)[1]
     dia_venc = min(tarjeta.dia_vencimiento, ultimo_dia_mes)
     venc = date(hoy.year, hoy.month, dia_venc)
@@ -216,7 +217,7 @@ def calcular_fecha_cierre_de_vencimiento(vencimiento: date, dia_cierre: int, dia
 
 
 def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preloaded: list[Cuota] = None) -> ResumenTarjeta:
-    hoy = date.today()
+    hoy = hoy_argentina()
 
     # ── Calcular fecha de vencimiento próximo ─────────────
     # Usar el último día del mes si dia_vencimiento es mayor
@@ -403,7 +404,7 @@ def pagar_resumen_tarjeta(
     if fecha_resumen is not None:
         limite_vencimiento = fecha_resumen
     else:
-        hoy = date.today()
+        hoy = hoy_argentina()
         limite_vencimiento = calcular_fecha_vencimiento_proximo(tarjeta, hoy)
 
     # 3. Obtener todas las cuotas de esta tarjeta que no estén pagadas y venzan en o antes del límite
@@ -508,7 +509,7 @@ def calcular_presion_futura(
     from sqlalchemy.orm import joinedload
     from app.models.usuario import Moneda
 
-    hoy = date.today()
+    hoy = hoy_argentina()
     fecha_limite = hoy + relativedelta(months=meses)
 
     # Obtener tarjetas activas del usuario

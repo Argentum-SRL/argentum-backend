@@ -1,9 +1,10 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional
 from uuid import UUID
 from sqlalchemy.orm import Session
 from app.models.notificacion import Notificacion, TipoNotificacion, NivelNotificacion
 from app.models.configuracion_notificacion import ConfiguracionNotificacion
+from app.utils.fecha import hoy_argentina
 import logging
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ def crear_notificacion(
     Si grupo_agrupacion_override se pasa, usa ese valor directamente.
     Retorna None si ya existe una notificación con el mismo grupo hoy.
     """
-    hoy_str = date.today().strftime('%Y%m%d')
+    hoy_str = hoy_argentina().strftime('%Y%m%d')
 
     if grupo_agrupacion_override:
         grupo = grupo_agrupacion_override
@@ -82,7 +83,7 @@ def obtener_notificaciones(
         query = query.filter(Notificacion.leida == False)
 
     # Excluir silenciadas activas
-    ahora = datetime.utcnow()
+    ahora = datetime.now(timezone.utc)
     query = query.filter(
         (Notificacion.silenciada_hasta == None) |
         (Notificacion.silenciada_hasta < ahora)
@@ -92,7 +93,7 @@ def obtener_notificaciones(
 
 
 def contar_no_leidas(db: Session, usuario_id: UUID) -> int:
-    ahora = datetime.utcnow()
+    ahora = datetime.now(timezone.utc)
     return db.query(Notificacion).filter(
         Notificacion.usuario_id == usuario_id,
         Notificacion.leida == False,
@@ -140,7 +141,7 @@ def silenciar_notificacion(
     ).first()
     if not notif:
         raise ValueError("Notificación no encontrada")
-    notif.silenciada_hasta = datetime.utcnow() + timedelta(hours=horas)
+    notif.silenciada_hasta = datetime.now(timezone.utc) + timedelta(hours=horas)
     db.commit()
     db.refresh(notif)
     return notif

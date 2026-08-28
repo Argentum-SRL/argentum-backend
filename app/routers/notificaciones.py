@@ -1,7 +1,7 @@
 import json
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -158,7 +158,7 @@ async def sse_notificaciones(
         # Enviar primer mensaje de conexión exitosa
         yield "data: {\"event\": \"connected\"}\n\n"
 
-        ultimo_check = datetime.utcnow()
+        ultimo_check = datetime.now(timezone.utc)
         while True:
             await asyncio.sleep(5)
 
@@ -174,13 +174,13 @@ async def sse_notificaciones(
                         Notificacion.created_at > ultimo_check,
                         Notificacion.leida == False,
                         Notificacion.archivada == False,
-                        (Notificacion.silenciada_hasta == None) | (Notificacion.silenciada_hasta < datetime.utcnow())
+                        (Notificacion.silenciada_hasta == None) | (Notificacion.silenciada_hasta < datetime.now(timezone.utc))
                     )
                     .all()
                 )
 
                 if nuevas:
-                    ultimo_check = datetime.utcnow()
+                    ultimo_check = datetime.now(timezone.utc)
                     for n in nuevas:
                         data_json = {
                             "id": str(n.id),

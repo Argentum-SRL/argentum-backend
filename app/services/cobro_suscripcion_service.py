@@ -10,6 +10,7 @@ from app.models.tarjeta_credito import TarjetaCredito
 from app.models.billetera import Billetera
 from app.services.suscripcion_service import obtener_precio_vigente, calcular_siguiente_cobro
 from app.services import cuotas_service, tarjeta_service
+from app.utils.fecha import hoy_argentina
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +127,7 @@ def _cobrar_suscripcion(db: Session, suscripcion: Suscripcion, hoy: date, primer
 
 
 def procesar_cobros_suscripciones(db: Session) -> None:
-    hoy = date.today()
+    hoy = hoy_argentina()
 
     suscripciones = db.query(Suscripcion).filter(
         Suscripcion.estado == EstadoSuscripcion.ACTIVA,

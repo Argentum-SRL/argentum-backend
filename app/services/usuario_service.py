@@ -59,15 +59,15 @@ def actualizar_datos_personales(
         raise HTTPException(status_code=400, detail="Nombre y apellido son obligatorios")
     
     if datos.fecha_nacimiento:
-        from datetime import date
-        if datos.fecha_nacimiento > date.today():
+        from app.utils.fecha import hoy_argentina
+        hoy = hoy_argentina()
+        if datos.fecha_nacimiento > hoy:
             raise HTTPException(status_code=400, detail="La fecha de nacimiento no puede ser futura.")
         
         # Decisión de diseño: fecha_nacimiento es obligatoria en el flujo de onboarding (datos personales),
         # por lo que se valida siempre allí. En la actualización del perfil, es opcional en el esquema para permitir
         # actualizaciones parciales, pero si se provee una fecha, se aplica la validación de manera estricta.
         # Esto garantiza el cumplimiento legal sin romper la flexibilidad de la API.
-        hoy = date.today()
         edad = hoy.year - datos.fecha_nacimiento.year - ((hoy.month, hoy.day) < (datos.fecha_nacimiento.month, datos.fecha_nacimiento.day))
         if edad < 18:
             raise HTTPException(status_code=400, detail="Tenés que ser mayor de 18 años para crear una cuenta en Argentum")
@@ -241,10 +241,8 @@ def actualizar_ciclo_financiero(
         except ValueError:
             raise HTTPException(status_code=400, detail="El día fijo debe ser un número entre 1 y 31")
     elif datos.ciclo_tipo == CicloTipo.REGLA:
-        reglas_validas = [
-            'primer_lunes', 'primer_martes', 'primer_miercoles', 'primer_jueves', 'primer_viernes',
-            'ultimo_lunes', 'ultimo_martes', 'ultimo_miercoles', 'ultimo_jueves', 'ultimo_viernes'
-        ]
+        from app.models.usuario import CicloRegla
+        reglas_validas = {e.value for e in CicloRegla}
         if datos.ciclo_valor not in reglas_validas:
             raise HTTPException(status_code=400, detail="Regla de ciclo no válida")
     
@@ -252,6 +250,9 @@ def actualizar_ciclo_financiero(
     usuario.ciclo_valor = datos.ciclo_valor
     if datos.ciclo_ajuste_direccion is not None:
         usuario.ciclo_ajuste_direccion = datos.ciclo_ajuste_direccion
+    elif usuario.ciclo_ajuste_direccion is None:
+        from app.models.usuario import CicloAjusteDireccion
+        usuario.ciclo_ajuste_direccion = CicloAjusteDireccion.ANTERIOR
     db.commit()
     db.refresh(usuario)
     return usuario

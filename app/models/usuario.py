@@ -42,6 +42,19 @@ class CicloTipo(str, Enum):
     REGLA = "regla"
 
 
+class CicloRegla(str, Enum):
+    PRIMER_LUNES = "primer_lunes"
+    PRIMER_MARTES = "primer_martes"
+    PRIMER_MIERCOLES = "primer_miercoles"
+    PRIMER_JUEVES = "primer_jueves"
+    PRIMER_VIERNES = "primer_viernes"
+    ULTIMO_LUNES = "ultimo_lunes"
+    ULTIMO_MARTES = "ultimo_martes"
+    ULTIMO_MIERCOLES = "ultimo_miercoles"
+    ULTIMO_JUEVES = "ultimo_jueves"
+    ULTIMO_VIERNES = "ultimo_viernes"
+
+
 class CicloAjusteDireccion(str, Enum):
     ANTERIOR = "anterior"
     POSTERIOR = "posterior"

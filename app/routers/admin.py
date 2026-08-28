@@ -218,10 +218,10 @@ async def refresh_feriados_admin(
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Fuerza la recarga de feriados de un año desde la API externa y actualiza BD y caché."""
-    from datetime import date
     from app.services.dias_habiles_service import recargar_feriados_anio
+    from app.utils.fecha import hoy_argentina
 
-    target_anio = anio or date.today().year
+    target_anio = anio or hoy_argentina().year
     logger.info("[ADMIN] Admin %s (%s) solicitó refresh de feriados para año %s", admin.id, admin.email, target_anio)
 
     res = await recargar_feriados_anio(target_anio)

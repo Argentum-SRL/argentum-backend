@@ -4,7 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.transaccion_recurrente import (
     EstadoTransaccionRecurrente,
@@ -19,7 +19,7 @@ class TransaccionRecurrenteBase(BaseModel):
     tipo: TipoTransaccionRecurrente
     monto: Decimal
     moneda: Moneda
-    descripcion: str
+    descripcion: str = Field(default="", max_length=300)
     categoria_id: UUID | None = None
     subcategoria_id: UUID | None = None
     billetera_id: UUID

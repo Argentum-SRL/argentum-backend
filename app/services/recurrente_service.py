@@ -11,6 +11,7 @@ from app.models.billetera import Billetera
 from app.models.transaccion_recurrente import TransaccionRecurrente, EstadoTransaccionRecurrente
 from app.schemas.transaccion_recurrente import TransaccionRecurrenteCreate, TransaccionRecurrenteUpdate
 from app.services import presupuesto_service
+from app.utils.fecha import hoy_argentina
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,7 @@ def procesar_recurrentes(db: Session):
     """
     Genera transacciones reales a partir de las plantillas recurrentes (Optimizado).
     """
-    hoy = date.today()
+    hoy = hoy_argentina()
     ultimo_dia_mes = calendar.monthrange(hoy.year, hoy.month)[1]
     
     recurrentes = db.execute(

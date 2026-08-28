@@ -80,3 +80,18 @@ def get_subcategorias_gasto(
     ids_lista = [uuid.UUID(i.strip()) for i in billetera_ids.split(',')] if billetera_ids else None
     return dashboard_service.get_subcategorias_gasto(db, current_user, categoria_id, billetera_ids=ids_lista)
 
+@router.get("/periodo-actual")
+def get_periodo_actual(
+    current_user: Usuario = Depends(get_current_user)
+) -> Any:
+    """
+    Retorna el rango de fechas (fecha_inicio, fecha_fin) del ciclo financiero actual del usuario autenticado.
+    """
+    from app.utils.fecha import hoy_argentina
+    fecha_inicio, fecha_fin = dashboard_service.get_ciclo_fechas(current_user, hoy_argentina())
+    return {
+        "fecha_inicio": fecha_inicio.isoformat(),
+        "fecha_fin": fecha_fin.isoformat()
+    }
+
+

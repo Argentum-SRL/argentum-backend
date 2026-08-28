@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Literal
-from pydantic import BaseModel, Field
-from app.models.usuario import CicloTipo, Moneda, Sexo
+from pydantic import BaseModel, Field, model_validator
+from typing_extensions import Self
+from app.models.usuario import CicloTipo, CicloRegla, Moneda, Sexo, CicloAjusteDireccion
 from app.schemas.usuario import UsuarioRead
 
 class DatosActuales(BaseModel):
@@ -12,6 +12,7 @@ class DatosActuales(BaseModel):
     moneda_principal: str | None = None
     ciclo_tipo: str | None = None
     ciclo_valor: str | None = None
+    ciclo_ajuste_direccion: str | None = None
     fecha_nacimiento: date | None = None
     sexo: str | None = None
 
@@ -45,6 +46,24 @@ class DatosPersonalesRequest(BaseModel):
 class CicloFinancieroRequest(BaseModel):
     ciclo_tipo: CicloTipo
     ciclo_valor: str
+    ciclo_ajuste_direccion: CicloAjusteDireccion | None = None
+
+    @model_validator(mode="after")
+    def validar_ciclo_polimorfico(self) -> Self:
+        if self.ciclo_tipo == CicloTipo.DIA_FIJO:
+            try:
+                dia = int(self.ciclo_valor)
+                if not (1 <= dia <= 31):
+                    raise ValueError("El día fijo debe ser un número entero entre 1 y 31.")
+            except ValueError:
+                raise ValueError("El día fijo debe ser un número entero entre 1 y 31.")
+        elif self.ciclo_tipo == CicloTipo.REGLA:
+            reglas_validas = {e.value for e in CicloRegla}
+            if self.ciclo_valor not in reglas_validas:
+                raise ValueError(f"Regla de ciclo no válida. Opciones válidas: {', '.join(sorted(reglas_validas))}")
+        return self
+
+
 
 class MonedaRequest(BaseModel):
     moneda_principal: Moneda
