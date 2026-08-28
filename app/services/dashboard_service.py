@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -12,6 +12,7 @@ from sqlalchemy import and_, func, select, desc, or_, case, literal, null, Strin
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
+from app.utils.fecha import hoy_argentina
 from app.models.usuario import Usuario, CicloTipo, Moneda
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion, MetodoPago
@@ -116,7 +117,7 @@ def get_dashboard_resumen(
     """
     Retorna el resumen optimizado del dashboard en máximo 2 queries DB.
     """
-    hoy = (datetime.now(timezone.utc) - timedelta(hours=3)).date()
+    hoy = hoy_argentina()
     fecha_inicio, fecha_fin = (fecha_desde_override, fecha_hasta_override) if (fecha_desde_override and fecha_hasta_override) else get_ciclo_fechas(usuario, hoy)
     fecha_inicio_ant, fecha_fin_ant = get_ciclo_fechas(usuario, fecha_inicio - timedelta(days=1))
     fecha_inicio_prox, fecha_fin_prox = get_ciclo_fechas(usuario, fecha_fin + timedelta(days=1))
@@ -491,7 +492,7 @@ def get_subcategorias_gasto(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid UUID format")
 
-    hoy = (datetime.now(timezone.utc) - timedelta(hours=3)).date()
+    hoy = hoy_argentina()
     fecha_inicio, fecha_fin = get_ciclo_fechas(usuario, hoy)
 
     # 1. Obtener todas las subcategorías activas de la categoría

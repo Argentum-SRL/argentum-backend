@@ -15,6 +15,7 @@ from app.schemas.presupuesto import (
     PresupuestoCategoriaResponse
 )
 from app.services import presupuesto_service
+from app.utils.fecha import hoy_argentina
 
 router = APIRouter(tags=["presupuestos"])
 
@@ -23,7 +24,7 @@ def _map_presupuesto_response(p) -> PresupuestoResponse:
     
     periodo_actual_resp = None
     if periodo_actual:
-        dias_restantes = max(0, (periodo_actual.fecha_fin - date.today()).days)
+        dias_restantes = max(0, (periodo_actual.fecha_fin - hoy_argentina()).days)
         porcentaje_usado = float((periodo_actual.monto_usado / periodo_actual.monto_limite) * 100) if periodo_actual.monto_limite > 0 else 0
         
         periodo_actual_resp = PeriodoPresupuestoResponse(
@@ -144,7 +145,7 @@ def obtener_historial(
     periodos = presupuesto_service.obtener_historial(db, usuario.id, id)
     resp = []
     for p in periodos:
-        dias_restantes = (p.fecha_fin - date.today()).days
+        dias_restantes = (p.fecha_fin - hoy_argentina()).days
         porcentaje_usado = float((p.monto_usado / p.monto_limite) * 100) if p.monto_limite > 0 else 0
         resp.append(PeriodoPresupuestoResponse(
             id=p.id,

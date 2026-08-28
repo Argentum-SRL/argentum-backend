@@ -18,6 +18,7 @@ from app.models.notificacion import TipoNotificacion, NivelNotificacion
 from app.models.usuario import Usuario, Moneda
 from app.schemas.presupuesto import PresupuestoCreate, PresupuestoUpdate
 from app.services.whatsapp_service import enviar_mensaje_whatsapp
+from app.utils.fecha import hoy_argentina
 
 logger = logging.getLogger(__name__)
 
@@ -60,16 +61,24 @@ def formatear_monto(monto: Decimal) -> str:
     # Formato simple para notificaciones
     return f"${monto:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-def calcular_fechas_periodo(periodo: str, fecha_referencia: date):
+def calcular_fechas_periodo(
+    periodo: str | PeriodoPresupuestoTipo, 
+    fecha_referencia: date, 
+    usuario: Optional[Usuario] = None
+) -> tuple[date, date]:
+    periodo_str = periodo.value if hasattr(periodo, "value") else str(periodo)
     year = fecha_referencia.year
     month = fecha_referencia.month
     
-    if periodo == PeriodoPresupuestoTipo.MENSUAL.value:
+    if periodo_str == PeriodoPresupuestoTipo.MENSUAL.value:
+        if usuario is not None:
+            from app.services.dashboard_service import get_ciclo_fechas
+            return get_ciclo_fechas(usuario, fecha_referencia)
         fecha_inicio = date(year, month, 1)
         fecha_fin = date(year, month, calendar.monthrange(year, month)[1])
         return fecha_inicio, fecha_fin
         
-    if periodo == PeriodoPresupuestoTipo.QUINCENAL.value:
+    if periodo_str == PeriodoPresupuestoTipo.QUINCENAL.value:
         if fecha_referencia.day <= 15:
             fecha_inicio = date(year, month, 1)
             fecha_fin = date(year, month, 15)
@@ -78,7 +87,7 @@ def calcular_fechas_periodo(periodo: str, fecha_referencia: date):
             fecha_fin = date(year, month, calendar.monthrange(year, month)[1])
         return fecha_inicio, fecha_fin
         
-    if periodo == PeriodoPresupuestoTipo.SEMANAL.value:
+    if periodo_str == PeriodoPresupuestoTipo.SEMANAL.value:
         weekday = fecha_referencia.weekday() # 0=Lunes
         fecha_inicio = fecha_referencia - timedelta(days=weekday)
         fecha_fin = fecha_inicio + timedelta(days=6)
@@ -136,7 +145,7 @@ def calcular_gasto_en_periodo(
     return resultado if resultado else Decimal("0")
 
 def obtener_periodo_activo(db: Optional[Session], presupuesto: Presupuesto) -> Optional[PeriodoPresupuesto]:
-    hoy = date.today()
+    hoy = hoy_argentina()
     if not presupuesto.periodos:
         return None
     return next(
@@ -202,7 +211,8 @@ def crear_presupuesto(db: Session, usuario_id: UUID, data: PresupuestoCreate) ->
         db.add(pc)
     
     # 3. Calcular fechas del primer periodo
-    fecha_inicio, fecha_fin = calcular_fechas_periodo(data.periodo.value if hasattr(data.periodo, "value") else str(data.periodo), date.today())
+    usuario = db.get(Usuario, usuario_id)
+    fecha_inicio, fecha_fin = calcular_fechas_periodo(data.periodo, hoy_argentina(), usuario=usuario)
     
     # 4. Calcular monto_usado inicial
     monto_usado = calcular_gasto_en_periodo(
@@ -234,6 +244,7 @@ def obtener_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto:
     query = (
         select(Presupuesto)
         .options(
+            joinedload(Presupuesto.usuario),
             selectinload(Presupuesto.categorias).joinedload(PresupuestoCategoria.categoria),
             selectinload(Presupuesto.categorias).joinedload(PresupuestoCategoria.subcategoria),
             selectinload(Presupuesto.periodos)
@@ -292,27 +303,24 @@ def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: Presup
         presupuesto.monto = data.monto
         if periodo_actual:
             periodo_actual.monto_limite = data.monto
-            periodo_actual.superado = periodo_actual.monto_usado > periodo_actual.monto_limite
+            periodo_actual.superado = periodo_actual.monto_usado > data.monto
             
     if periodo_cambio and periodo_actual:
-        fecha_inicio, fecha_fin = calcular_fechas_periodo(presupuesto.periodo.value, date.today())
+        fecha_inicio, fecha_fin = calcular_fechas_periodo(presupuesto.periodo, hoy_argentina(), usuario=presupuesto.usuario)
         periodo_actual.fecha_inicio = fecha_inicio
         periodo_actual.fecha_fin = fecha_fin
 
     if recalcular_monto and periodo_actual:
-        cats_to_calc = data.categorias if data.categorias is not None else presupuesto.categorias
         periodo_actual.monto_usado = calcular_gasto_en_periodo(
-            db, usuario_id, cats_to_calc, periodo_actual.fecha_inicio, periodo_actual.fecha_fin, moneda=presupuesto.moneda
+            db, usuario_id, presupuesto.categorias, periodo_actual.fecha_inicio, periodo_actual.fecha_fin, moneda=presupuesto.moneda
         )
         periodo_actual.superado = periodo_actual.monto_usado > periodo_actual.monto_limite
 
     db.commit()
     
     presupuesto_cargado = obtener_presupuesto(db, usuario_id, id)
-    periodo_actual_cargado = obtener_periodo_activo(db, presupuesto_cargado)
-
-    if (data.monto is not None or recalcular_monto) and periodo_actual_cargado:
-        verificar_alertas_presupuesto(db, presupuesto_cargado, periodo_actual_cargado)
+    if periodo_actual and periodo_actual.monto_usado > 0:
+        verificar_alertas_presupuesto(db, presupuesto_cargado, periodo_actual)
             
     return presupuesto_cargado
 
@@ -326,12 +334,11 @@ def reanudar_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto
     presupuesto = obtener_presupuesto(db, usuario_id, id)
     presupuesto.estado = EstadoPresupuesto.ACTIVO
     
-    hoy = date.today()
+    hoy = hoy_argentina()
     periodo_actual = obtener_periodo_activo(db, presupuesto)
     
     if not periodo_actual:
-        periodo_val = presupuesto.periodo.value if hasattr(presupuesto.periodo, "value") else str(presupuesto.periodo)
-        fecha_inicio, fecha_fin = calcular_fechas_periodo(periodo_val, hoy)
+        fecha_inicio, fecha_fin = calcular_fechas_periodo(presupuesto.periodo, hoy, usuario=presupuesto.usuario)
         monto_usado = calcular_gasto_en_periodo(
             db, usuario_id, presupuesto.categorias, fecha_inicio, fecha_fin, moneda=presupuesto.moneda
         )
@@ -499,10 +506,14 @@ def verificar_alertas_presupuesto(db: Session, presupuesto: Presupuesto, periodo
                 logger.warning("Error al enviar notificación de presupuesto por WhatsApp", exc_info=True)
 
 def renovar_presupuestos(db: Session):
-    hoy = date.today()
+    hoy = hoy_argentina()
     presupuestos = db.execute(
         select(Presupuesto)
-        .options(selectinload(Presupuesto.periodos), selectinload(Presupuesto.categorias))
+        .options(
+            selectinload(Presupuesto.periodos), 
+            selectinload(Presupuesto.categorias),
+            joinedload(Presupuesto.usuario)
+        )
         .where(
             Presupuesto.estado == EstadoPresupuesto.ACTIVO,
             Presupuesto.renovacion == RenovacionPresupuesto.AUTOMATICA
@@ -541,7 +552,7 @@ def renovar_presupuestos(db: Session):
                         grupo_agrupacion_override=f"presupuestos/sugerencia/{presu.id}/{hoy.strftime('%Y%m%d')}"
                     )
                 
-                nueva_inicio, nueva_fin = calcular_fechas_periodo(presu.periodo, hoy)
+                nueva_inicio, nueva_fin = calcular_fechas_periodo(presu.periodo, hoy, usuario=presu.usuario)
                 ya_existe = any(p.fecha_inicio == nueva_inicio for p in presu.periodos)
                 if not ya_existe:
                     nuevo_periodo = PeriodoPresupuesto(

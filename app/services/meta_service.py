@@ -13,6 +13,7 @@ from app.models.billetera import Billetera
 from app.models.usuario import Moneda
 from app.schemas.meta import MetaCreate, MetaUpdate
 from app.schemas.movimiento_meta import MovimientoMetaCreate
+from app.utils.fecha import hoy_argentina
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def obtener_meta(db: Session, usuario_id: UUID, meta_id: UUID) -> Meta:
     return meta
 
 def crear_meta(db: Session, usuario_id: UUID, data: MetaCreate) -> Meta:
-    if data.fecha_limite and data.fecha_limite < date.today():
+    if data.fecha_limite and data.fecha_limite < hoy_argentina():
         raise HTTPException(status_code=400, detail="La fecha límite no puede ser en el pasado")
         
     nueva_meta = Meta(
@@ -69,7 +70,7 @@ def actualizar_meta(db: Session, usuario_id: UUID, meta_id: UUID, data: MetaUpda
                 detail="No se puede cambiar la moneda de una meta que ya tiene movimientos registrados"
             )
             
-    if "fecha_limite" in update_data and update_data["fecha_limite"] and update_data["fecha_limite"] < date.today():
+    if "fecha_limite" in update_data and update_data["fecha_limite"] and update_data["fecha_limite"] < hoy_argentina():
          raise HTTPException(status_code=400, detail="La fecha límite no puede ser en el pasado")
 
     # No permitir pasar a COMPLETADA manualmente si no tiene los fondos
@@ -301,7 +302,7 @@ def obtener_analytics(db: Session, usuario_id: UUID, meta_id: UUID) -> Dict[str,
     meta = obtener_meta(db, usuario_id, meta_id)
     
     # Historial de aportes mensuales (últimos 12 meses)
-    hoy = date.today()
+    hoy = hoy_argentina()
     un_anio_atras = hoy - timedelta(days=365)
     
     movimientos = db.execute(
@@ -381,7 +382,7 @@ def obtener_summary(db: Session, usuario_id: UUID) -> Dict[str, Any]:
     return {
         "total_metas": len(metas),
         "completadas": count_completadas,
-        "proximo_vencimiento": min([m.fecha_limite for m in metas if m.fecha_limite and m.fecha_limite >= date.today()], default=None)
+        "proximo_vencimiento": min([m.fecha_limite for m in metas if m.fecha_limite and m.fecha_limite >= hoy_argentina()], default=None)
     }
 
 # ==============================================================================

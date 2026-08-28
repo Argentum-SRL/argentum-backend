@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_admin_user, get_db
 from app.core.config import settings
+from app.utils.fecha import hoy_argentina
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria, EstadoCategoria, TipoCategoria
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
@@ -468,12 +469,12 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                     moneda_val = Moneda.USD if entidades.get("moneda") == "USD" else Moneda.ARS
 
                     fecha_val = entidades.get("fecha")
-                    fecha_obj = date.today()
+                    fecha_obj = hoy_argentina()
                     if fecha_val:
                         try:
                             fecha_obj = date.fromisoformat(str(fecha_val))
                         except Exception:
-                            fecha_obj = date.today()
+                            fecha_obj = hoy_argentina()
 
                     transaccion = Transaccion(
                         usuario_id=usuario.id,

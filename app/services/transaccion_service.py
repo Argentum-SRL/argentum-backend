@@ -1,6 +1,6 @@
 import logging
 from uuid import UUID
-from datetime import date, datetime, timezone, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Optional
 from fastapi import BackgroundTasks, HTTPException
@@ -16,6 +16,7 @@ from app.models.tarjeta_credito import TarjetaCredito
 from app.schemas.transaccion import TransaccionCreate, TransaccionUpdate
 from app.services.tarjeta_service import calcular_primer_vencimiento
 from app.services import cuotas_service, presupuesto_service
+from app.utils.fecha import hoy_argentina
 
 logger = logging.getLogger(__name__)
 
@@ -111,8 +112,8 @@ def obtener_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID) -> 
 
 
 def _hoy_argentina() -> date:
-    """Retorna la fecha actual en hora Argentina (UTC-3)."""
-    return (datetime.now(timezone.utc) - timedelta(hours=3)).date()
+    """Retorna la fecha actual en hora Argentina (America/Argentina/Buenos_Aires)."""
+    return hoy_argentina()
 
 
 def _afecta_saldo(transaccion) -> bool:
@@ -389,6 +390,8 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
                     logger.error(f"Inconsistencia al revertir saldo de billetera vieja {billetera_vieja.id} para tx {transaccion.id}: {e}")
 
         update_data = data.model_dump(exclude_unset=True)
+        if "descripcion" in update_data and update_data["descripcion"] is None:
+            update_data["descripcion"] = ""
         for key, value in update_data.items():
             setattr(transaccion, key, value)
 
@@ -427,6 +430,8 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
                         pass
     else:
         update_data = data.model_dump(exclude_unset=True)
+        if "descripcion" in update_data and update_data["descripcion"] is None:
+            update_data["descripcion"] = ""
         for key, value in update_data.items():
             setattr(transaccion, key, value)
             
@@ -579,7 +584,7 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
     transaccion.estado_verificacion = EstadoVerificacionTransaccion.CONFIRMADA
     
     # Al confirmar, RECIEN impacta el saldo si la fecha es hoy o pasada
-    hoy = (datetime.now(timezone.utc) - timedelta(hours=3)).date()
+    hoy = hoy_argentina()
     if transaccion.fecha <= hoy and transaccion.metodo_pago != MetodoPago.CREDITO:
         billetera = db.get(Billetera, transaccion.billetera_id)
         if not billetera:
@@ -789,25 +794,10 @@ def evaluar_gasto_inusual(db: Session, usuario_id: UUID, transaccion: Transaccio
 
         # 3. Ingreso promedio mensual
         usuario = db.get(Usuario, usuario_id)
-        hoy_dt = date.today()
+        hoy_dt = hoy_argentina()
         if usuario:
-            try:
-                dia_inicio = int(usuario.ciclo_valor) if usuario.ciclo_valor else 1
-            except ValueError:
-                dia_inicio = 1
-
-            if hoy_dt.day >= dia_inicio:
-                import calendar as cal
-                ultimo_dia_mes = cal.monthrange(hoy_dt.year, hoy_dt.month)[1]
-                dia_real = min(dia_inicio, ultimo_dia_mes)
-                inicio_ciclo = hoy_dt.replace(day=dia_real)
-            else:
-                import calendar as cal
-                mes_anterior = hoy_dt.replace(day=1) - timedelta(days=1)
-                ultimo_dia_mes = cal.monthrange(mes_anterior.year, mes_anterior.month)[1]
-                dia_real = min(dia_inicio, ultimo_dia_mes)
-                inicio_ciclo = mes_anterior.replace(day=dia_real)
-
+            from app.services.dashboard_service import get_ciclo_fechas
+            inicio_ciclo, _ = get_ciclo_fechas(usuario, hoy_dt)
             inicio_analisis = min(
                 inicio_ciclo - timedelta(days=60),
                 hoy_dt - timedelta(days=90)

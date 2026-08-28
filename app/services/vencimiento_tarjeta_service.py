@@ -6,9 +6,10 @@ from app.models.transaccion import Transaccion, TipoTransaccion
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.cuota import Cuota
 from app.services.tarjeta_service import calcular_resumen_actual
+from app.utils.fecha import hoy_argentina
 
 def procesar_vencimientos_tarjetas(db: Session) -> None:
-    hoy = date.today()
+    hoy = hoy_argentina()
 
     # Buscar tarjetas activas cuyo día de vencimiento es hoy
     tarjetas = db.query(TarjetaCredito).filter(

@@ -51,15 +51,16 @@ def enviar_email_notificacion(
         return False
 
 
+from app.utils.fecha import ahora_argentina
+
+
 def generar_email_cambio_contrasena(
     usuario_nombre: str,
     fecha_hora_argentina: str = None,
     dispositivo: str = "No especificado"
 ) -> tuple[str, str, str]:
-    from datetime import datetime, timedelta
     if not fecha_hora_argentina:
-        # CORRECCIÓN DEL BUG: Usar + timedelta(hours=-3) para restar 3 horas (GMT-3)
-        fecha_hora_argentina = (datetime.utcnow() + timedelta(hours=-3)).strftime("%d/%m/%Y a las %H:%M")
+        fecha_hora_argentina = ahora_argentina().strftime("%d/%m/%Y a las %H:%M")
     
     asunto = "Argentum — Cambio de contraseña detectado"
     html = template_cambio_contrasena(
@@ -82,8 +83,7 @@ def generar_email_nuevo_dispositivo(
     ubicacion: str = "No especificada",
     link_bloqueo: str = None
 ) -> tuple[str, str, str]:
-    from datetime import datetime, timedelta
-    ts = (datetime.utcnow() + timedelta(hours=-3)).strftime("%d/%m/%Y a las %H:%M")
+    ts = ahora_argentina().strftime("%d/%m/%Y a las %H:%M")
     ip_info = f" desde la IP {ip}" if ip else ""
     
     if ip and dispositivo == "No especificado":
@@ -114,9 +114,8 @@ def generar_email_intentos_login(
     fecha_hora_argentina: str = None,
     link_recupero: str = None
 ) -> tuple[str, str, str]:
-    from datetime import datetime, timedelta
     if not fecha_hora_argentina:
-        fecha_hora_argentina = (datetime.utcnow() + timedelta(hours=-3)).strftime("%d/%m/%Y a las %H:%M")
+        fecha_hora_argentina = ahora_argentina().strftime("%d/%m/%Y a las %H:%M")
         
     if not link_recupero:
         link_recupero = f"{settings.FRONTEND_URL}/auth/recuperar-password"

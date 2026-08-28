@@ -7,6 +7,7 @@ from app.models.configuracion_notificacion import ConfiguracionNotificacion
 from app.models.usuario import Usuario
 from app.services.notificacion_service import crear_notificacion
 from app.services import notificacion_whatsapp_service as wpp_svc
+from app.utils.fecha import ahora_argentina, hoy_argentina
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ def _job_notificaciones_cuotas(db_session_factory):
             ConfiguracionNotificacion.cuota_vence_whatsapp,
         ).all()
 
-        hoy = date.today()
+        hoy = hoy_argentina()
 
         for config in configs:
             usuario_id = config.usuario_id
@@ -232,7 +233,7 @@ def _job_notificaciones_suscripciones(db_session_factory):
         from app.services.suscripcion_service import obtener_precio_vigente
 
         configs = db.query(ConfiguracionNotificacion).all()
-        hoy = date.today()
+        hoy = hoy_argentina()
 
         for config in configs:
             usuario_id = config.usuario_id
@@ -311,7 +312,7 @@ def _job_notificaciones_inactividad(db_session_factory):
             ConfiguracionNotificacion.inactividad_activo == True
         ).all()
 
-        hoy = date.today()
+        hoy = hoy_argentina()
 
         for config in configs:
             usuario_id = config.usuario_id
@@ -367,10 +368,10 @@ def _job_entrega_whatsapp_batched(db_session_factory):
     db: Session = db_session_factory()
     try:
         # Calcular hora y minuto local actual en Argentina (UTC-3)
-        ahora_utc = datetime.utcnow()
-        tiempo_local = ahora_utc - timedelta(hours=3)
+        tiempo_local = ahora_argentina()
         hora_local = tiempo_local.hour
         minuto_local = tiempo_local.minute
+        ahora_utc = datetime.now(timezone.utc)
 
         # Obtener todos los usuarios que tengan configurado el envío para esta hora y minuto local
         usuarios = (
@@ -435,7 +436,7 @@ def _job_resumen_cierre_ciclo(db_session_factory):
         from app.services.dashboard_service import get_ciclo_fechas
         from sqlalchemy import func
 
-        hoy = (datetime.now(timezone.utc) - timedelta(hours=3)).date()
+        hoy = hoy_argentina()
         ayer = hoy - timedelta(days=1)
 
         # Obtener usuarios con WhatsApp verificado y configuración activa
@@ -574,7 +575,7 @@ def _job_resumen_semanal(db_session_factory):
     from app.models.transaccion import Transaccion, TipoTransaccion
     from app.models.categoria import Categoria
 
-    hoy = date.today()
+    hoy = hoy_argentina()
     # Semana anterior: lunes a domingo
     lunes_pasado = hoy - timedelta(days=hoy.weekday() + 7)
     domingo_pasado = lunes_pasado + timedelta(days=6)
@@ -737,7 +738,7 @@ async def _job_proyeccion_negativa(db_session_factory):
                         return
                     
                     proyecciones = calcular_proyeccion(db, usuario)
-                    hoy = date.today()
+                    hoy = hoy_argentina()
                     fecha_inicio_ciclo, _ = get_ciclo_fechas(usuario, hoy)
 
                     for moneda_key, moneda_label, simbolo in [("ars", "pesos", "$"), ("usd", "dólares", "US$")]:

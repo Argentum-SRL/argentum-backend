@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from math import ceil
 from typing import Any, Dict
@@ -16,10 +16,10 @@ from app.models.cuota import Cuota
 from app.models.historial_suscripcion import HistorialSuscripcion
 from app.models.transaccion_recurrente import TransaccionRecurrente, EstadoTransaccionRecurrente, FrecuenciaTransaccionRecurrente, TipoTransaccionRecurrente
 from app.services.dashboard_service import get_ciclo_fechas
+from app.utils.fecha import hoy_argentina
 
 def _calcular_proyeccion_por_moneda(db: Session, usuario: Usuario, moneda: Moneda) -> Dict[str, Any]:
-    # Argentum usa UTC-3 para presentacion
-    hoy = (datetime.now(timezone.utc) - timedelta(hours=3)).date()
+    hoy = hoy_argentina()
     
     # Paso 1: Obtener ciclos completos y actual
     fecha_inicio_actual, fecha_fin_actual = get_ciclo_fechas(usuario, hoy)

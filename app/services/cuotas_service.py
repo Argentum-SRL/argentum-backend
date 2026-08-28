@@ -6,6 +6,7 @@ from app.models.cuota import Cuota
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion
 from app.models.grupo_cuotas import GrupoCuotas
 from app.services import presupuesto_service
+from app.utils.fecha import hoy_argentina
 
 def crear_cuotas(
     db: Session,
@@ -50,7 +51,7 @@ def crear_cuotas(
             monto=monto_actual,
             moneda=transaccion_padre.moneda,
             fecha=fecha_cuota,
-            descripcion=f"{transaccion_padre.descripcion} (Cuota {i}/{cantidad_cuotas})",
+            descripcion=f"{transaccion_padre.descripcion} (Cuota {i}/{cantidad_cuotas})".strip() if transaccion_padre.descripcion else f"Cuota {i}/{cantidad_cuotas}",
             categoria_id=transaccion_padre.categoria_id,
             subcategoria_id=transaccion_padre.subcategoria_id,
             metodo_pago=transaccion_padre.metodo_pago,
@@ -181,7 +182,7 @@ def prepagar_grupo(
         tipo=TipoTransaccion.EGRESO,
         monto=monto_total_pendiente,
         moneda=grupo.moneda,
-        fecha=date.today(),
+        fecha=hoy_argentina(),
         descripcion=f"Prepago de {len(cuotas_pendientes)} cuotas restantes: {grupo.descripcion}",
         categoria_id=categoria_id if categoria_id else (grupo.transaccion_padre.categoria_id if grupo.transaccion_padre else None),
         metodo_pago=MetodoPago.DEBITO,

@@ -22,6 +22,7 @@ from app.models.usuario import Usuario
 from app.services.dashboard_service import get_ciclo_fechas, get_dashboard_resumen
 from app.services.openai_client import get_openai_client
 from app.services.proyeccion_service import calcular_proyeccion
+from app.utils.fecha import hoy_argentina
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +191,7 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
             subcats_por_cat[key] = []
         subcats_por_cat[key].append(s.nombre)
 
-    fecha_inicio, fecha_fin = get_ciclo_fechas(usuario, date.today())
+    fecha_inicio, fecha_fin = get_ciclo_fechas(usuario, hoy_argentina())
 
     metas = db.execute(
         select(Meta).where(

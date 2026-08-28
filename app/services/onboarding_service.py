@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func
-from app.models.usuario import Usuario, CicloTipo, Moneda, Sexo
+from app.models.usuario import Usuario, CicloTipo, CicloRegla, Moneda, Sexo
 from app.schemas.onboarding import (
     EstadoOnboardingResponse, 
     DatosActuales
@@ -40,6 +38,7 @@ def get_estado_onboarding(db: Session, user: Usuario) -> EstadoOnboardingRespons
             moneda_principal=user.moneda_principal.value if user.moneda_principal else None,
             ciclo_tipo=user.ciclo_tipo.value if user.ciclo_tipo else None,
             ciclo_valor=user.ciclo_valor,
+            ciclo_ajuste_direccion=user.ciclo_ajuste_direccion.value if user.ciclo_ajuste_direccion else "anterior",
             fecha_nacimiento=user.fecha_nacimiento,
             sexo=user.sexo.value if user.sexo else None
         )
@@ -52,14 +51,12 @@ def validar_ciclo(ciclo_tipo: CicloTipo, ciclo_valor: str) -> tuple[bool, str | 
             if not (1 <= dia <= 31):
                 return False, "El día debe estar entre 1 y 31."
         except ValueError:
-            return False, "El valor debe ser un número para el tipo día fijo."
+            return False, "El valor debe ser un número entero entre 1 y 31."
     elif ciclo_tipo == CicloTipo.REGLA:
-        valid_reglas = [
-            'primer_lunes', 'primer_martes', 'primer_miercoles', 'primer_jueves', 'primer_viernes',
-            'ultimo_lunes', 'ultimo_martes', 'ultimo_miercoles', 'ultimo_jueves', 'ultimo_viernes'
-        ]
+        valid_reglas = {e.value for e in CicloRegla}
         if ciclo_valor not in valid_reglas:
             return False, "La regla seleccionada no es válida."
     return True, None
+
 
 

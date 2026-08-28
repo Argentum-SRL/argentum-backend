@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from typing import Optional, Any
 import httpx
 import structlog
+from app.utils.fecha import hoy_argentina
 
 logger = structlog.get_logger("dias_habiles")
 
@@ -122,6 +123,13 @@ async def obtener_feriados_argentina(anio: int, forzar_refresh: bool = False) ->
                     fecha_str = item.get("fecha", "")
                     if fecha_str:
                         f_date = date.fromisoformat(fecha_str)
+                        if f_date.year != anio:
+                            logger.warning(
+                                "Feriado con año discrepante recibido de API externa",
+                                fecha=fecha_str,
+                                anio_esperado=anio
+                            )
+                            continue
                         nombre = item.get("nombre") or "Feriado"
                         feriados_fechas.append(f_date)
                         feriados_items.append({
@@ -204,24 +212,9 @@ async def calcular_fecha_cobro(
     Dado un día nominal, mes y año, calcula la fecha real aplicando
     la regla de día hábil (anterior o posterior).
     """
-    ultimo_dia_mes = calendar.monthrange(anio, mes)[1]
-    dia_real = min(dia_nominal, ultimo_dia_mes)
+    await obtener_feriados_argentina(anio)
+    return calcular_fecha_cobro_sync(dia_nominal, mes, anio, direccion=direccion)
 
-    fecha = date(anio, mes, dia_real)
-    feriados = await obtener_feriados_argentina(anio)
-
-    dir_norm = "posterior" if str(direccion).lower() == "posterior" else "anterior"
-    delta_dias = 1 if dir_norm == "posterior" else -1
-
-    intentos = 0
-    while not es_dia_habil(fecha, feriados) and intentos < 7:
-        fecha += timedelta(days=delta_dias)
-        intentos += 1
-        if fecha.year != anio:
-            feriados_prev = await obtener_feriados_argentina(fecha.year)
-            feriados = feriados_prev + feriados
-
-    return fecha
 
 
 async def calcular_proxima_fecha_cobro(
@@ -230,7 +223,7 @@ async def calcular_proxima_fecha_cobro(
     """
     Calcula la próxima fecha de cobro a partir de hoy.
     """
-    hoy = date.today()
+    hoy = hoy_argentina()
     mes = hoy.month
     anio = hoy.year
 
@@ -250,7 +243,7 @@ async def asegurar_feriados_cargados() -> None:
     Job de refresh diario: verifica y asegura que los feriados del año actual
     y año actual + 1 estén persistidos y en cache.
     """
-    hoy = date.today()
+    hoy = hoy_argentina()
     anios = [hoy.year, hoy.year + 1]
 
     for anio in anios:
