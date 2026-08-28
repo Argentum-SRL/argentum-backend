@@ -502,5 +502,174 @@ def test_timezone_argentina_en_ventana_nocturna(client, admin_user):
         assert resp.status_code == status.HTTP_200_OK
 
 
+# ==============================================================================
+# 7. Regression tests: DIA_FIJO fecha ajustada vs nominal y proyeccion desglose
+# ==============================================================================
+
+def test_get_ciclo_fechas_dia_fijo_ajustado_antes_del_nominal(db_session):
+    """
+    Regresión: Cuando el día nominal cae en fin de semana y se ajusta hacia atrás
+    (ej: día 30 cae domingo 30/08/2026 -> se ajusta a viernes 28/08/2026),
+    en la fecha ajustada (28/08) get_ciclo_fechas debe reconocer que el ciclo ya arrancó
+    (hoy >= inicio_candidato_este_mes), aunque hoy.day (28) < dia (30).
+    """
+    user = Usuario(
+        id=uuid4(),
+        email="test_dia_fijo_ajustado@argentum.com",
+        rol=RolUsuario.ADMIN,
+        estado=EstadoUsuario.ACTIVO,
+        auth_provider=AuthProvider.EMAIL,
+        ciclo_tipo=CicloTipo.DIA_FIJO,
+        ciclo_valor="30",
+        ciclo_ajuste_direccion=CicloAjusteDireccion.ANTERIOR,
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    # En la fecha del cobro ajustado (28 de agosto)
+    inicio, fin = get_ciclo_fechas(user, date(2026, 8, 28))
+    assert inicio == date(2026, 8, 28)
+    assert fin == date(2026, 9, 29)
+
+    # En el sábado intermedio (29 de agosto)
+    inicio_sab, fin_sab = get_ciclo_fechas(user, date(2026, 8, 29))
+    assert inicio_sab == date(2026, 8, 28)
+    assert fin_sab == date(2026, 9, 29)
+
+    # El día antes del cobro ajustado (27 de agosto) debe pertenecer al ciclo anterior
+    inicio_ant, fin_ant = get_ciclo_fechas(user, date(2026, 8, 27))
+    assert inicio_ant == date(2026, 7, 30)
+    assert fin_ant == date(2026, 8, 27)
+
+
+def test_get_ciclo_fechas_dia_fijo_sin_ajuste(db_session):
+    """
+    Caso normal: día nominal que cae en día hábil (ej: día 10 de agosto 2026 es lunes).
+    Debe operar idénticamente (notar que en julio 2026, 9 y 10 son feriados, por lo que ajusta a 8).
+    """
+    user = Usuario(
+        id=uuid4(),
+        email="test_dia_fijo_normal@argentum.com",
+        rol=RolUsuario.ADMIN,
+        estado=EstadoUsuario.ACTIVO,
+        auth_provider=AuthProvider.EMAIL,
+        ciclo_tipo=CicloTipo.DIA_FIJO,
+        ciclo_valor="10",
+        ciclo_ajuste_direccion=CicloAjusteDireccion.ANTERIOR,
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    # Día 10 de agosto (primer día del nuevo ciclo)
+    inicio, fin = get_ciclo_fechas(user, date(2026, 8, 10))
+    assert inicio == date(2026, 8, 10)
+    assert fin == date(2026, 9, 9)
+
+    # Día 9 de agosto (último día del ciclo anterior: 9 y 10 de julio son feriados, por lo que inicio fue el 8 de julio)
+    inicio_ant, fin_ant = get_ciclo_fechas(user, date(2026, 8, 9))
+    assert inicio_ant == date(2026, 7, 8)
+    assert fin_ant == date(2026, 8, 9)
+
+
+def test_proyeccion_desglose_cuando_ciclo_finalizado(db_session, monkeypatch):
+    """
+    Regresión: Cuando un ciclo ya finalizó (dias_restantes < 0), proyeccion_service
+    debe retornar el desglose real por categorías en desglose_por_categoria,
+    no una lista vacía [].
+    """
+    from decimal import Decimal
+    from unittest.mock import patch
+    from app.models.categoria import Categoria, TipoCategoria
+    from app.models.transaccion import Transaccion, TipoTransaccion, MetodoPago, OrigenTransaccion
+    from app.models.billetera import Billetera, EstadoBilletera, Moneda
+    from app.services.proyeccion_service import _calcular_proyeccion_por_moneda
+
+    user = Usuario(
+        id=uuid4(),
+        email="test_proyeccion_finalizado@argentum.com",
+        rol=RolUsuario.ADMIN,
+        estado=EstadoUsuario.ACTIVO,
+        auth_provider=AuthProvider.EMAIL,
+        ciclo_tipo=CicloTipo.DIA_FIJO,
+        ciclo_valor="1",
+        ciclo_ajuste_direccion=CicloAjusteDireccion.ANTERIOR,
+    )
+    db_session.add(user)
+
+    billetera = Billetera(
+        id=uuid4(),
+        usuario_id=user.id,
+        nombre="Efectivo Test",
+        moneda=Moneda.ARS,
+        saldo_actual=Decimal("100000"),
+        es_efectivo=True,
+        estado=EstadoBilletera.ACTIVA
+    )
+    db_session.add(billetera)
+
+    cat1 = Categoria(
+        id=uuid4(),
+        nombre="Supermercado Test",
+        tipo=TipoCategoria.EGRESO,
+        es_global=True
+    )
+    cat2 = Categoria(
+        id=uuid4(),
+        nombre="Servicios Test",
+        tipo=TipoCategoria.EGRESO,
+        es_global=True
+    )
+    db_session.add_all([cat1, cat2])
+    db_session.commit()
+
+    # Transacciones en agosto 2026
+    tx1 = Transaccion(
+        id=uuid4(),
+        usuario_id=user.id,
+        billetera_id=billetera.id,
+        categoria_id=cat1.id,
+        monto=Decimal("15000.00"),
+        moneda=Moneda.ARS,
+        tipo=TipoTransaccion.EGRESO,
+        metodo_pago=MetodoPago.EFECTIVO,
+        origen=OrigenTransaccion.MANUAL,
+        fecha=date(2026, 8, 10),
+        es_padre_cuotas=False
+    )
+    tx2 = Transaccion(
+        id=uuid4(),
+        usuario_id=user.id,
+        billetera_id=billetera.id,
+        categoria_id=cat2.id,
+        monto=Decimal("8500.00"),
+        moneda=Moneda.ARS,
+        tipo=TipoTransaccion.EGRESO,
+        metodo_pago=MetodoPago.EFECTIVO,
+        origen=OrigenTransaccion.MANUAL,
+        fecha=date(2026, 8, 15),
+        es_padre_cuotas=False
+    )
+    db_session.add_all([tx1, tx2])
+    db_session.commit()
+
+    # Simular que hoy es 2026-09-05, pero forzamos get_ciclo_fechas a devolver el ciclo de agosto (ya finalizado)
+    # o simulamos que hoy_argentina() es posterior a la fecha fin del ciclo retornado
+    with patch("app.services.proyeccion_service.hoy_argentina", return_value=date(2026, 9, 5)), \
+         patch("app.services.proyeccion_service.get_ciclo_fechas", return_value=(date(2026, 8, 1), date(2026, 8, 31))):
+        res = _calcular_proyeccion_por_moneda(db_session, user, Moneda.ARS)
+
+        assert res["gasto_proyectado_total"] == 23500.0
+        assert len(res["desglose_por_categoria"]) == 2
+        
+        nombres = [d["categoria_nombre"] for d in res["desglose_por_categoria"]]
+        assert "Supermercado Test" in nombres
+        assert "Servicios Test" in nombres
+
+        super_item = next(d for d in res["desglose_por_categoria"] if d["categoria_nombre"] == "Supermercado Test")
+        assert super_item["gasto_actual_ciclo"] == 15000.0
+        assert super_item["proyectado"] == 15000.0
+
+
+
 
 

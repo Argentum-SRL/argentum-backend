@@ -171,6 +171,21 @@ def _calcular_proyeccion_por_moneda(db: Session, usuario: Usuario, moneda: Moned
             )
         ).scalar() or Decimal("0")
 
+        desglose = []
+        for row in res_actual:
+            cat_id = row.categoria_id
+            monto_real = row.total or Decimal("0")
+            promedio_hist = promedios_historicos.get(cat_id, Decimal("0"))
+            desglose.append({
+                "categoria_id": str(cat_id) if cat_id is not None else None,
+                "categoria_nombre": row.nombre or "Sin categoría",
+                "gasto_actual_ciclo": float(monto_real),
+                "promedio_historico": float(promedio_hist),
+                "proyectado": float(monto_real),
+                "fuera_de_patron": False
+            })
+        desglose.sort(key=lambda x: x["proyectado"], reverse=True)
+
         return {
             "periodo": {
                 "fecha_inicio": fecha_inicio_actual.isoformat(),
@@ -183,7 +198,7 @@ def _calcular_proyeccion_por_moneda(db: Session, usuario: Usuario, moneda: Moned
             "balance_proyectado": float(ingresos_actuales - gasto_total_real),
             "ingresos_proyectados": float(ingresos_actuales),
             "certezas": {"cuotas_restantes": 0, "suscripciones_restantes": 0, "total": 0},
-            "desglose_por_categoria": [],
+            "desglose_por_categoria": desglose,
             "nivel_confianza": "alto",
             "ciclos_analizados": n_ciclos,
             "pesos": {"historial": 1.0, "ciclo_actual": 0.0},
