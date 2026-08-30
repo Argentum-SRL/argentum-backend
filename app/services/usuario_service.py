@@ -18,6 +18,7 @@ from app.models.notificacion import Notificacion
 from app.models.conversacion_wpp import ConversacionWpp
 from app.models.refresh_token import RefreshToken
 from app.models.perfil_financiero import PerfilFinanciero
+from app.models.historial_perfil_financiero import HistorialPerfilFinanciero
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.transaccion_recurrente import TransaccionRecurrente
 from app.models.transferencia_interna import TransferenciaInterna
@@ -72,8 +73,8 @@ def actualizar_datos_personales(
         if edad < 18:
             raise HTTPException(status_code=400, detail="Tenés que ser mayor de 18 años para crear una cuenta en Argentum")
     
-    usuario.nombre = datos.nombre
-    usuario.apellido = datos.apellido
+    usuario.nombre = datos.nombre.strip()
+    usuario.apellido = datos.apellido.strip()
     usuario.fecha_nacimiento = datos.fecha_nacimiento
     usuario.sexo = datos.sexo
     db.commit()
@@ -263,7 +264,13 @@ def actualizar_moneda(
     usuario.moneda_principal = datos.moneda_principal
     usuario.moneda_secundaria_activa = datos.moneda_secundaria_activa
     if datos.tipo_dolar:
-        usuario.tipo_dolar = datos.tipo_dolar
+        tipo = datos.tipo_dolar.lower().strip()
+        if tipo == "bolsa":
+            tipo = "mep"
+        valid_dolares = {"oficial", "blue", "tarjeta", "mep"}
+        if tipo not in valid_dolares:
+            raise HTTPException(status_code=400, detail="Tipo de dólar no válido.")
+        usuario.tipo_dolar = tipo
     
     db.commit()
     db.refresh(usuario)
@@ -393,7 +400,8 @@ def eliminar_usuario(db: Session, usuario: Usuario) -> dict:
             ConversacionWpp, Notificacion, RefreshToken, Suscripcion,
             Presupuesto, Meta, GrupoCuotas, TransaccionRecurrente, 
             TransferenciaInterna, CategoriaExcluida, ConfiguracionNotificacion,
-            Transaccion, ImportacionResumen, TarjetaCredito, Billetera, PerfilFinanciero
+            Transaccion, ImportacionResumen, TarjetaCredito, Billetera,
+            PerfilFinanciero, HistorialPerfilFinanciero
         ]
         
         for modelo in modelos_usuario:

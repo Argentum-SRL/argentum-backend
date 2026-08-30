@@ -10,6 +10,8 @@ class DatosActuales(BaseModel):
     nombre: str | None = None
     apellido: str | None = None
     moneda_principal: str | None = None
+    moneda_secundaria_activa: bool | None = None
+    tipo_dolar: str | None = None
     ciclo_tipo: str | None = None
     ciclo_valor: str | None = None
     ciclo_ajuste_direccion: str | None = None
@@ -38,10 +40,27 @@ class CotizacionesDolarResponse(BaseModel):
     cotizaciones: dict[str, CotizacionDolar]
 
 class DatosPersonalesRequest(BaseModel):
-    nombre: str = Field(..., min_length=1)
-    apellido: str = Field(..., min_length=1)
+    nombre: str = Field(..., min_length=1, max_length=100)
+    apellido: str = Field(..., min_length=1, max_length=100)
     fecha_nacimiento: date
     sexo: Sexo
+
+    @model_validator(mode="after")
+    def validar_datos_personales(self) -> Self:
+        if not self.nombre.strip():
+            raise ValueError("El nombre no puede estar vacío.")
+        if not self.apellido.strip():
+            raise ValueError("El apellido no puede estar vacío.")
+        from app.utils.fecha import hoy_argentina
+        hoy = hoy_argentina()
+        if self.fecha_nacimiento > hoy:
+            raise ValueError("La fecha de nacimiento no puede ser futura.")
+        edad = hoy.year - self.fecha_nacimiento.year - ((hoy.month, hoy.day) < (self.fecha_nacimiento.month, self.fecha_nacimiento.day))
+        if edad < 18:
+            raise ValueError("Tenés que ser mayor de 18 años para crear una cuenta en Argentum.")
+        if edad > 120:
+            raise ValueError("La fecha de nacimiento no es válida.")
+        return self
 
 class CicloFinancieroRequest(BaseModel):
     ciclo_tipo: CicloTipo
@@ -69,6 +88,26 @@ class MonedaRequest(BaseModel):
     moneda_principal: Moneda
     moneda_secundaria_activa: bool
     tipo_dolar: str | None = None
+
+    @model_validator(mode="after")
+    def validar_moneda(self) -> Self:
+        if self.moneda_principal == Moneda.USD or self.moneda_secundaria_activa:
+            if not self.tipo_dolar:
+                raise ValueError("El tipo de dólar de referencia es obligatorio.")
+            tipo = self.tipo_dolar.lower().strip()
+            if tipo == "bolsa":
+                tipo = "mep"
+            valid_dolares = {"oficial", "blue", "tarjeta", "mep"}
+            if tipo not in valid_dolares:
+                raise ValueError("El tipo de dólar seleccionado no es válido.")
+            self.tipo_dolar = tipo
+        else:
+            if self.tipo_dolar:
+                tipo = self.tipo_dolar.lower().strip()
+                if tipo == "bolsa":
+                    tipo = "mep"
+                self.tipo_dolar = tipo
+        return self
 
 
 

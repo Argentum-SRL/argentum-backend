@@ -36,6 +36,8 @@ def get_estado_onboarding(db: Session, user: Usuario) -> EstadoOnboardingRespons
             nombre=user.nombre,
             apellido=user.apellido,
             moneda_principal=user.moneda_principal.value if user.moneda_principal else None,
+            moneda_secundaria_activa=user.moneda_secundaria_activa,
+            tipo_dolar=user.tipo_dolar,
             ciclo_tipo=user.ciclo_tipo.value if user.ciclo_tipo else None,
             ciclo_valor=user.ciclo_valor,
             ciclo_ajuste_direccion=user.ciclo_ajuste_direccion.value if user.ciclo_ajuste_direccion else "anterior",
