@@ -125,9 +125,10 @@ def _calcular_proyeccion_por_moneda(db: Session, usuario: Usuario, moneda: Moned
                 promedios_historicos[cat_id] = suma_total / Decimal(n_ciclos)
 
     # Paso 3: Calcular ritmo del ciclo actual
-    dias_totales = (fecha_fin_actual - fecha_inicio_actual).days + 1
-    dias_transcurridos = (hoy - fecha_inicio_actual).days + 1
-    dias_restantes = dias_totales - dias_transcurridos
+    dias_totales = max(1, (fecha_fin_actual - fecha_inicio_actual).days + 1)
+    dias_transcurridos_calc = (hoy - fecha_inicio_actual).days + 1
+    dias_transcurridos = max(1, min(dias_transcurridos_calc, dias_totales))
+    dias_restantes = max(0, (fecha_fin_actual - hoy).days)
 
     if dias_restantes < 0:
         # El ciclo ya termino, devolver datos reales
@@ -293,7 +294,7 @@ def _calcular_proyeccion_por_moneda(db: Session, usuario: Usuario, moneda: Moned
                 Transaccion.usuario_id == usuario.id,
                 Transaccion.moneda == moneda,
                 Cuota.pagada == False,
-                Cuota.fecha_vencimiento > hoy,
+                Cuota.fecha_vencimiento >= hoy,
                 Cuota.fecha_vencimiento <= fecha_fin_actual
             )
         )
@@ -324,7 +325,7 @@ def _calcular_proyeccion_por_moneda(db: Session, usuario: Usuario, moneda: Moned
             and_(
                 Suscripcion.usuario_id == usuario.id,
                 Suscripcion.estado == EstadoSuscripcion.ACTIVA,
-                Suscripcion.proximo_cobro > hoy,
+                Suscripcion.proximo_cobro >= hoy,
                 Suscripcion.proximo_cobro <= fecha_fin_actual,
                 HistorialSuscripcion.moneda == moneda
             )
@@ -382,7 +383,7 @@ def _calcular_proyeccion_por_moneda(db: Session, usuario: Usuario, moneda: Moned
 
     for rec in recurrentes_activas:
         ya_genero_hoy = rec.id in recurrentes_hoy
-        start_date = hoy + timedelta(days=1)
+        start_date = hoy if not ya_genero_hoy else hoy + timedelta(days=1)
         
         if start_date > fecha_fin_actual:
             continue

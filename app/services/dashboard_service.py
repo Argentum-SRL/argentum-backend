@@ -59,10 +59,11 @@ def get_ciclo_fechas(usuario: Usuario, hoy: date) -> tuple[date, date]:
         fin = (inicio + relativedelta(months=1)) - timedelta(days=1)
         return inicio, fin
 
+    ciclo_dir = getattr(usuario, "ciclo_ajuste_direccion", None)
     direccion = (
-        usuario.ciclo_ajuste_direccion.value
-        if getattr(usuario, "ciclo_ajuste_direccion", None)
-        else "anterior"
+        ciclo_dir.value
+        if hasattr(ciclo_dir, "value")
+        else (str(ciclo_dir) if ciclo_dir else "anterior")
     )
 
     if usuario.ciclo_tipo == CicloTipo.DIA_FIJO:
@@ -226,9 +227,19 @@ def get_dashboard_resumen(
     )
     if billetera_ids:
         tarjeta_ids_stmt = select(TarjetaCredito.id).where(TarjetaCredito.billetera_id.in_(billetera_ids))
+        parent_tx_stmt = select(Transaccion.id).where(
+            Transaccion.usuario_id == usuario.id,
+            Transaccion.billetera_id.in_(billetera_ids)
+        )
         c_stmt_where = and_(
             c_stmt_where,
-            GrupoCuotas.tarjeta_id.in_(tarjeta_ids_stmt)
+            or_(
+                GrupoCuotas.tarjeta_id.in_(tarjeta_ids_stmt),
+                and_(
+                    GrupoCuotas.tarjeta_id == None,
+                    GrupoCuotas.transaccion_padre_id.in_(parent_tx_stmt)
+                )
+            )
         )
 
     c_stmt = select(
@@ -427,19 +438,34 @@ def get_dashboard_resumen(
         "proximos_pagos": proximos_pagos
     }
 
-async def get_cotizacion_usuario(usuario: Usuario) -> Dict[str, Any]:
-    tipo = usuario.tipo_dolar or "blue"
-    url = f"https://dolarapi.com/v1/dolares/{tipo}"
+def get_cotizacion_usuario(usuario: Usuario) -> Dict[str, Any]:
+    from app.services.dolar_service import get_cotizaciones_dolar
+    tipo = (usuario.tipo_dolar or "blue").lower()
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            data = response.json()
-            return {"tipo": data.get("casa", tipo), "compra": data.get("compra"), "venta": data.get("venta"), "fecha_actualizacion": data.get("fechaActualizacion")}
+        data = get_cotizaciones_dolar()
+        cots = data.get("cotizaciones", {})
+        if tipo in cots:
+            return cots[tipo]
+        if "blue" in cots:
+            return cots["blue"]
+        if "oficial" in cots:
+            return cots["oficial"]
     except Exception:
-        return {"tipo": tipo, "compra": 0, "venta": 0, "fecha_actualizacion": None, "error": "Servicio de cotizaciones no disponible"}
+        pass
 
-async def get_resumen_completo(
+    return {
+        "tipo": tipo,
+        "nombre": f"Dólar {tipo.capitalize()}",
+        "compra": None,
+        "venta": None,
+        "promedio": None,
+        "moneda": "ARS",
+        "fecha_actualizacion": None,
+        "error": "Servicio de cotizaciones no disponible"
+    }
+
+
+def get_resumen_completo(
     db: Session, 
     usuario: Usuario, 
     desde: Optional[date] = None, 
@@ -468,13 +494,22 @@ async def get_resumen_completo(
                 if moneda_key in total_saldo_activa:
                     total_saldo_activa[moneda_key] += Decimal(str(b.saldo_actual))
         billeteras_data.append({
-            "id": str(b.id), "nombre": b.nombre, "moneda": b.moneda.value, "saldo_actual": float(b.saldo_actual),
-            "es_principal": b.es_principal, "es_efectivo": b.es_efectivo, "estado": b.estado.value, "tiene_transacciones": has_tx
+            "id": str(b.id),
+            "nombre": b.nombre,
+            "moneda": b.moneda.value,
+            "saldo_actual": float(b.saldo_actual),
+            "saldo_inicial": float(getattr(b, "saldo_inicial", Decimal("0")) or Decimal("0")),
+            "es_principal": bool(b.es_principal),
+            "es_efectivo": bool(b.es_efectivo),
+            "estado": b.estado.value,
+            "fecha_creacion": b.fecha_creacion.isoformat() if getattr(b, "fecha_creacion", None) else None,
+            "bank_id": getattr(b, "bank_id", None),
+            "tiene_transacciones": bool(has_tx)
         })
 
     # QUERY 2 y 3: Se ejecutan dentro de get_dashboard_resumen
     resumen = get_dashboard_resumen(db, usuario, desde, hasta, total_billeteras_override=total_saldo_activa, billetera_ids=billetera_ids)
-    cotizacion = await get_cotizacion_usuario(usuario)
+    cotizacion = get_cotizacion_usuario(usuario)
 
     return {"billeteras": billeteras_data, "resumen": resumen, "cotizacion": cotizacion}
 
@@ -490,8 +525,8 @@ def get_subcategorias_gasto(
     import uuid
     try:
         cat_uuid = uuid.UUID(categoria_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid UUID format")
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="Formato de ID de categoría inválido")
 
     hoy = hoy_argentina()
     fecha_inicio, fecha_fin = get_ciclo_fechas(usuario, hoy)
@@ -515,7 +550,7 @@ def get_subcategorias_gasto(
         Transaccion.usuario_id == usuario.id,
         Transaccion.categoria_id == cat_uuid,
         Transaccion.fecha >= fecha_inicio,
-        Transaccion.fecha <= hoy,
+        Transaccion.fecha <= fecha_fin,
         Transaccion.tipo == TipoTransaccion.EGRESO,
         Transaccion.es_padre_cuotas == False,
         Transaccion.metodo_pago != MetodoPago.CREDITO,
