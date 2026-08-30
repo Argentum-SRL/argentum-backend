@@ -30,19 +30,21 @@ def _parse_month_str(date_input: str) -> str:
         raise ValueError("Fecha vacía o inválida")
     val = str(date_input).strip()
     if len(val) >= 7 and val[4] == '-':
-        return val[:7]
+        try:
+            y = int(val[:4])
+            m = int(val[5:7])
+            if 1900 <= y <= 2100 and 1 <= m <= 12:
+                return f"{y:04d}-{m:02d}"
+        except ValueError:
+            pass
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d"):
+        try:
+            dt = datetime.strptime(val[:10], fmt)
+            return dt.strftime("%Y-%m")
+        except ValueError:
+            pass
     try:
         dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
-        return dt.strftime("%Y-%m")
-    except ValueError:
-        pass
-    try:
-        dt = datetime.strptime(val, "%Y-%m-%d")
-        return dt.strftime("%Y-%m")
-    except ValueError:
-        pass
-    try:
-        dt = datetime.strptime(val, "%d/%m/%Y")
         return dt.strftime("%Y-%m")
     except ValueError:
         pass
@@ -106,9 +108,13 @@ def get_current_ipc(db: Session) -> IPCCache:
         select(IPCCache).order_by(IPCCache.fecha_dato.desc())
     ).scalars().first()
 
-    if ultimo_cache and ultimo_cache.fecha_actualizacion >= limite_cache and not ultimo_cache.es_estimado:
-        logger.info(f"Caché válido encontrado: {ultimo_cache.fecha_dato} (actualizado hace menos de 24hs)")
-        return _calcular_y_asignar_valor_mensual(db, ultimo_cache)
+    if ultimo_cache:
+        fa = ultimo_cache.fecha_actualizacion
+        if fa.tzinfo is None:
+            fa = fa.replace(tzinfo=timezone.utc)
+        if fa >= limite_cache and not ultimo_cache.es_estimado:
+            logger.info(f"Caché válido encontrado: {ultimo_cache.fecha_dato} (actualizado hace menos de 24hs)")
+            return _calcular_y_asignar_valor_mensual(db, ultimo_cache)
 
     # Consultar API de datos.gob.ar
     try:
@@ -167,7 +173,7 @@ def get_current_ipc(db: Session) -> IPCCache:
 
     # Si nunca hubo caché ni datos, crear uno por defecto estimado
     logger.warning("No hay datos disponibles en la base de datos. Retornando valor por defecto estimado.")
-    mes_anterior = datetime.now() - timedelta(days=30)
+    mes_anterior = ahora - timedelta(days=30)
     fecha_dato_default = mes_anterior.strftime("%Y-%m")
     
     nuevo_ipc = IPCCache(
@@ -263,6 +269,9 @@ def ajustar_por_ipc(monto: float, fecha_origen: str, fecha_destino: str | None =
         return AjusteIPCFloat(monto, ajuste_posible=False)
 
     record_origen = _get_closest_ipc_record(db, fo_str)
+    if not record_origen or record_origen.indice_acumulado <= 0:
+        logger.warning(f"Índice de origen inválido para {fo_str}.")
+        return AjusteIPCFloat(monto, ajuste_posible=False)
 
     if fecha_destino is not None:
         try:
@@ -274,9 +283,10 @@ def ajustar_por_ipc(monto: float, fecha_origen: str, fecha_destino: str | None =
     else:
         # Usa el período disponible más reciente en la tabla
         record_destino = db.execute(select(IPCCache).order_by(IPCCache.fecha_dato.desc())).scalars().first()
-        if not record_destino:
-            logger.warning("No hay registros de IPC destino disponibles.")
-            return AjusteIPCFloat(monto, ajuste_posible=False)
+
+    if not record_destino or record_destino.indice_acumulado <= 0:
+        logger.warning("No hay registros de IPC destino válidos disponibles.")
+        return AjusteIPCFloat(monto, ajuste_posible=False)
 
     factor = record_destino.indice_acumulado / record_origen.indice_acumulado
     monto_ajustado = float(monto) * factor
@@ -441,17 +451,22 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
 
     gasto_promedio_variable = float(gastos_total / Decimal(str(divisor)))
 
+    saldo_disp_ars = round(float(disponible_res["ars"]["saldo_disponible"]), 2)
+    carga_comprometida_ars = round(carga_mensual_comprometida_ars, 2)
+
     # Margen libre mensual
     margen_libre_mensual = None
     if ingreso_promedio_mensual is not None:
         margen_libre_mensual = ingreso_promedio_mensual - carga_mensual_comprometida_ars - gasto_promedio_variable
 
     return {
+        "saldo_disponible": saldo_disp_ars,
+        "carga_mensual_comprometida": carga_comprometida_ars,
         "ars": {
             "total_billeteras": round(float(disponible_res["ars"]["total_billeteras"]), 2),
             "cuotas_comprometidas": round(float(disponible_res["ars"]["cuotas_comprometidas"]), 2),
             "suscripciones_mensuales": round(float(disponible_res["ars"]["suscripciones_mensuales"]), 2),
-            "saldo_disponible": round(float(disponible_res["ars"]["saldo_disponible"]), 2),
+            "saldo_disponible": saldo_disp_ars,
         },
         "usd": {
             "total_billeteras": round(float(disponible_res["usd"]["total_billeteras"]), 2),
@@ -481,10 +496,11 @@ def calcular_puede_permitirse(
     # 1. Obtener contexto financiero del usuario
     ctx = obtener_contexto_financiero(user_id, db)
     
-    ingreso = ingreso_manual if ctx['ingreso_promedio_mensual'] is None else ctx['ingreso_promedio_mensual']
-    saldo = ctx['ars']['saldo_disponible']
-    carga_actual = ctx['ars']['cuotas_comprometidas'] + ctx['ars']['suscripciones_mensuales']
-    gasto_variable = ctx['gasto_promedio_variable']
+    ingreso = ingreso_manual if ctx.get('ingreso_promedio_mensual') is None else ctx['ingreso_promedio_mensual']
+    saldo = ctx.get('ars', {}).get('saldo_disponible', 0.0)
+    carga_actual = ctx.get('ars', {}).get('cuotas_comprometidas', 0.0) + ctx.get('ars', {}).get('suscripciones_mensuales', 0.0)
+    gasto_variable = ctx.get('gasto_promedio_variable', 0.0)
+    es_manual = bool(ctx.get('ingreso_promedio_mensual') is None and ingreso_manual is not None)
 
     if modo == 'contado':
         # ---- MODO CONTADO ----
@@ -493,7 +509,10 @@ def calcular_puede_permitirse(
         porcentaje_del_ingreso = (precio_total / ingreso * 100) if ingreso else None
         
         # Semáforo
-        if porcentaje_del_saldo <= 20:
+        if saldo <= 0 or precio_total > saldo:
+            semaforo = 'negro'
+            mensaje = 'No tenés suficiente saldo disponible para esta compra.'
+        elif porcentaje_del_saldo <= 20:
             semaforo = 'verde'
             mensaje = 'Podés comprarlo sin comprometer tu estabilidad.'
         elif porcentaje_del_saldo <= 50:
@@ -516,7 +535,7 @@ def calcular_puede_permitirse(
             "semaforo": semaforo,
             "mensaje_principal": mensaje,
             "ingreso_promedio_usado": round(ingreso, 2) if ingreso else None,
-            "ingreso_es_manual": ctx['ingreso_promedio_mensual'] is None,
+            "ingreso_es_manual": es_manual,
         }
 
     else:
@@ -540,10 +559,17 @@ def calcular_puede_permitirse(
         porcentaje_carga_sobre_ingreso = (nueva_carga_total / ingreso * 100) if ingreso else None
         nuevo_margen_libre = (ingreso - nueva_carga_total - gasto_variable) if ingreso else None
         
-        # Semáforo basado en % de carga comprometida sobre ingreso
+        # Semáforo basado en % de carga comprometida sobre ingreso y margen libre resultante
         if porcentaje_carga_sobre_ingreso is None:
             semaforo = 'gris'
             mensaje = 'Ingresá tu ingreso mensual para ver el análisis completo.'
+        elif nuevo_margen_libre is not None and nuevo_margen_libre < 0:
+            if porcentaje_carga_sobre_ingreso > 100:
+                semaforo = 'negro'
+                mensaje = 'Esta cuota supera tu capacidad de pago mensual según tu historial.'
+            else:
+                semaforo = 'rojo'
+                mensaje = 'Tus gastos totales y cuotas superarían tus ingresos mensuales, dejándote con saldo negativo.'
         elif porcentaje_carga_sobre_ingreso <= 30:
             semaforo = 'verde'
             mensaje = 'La cuota entra bien en tu presupuesto mensual.'
@@ -569,7 +595,7 @@ def calcular_puede_permitirse(
             "semaforo": semaforo,
             "mensaje_principal": mensaje,
             "ingreso_promedio_usado": round(ingreso, 2) if ingreso else None,
-            "ingreso_es_manual": ctx['ingreso_promedio_mensual'] is None,
+            "ingreso_es_manual": es_manual,
             "gasto_variable_promedio": round(gasto_variable, 2),
             "tiene_interes": tiene_interes,
             "tna_usada": tna if tiene_interes else None,

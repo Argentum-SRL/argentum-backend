@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, Float, String
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, String
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,6 +12,10 @@ from app.core.database import Base
 
 class IPCCache(Base):
     __tablename__ = "ipc_cache"
+    __table_args__ = (
+        CheckConstraint("indice_acumulado > 0", name="chk_ipc_indice_positivo"),
+        CheckConstraint("length(fecha_dato) = 7", name="chk_ipc_fecha_formato"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     indice_acumulado: Mapped[float] = mapped_column(Float, nullable=False)
