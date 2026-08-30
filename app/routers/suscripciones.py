@@ -12,7 +12,8 @@ from app.schemas.suscripcion import (
     SuscripcionUpdate, 
     SuscripcionResponse, 
     ActualizarPrecioRequest,
-    HistorialSuscripcionResponse
+    HistorialSuscripcionResponse,
+    TotalMensualResponse
 )
 from app.services import suscripcion_service
 
@@ -26,7 +27,7 @@ def get_suscripciones(
 ):
     return suscripcion_service.obtener_suscripciones(db, current_user.id, estado)
 
-@router.get("/total-mensual")
+@router.get("/total-mensual", response_model=TotalMensualResponse)
 def get_total_mensual(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
@@ -102,8 +103,5 @@ def delete_suscripcion(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
-    try:
-        suscripcion_service.eliminar_suscripcion(db, current_user.id, id)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    suscripcion_service.eliminar_suscripcion(db, current_user.id, id)
     return None
