@@ -66,7 +66,10 @@ class Presupuesto(Base):
         back_populates="presupuesto",
         cascade="all, delete-orphan",
     )
-    periodos: Mapped[list[PeriodoPresupuesto]] = relationship("PeriodoPresupuesto")
+    periodos: Mapped[list[PeriodoPresupuesto]] = relationship(
+        "PeriodoPresupuesto",
+        cascade="all, delete-orphan"
+    )
     usuario: Mapped[Usuario] = relationship("Usuario")
 
     def __repr__(self) -> str:

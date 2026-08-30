@@ -42,8 +42,9 @@ def _map_presupuesto_response(p) -> PresupuestoResponse:
     categorias_resp = []
     for pc in p.categorias:
         nombre = pc.subcategoria.nombre if pc.subcategoria else (pc.categoria.nombre if pc.categoria else "")
+        cat_id = pc.categoria_id or (pc.subcategoria.categoria_id if pc.subcategoria else None)
         categorias_resp.append(PresupuestoCategoriaResponse(
-            categoria_id=pc.categoria_id,
+            categoria_id=cat_id,
             subcategoria_id=pc.subcategoria_id,
             nombre=nombre,
             es_subcategoria=pc.subcategoria_id is not None
@@ -142,10 +143,11 @@ def obtener_historial(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user)
 ):
+    presupuesto_service.obtener_presupuesto(db, usuario.id, id)
     periodos = presupuesto_service.obtener_historial(db, usuario.id, id)
     resp = []
     for p in periodos:
-        dias_restantes = (p.fecha_fin - hoy_argentina()).days
+        dias_restantes = max(0, (p.fecha_fin - hoy_argentina()).days)
         porcentaje_usado = float((p.monto_usado / p.monto_limite) * 100) if p.monto_limite > 0 else 0
         resp.append(PeriodoPresupuestoResponse(
             id=p.id,
