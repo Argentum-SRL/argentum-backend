@@ -22,7 +22,7 @@ from app.utils.fecha import hoy_argentina
 
 logger = logging.getLogger(__name__)
 
-def _validar_categorias_presupuesto(db: Session, categorias_input: List) -> None:
+def _validar_categorias_presupuesto(db: Session, categorias_input: List, usuario_id: Optional[UUID] = None) -> None:
     if not categorias_input:
         raise HTTPException(status_code=400, detail="Debe seleccionar al menos una categoría")
 
@@ -30,9 +30,10 @@ def _validar_categorias_presupuesto(db: Session, categorias_input: List) -> None
     subcat_ids = {c.subcategoria_id for c in categorias_input if getattr(c, 'subcategoria_id', None)}
 
     if cat_ids:
-        cats = db.execute(
-            select(Categoria).where(Categoria.id.in_(cat_ids))
-        ).scalars().all()
+        query = select(Categoria).where(Categoria.id.in_(cat_ids))
+        if usuario_id is not None:
+            query = query.where(or_(Categoria.creador_id == usuario_id, Categoria.es_global == True))
+        cats = db.execute(query).scalars().all()
         found_cat_ids = {c.id for c in cats}
         if len(found_cat_ids) != len(cat_ids):
             raise HTTPException(status_code=404, detail="Categoría no encontrada")
@@ -44,9 +45,10 @@ def _validar_categorias_presupuesto(db: Session, categorias_input: List) -> None
                 )
 
     if subcat_ids:
-        subs = db.execute(
-            select(Subcategoria).options(joinedload(Subcategoria.categoria)).where(Subcategoria.id.in_(subcat_ids))
-        ).scalars().all()
+        query = select(Subcategoria).options(joinedload(Subcategoria.categoria)).where(Subcategoria.id.in_(subcat_ids))
+        if usuario_id is not None:
+            query = query.where(or_(Subcategoria.creador_id == usuario_id, Subcategoria.es_global == True))
+        subs = db.execute(query).scalars().all()
         found_subcat_ids = {s.id for s in subs}
         if len(found_subcat_ids) != len(subcat_ids):
             raise HTTPException(status_code=404, detail="Categoría no encontrada")
@@ -56,6 +58,14 @@ def _validar_categorias_presupuesto(db: Session, categorias_input: List) -> None
                     status_code=400, 
                     detail="Los presupuestos solo pueden asociarse a categorías de egreso"
                 )
+        for c in categorias_input:
+            if c.categoria_id and getattr(c, 'subcategoria_id', None):
+                sub = next((s for s in subs if s.id == c.subcategoria_id), None)
+                if sub and sub.categoria_id != c.categoria_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="La subcategoría seleccionada no pertenece a la categoría indicada"
+                    )
 
 def formatear_monto(monto: Decimal) -> str:
     # Formato simple para notificaciones
@@ -173,7 +183,21 @@ def crear_presupuesto(db: Session, usuario_id: UUID, data: PresupuestoCreate) ->
     if data.monto <= 0:
         raise HTTPException(status_code=400, detail="Monto límite debe ser positivo")
 
-    _validar_categorias_presupuesto(db, data.categorias)
+    _validar_categorias_presupuesto(db, data.categorias, usuario_id)
+
+    nombre_limpio = data.nombre.strip()
+    nombre_existente = db.execute(
+        select(Presupuesto.id).where(
+            Presupuesto.usuario_id == usuario_id,
+            func.lower(Presupuesto.nombre) == nombre_limpio.lower(),
+            Presupuesto.estado.in_([EstadoPresupuesto.ACTIVO, EstadoPresupuesto.PAUSADO])
+        )
+    ).scalar_one_or_none()
+    if nombre_existente:
+        raise HTTPException(
+            status_code=400,
+            detail="Ya tenés un presupuesto activo o pausado con ese nombre"
+        )
 
     try:
         moneda_enum = Moneda(data.moneda)
@@ -191,7 +215,7 @@ def crear_presupuesto(db: Session, usuario_id: UUID, data: PresupuestoCreate) ->
     # 1. Crear registro Presupuesto
     nuevo_presupuesto = Presupuesto(
         usuario_id=usuario_id,
-        nombre=data.nombre,
+        nombre=nombre_limpio,
         monto=data.monto,
         moneda=moneda_enum,
         periodo=periodo_enum,
@@ -260,7 +284,21 @@ def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: Presup
     presupuesto = obtener_presupuesto(db, usuario_id, id)
     
     if data.nombre is not None:
-        presupuesto.nombre = data.nombre
+        nombre_limpio = data.nombre.strip()
+        nombre_existente = db.execute(
+            select(Presupuesto.id).where(
+                Presupuesto.usuario_id == usuario_id,
+                func.lower(Presupuesto.nombre) == nombre_limpio.lower(),
+                Presupuesto.estado.in_([EstadoPresupuesto.ACTIVO, EstadoPresupuesto.PAUSADO]),
+                Presupuesto.id != id
+            )
+        ).scalar_one_or_none()
+        if nombre_existente:
+            raise HTTPException(
+                status_code=400,
+                detail="Ya tenés un presupuesto activo o pausado con ese nombre"
+            )
+        presupuesto.nombre = nombre_limpio
     if data.moneda is not None:
         try:
             presupuesto.moneda = Moneda(data.moneda)
@@ -283,16 +321,15 @@ def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: Presup
     recalcular_monto = data.moneda is not None or periodo_cambio
 
     if data.categorias is not None:
-        _validar_categorias_presupuesto(db, data.categorias)
-        from sqlalchemy import delete
-        db.execute(delete(PresupuestoCategoria).where(PresupuestoCategoria.presupuesto_id == id))
+        _validar_categorias_presupuesto(db, data.categorias, usuario_id)
+        presupuesto.categorias.clear()
         for cat_data in data.categorias:
             pc = PresupuestoCategoria(
                 presupuesto_id=id,
                 categoria_id=cat_data.categoria_id,
                 subcategoria_id=cat_data.subcategoria_id
             )
-            db.add(pc)
+            presupuesto.categorias.append(pc)
         recalcular_monto = True
         
     periodo_actual = obtener_periodo_activo(db, presupuesto)
@@ -357,7 +394,10 @@ def reanudar_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto
 
 def eliminar_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> None:
     presupuesto = obtener_presupuesto(db, usuario_id, id)
-    presupuesto.estado = EstadoPresupuesto.FINALIZADO
+    if presupuesto.estado == EstadoPresupuesto.FINALIZADO:
+        db.delete(presupuesto)
+    else:
+        presupuesto.estado = EstadoPresupuesto.FINALIZADO
     db.commit()
 
 def obtener_historial(db: Session, usuario_id: UUID, presupuesto_id: UUID) -> List[PeriodoPresupuesto]:
@@ -489,7 +529,7 @@ def verificar_alertas_presupuesto(db: Session, presupuesto: Presupuesto, periodo
         mensaje=mensaje,
         entidad_tipo="presupuesto",
         entidad_id=presupuesto.id,
-        deep_link=f"/presupuestos/{presupuesto.id}",
+        deep_link="/app/presupuestos",
         canal_web=canal_web,
         canal_whatsapp=canal_whatsapp,
         canal_email=False,
@@ -545,7 +585,7 @@ def renovar_presupuestos(db: Session):
                         mensaje=mensaje_sug,
                         entidad_tipo="presupuesto",
                         entidad_id=presu.id,
-                        deep_link=f"/presupuestos/{presu.id}",
+                        deep_link="/app/presupuestos",
                         canal_web=True,
                         canal_whatsapp=False,
                         canal_email=False,
@@ -555,14 +595,18 @@ def renovar_presupuestos(db: Session):
                 nueva_inicio, nueva_fin = calcular_fechas_periodo(presu.periodo, hoy, usuario=presu.usuario)
                 ya_existe = any(p.fecha_inicio == nueva_inicio for p in presu.periodos)
                 if not ya_existe:
+                    monto_usado = calcular_gasto_en_periodo(
+                        db, presu.usuario_id, presu.categorias, nueva_inicio, nueva_fin, moneda=presu.moneda
+                    )
                     nuevo_periodo = PeriodoPresupuesto(
                         presupuesto_id=presu.id,
                         fecha_inicio=nueva_inicio,
                         fecha_fin=nueva_fin,
                         monto_limite=presu.monto,
-                        monto_usado=Decimal("0"),
-                        superado=False
+                        monto_usado=monto_usado,
+                        superado=monto_usado > presu.monto
                     )
                     db.add(nuevo_periodo)
+                    presu.periodos.append(nuevo_periodo)
     
     db.commit()

@@ -46,6 +46,16 @@ class PresupuestoCreate(BaseModel):
             raise ValueError("El nombre no puede superar los 100 caracteres")
         return cleaned
 
+    @field_validator("monto")
+    @classmethod
+    def validate_monto(cls, v: Decimal) -> Decimal:
+        if v is not None:
+            if v <= 0:
+                raise ValueError("El monto límite debe ser mayor a cero")
+            if v.as_tuple().exponent < -2:
+                raise ValueError("El monto no puede tener más de 2 decimales")
+        return v
+
     @field_validator("categorias")
     @classmethod
     def validate_categorias(cls, v: List[PresupuestoCategoriaInput]) -> List[PresupuestoCategoriaInput]:
@@ -80,6 +90,16 @@ class PresupuestoUpdate(BaseModel):
         if len(cleaned) > 100:
             raise ValueError("El nombre no puede superar los 100 caracteres")
         return cleaned
+
+    @field_validator("monto")
+    @classmethod
+    def validate_monto_update(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        if v is not None:
+            if v <= 0:
+                raise ValueError("El monto límite debe ser mayor a cero")
+            if v.as_tuple().exponent < -2:
+                raise ValueError("El monto no puede tener más de 2 decimales")
+        return v
 
     @field_validator("categorias")
     @classmethod
