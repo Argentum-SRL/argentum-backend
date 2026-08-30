@@ -1,7 +1,7 @@
 import logging
 from uuid import UUID
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import List, Dict, Any
 from sqlalchemy import select, func, desc
 from sqlalchemy.orm import Session, joinedload
@@ -18,12 +18,16 @@ from app.utils.fecha import hoy_argentina
 logger = logging.getLogger(__name__)
 
 def obtener_metas(db: Session, usuario_id: UUID, activas_solo: bool = False, skip: int = 0, limit: int = 50) -> List[Meta]:
-    query = select(Meta).where(Meta.usuario_id == usuario_id)
+    query = (
+        select(Meta)
+        .options(joinedload(Meta.movimientos).joinedload(MovimientoMeta.billetera))
+        .where(Meta.usuario_id == usuario_id)
+    )
     if activas_solo:
         query = query.where(Meta.estado == EstadoMeta.ACTIVA)
     query = query.order_by(desc(Meta.fecha_creacion))
     query = query.offset(skip).limit(limit)
-    return db.execute(query).scalars().all()
+    return list(db.execute(query).unique().scalars().all())
 
 def obtener_meta(db: Session, usuario_id: UUID, meta_id: UUID) -> Meta:
     query = (
@@ -38,18 +42,25 @@ def obtener_meta(db: Session, usuario_id: UUID, meta_id: UUID) -> Meta:
     return meta
 
 def crear_meta(db: Session, usuario_id: UUID, data: MetaCreate) -> Meta:
+    nombre_limpio = data.nombre.strip()
+    if not nombre_limpio:
+        raise HTTPException(status_code=400, detail="El nombre de la meta no puede estar vacío.")
+
+    if data.monto_objetivo <= Decimal("0"):
+        raise HTTPException(status_code=400, detail="El monto objetivo tiene que ser mayor a cero.")
+
     if data.fecha_limite and data.fecha_limite < hoy_argentina():
-        raise HTTPException(status_code=400, detail="La fecha límite no puede ser en el pasado")
+        raise HTTPException(status_code=400, detail="La fecha límite no puede ser en el pasado.")
         
     nueva_meta = Meta(
         usuario_id=usuario_id,
-        nombre=data.nombre,
+        nombre=nombre_limpio,
         monto_objetivo=data.monto_objetivo,
         moneda=data.moneda,
         monto_actual=data.monto_actual,
         fecha_limite=data.fecha_limite,
         color=data.color,
-        nota=data.nota,
+        nota=data.nota.strip() if data.nota else None,
         estado=data.estado
     )
     db.add(nueva_meta)
@@ -61,38 +72,59 @@ def actualizar_meta(db: Session, usuario_id: UUID, meta_id: UUID, data: MetaUpda
     meta = obtener_meta(db, usuario_id, meta_id)
     
     update_data = data.model_dump(exclude_unset=True)
+
+    if "nombre" in update_data:
+        nombre_limpio = update_data["nombre"].strip() if update_data["nombre"] else ""
+        if not nombre_limpio:
+            raise HTTPException(status_code=400, detail="El nombre de la meta no puede estar vacío.")
+        update_data["nombre"] = nombre_limpio
+
+    if "monto_objetivo" in update_data:
+        if update_data["monto_objetivo"] <= Decimal("0"):
+            raise HTTPException(status_code=400, detail="El monto objetivo tiene que ser mayor a cero.")
     
     # Restricción: No cambiar moneda si hay movimientos
     if "moneda" in update_data and update_data["moneda"] != meta.moneda:
         if meta.movimientos:
             raise HTTPException(
                 status_code=400, 
-                detail="No se puede cambiar la moneda de una meta que ya tiene movimientos registrados"
+                detail="No se puede cambiar la moneda de una meta que ya tiene movimientos registrados."
             )
             
     if "fecha_limite" in update_data and update_data["fecha_limite"] and update_data["fecha_limite"] < hoy_argentina():
-         raise HTTPException(status_code=400, detail="La fecha límite no puede ser en el pasado")
+        raise HTTPException(status_code=400, detail="La fecha límite no puede ser en el pasado.")
+
+    objetivo_final = update_data.get("monto_objetivo", meta.monto_objetivo)
 
     # No permitir pasar a COMPLETADA manualmente si no tiene los fondos
     if "estado" in update_data and update_data["estado"] == EstadoMeta.COMPLETADA:
-        if meta.monto_actual < meta.monto_objetivo:
-             raise HTTPException(
+        if meta.monto_actual < objetivo_final:
+            raise HTTPException(
                 status_code=400, 
-                detail="No se puede marcar como completada una meta que no ha alcanzado su objetivo"
+                detail="No se puede marcar como completada una meta que no ha alcanzado su objetivo."
             )
+
+    if "nota" in update_data and update_data["nota"]:
+        update_data["nota"] = update_data["nota"].strip()
 
     for key, value in update_data.items():
         setattr(meta, key, value)
+
+    # Ajuste automático si el nuevo objetivo se cumplió
+    if meta.monto_actual >= meta.monto_objetivo and meta.estado == EstadoMeta.ACTIVA:
+        meta.estado = EstadoMeta.COMPLETADA
+    elif meta.monto_actual < meta.monto_objetivo and meta.estado == EstadoMeta.COMPLETADA:
+        meta.estado = EstadoMeta.ACTIVA
         
     db.commit()
     db.refresh(meta)
-    return meta
+    return obtener_meta(db, usuario_id, meta_id)
 
 def eliminar_meta(db: Session, usuario_id: UUID, meta_id: UUID) -> None:
     meta = obtener_meta(db, usuario_id, meta_id)
     
     # Si tiene plata ahorrada, obligamos a retirar antes de borrar
-    if meta.monto_actual > 0:
+    if meta.monto_actual > Decimal("0"):
         raise HTTPException(
             status_code=400, 
             detail="No se puede eliminar una meta que aún tiene fondos. Por favor, retirá el dinero primero."
@@ -109,10 +141,17 @@ def eliminar_meta(db: Session, usuario_id: UUID, meta_id: UUID) -> None:
 def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: MovimientoMetaCreate) -> MovimientoMeta:
     meta = obtener_meta(db, usuario_id, meta_id)
     
+    if data.monto <= Decimal("0"):
+        raise HTTPException(status_code=400, detail="El monto del movimiento tiene que ser mayor a cero.")
+
     # Validar billetera
     billetera = db.get(Billetera, data.billetera_id)
     if not billetera or billetera.usuario_id != usuario_id:
-        raise HTTPException(status_code=404, detail="Billetera no encontrada")
+        raise HTTPException(status_code=404, detail="Billetera no encontrada.")
+
+    from app.models.billetera import EstadoBilletera
+    if billetera.estado != EstadoBilletera.ACTIVA:
+        raise HTTPException(status_code=400, detail="La billetera seleccionada no está activa.")
 
     from app.services.transaccion_service import _validar_moneda_coincide
     _validar_moneda_coincide(data.moneda_movimiento, billetera)
@@ -120,15 +159,15 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
     # El monto que impacta la META debe ser en la moneda de la META.
     monto_impacto_meta = data.monto
     if data.moneda_movimiento != meta.moneda:
-        if not data.cotizacion_usada:
-             raise HTTPException(status_code=400, detail="Se requiere cotización para movimientos en moneda distinta a la meta")
+        if not data.cotizacion_usada or data.cotizacion_usada <= Decimal("0"):
+            raise HTTPException(status_code=400, detail="Se requiere una cotización válida mayor a 0 para movimientos en moneda distinta a la meta.")
         
         # Meta en USD, Movimiento en ARS. monto_impacto = monto_ars / cotizacion
         if meta.moneda == Moneda.USD and data.moneda_movimiento == Moneda.ARS:
-            monto_impacto_meta = data.monto / data.cotizacion_usada
+            monto_impacto_meta = (data.monto / data.cotizacion_usada).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         # Meta en ARS, Movimiento en USD. monto_impacto = monto_usd * cotizacion
         elif meta.moneda == Moneda.ARS and data.moneda_movimiento == Moneda.USD:
-            monto_impacto_meta = data.monto * data.cotizacion_usada
+            monto_impacto_meta = (data.monto * data.cotizacion_usada).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     nuevo_movimiento = MovimientoMeta(
         meta_id=meta_id,
@@ -146,7 +185,7 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
         if billetera.saldo_actual < data.monto:
             raise HTTPException(
                 status_code=400, 
-                detail=f"Saldo insuficiente en la billetera '{billetera.nombre}'"
+                detail=f"Saldo insuficiente en la billetera '{billetera.nombre}'."
             )
             
         # Crear la transacción vinculada (EGRESO)
@@ -173,7 +212,7 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
     else:
         # Validar que no se retire más de lo que hay
         if meta.monto_actual < monto_impacto_meta:
-             raise HTTPException(status_code=400, detail="Monto insuficiente en la meta")
+            raise HTTPException(status_code=400, detail="Monto insuficiente en la meta.")
         
         # Crear la transacción vinculada (INGRESO)
         from app.schemas.transaccion import TransaccionCreate
@@ -237,30 +276,43 @@ def eliminar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, movimiento
     
     movimiento = db.get(MovimientoMeta, movimiento_id)
     if not movimiento or movimiento.meta_id != meta_id:
-        raise HTTPException(status_code=404, detail="Movimiento no encontrado")
+        raise HTTPException(status_code=404, detail="Movimiento no encontrado.")
         
     # Revertir impacto
     billetera = db.get(Billetera, movimiento.billetera_id)
     
     monto_impacto_meta = movimiento.monto
     if movimiento.moneda_movimiento != meta.moneda:
+        cotiz = movimiento.cotizacion_usada or Decimal("1")
         if meta.moneda == Moneda.USD and movimiento.moneda_movimiento == Moneda.ARS:
-            monto_impacto_meta = movimiento.monto / movimiento.cotizacion_usada
+            monto_impacto_meta = (movimiento.monto / cotiz).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         elif meta.moneda == Moneda.ARS and movimiento.moneda_movimiento == Moneda.USD:
-            monto_impacto_meta = movimiento.monto * movimiento.cotizacion_usada
+            monto_impacto_meta = (movimiento.monto * cotiz).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     # Revertir impacto en saldo / transacciones
     from app.models.transaccion import Transaccion
     from app.services.transaccion_service import eliminar_transaccion
     
-    desc_buscada = f"Aporte a la meta: {meta.nombre}" if movimiento.tipo == TipoMovimientoMeta.APORTE else f"Retiro de la meta: {meta.nombre}"
+    desc_exacta = f"Aporte a la meta: {meta.nombre}" if movimiento.tipo == TipoMovimientoMeta.APORTE else f"Retiro de la meta: {meta.nombre}"
+    desc_patron = f"%Aporte a la meta:%" if movimiento.tipo == TipoMovimientoMeta.APORTE else f"%Retiro de la meta:%"
+    
     tx = db.query(Transaccion).filter(
         Transaccion.usuario_id == usuario_id,
         Transaccion.billetera_id == movimiento.billetera_id,
         Transaccion.monto == movimiento.monto,
         Transaccion.fecha == movimiento.fecha,
-        Transaccion.descripcion == desc_buscada
+        Transaccion.descripcion == desc_exacta
     ).first()
+
+    if not tx:
+        # Si la meta fue renombrada, buscar por el patrón general
+        tx = db.query(Transaccion).filter(
+            Transaccion.usuario_id == usuario_id,
+            Transaccion.billetera_id == movimiento.billetera_id,
+            Transaccion.monto == movimiento.monto,
+            Transaccion.fecha == movimiento.fecha,
+            Transaccion.descripcion.like(desc_patron)
+        ).first()
 
     if tx:
         eliminar_transaccion(db, usuario_id, tx.id)
@@ -285,7 +337,7 @@ def eliminar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, movimiento
 
     # Revertir en la meta
     if movimiento.tipo == TipoMovimientoMeta.APORTE:
-        meta.monto_actual -= monto_impacto_meta
+        meta.monto_actual = max(Decimal("0"), meta.monto_actual - monto_impacto_meta)
     else:
         meta.monto_actual += monto_impacto_meta
 
@@ -315,16 +367,16 @@ def obtener_analytics(db: Session, usuario_id: UUID, meta_id: UUID) -> Dict[str,
     ).scalars().all()
     
     # Agrupar por mes
-    historial_mensual = {}
+    historial_mensual: Dict[str, Decimal] = {}
     for m in movimientos:
         mes_key = m.fecha.strftime("%Y-%m")
         impacto = m.monto
         if m.moneda_movimiento != meta.moneda:
-             # Usar la cotización guardada en el movimiento
-             if meta.moneda == Moneda.USD and m.moneda_movimiento == Moneda.ARS:
-                 impacto = m.monto / m.cotizacion_usada
-             elif meta.moneda == Moneda.ARS and m.moneda_movimiento == Moneda.USD:
-                 impacto = m.monto * m.cotizacion_usada
+            cotiz = m.cotizacion_usada or Decimal("1")
+            if meta.moneda == Moneda.USD and m.moneda_movimiento == Moneda.ARS:
+                impacto = m.monto / cotiz
+            elif meta.moneda == Moneda.ARS and m.moneda_movimiento == Moneda.USD:
+                impacto = m.monto * cotiz
         
         if m.tipo == TipoMovimientoMeta.RETIRO:
             impacto = -impacto
@@ -342,10 +394,11 @@ def obtener_analytics(db: Session, usuario_id: UUID, meta_id: UUID) -> Dict[str,
     for m in aportes_recientes:
         impacto = m.monto
         if m.moneda_movimiento != meta.moneda:
-             if meta.moneda == Moneda.USD and m.moneda_movimiento == Moneda.ARS:
-                 impacto = m.monto / m.cotizacion_usada
-             elif meta.moneda == Moneda.ARS and m.moneda_movimiento == Moneda.USD:
-                 impacto = m.monto * m.cotizacion_usada
+            cotiz = m.cotizacion_usada or Decimal("1")
+            if meta.moneda == Moneda.USD and m.moneda_movimiento == Moneda.ARS:
+                impacto = m.monto / cotiz
+            elif meta.moneda == Moneda.ARS and m.moneda_movimiento == Moneda.USD:
+                impacto = m.monto * cotiz
         suma_aportes += impacto
         
     velocidad_mensual = suma_aportes / 3
@@ -364,25 +417,33 @@ def obtener_analytics(db: Session, usuario_id: UUID, meta_id: UUID) -> Dict[str,
         "velocidad_mensual": float(velocidad_mensual),
         "meses_restantes": meses_restantes,
         "fecha_estimada_finalizacion": fecha_estimada,
-        "porcentaje_progreso": float((meta.monto_actual / meta.monto_objetivo) * 100) if meta.monto_objetivo > 0 else 0,
-        "monto_faltante": float(faltante) if faltante > 0 else 0
+        "porcentaje_progreso": float((meta.monto_actual / meta.monto_objetivo) * 100) if meta.monto_objetivo > 0 else 0.0,
+        "monto_faltante": float(faltante) if faltante > 0 else 0.0
     }
 
 def obtener_summary(db: Session, usuario_id: UUID) -> Dict[str, Any]:
-    metas = obtener_metas(db, usuario_id, activas_solo=True)
-    
-    total_objetivo_ars = Decimal("0")
-    total_actual_ars = Decimal("0")
-    # Para el summary, simplificamos a ARS usando una cotización base o simplemente contando
-    
+    hoy = hoy_argentina()
+    count_activas = db.execute(
+        select(func.count(Meta.id)).where(Meta.usuario_id == usuario_id, Meta.estado == EstadoMeta.ACTIVA)
+    ).scalar() or 0
+
     count_completadas = db.execute(
         select(func.count(Meta.id)).where(Meta.usuario_id == usuario_id, Meta.estado == EstadoMeta.COMPLETADA)
     ).scalar() or 0
-    
+
+    proximo_vencimiento = db.execute(
+        select(func.min(Meta.fecha_limite)).where(
+            Meta.usuario_id == usuario_id,
+            Meta.estado == EstadoMeta.ACTIVA,
+            Meta.fecha_limite.is_not(None),
+            Meta.fecha_limite >= hoy
+        )
+    ).scalar()
+
     return {
-        "total_metas": len(metas),
+        "total_metas": count_activas,
         "completadas": count_completadas,
-        "proximo_vencimiento": min([m.fecha_limite for m in metas if m.fecha_limite and m.fecha_limite >= hoy_argentina()], default=None)
+        "proximo_vencimiento": proximo_vencimiento
     }
 
 # ==============================================================================

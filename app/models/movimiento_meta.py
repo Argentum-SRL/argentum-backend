@@ -5,7 +5,7 @@ from decimal import Decimal
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, String
+from sqlalchemy import CheckConstraint, Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,6 +25,10 @@ class TipoMovimientoMeta(str, Enum):
 
 class MovimientoMeta(Base):
     __tablename__ = "movimientos_meta"
+    __table_args__ = (
+        CheckConstraint("monto > 0", name="chk_movimiento_meta_monto_gt_zero"),
+        CheckConstraint("cotizacion_usada IS NULL OR cotizacion_usada > 0", name="chk_movimiento_meta_cotizacion_gt_zero"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     meta_id: Mapped[UUID] = mapped_column(
