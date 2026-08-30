@@ -1,5 +1,5 @@
-from __future__ import annotations
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from typing import Literal
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query, Path
 from sqlalchemy.orm import Session
 from uuid import UUID
 import logging
@@ -13,6 +13,7 @@ from app.schemas.admin import (
     PaginatedUsuariosResponse,
     CambiarEstadoRequest,
     ResetearOnboardingRequest,
+    AdminStatsResponse,
 )
 from app.services import admin_service
 from app.core.config import settings
@@ -41,12 +42,12 @@ def _map_onboarding_step(user: Usuario) -> str | None:
 
 @router.get("/usuarios", response_model=dict)
 def get_usuarios(
-    page: int = 1,
-    limit: int = 20,
-    search: str | None = None,
-    estado: str | None = None,
-    onboarding: str | None = None,
-    wpp: str | None = None,
+    page: int = Query(1, ge=1, description="Número de página"),
+    limit: int = Query(20, ge=1, le=100, description="Cantidad de usuarios por página"),
+    search: str | None = Query(None, max_length=150, description="Término de búsqueda"),
+    estado: Literal["activo", "inactivo", "bloqueado"] | None = Query(None, description="Filtro por estado de cuenta"),
+    onboarding: Literal["completo", "incompleto"] | None = Query(None, description="Filtro por estado de onboarding"),
+    wpp: Literal["vinculado", "no_vinculado"] | None = Query(None, description="Filtro por vinculación de WhatsApp"),
     db: Session = Depends(get_db),
     admin: Usuario = Depends(get_current_admin_user),
 ):
@@ -67,14 +68,14 @@ def get_usuarios(
     )
     return {
         "success": True,
-        "data": data.model_dump(),
+        "data": data.model_dump(mode="json"),
         "message": "Usuarios listados correctamente."
     }
 
 
 @router.get("/usuarios/{usuario_id}", response_model=dict)
 def get_usuario_detalle(
-    usuario_id: UUID,
+    usuario_id: UUID = Path(..., description="Identificador único del usuario"),
     db: Session = Depends(get_db),
     admin: Usuario = Depends(get_current_admin_user),
 ):
@@ -87,15 +88,15 @@ def get_usuario_detalle(
     
     return {
         "success": True,
-        "data": user_data.model_dump(),
+        "data": user_data.model_dump(mode="json"),
         "message": "Usuario obtenido correctamente."
     }
 
 
 @router.patch("/usuarios/{usuario_id}/estado", response_model=dict)
 def cambiar_estado(
-    usuario_id: UUID,
-    body: CambiarEstadoRequest,
+    usuario_id: UUID = Path(..., description="Identificador único del usuario"),
+    body: CambiarEstadoRequest = ...,
     db: Session = Depends(get_db),
     admin: Usuario = Depends(get_current_admin_user),
 ):
@@ -108,14 +109,14 @@ def cambiar_estado(
     
     return {
         "success": True,
-        "data": user_data.model_dump(),
+        "data": user_data.model_dump(mode="json"),
         "message": "Estado del usuario actualizado correctamente."
     }
 
 
 @router.post("/usuarios/{usuario_id}/reset-password", response_model=dict)
 def reset_password(
-    usuario_id: UUID,
+    usuario_id: UUID = Path(..., description="Identificador único del usuario"),
     db: Session = Depends(get_db),
     admin: Usuario = Depends(get_current_admin_user),
 ):
@@ -130,7 +131,7 @@ def reset_password(
 
 @router.post("/usuarios/{usuario_id}/revocar-sesiones", response_model=dict)
 def revocar_sesiones_usuario(
-    usuario_id: UUID,
+    usuario_id: UUID = Path(..., description="Identificador único del usuario"),
     db: Session = Depends(get_db),
     admin: Usuario = Depends(get_current_admin_user),
 ):
@@ -145,7 +146,7 @@ def revocar_sesiones_usuario(
 
 @router.post("/usuarios/{usuario_id}/desconectar-wpp", response_model=dict)
 def desconectar_whatsapp(
-    usuario_id: UUID,
+    usuario_id: UUID = Path(..., description="Identificador único del usuario"),
     db: Session = Depends(get_db),
     admin: Usuario = Depends(get_current_admin_user),
 ):
@@ -158,15 +159,15 @@ def desconectar_whatsapp(
     
     return {
         "success": True,
-        "data": user_data.model_dump(),
+        "data": user_data.model_dump(mode="json"),
         "message": "WhatsApp desconectado correctamente."
     }
 
 
 @router.post("/usuarios/{usuario_id}/resetear-onboarding", response_model=dict)
 def resetear_onboarding_usuario(
-    usuario_id: UUID,
-    body: ResetearOnboardingRequest,
+    usuario_id: UUID = Path(..., description="Identificador único del usuario"),
+    body: ResetearOnboardingRequest = ...,
     db: Session = Depends(get_db),
     admin: Usuario = Depends(get_current_admin_user),
 ):
@@ -192,7 +193,7 @@ def resetear_onboarding_usuario(
     
     return {
         "success": True,
-        "data": user_data.model_dump(),
+        "data": user_data.model_dump(mode="json"),
         "message": "Onboarding reseteado correctamente."
     }
 
@@ -205,16 +206,17 @@ def get_stats(
     """Obtiene estadísticas generales para el panel de administración."""
     logger.info("[ADMIN] Admin %s (%s) solicitó estadísticas generales.", admin.id, admin.email)
     stats = admin_service.obtener_estadisticas(db)
+    stats_data = AdminStatsResponse.model_validate(stats)
     return {
         "success": True,
-        "data": stats,
+        "data": stats_data.model_dump(mode="json"),
         "message": "Estadísticas obtenidas correctamente."
     }
 
 
 @router.post("/feriados/refresh", response_model=dict)
 async def refresh_feriados_admin(
-    anio: int | None = None,
+    anio: int | None = Query(None, ge=2000, le=2100, description="Año a consultar feriados"),
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Fuerza la recarga de feriados de un año desde la API externa y actualiza BD y caché."""
