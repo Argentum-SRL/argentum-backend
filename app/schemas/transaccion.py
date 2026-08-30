@@ -30,6 +30,8 @@ class InfoCuotas(BaseModel):
             raise ValueError("La cuota inicial no puede ser mayor a la cantidad total de cuotas.")
         if self.tiene_interes and self.tasa_interes is not None and self.tasa_interes < 0:
             raise ValueError("La tasa de interés no puede ser negativa.")
+        if self.tasa_interes is not None and self.tasa_interes > Decimal("1000"):
+            raise ValueError("La tasa de interés debe estar entre 0 y 1000% mensual.")
         return self
 
 
