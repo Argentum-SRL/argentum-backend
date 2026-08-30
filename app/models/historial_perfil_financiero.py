@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, Date
+from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, Date, Index
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import TYPE_CHECKING
@@ -17,12 +17,16 @@ from app.core.database import Base
 
 class HistorialPerfilFinanciero(Base):
     __tablename__ = "historial_perfiles_financieros"
+    __table_args__ = (
+        Index("ix_historial_perfiles_usuario_id", "usuario_id"),
+        Index("ix_historial_perfiles_periodo_inicio", "periodo_inicio"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     usuario_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False, index=True
+        PGUUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False
     )
-    periodo_inicio: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    periodo_inicio: Mapped[date] = mapped_column(Date, nullable=False)
     periodo_fin: Mapped[date] = mapped_column(Date, nullable=False)
     tasa_ahorro_ars: Mapped[Decimal | None] = mapped_column(Numeric(6, 4), nullable=True)
     tasa_ahorro_usd: Mapped[Decimal | None] = mapped_column(Numeric(6, 4), nullable=True)

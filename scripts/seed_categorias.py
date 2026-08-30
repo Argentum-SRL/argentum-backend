@@ -194,7 +194,13 @@ def seed_categorias(db: Session):
                 print(f"  [+] Subcategoria creada: {nombre_sub} en {categoria.nombre}")
 
     db.commit()
+    try:
+        from app.services.categoria_service import invalidar_cache_categorias_globales
+        invalidar_cache_categorias_globales()
+    except Exception:
+        pass
     print(f"[OK] Seed de categorias completado: {len(CATEGORIAS_SEED)} categorias canonicas contempladas.")
+
 
 
 if __name__ == "__main__":

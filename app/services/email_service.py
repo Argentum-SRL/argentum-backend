@@ -146,7 +146,7 @@ def verificar_codigo_email(email: str, codigo: str) -> tuple[bool, str | None]:
     return True, None
 
 
-def enviar_email_verificacion(destinatario: str, codigo: str) -> bool:
+def enviar_email_verificacion(destinatario: str, codigo: str, nombre: str | None = None) -> bool:
     codigo_nuevo = _generar_codigo() if not codigo else codigo
     guardar_codigo_verificacion_email(destinatario, codigo_nuevo)
     asunto = "Verificá tu email para entrar a Argentum"
@@ -158,12 +158,12 @@ def enviar_email_verificacion(destinatario: str, codigo: str) -> bool:
         f"Este código expira en 15 minutos.\n"
         f"Si no creaste una cuenta en Argentum, ignorá este mensaje."
     )
-    nombre = _obtener_nombre_usuario(destinatario)
-    cuerpo_html = template_verificacion_email(nombre=nombre, codigo=codigo_nuevo)
+    nombre_final = nombre or _obtener_nombre_usuario(destinatario)
+    cuerpo_html = template_verificacion_email(nombre=nombre_final, codigo=codigo_nuevo)
     return _enviar_email(destinatario, asunto, cuerpo, cuerpo_html)
 
 
-def generar_y_enviar_verificacion_email(destinatario: str) -> str:
+def generar_y_enviar_verificacion_email(destinatario: str, nombre: str | None = None) -> str:
     """Genera código, lo guarda y lo envía. Devuelve el código (para logs en dev)."""
     codigo = _generar_codigo()
     guardar_codigo_verificacion_email(destinatario, codigo)
@@ -176,8 +176,8 @@ def generar_y_enviar_verificacion_email(destinatario: str) -> str:
         f"Este código expira en 15 minutos.\n"
         f"Si no creaste una cuenta en Argentum, ignorá este mensaje."
     )
-    nombre = _obtener_nombre_usuario(destinatario)
-    cuerpo_html = template_verificacion_email(nombre=nombre, codigo=codigo)
+    nombre_final = nombre or _obtener_nombre_usuario(destinatario)
+    cuerpo_html = template_verificacion_email(nombre=nombre_final, codigo=codigo)
     enviado = _enviar_email(destinatario, asunto, cuerpo, cuerpo_html)
     if not enviado:
         logger.warning(
@@ -185,6 +185,7 @@ def generar_y_enviar_verificacion_email(destinatario: str) -> str:
             destinatario,
         )
     return codigo
+
 
 
 # ---------------------------------------------------------------------------

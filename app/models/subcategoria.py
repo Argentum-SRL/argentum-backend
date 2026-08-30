@@ -3,7 +3,12 @@ from __future__ import annotations
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, String
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.categoria import Categoria
+
+from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, String, Index
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,6 +22,10 @@ class EstadoSubcategoria(str, Enum):
 
 class Subcategoria(Base):
     __tablename__ = "subcategorias"
+    __table_args__ = (
+        Index("ix_subcategorias_categoria_id", "categoria_id"),
+        Index("ix_subcategorias_creador_id", "creador_id"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     categoria_id: Mapped[UUID] = mapped_column(

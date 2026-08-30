@@ -40,6 +40,11 @@ logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 # ---------------------------------------------------------------------------
 from app.core.database import SessionLocal
 from app.core.auth import limpiar_tokens_expirados
+from app.core.job_lock import intentar_tomar_lock_job, liberar_lock_job
+import structlog
+
+struct_logger = structlog.get_logger(__name__)
+
 from app.services.recurrente_service import procesar_recurrentes
 from app.services.vencimiento_tarjeta_service import procesar_vencimientos_tarjetas
 from app.services.presupuesto_service import renovar_presupuestos
@@ -109,62 +114,112 @@ class TimeoutMiddleware:
 async def _job_limpiar_tokens():
     """Tarea programada: elimina refresh tokens viejos cada 6 horas."""
     db = SessionLocal()
+    lock_adquirido = False
     try:
+        if not intentar_tomar_lock_job(db, "_job_limpiar_tokens"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_limpiar_tokens",
+            )
+            return
+        lock_adquirido = True
         eliminados = limpiar_tokens_expirados(db)
         if eliminados:
             logger.info("Refresh tokens eliminados: %s", eliminados)
     except Exception:
         logger.exception("Error en job limpiar_tokens")
     finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_limpiar_tokens")
         db.close()
 
 
 async def _job_procesar_recurrentes():
     """Tarea programada: genera transacciones recurrentes una vez al día."""
     db = SessionLocal()
+    lock_adquirido = False
     try:
+        if not intentar_tomar_lock_job(db, "_job_procesar_recurrentes"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_procesar_recurrentes",
+            )
+            return
+        lock_adquirido = True
         generadas = procesar_recurrentes(db)
         if generadas:
             logger.info("Transacciones recurrentes generadas: %s", generadas)
     except Exception:
         logger.exception("Error en job procesar_recurrentes")
     finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_procesar_recurrentes")
         db.close()
 
 
 async def _job_vencimientos_tarjetas():
     """Tarea programada: genera transacciones de vencimiento de tarjetas una vez al día."""
     db = SessionLocal()
+    lock_adquirido = False
     try:
+        if not intentar_tomar_lock_job(db, "_job_vencimientos_tarjetas"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_vencimientos_tarjetas",
+            )
+            return
+        lock_adquirido = True
         procesar_vencimientos_tarjetas(db)
         logger.info("Job de vencimientos de tarjetas ejecutado.")
     except Exception:
         logger.exception("Error en job vencimientos_tarjetas")
     finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_vencimientos_tarjetas")
         db.close()
 
 
 async def _job_renovar_presupuestos():
     """Tarea programada: renueva presupuestos automáticamente una vez al día."""
     db = SessionLocal()
+    lock_adquirido = False
     try:
+        if not intentar_tomar_lock_job(db, "_job_renovar_presupuestos"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_renovar_presupuestos",
+            )
+            return
+        lock_adquirido = True
         renovar_presupuestos(db)
         logger.info("Job de renovación de presupuestos ejecutado.")
     except Exception:
         logger.exception("Error en job renovar_presupuestos")
     finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_renovar_presupuestos")
         db.close()
 
 
 async def _job_cobros_suscripciones():
     """Tarea programada: procesa cobros de suscripciones automáticamente una vez al día."""
     db = SessionLocal()
+    lock_adquirido = False
     try:
+        if not intentar_tomar_lock_job(db, "_job_cobros_suscripciones"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_cobros_suscripciones",
+            )
+            return
+        lock_adquirido = True
         procesar_cobros_suscripciones(db)
         logger.info("Job de cobros de suscripciones ejecutado.")
     except Exception:
         logger.exception("Error en job cobros_suscripciones")
     finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_cobros_suscripciones")
         db.close()
 
 
@@ -209,51 +264,69 @@ async def _job_actualizar_perfiles():
 
     @asynccontextmanager
     async def get_db_context():
-        db = SessionLocal()
+        db_sub = SessionLocal()
         try:
-            yield db
+            yield db_sub
         finally:
-            db.close()
+            db_sub.close()
 
     db = SessionLocal()
+    lock_adquirido = False
     try:
+        if not intentar_tomar_lock_job(db, "_job_actualizar_perfiles"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_actualizar_perfiles",
+            )
+            return
+        lock_adquirido = True
         usuarios_activos = db.execute(
             select(Usuario.id).where(Usuario.estado == EstadoUsuario.ACTIVO)
         ).scalars().all()
-    except Exception:
-        logger.exception("Error en job _job_actualizar_perfiles")
-        db.close()
-        return
-    finally:
-        db.close()
 
-    semaforo = asyncio.Semaphore(50)
-    cant_actualizados = 0
+        semaforo = asyncio.Semaphore(50)
+        cant_actualizados = 0
 
-    async def procesar_usuario(usuario_id):
-        nonlocal cant_actualizados
-        async with semaforo:
-            try:
-                async with get_db_context() as db:
-                    await calcular_y_persistir_perfil(db, usuario_id)
-                    cant_actualizados += 1
-            except Exception as e:
-                logger.error(f"Error actualizando perfil {usuario_id}: {e}")
+        async def procesar_usuario(usuario_id):
+            nonlocal cant_actualizados
+            async with semaforo:
+                try:
+                    async with get_db_context() as db_ctx:
+                        await calcular_y_persistir_perfil(db_ctx, usuario_id)
+                        cant_actualizados += 1
+                except Exception as e:
+                    logger.error(f"Error actualizando perfil {usuario_id}: {e}")
 
-    try:
         await asyncio.gather(*[procesar_usuario(uid) for uid in usuarios_activos])
         logger.info(f"Se actualizaron {cant_actualizados} perfiles financieros en el job programado.")
     except Exception:
         logger.exception("Error en job _job_actualizar_perfiles")
+    finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_actualizar_perfiles")
+        db.close()
 
 
 async def _job_refresh_feriados():
     """Tarea programada diaria: verifica y asegura que los feriados estén persistidos y cacheados."""
     from app.services.dias_habiles_service import asegurar_feriados_cargados
+    db = SessionLocal()
+    lock_adquirido = False
     try:
+        if not intentar_tomar_lock_job(db, "_job_refresh_feriados"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_refresh_feriados",
+            )
+            return
+        lock_adquirido = True
         await asegurar_feriados_cargados()
     except Exception:
         logger.exception("Error en job _job_refresh_feriados")
+    finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_refresh_feriados")
+        db.close()
 
 
 @asynccontextmanager

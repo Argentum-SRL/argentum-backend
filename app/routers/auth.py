@@ -23,6 +23,7 @@ FLUJOS:
 import logging
 from datetime import datetime, timezone
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, BackgroundTasks, Cookie
 from sqlalchemy import select
@@ -97,12 +98,28 @@ def _device_info(request: Request) -> str | None:
     return ua[:200] if ua else None
 
 
-def _tokens(usuario_id, request: Request, db: Session) -> tuple[str, str]:
-    user = db.execute(select(Usuario).where(Usuario.id == usuario_id)).scalar_one_or_none()
-    is_admin = user.is_admin if user else False
+def _tokens(
+    user_or_id: Usuario | UUID | str,
+    request: Request,
+    db: Session,
+    hacer_commit: bool = True,
+) -> tuple[str, str]:
+    if isinstance(user_or_id, Usuario):
+        usuario_id = user_or_id.id
+        is_admin = bool(user_or_id.is_admin)
+    else:
+        usuario_id = user_or_id
+        user = db.execute(select(Usuario).where(Usuario.id == usuario_id)).scalar_one_or_none()
+        is_admin = user.is_admin if user else False
+
     return (
         crear_access_token(usuario_id, is_admin=is_admin),
-        crear_refresh_token(usuario_id, db, device_info=_device_info(request)),
+        crear_refresh_token(
+            usuario_id,
+            db,
+            device_info=_device_info(request),
+            hacer_commit=hacer_commit,
+        ),
     )
 
 
@@ -155,7 +172,7 @@ def register(user_in: RegisterRequest, background_tasks: BackgroundTasks, db: Se
     usuario_service.crear_billeteras_efectivo_default(db, nuevo.id)
 
     # Enviar email en segundo plano para no bloquear el registro
-    background_tasks.add_task(generar_y_enviar_verificacion_email, nuevo.email)
+    background_tasks.add_task(generar_y_enviar_verificacion_email, nuevo.email, nombre=nuevo.nombre)
 
     return AuthResponse(
         usuario=UsuarioRead.model_validate(nuevo),
@@ -185,12 +202,12 @@ def login(user_in: LoginRequest, request: Request, response: Response, db: Sessi
         raise HTTPException(status_code=401, detail="El email o la contraseña no son correctos. Revisalos e intentá de nuevo.")
 
     user.ultimo_acceso = datetime.now(timezone.utc)
-    db.commit()
 
     # Asegurar que tenga las billeteras de efectivo default
     usuario_service.crear_billeteras_efectivo_default(db, user.id)
 
-    access, refresh = _tokens(user.id, request, db)
+    access, refresh = _tokens(user, request, db, hacer_commit=False)
+    db.commit()
     setear_cookies_auth(response, access, refresh, settings)
     return AuthResponse(
         access_token=access,
@@ -299,7 +316,7 @@ def confirmar_token(
     except Exception:
         pass
 
-    access, refresh = _tokens(usuario.id, request, db)
+    access, refresh = _tokens(usuario, request, db)
     setear_cookies_auth(response, access, refresh, settings)
     return AuthResponse(
         access_token=access,
@@ -390,7 +407,7 @@ def verificar_email(
         # El usuario completó su perfil; activar cuenta y emitir tokens
         user.estado = EstadoUsuario.ACTIVO
         db.commit()
-        access, refresh = _tokens(user.id, request, db)
+        access, refresh = _tokens(user, request, db)
         setear_cookies_auth(response, access, refresh, settings)
         return AuthResponse(
             access_token=access,
@@ -498,7 +515,7 @@ def login_google(
         _requiere_onboarding(user) if user.telefono_verificado else False,
     )
 
-    access, refresh = _tokens(user.id, request, db)
+    access, refresh = _tokens(user, request, db)
     setear_cookies_auth(response, access, refresh, settings)
 
     return AuthResponse(
@@ -613,7 +630,7 @@ def verificar_codigo_telefono(
         # Crear billeteras efectivo default
         usuario_service.crear_billeteras_efectivo_default(db, user.id)
 
-        access, refresh = _tokens(user.id, request, db)
+        access, refresh = _tokens(user, request, db)
         setear_cookies_auth(response, access, refresh, settings)
         return AuthResponse(
             access_token=access,
@@ -650,7 +667,7 @@ def verificar_codigo_telefono(
     except Exception:
         pass
 
-    access, refresh = _tokens(user.id, request, db)
+    access, refresh = _tokens(user, request, db)
     setear_cookies_auth(response, access, refresh, settings)
     
     # requiere_datos si no tiene nombre, email o password (usuarios de teléfono que no completaron perfil)
@@ -708,7 +725,7 @@ def completar_perfil(
     db.commit()
 
     # Enviar email en segundo plano
-    background_tasks.add_task(generar_y_enviar_verificacion_email, current_user.email)
+    background_tasks.add_task(generar_y_enviar_verificacion_email, current_user.email, nombre=current_user.nombre)
 
     return AuthResponse(
         usuario=UsuarioRead.model_validate(current_user),

@@ -6,7 +6,7 @@ from decimal import Decimal
 from uuid import UUID, uuid4
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Date, DateTime, Enum as SAEnum, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Date, DateTime, Enum as SAEnum, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -95,10 +95,13 @@ class ImportacionResumen(Base):
 
 class CorreccionImportacion(Base):
     __tablename__ = "correcciones_importacion"
+    __table_args__ = (
+        Index("ix_correcciones_importacion_banco_tipo_correccion", "banco", "tipo_correccion"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     importacion_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("importaciones_resumen.id"), nullable=False
+        PGUUID(as_uuid=True), ForeignKey("importaciones_resumen.id", ondelete="CASCADE"), nullable=False
     )
     banco: Mapped[str] = mapped_column(String(30), nullable=False)
     capa_parser_usada: Mapped[str] = mapped_column(String(30), nullable=False)

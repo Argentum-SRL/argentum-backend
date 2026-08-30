@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from app.models.importacion import ImportacionResumen
     from app.models.tarjeta_credito import TarjetaCredito
 
-from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, String
+from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, String, Index, text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -49,6 +49,19 @@ class EstadoVerificacionTransaccion(str, Enum):
 
 class Transaccion(Base):
     __tablename__ = "transacciones"
+    __table_args__ = (
+        Index("ix_transacciones_usuario_id", "usuario_id"),
+        Index("ix_transacciones_usuario_fecha", "usuario_id", "fecha"),
+        Index("ix_transacciones_usuario_tipo_fecha", "usuario_id", "tipo", "fecha"),
+        Index("ix_transacciones_billetera_id", "billetera_id"),
+        Index("ix_transacciones_categoria_id", "categoria_id"),
+        Index("ix_transacciones_subcategoria_id", "subcategoria_id"),
+        Index("ix_transacciones_tarjeta_id", "tarjeta_id"),
+        Index("ix_transacciones_estado_verificacion", "estado_verificacion"),
+        Index("ix_transacciones_importacion_id", "importacion_id"),
+        Index("idx_transacciones_import_hash", "usuario_id", "import_hash", unique=True, postgresql_where=text("import_hash IS NOT NULL")),
+        Index("ix_transacciones_recurrente_fecha", "recurrente_id", "fecha", postgresql_where=text("recurrente_id IS NOT NULL")),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     usuario_id: Mapped[UUID] = mapped_column(

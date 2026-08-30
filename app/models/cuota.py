@@ -4,7 +4,7 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, Index, text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import TYPE_CHECKING
@@ -18,6 +18,11 @@ from app.core.database import Base
 
 class Cuota(Base):
     __tablename__ = "cuotas"
+    __table_args__ = (
+        Index("ix_cuotas_grupo_id", "grupo_id"),
+        Index("ix_cuotas_pagada_vencimiento", "pagada", "fecha_vencimiento"),
+        Index("ix_cuotas_grupo_vencimiento", "grupo_id", "fecha_vencimiento", postgresql_where=text("pagada = false")),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     grupo_id: Mapped[UUID] = mapped_column(

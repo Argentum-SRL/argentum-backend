@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from app.models.usuario import Usuario
     from app.models.billetera import Billetera
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Numeric, String, Integer
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Numeric, String, Integer, Index
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -34,6 +34,11 @@ class EstadoTarjeta(str, Enum):
 
 class TarjetaCredito(Base):
     __tablename__ = "tarjetas_credito"
+    __table_args__ = (
+        Index("ix_tarjetas_credito_usuario_id", "usuario_id"),
+        Index("ix_tarjetas_credito_billetera_id", "billetera_id"),
+        Index("ix_tarjetas_credito_estado", "estado"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     usuario_id: Mapped[UUID] = mapped_column(

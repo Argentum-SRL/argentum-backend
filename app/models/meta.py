@@ -5,7 +5,7 @@ from decimal import Decimal
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, String, Text
+from sqlalchemy import CheckConstraint, Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, String, Text, Index
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -29,6 +29,8 @@ class Meta(Base):
     __table_args__ = (
         CheckConstraint("monto_objetivo > 0", name="chk_meta_monto_objetivo_gt_zero"),
         CheckConstraint("monto_actual >= 0", name="chk_meta_monto_actual_gte_zero"),
+        Index("ix_metas_usuario_id", "usuario_id"),
+        Index("ix_metas_estado", "estado"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, ForeignKey, UniqueConstraint
+from sqlalchemy import CheckConstraint, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import TYPE_CHECKING
@@ -28,6 +28,9 @@ class PresupuestoCategoria(Base):
             "subcategoria_id",
             name="uq_presupuestos_categorias_presupuesto_cat_subcat",
         ),
+        Index("ix_presupuestos_categorias_presupuesto_id", "presupuesto_id"),
+        Index("ix_presupuestos_categorias_categoria_id", "categoria_id"),
+        Index("ix_presupuestos_categorias_subcategoria_id", "subcategoria_id"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)

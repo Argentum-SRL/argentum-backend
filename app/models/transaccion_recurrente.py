@@ -5,7 +5,7 @@ from decimal import Decimal
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Integer, Numeric, String
+from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Integer, Numeric, String, Index
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import TYPE_CHECKING
@@ -38,6 +38,11 @@ class EstadoTransaccionRecurrente(str, Enum):
 
 class TransaccionRecurrente(Base):
     __tablename__ = "transacciones_recurrentes"
+    __table_args__ = (
+        Index("ix_transacciones_recurrentes_usuario_id", "usuario_id"),
+        Index("ix_transacciones_recurrentes_estado", "estado"),
+        Index("ix_transacciones_recurrentes_billetera_id", "billetera_id"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     usuario_id: Mapped[UUID] = mapped_column(

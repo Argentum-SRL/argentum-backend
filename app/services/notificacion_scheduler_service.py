@@ -2,14 +2,17 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func, or_
+import structlog
 from app.models.notificacion import TipoNotificacion, NivelNotificacion, Notificacion
 from app.models.configuracion_notificacion import ConfiguracionNotificacion
 from app.models.usuario import Usuario
 from app.services.notificacion_service import crear_notificacion
 from app.services import notificacion_whatsapp_service as wpp_svc
 from app.utils.fecha import ahora_argentina, hoy_argentina
+from app.core.job_lock import intentar_tomar_lock_job, liberar_lock_job
 
 logger = logging.getLogger(__name__)
+struct_logger = structlog.get_logger(__name__)
 
 
 def _job_notificaciones_cuotas(db_session_factory):
@@ -20,7 +23,15 @@ def _job_notificaciones_cuotas(db_session_factory):
     - Para cuotas sin tarjeta: notifica por la cuota individual.
     """
     db: Session = db_session_factory()
+    lock_adquirido = False
     try:
+        if not intentar_tomar_lock_job(db, "_job_notificaciones_cuotas"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_notificaciones_cuotas",
+            )
+            return
+        lock_adquirido = True
         from app.models.cuota import Cuota
         from app.models.grupo_cuotas import GrupoCuotas
         from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
@@ -131,6 +142,8 @@ def _job_notificaciones_cuotas(db_session_factory):
     except Exception:
         logger.exception("Error en _job_notificaciones_cuotas")
     finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_notificaciones_cuotas")
         db.close()
 
 
@@ -140,7 +153,15 @@ def _job_notificaciones_presupuestos(db_session_factory):
     Detecta presupuestos que alcanzaron los umbrales configurados.
     """
     db: Session = db_session_factory()
+    lock_adquirido = False
     try:
+        if not intentar_tomar_lock_job(db, "_job_notificaciones_presupuestos"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_notificaciones_presupuestos",
+            )
+            return
+        lock_adquirido = True
         from app.services.presupuesto_service import calcular_gasto_en_periodo, obtener_periodo_activo
         from app.models.presupuesto import Presupuesto
 
@@ -219,6 +240,8 @@ def _job_notificaciones_presupuestos(db_session_factory):
     except Exception:
         logger.exception("Error en _job_notificaciones_presupuestos")
     finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_notificaciones_presupuestos")
         db.close()
 
 
@@ -228,7 +251,15 @@ def _job_notificaciones_suscripciones(db_session_factory):
     Detecta suscripciones cobradas hoy o próximas a cobrar.
     """
     db: Session = db_session_factory()
+    lock_adquirido = False
     try:
+        if not intentar_tomar_lock_job(db, "_job_notificaciones_suscripciones"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_notificaciones_suscripciones",
+            )
+            return
+        lock_adquirido = True
         from app.models.suscripcion import Suscripcion, EstadoSuscripcion
         from app.services.suscripcion_service import obtener_precio_vigente
 
@@ -295,6 +326,8 @@ def _job_notificaciones_suscripciones(db_session_factory):
     except Exception:
         logger.exception("Error en _job_notificaciones_suscripciones")
     finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_notificaciones_suscripciones")
         db.close()
 
 
@@ -304,7 +337,15 @@ def _job_notificaciones_inactividad(db_session_factory):
     Detecta inactividad del usuario si no registró movimientos en los días configurados.
     """
     db: Session = db_session_factory()
+    lock_adquirido = False
     try:
+        if not intentar_tomar_lock_job(db, "_job_notificaciones_inactividad"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_notificaciones_inactividad",
+            )
+            return
+        lock_adquirido = True
         from app.models.transaccion import Transaccion
         from app.models.transferencia_interna import TransferenciaInterna
 
@@ -356,6 +397,8 @@ def _job_notificaciones_inactividad(db_session_factory):
     except Exception:
         logger.exception("Error en _job_notificaciones_inactividad")
     finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_notificaciones_inactividad")
         db.close()
 
 
@@ -366,7 +409,15 @@ def _job_entrega_whatsapp_batched(db_session_factory):
     Huso local por defecto: UTC-3 (Argentina).
     """
     db: Session = db_session_factory()
+    lock_adquirido = False
     try:
+        if not intentar_tomar_lock_job(db, "_job_entrega_whatsapp_batched"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_entrega_whatsapp_batched",
+            )
+            return
+        lock_adquirido = True
         # Calcular hora y minuto local actual en Argentina (UTC-3)
         tiempo_local = ahora_argentina()
         hora_local = tiempo_local.hour
@@ -421,6 +472,8 @@ def _job_entrega_whatsapp_batched(db_session_factory):
     except Exception:
         logger.exception("Error en _job_entrega_whatsapp_batched")
     finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_entrega_whatsapp_batched")
         db.close()
 
 
@@ -430,7 +483,15 @@ def _job_resumen_cierre_ciclo(db_session_factory):
     Detecta usuarios cuyo ciclo cerró ayer y les manda un resumen por WhatsApp.
     """
     db: Session = db_session_factory()
+    lock_adquirido = False
     try:
+        if not intentar_tomar_lock_job(db, "_job_resumen_cierre_ciclo"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_resumen_cierre_ciclo",
+            )
+            return
+        lock_adquirido = True
         from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion
         from app.models.categoria import Categoria
         from app.services.dashboard_service import get_ciclo_fechas
@@ -562,6 +623,8 @@ def _job_resumen_cierre_ciclo(db_session_factory):
     except Exception:
         logger.exception("Error en _job_resumen_cierre_ciclo")
     finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_resumen_cierre_ciclo")
         db.close()
 
 
@@ -581,7 +644,15 @@ def _job_resumen_semanal(db_session_factory):
     domingo_pasado = lunes_pasado + timedelta(days=6)
 
     db: Session = db_session_factory()
+    lock_adquirido = False
     try:
+        if not intentar_tomar_lock_job(db, "_job_resumen_semanal"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_resumen_semanal",
+            )
+            return
+        lock_adquirido = True
         usuarios = db.execute(
             select(Usuario).where(Usuario.estado == EstadoUsuario.ACTIVO)
         ).scalars().all()
@@ -684,6 +755,8 @@ def _job_resumen_semanal(db_session_factory):
         logger.error(f"[resumen_semanal] Error general: {e}")
         db.rollback()
     finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_resumen_semanal")
         db.close()
 
 
@@ -702,82 +775,87 @@ async def _job_proyeccion_negativa(db_session_factory):
 
     @asynccontextmanager
     async def get_db_context():
-        db = db_session_factory()
+        db_sub = db_session_factory()
         try:
-            yield db
+            yield db_sub
         finally:
-            db.close()
+            db_sub.close()
 
     db = db_session_factory()
+    lock_adquirido = False
     try:
+        if not intentar_tomar_lock_job(db, "_job_proyeccion_negativa"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_proyeccion_negativa",
+            )
+            return
+        lock_adquirido = True
         usuarios_activos = db.execute(
             select(Usuario.id).where(Usuario.estado == EstadoUsuario.ACTIVO)
         ).scalars().all()
-    except Exception:
-        logger.exception("Error obteniendo usuarios activos en _job_proyeccion_negativa")
-        db.close()
-        return
-    finally:
-        db.close()
 
-    semaforo = asyncio.Semaphore(50)
-    cant_notificaciones_creadas = 0
+        semaforo = asyncio.Semaphore(50)
+        cant_notificaciones_creadas = 0
 
-    async def procesar_usuario(usuario_id):
-        nonlocal cant_notificaciones_creadas
-        
-        # Prohibición absoluta de Manuel
-        if str(usuario_id) in ("931c28da-96b0-4dd3-892e-79fbd73451c6", "fdc16c1a-8442-4e50-bcf6-cdb2ccf6884a"):
-            return
+        async def procesar_usuario(usuario_id):
+            nonlocal cant_notificaciones_creadas
+            
+            # Prohibición absoluta de Manuel
+            if str(usuario_id) in ("931c28da-96b0-4dd3-892e-79fbd73451c6", "fdc16c1a-8442-4e50-bcf6-cdb2ccf6884a"):
+                return
 
-        async with semaforo:
-            try:
-                async with get_db_context() as db:
-                    usuario = db.get(Usuario, usuario_id)
-                    if not usuario:
-                        return
-                    
-                    proyecciones = calcular_proyeccion(db, usuario)
-                    hoy = hoy_argentina()
-                    fecha_inicio_ciclo, _ = get_ciclo_fechas(usuario, hoy)
+            async with semaforo:
+                try:
+                    async with get_db_context() as db_ctx:
+                        usuario = db_ctx.get(Usuario, usuario_id)
+                        if not usuario:
+                            return
+                        
+                        proyecciones = calcular_proyeccion(db_ctx, usuario)
+                        hoy = hoy_argentina()
+                        fecha_inicio_ciclo, _ = get_ciclo_fechas(usuario, hoy)
 
-                    for moneda_key, moneda_label, simbolo in [("ars", "pesos", "$"), ("usd", "dólares", "US$")]:
-                        proj = proyecciones.get(moneda_key)
-                        if proj and proj.get("datos_suficientes") is True:
-                            balance = proj.get("balance_proyectado", 0.0)
-                            if balance < 0:
-                                if moneda_key == "ars":
-                                    mensaje = f"¡Atención! Estimamos que tu saldo en pesos va a terminar este ciclo en negativo por {simbolo}{abs(balance):,.0f}. Te sugerimos revisar tus gastos."
-                                else:
-                                    mensaje = f"¡Atención! Estimamos que tu saldo en dólares va a terminar este ciclo en negativo por {simbolo}{abs(balance):,.2f}. Te sugerimos revisar tus gastos."
-                                
-                                # Clave de deduplicación que incluye ID de usuario, moneda y fecha inicio del ciclo
-                                grupo_override = f"proyeccion_negativa/{usuario.id}/{moneda_key}/{fecha_inicio_ciclo.strftime('%Y%m%d')}"
-                                
-                                from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion
-                                config = obtener_configuracion(db, usuario.id)
-                                canales = resolver_canales_notificacion(config, TipoNotificacion.PROYECCION_NEGATIVA)
-                                if canales is not None:
-                                    canal_web, canal_whatsapp = canales
-                                    notif = crear_notificacion(
-                                        db=db,
-                                        usuario_id=usuario.id,
-                                        tipo=TipoNotificacion.PROYECCION_NEGATIVA,
-                                        nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                                        mensaje=mensaje,
-                                        canal_web=canal_web,
-                                        canal_whatsapp=canal_whatsapp,
-                                        canal_email=False,
-                                        grupo_agrupacion_override=grupo_override
-                                    )
-                                    if notif:
-                                        cant_notificaciones_creadas += 1
+                        for moneda_key, moneda_label, simbolo in [("ars", "pesos", "$"), ("usd", "dólares", "US$")]:
+                            proj = proyecciones.get(moneda_key)
+                            if proj and proj.get("datos_suficientes") is True:
+                                balance = proj.get("balance_proyectado", 0.0)
+                                if balance < 0:
+                                    if moneda_key == "ars":
+                                        mensaje = f"¡Atención! Estimamos que tu saldo en pesos va a terminar este ciclo en negativo por {simbolo}{abs(balance):,.0f}. Te sugerimos revisar tus gastos."
+                                    else:
+                                        mensaje = f"¡Atención! Estimamos que tu saldo en dólares va a terminar este ciclo en negativo por {simbolo}{abs(balance):,.2f}. Te sugerimos revisar tus gastos."
+                                    
+                                    # Clave de deduplicación que incluye ID de usuario, moneda y fecha inicio del ciclo
+                                    grupo_override = f"proyeccion_negativa/{usuario.id}/{moneda_key}/{fecha_inicio_ciclo.strftime('%Y%m%d')}"
+                                    
+                                    from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion
+                                    config = obtener_configuracion(db_ctx, usuario.id)
+                                    canales = resolver_canales_notificacion(config, TipoNotificacion.PROYECCION_NEGATIVA)
+                                    if canales is not None:
+                                        canal_web, canal_whatsapp = canales
+                                        notif = crear_notificacion(
+                                            db=db_ctx,
+                                            usuario_id=usuario.id,
+                                            tipo=TipoNotificacion.PROYECCION_NEGATIVA,
+                                            nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                                            mensaje=mensaje,
+                                            canal_web=canal_web,
+                                            canal_whatsapp=canal_whatsapp,
+                                            canal_email=False,
+                                            grupo_agrupacion_override=grupo_override
+                                        )
+                                        if notif:
+                                            cant_notificaciones_creadas += 1
 
-            except Exception as e:
-                logger.error(f"Error en _job_proyeccion_negativa para usuario {usuario_id}: {e}")
+                except Exception as e:
+                    logger.error(f"Error en _job_proyeccion_negativa para usuario {usuario_id}: {e}")
 
-    try:
         await asyncio.gather(*[procesar_usuario(uid) for uid in usuarios_activos])
         logger.info(f"Job _job_proyeccion_negativa finalizado. Notificaciones creadas: {cant_notificaciones_creadas}")
     except Exception:
         logger.exception("Error general en job _job_proyeccion_negativa")
+    finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_proyeccion_negativa")
+        db.close()
