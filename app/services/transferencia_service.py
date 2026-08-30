@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
 
-from app.models.billetera import Billetera
+from app.models.billetera import Billetera, EstadoBilletera
 from app.models.transferencia_interna import TransferenciaInterna
 from app.schemas.transferencia_interna import TransferenciaInternaCreate
 
@@ -34,12 +34,6 @@ def obtener_transferencia(db: Session, usuario_id: UUID, transferencia_id: UUID)
 
 
 def crear_transferencia(db: Session, usuario_id: UUID, data: TransferenciaInternaCreate) -> TransferenciaInterna:
-    if data.monto <= Decimal("0"):
-        raise HTTPException(status_code=400, detail="El monto de la transferencia debe ser mayor a cero.")
-
-    if data.billetera_origen_id == data.billetera_destino_id:
-        raise HTTPException(status_code=400, detail="La billetera de origen y destino no pueden ser la misma.")
-
     # 1. Validar billeteras
     b_origen = db.execute(
         select(Billetera).where(Billetera.id == data.billetera_origen_id, Billetera.usuario_id == usuario_id)
@@ -54,6 +48,18 @@ def crear_transferencia(db: Session, usuario_id: UUID, data: TransferenciaIntern
     if not b_destino:
         raise HTTPException(status_code=404, detail="No encontramos la billetera de destino.")
 
+    # Validar que las billeteras estén activas
+    if b_origen.estado != EstadoBilletera.ACTIVA:
+        raise HTTPException(
+            status_code=400,
+            detail=f"La billetera de origen '{b_origen.nombre}' está archivada y no puede usarse para transferencias."
+        )
+    if b_destino.estado != EstadoBilletera.ACTIVA:
+        raise HTTPException(
+            status_code=400,
+            detail=f"La billetera de destino '{b_destino.nombre}' está archivada y no puede usarse para transferencias."
+        )
+
     from app.services.transaccion_service import _validar_moneda_coincide
     _validar_moneda_coincide(data.moneda, b_origen)
     if b_origen.moneda != b_destino.moneda:
@@ -63,6 +69,13 @@ def crear_transferencia(db: Session, usuario_id: UUID, data: TransferenciaIntern
         )
     _validar_moneda_coincide(data.moneda, b_destino)
 
+    # Validar que el saldo sea suficiente
+    if b_origen.saldo_actual < data.monto:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Saldo insuficiente en {b_origen.nombre}. Disponible: {b_origen.saldo_actual}, Solicitado: {data.monto}."
+        )
+
     # 2. Crear registro
     nueva_tr = TransferenciaInterna(
         **data.model_dump(exclude={"usuario_id"}),
@@ -70,30 +83,7 @@ def crear_transferencia(db: Session, usuario_id: UUID, data: TransferenciaIntern
     )
 
     # 3. Impactar saldos
-    # Solo se permiten transferencias de la misma moneda.
     b_origen.saldo_actual -= data.monto
-    if b_origen.saldo_actual <= 0:
-        try:
-            from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
-            from app.models.notificacion import TipoNotificacion, NivelNotificacion
-            config = obtener_configuracion(db, usuario_id)
-            canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
-            if canales is not None:
-                canal_web, canal_whatsapp = canales
-                crear_notificacion(
-                    db=db,
-                    usuario_id=usuario_id,
-                    tipo=TipoNotificacion.SALDO_CERO,
-                    nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                    mensaje=f"Tu billetera '{b_origen.nombre}' quedó sin saldo disponible.",
-                    entidad_tipo="billetera",
-                    entidad_id=b_origen.id,
-                    deep_link="/app/billeteras",
-                    canal_web=canal_web,
-                    canal_whatsapp=canal_whatsapp,
-                )
-        except Exception:
-            pass
     b_destino.saldo_actual += data.monto
 
     db.add(nueva_tr)
@@ -109,20 +99,28 @@ def eliminar_transferencia(db: Session, usuario_id: UUID, transferencia_id: UUID
     b_origen = db.get(Billetera, tr.billetera_origen_id)
     b_destino = db.get(Billetera, tr.billetera_destino_id)
 
-    if b_origen:
-        try:
-            from app.services.transaccion_service import _validar_moneda_coincide
-            _validar_moneda_coincide(tr.moneda, b_origen)
-            b_origen.saldo_actual += tr.monto
-        except Exception as e:
-            logger.critical(f"Error crítico de inconsistencia de moneda al revertir origen de transferencia {tr.id}: {e}")
-    if b_destino:
-        try:
-            from app.services.transaccion_service import _validar_moneda_coincide
-            _validar_moneda_coincide(tr.moneda, b_destino)
-            b_destino.saldo_actual -= tr.monto
-        except Exception as e:
-            logger.critical(f"Error crítico de inconsistencia de moneda al revertir destino de transferencia {tr.id}: {e}")
+    if not b_origen:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error crítico: No se encontró la billetera de origen para revertir la transferencia {tr.id}."
+        )
+    if not b_destino:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error crítico: No se encontró la billetera de destino para revertir la transferencia {tr.id}."
+        )
+
+    try:
+        from app.services.transaccion_service import _validar_moneda_coincide
+        _validar_moneda_coincide(tr.moneda, b_origen)
+        _validar_moneda_coincide(tr.moneda, b_destino)
+    except HTTPException as e:
+        logger.critical(f"Error crítico: Inconsistencia de moneda detectada al revertir transferencia {tr.id}: {e.detail}")
+        raise
+
+    # Revertir saldos
+    b_origen.saldo_actual += tr.monto
+    b_destino.saldo_actual -= tr.monto
 
     db.delete(tr)
     db.commit()
