@@ -5,7 +5,7 @@ from decimal import Decimal
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, String, Text
+from sqlalchemy import CheckConstraint, Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -26,6 +26,10 @@ class EstadoMeta(str, Enum):
 
 class Meta(Base):
     __tablename__ = "metas"
+    __table_args__ = (
+        CheckConstraint("monto_objetivo > 0", name="chk_meta_monto_objetivo_gt_zero"),
+        CheckConstraint("monto_actual >= 0", name="chk_meta_monto_actual_gte_zero"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     usuario_id: Mapped[UUID] = mapped_column(
@@ -47,7 +51,11 @@ class Meta(Base):
     usuario: Mapped[Usuario] = relationship("Usuario")
 
     # La meta no queda atada a una billetera fija; cada movimiento define origen/destino.
-    movimientos: Mapped[list[MovimientoMeta]] = relationship("MovimientoMeta", back_populates="meta")
+    movimientos: Mapped[list[MovimientoMeta]] = relationship(
+        "MovimientoMeta",
+        back_populates="meta",
+        order_by="desc(MovimientoMeta.fecha), desc(MovimientoMeta.fecha_creacion)"
+    )
 
     def __repr__(self) -> str:
         return (
