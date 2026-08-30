@@ -116,8 +116,9 @@ def cancelar_grupo(db: Session, grupo_id: any, usuario_id: any) -> GrupoCuotas:
             # Marcar la transacción hija con monto cero y descripción cancelada
             tx_hija.monto = Decimal("0.00")
             tx_hija.descripcion = f"{tx_hija.descripcion} (Cancelada)"
-        # Marcar la cuota como pagada con monto real cero
+        # Marcar la cuota con monto cero
         cuota.pagada = True
+        cuota.monto_proyectado = Decimal("0.00")
         cuota.monto_real = Decimal("0.00")
 
     # 5. Marcar grupo.estado = EstadoGrupoCuotas.CANCELADO
@@ -185,9 +186,12 @@ def prepagar_grupo(
         fecha=hoy_argentina(),
         descripcion=f"Prepago de {len(cuotas_pendientes)} cuotas restantes: {grupo.descripcion}",
         categoria_id=categoria_id if categoria_id else (grupo.transaccion_padre.categoria_id if grupo.transaccion_padre else None),
+        subcategoria_id=(grupo.transaccion_padre.subcategoria_id if grupo.transaccion_padre else None),
         metodo_pago=MetodoPago.DEBITO,
         billetera_id=billetera_id,
+        tarjeta_id=grupo.tarjeta_id,
         es_cuota_hija=False,
+        es_padre_cuotas=False,
         origen=OrigenTransaccion.MANUAL,
         estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA
     )

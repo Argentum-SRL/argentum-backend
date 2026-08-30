@@ -113,6 +113,13 @@ def crear_tarjeta(db: Session, usuario_id: UUID, data: TarjetaCreditoCreate) -> 
             detail="Las billeteras de efectivo no pueden tener tarjetas."
         )
 
+    # Validar que la moneda de la tarjeta coincida con la de la billetera
+    if data.moneda != billetera.moneda:
+        raise HTTPException(
+            status_code=400,
+            detail="La moneda de la tarjeta debe coincidir con la moneda de la billetera asociada."
+        )
+
     nueva_tarjeta = TarjetaCredito(
         usuario_id=usuario_id,
         billetera_id=data.billetera_id,
@@ -141,6 +148,20 @@ def actualizar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID, data: Ta
         raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
     
     update_data = data.model_dump(exclude_unset=True)
+
+    if "moneda" in update_data and update_data["moneda"] is not None and update_data["moneda"] != tarjeta.moneda:
+        if tarjeta.billetera and update_data["moneda"] != tarjeta.billetera.moneda:
+            raise HTTPException(
+                status_code=400,
+                detail="La moneda de la tarjeta debe coincidir con la moneda de la billetera asociada."
+            )
+        tiene_tx = db.query(Transaccion).filter(Transaccion.tarjeta_id == tarjeta.id).first()
+        if tiene_tx:
+            raise HTTPException(
+                status_code=400,
+                detail="No podés cambiar la moneda de una tarjeta que ya tiene transacciones registradas."
+            )
+
     for key, value in update_data.items():
         setattr(tarjeta, key, value)
     
