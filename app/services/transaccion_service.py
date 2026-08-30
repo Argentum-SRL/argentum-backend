@@ -163,8 +163,39 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, co
         raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
 
     _validar_moneda_coincide(data.moneda, billetera)
+
+    # 2. Validar categoría obligatoria
+    if not data.categoria_id:
+        raise HTTPException(status_code=400, detail="Debés seleccionar una categoría.")
+
+    from app.models.categoria import Categoria, EstadoCategoria
+    categoria = db.execute(
+        select(Categoria).where(
+            Categoria.id == data.categoria_id,
+            or_(
+                Categoria.creador_id == usuario_id,
+                Categoria.es_global == True
+            ),
+            Categoria.estado == EstadoCategoria.ACTIVA
+        )
+    ).scalar_one_or_none()
+
+    if not categoria:
+        raise HTTPException(status_code=404, detail="No encontramos esa categoría.")
+
+    # 3. Validar subcategoría si se proporcionó
+    if data.subcategoria_id:
+        from app.models.subcategoria import Subcategoria
+        subcategoria = db.execute(
+            select(Subcategoria).where(
+                Subcategoria.id == data.subcategoria_id,
+                Subcategoria.categoria_id == data.categoria_id
+            )
+        ).scalar_one_or_none()
+        if not subcategoria:
+            raise HTTPException(status_code=400, detail="La subcategoría no pertenece a la categoría seleccionada.")
     
-    # 2. Manejo de Cuotas
+    # 4. Manejo de Cuotas
     if data.es_padre_cuotas:
         if not data.info_cuotas:
             raise HTTPException(status_code=400, detail="Para registrar una compra en cuotas, completá los datos de las cuotas.")

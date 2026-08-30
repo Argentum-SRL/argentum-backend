@@ -3,7 +3,7 @@ import logging
 from uuid import UUID
 from datetime import date
 from fastapi import HTTPException
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, or_
 from sqlalchemy.orm import Session
 
 from app.models.transaccion import Transaccion, OrigenTransaccion
@@ -47,6 +47,25 @@ def crear_recurrente(db: Session, usuario_id: UUID, data: TransaccionRecurrenteC
     
     if not billetera:
         raise HTTPException(status_code=404, detail="Billetera no encontrada")
+
+    # Validar categoría
+    if not data.categoria_id:
+        raise HTTPException(status_code=400, detail="Debés seleccionar una categoría.")
+
+    from app.models.categoria import Categoria, EstadoCategoria
+    categoria = db.execute(
+        select(Categoria).where(
+            Categoria.id == data.categoria_id,
+            or_(
+                Categoria.creador_id == usuario_id,
+                Categoria.es_global == True
+            ),
+            Categoria.estado == EstadoCategoria.ACTIVA
+        )
+    ).scalar_one_or_none()
+
+    if not categoria:
+        raise HTTPException(status_code=404, detail="No encontramos esa categoría.")
 
     nueva_recurrente = TransaccionRecurrente(
         **data.model_dump(exclude={"usuario_id"}),
