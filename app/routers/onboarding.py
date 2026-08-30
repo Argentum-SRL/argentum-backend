@@ -143,6 +143,9 @@ def post_moneda(
     from datetime import datetime, timezone
     current_user.ultimo_acceso = datetime.now(timezone.utc)
     
+    from app.services import usuario_service
+    usuario_service.crear_billeteras_efectivo_default(db, current_user.id)
+    
     db.commit()
     
     return OnboardingStepResponse(completado=True, siguiente_paso=None)
