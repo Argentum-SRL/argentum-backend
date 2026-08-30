@@ -22,19 +22,24 @@ def listar_usuarios(
     onboarding: str | None = None,
     wpp: str | None = None,
 ) -> dict:
-    limit = min(limit, 50)
+    page = max(1, page)
+    limit = max(1, min(limit, 100))
     offset = (page - 1) * limit
 
     conditions = []
 
-    # 1. Búsqueda por texto (nombre, email, teléfono)
-    if search:
-        search_term = f"%{search}%"
+    # 1. Búsqueda por texto (nombre, apellido, nombre completo, email, teléfono)
+    if search and search.strip():
+        sanitized_search = search.strip()[:150]
+        search_term = f"%{sanitized_search}%"
         conditions.append(
             or_(
                 Usuario.nombre.ilike(search_term),
+                Usuario.apellido.ilike(search_term),
+                func.concat(func.coalesce(Usuario.nombre, ""), " ", func.coalesce(Usuario.apellido, "")).ilike(search_term),
                 Usuario.email.ilike(search_term),
                 Usuario.telefono.ilike(search_term),
+                Usuario.telefono_normalizado.ilike(search_term),
             )
         )
 
@@ -116,6 +121,13 @@ def cambiar_estado_usuario(
         )
 
     user.is_active = is_active
+    if not is_active:
+        user.tokens_revocados_at = datetime.now(timezone.utc)
+        db.execute(
+            update(RefreshToken)
+            .where(RefreshToken.usuario_id == usuario_id, RefreshToken.revocado == False)
+            .values(revocado=True)
+        )
     db.commit()
     db.refresh(user)
     return user
