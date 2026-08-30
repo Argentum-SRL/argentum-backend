@@ -134,6 +134,8 @@ def test_transaccion_create_schema_sin_descripcion():
         monto=Decimal("1500.50"),
         moneda=Moneda.ARS,
         fecha=date(2026, 8, 27),
+        categoria_id=uuid4(),
+        metodo_pago=MetodoPago.DEBITO,
         billetera_id=uuid4(),
         origen=OrigenTransaccion.MANUAL,
     )
@@ -149,6 +151,8 @@ def test_transaccion_create_schema_con_descripcion_espacios():
         moneda=Moneda.ARS,
         fecha=date(2026, 8, 27),
         descripcion="   ",
+        categoria_id=uuid4(),
+        metodo_pago=MetodoPago.DEBITO,
         billetera_id=uuid4(),
         origen=OrigenTransaccion.MANUAL,
     )
@@ -197,6 +201,7 @@ def test_crear_transaccion_sin_descripcion_exitoso(client, setup_data):
 def test_crear_transaccion_descripcion_vacia_exitoso(client, setup_data):
     """Prueba que POST /transacciones permita crear una transacción con descripcion=""."""
     billetera = setup_data["billetera"]
+    categoria = setup_data["categoria"]
 
     payload = {
         "tipo": "ingreso",
@@ -205,6 +210,7 @@ def test_crear_transaccion_descripcion_vacia_exitoso(client, setup_data):
         "fecha": "2026-08-27",
         "descripcion": "   ",
         "billetera_id": str(billetera.id),
+        "categoria_id": str(categoria.id),
         "metodo_pago": "transferencia",
         "origen": "manual",
     }
@@ -219,6 +225,7 @@ def test_crear_transaccion_descripcion_vacia_exitoso(client, setup_data):
 def test_editar_transaccion_sin_descripcion(client, setup_data, db_session):
     """Prueba que PATCH /transacciones/{id} permita actualizar dejando descripción vacía."""
     billetera = setup_data["billetera"]
+    categoria = setup_data["categoria"]
 
     # Crear transacción inicial con descripción
     res_crear = client.post("/transacciones", json={
@@ -228,6 +235,7 @@ def test_editar_transaccion_sin_descripcion(client, setup_data, db_session):
         "fecha": "2026-08-27",
         "descripcion": "Compra inicial",
         "billetera_id": str(billetera.id),
+        "categoria_id": str(categoria.id),
         "metodo_pago": "debito",
         "origen": "manual",
     })
@@ -244,10 +252,11 @@ def test_editar_transaccion_sin_descripcion(client, setup_data, db_session):
 
 def test_crear_transaccion_campos_obligatorios_siguen_fallando(client, setup_data):
     """
-    Confirma que monto, billetera_id, tipo, moneda y fecha SIGUEN siendo obligatorios
-    y devuelven 422 si se omiten o son inválidos.
+    Confirma que monto, billetera_id, categoria_id, metodo_pago, tipo, moneda y fecha
+    SON obligatorios y devuelven 422 si se omiten o son inválidos.
     """
     billetera = setup_data["billetera"]
+    categoria = setup_data["categoria"]
 
     # 1. Falta monto
     res_no_monto = client.post("/transacciones", json={
@@ -255,6 +264,8 @@ def test_crear_transaccion_campos_obligatorios_siguen_fallando(client, setup_dat
         "moneda": "ARS",
         "fecha": "2026-08-27",
         "billetera_id": str(billetera.id),
+        "categoria_id": str(categoria.id),
+        "metodo_pago": "debito",
         "origen": "manual",
     })
     assert res_no_monto.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
@@ -266,6 +277,8 @@ def test_crear_transaccion_campos_obligatorios_siguen_fallando(client, setup_dat
         "moneda": "ARS",
         "fecha": "2026-08-27",
         "billetera_id": str(billetera.id),
+        "categoria_id": str(categoria.id),
+        "metodo_pago": "debito",
         "origen": "manual",
     })
     assert res_monto_cero.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
@@ -276,6 +289,8 @@ def test_crear_transaccion_campos_obligatorios_siguen_fallando(client, setup_dat
         "monto": 100,
         "moneda": "ARS",
         "fecha": "2026-08-27",
+        "categoria_id": str(categoria.id),
+        "metodo_pago": "debito",
         "origen": "manual",
     })
     assert res_no_billetera.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
@@ -286,14 +301,42 @@ def test_crear_transaccion_campos_obligatorios_siguen_fallando(client, setup_dat
         "monto": 100,
         "moneda": "ARS",
         "billetera_id": str(billetera.id),
+        "categoria_id": str(categoria.id),
+        "metodo_pago": "debito",
         "origen": "manual",
     })
     assert res_no_fecha.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    # 5. Falta categoria_id
+    res_no_categoria = client.post("/transacciones", json={
+        "tipo": "egreso",
+        "monto": 100,
+        "moneda": "ARS",
+        "fecha": "2026-08-27",
+        "billetera_id": str(billetera.id),
+        "metodo_pago": "debito",
+        "origen": "manual",
+    })
+    assert res_no_categoria.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    # 6. Categoria inexistente (404)
+    res_cat_inexistente = client.post("/transacciones", json={
+        "tipo": "egreso",
+        "monto": 100,
+        "moneda": "ARS",
+        "fecha": "2026-08-27",
+        "billetera_id": str(billetera.id),
+        "categoria_id": str(uuid4()),
+        "metodo_pago": "debito",
+        "origen": "manual",
+    })
+    assert res_cat_inexistente.status_code == status.HTTP_404_NOT_FOUND
 
 
 def test_editar_transaccion_preserva_descripcion_si_no_se_envia(client, setup_data):
     """Prueba que un PATCH que solo actualiza fecha o monto NO pise ni borre la descripción existente."""
     billetera = setup_data["billetera"]
+    categoria = setup_data["categoria"]
 
     res_crear = client.post("/transacciones", json={
         "tipo": "egreso",
@@ -302,6 +345,7 @@ def test_editar_transaccion_preserva_descripcion_si_no_se_envia(client, setup_da
         "fecha": "2026-08-27",
         "descripcion": "Mi Compra Valiosa",
         "billetera_id": str(billetera.id),
+        "categoria_id": str(categoria.id),
         "metodo_pago": "debito",
         "origen": "manual",
     })
@@ -324,6 +368,7 @@ def test_editar_transaccion_preserva_descripcion_si_no_se_envia(client, setup_da
 def test_editar_transaccion_descripcion_null_limpia_a_vacio(client, setup_data):
     """Prueba que si un cliente envía descripcion: null explícitamente en el PATCH, se limpie a string vacío sin romper."""
     billetera = setup_data["billetera"]
+    categoria = setup_data["categoria"]
 
     res_crear = client.post("/transacciones", json={
         "tipo": "egreso",
@@ -332,6 +377,7 @@ def test_editar_transaccion_descripcion_null_limpia_a_vacio(client, setup_data):
         "fecha": "2026-08-27",
         "descripcion": "Texto a borrar",
         "billetera_id": str(billetera.id),
+        "categoria_id": str(categoria.id),
         "metodo_pago": "debito",
         "origen": "manual",
     })

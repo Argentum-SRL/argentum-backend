@@ -17,10 +17,10 @@ from app.models.usuario import Moneda
 class TransaccionRecurrenteBase(BaseModel):
     usuario_id: UUID | None = None
     tipo: TipoTransaccionRecurrente
-    monto: Decimal
+    monto: Decimal = Field(..., gt=0, max_digits=15, decimal_places=2, description="Monto mayor a 0")
     moneda: Moneda
     descripcion: str = Field(default="", max_length=300)
-    categoria_id: UUID | None = None
+    categoria_id: UUID
     subcategoria_id: UUID | None = None
     billetera_id: UUID
     frecuencia: FrecuenciaTransaccionRecurrente
@@ -34,7 +34,7 @@ class TransaccionRecurrenteCreate(TransaccionRecurrenteBase):
 
 class TransaccionRecurrenteUpdate(BaseModel):
     tipo: TipoTransaccionRecurrente | None = None
-    monto: Decimal | None = None
+    monto: Decimal | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
     moneda: Moneda | None = None
     descripcion: str | None = None
     categoria_id: UUID | None = None
@@ -47,6 +47,7 @@ class TransaccionRecurrenteUpdate(BaseModel):
 
 class TransaccionRecurrenteRead(TransaccionRecurrenteBase):
     id: UUID
+    categoria_id: UUID | None = None
     fecha_creacion: datetime
 
     model_config = ConfigDict(from_attributes=True)

@@ -40,9 +40,9 @@ class TransaccionBase(BaseModel):
     moneda: Moneda
     fecha: date
     descripcion: str = Field(default="", max_length=300)
-    categoria_id: UUID | None = None
+    categoria_id: UUID
     subcategoria_id: UUID | None = None
-    metodo_pago: MetodoPago | None = None
+    metodo_pago: MetodoPago
     billetera_id: UUID
     tarjeta_id: UUID | None = None
     primer_vencimiento_manual: date | None = None
@@ -51,7 +51,7 @@ class TransaccionBase(BaseModel):
     es_cuota_hija: bool = False
     es_padre_cuotas: bool = False
     grupo_cuotas_id: UUID | None = None
-    origen: OrigenTransaccion
+    origen: OrigenTransaccion = OrigenTransaccion.MANUAL
     estado_verificacion: EstadoVerificacionTransaccion | None = None
 
 
@@ -94,6 +94,8 @@ class TransaccionUpdate(BaseModel):
 
 class TransaccionRead(TransaccionBase):
     id: UUID
+    categoria_id: UUID | None = None
+    metodo_pago: MetodoPago | None = None
     fecha_creacion: datetime
     subcategoria: SubcategoriaRead | None = None
 
