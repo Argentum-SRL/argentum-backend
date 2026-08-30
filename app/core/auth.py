@@ -100,7 +100,12 @@ def verificar_access_token(token: str) -> str:
 # Refresh token (token_id indexable + secreto firmado)
 # ---------------------------------------------------------------------------
 
-def crear_refresh_token(usuario_id: UUID | str, db: Session, device_info: str | None = None) -> str:
+def crear_refresh_token(
+    usuario_id: UUID | str,
+    db: Session,
+    device_info: str | None = None,
+    hacer_commit: bool = True,
+) -> str:
     token_id = secrets.token_urlsafe(16)
     token_secret = secrets.token_urlsafe(48)
 
@@ -118,9 +123,11 @@ def crear_refresh_token(usuario_id: UUID | str, db: Session, device_info: str | 
     )
 
     db.add(db_token)
-    db.commit()
+    if hacer_commit:
+        db.commit()
 
     return token_plain
+
 
 
 def _buscar_refresh_token(token_plain: str, db: Session) -> RefreshToken:

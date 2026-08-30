@@ -4,7 +4,12 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import Date, DateTime, Enum as SAEnum, ForeignKey, Numeric
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.suscripcion import Suscripcion
+
+from sqlalchemy import Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, Index, text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -14,6 +19,9 @@ from app.models.usuario import Moneda
 
 class HistorialSuscripcion(Base):
     __tablename__ = "historial_suscripciones"
+    __table_args__ = (
+        Index("ix_historial_suscripcion_id_fecha", "suscripcion_id", text("vigente_desde DESC")),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     suscripcion_id: Mapped[UUID] = mapped_column(

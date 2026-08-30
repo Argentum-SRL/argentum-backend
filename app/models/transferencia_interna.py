@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, String
+from sqlalchemy import Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, String, Index
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import TYPE_CHECKING
@@ -19,6 +19,11 @@ from app.models.usuario import Moneda
 
 class TransferenciaInterna(Base):
     __tablename__ = "transferencias_internas"
+    __table_args__ = (
+        Index("ix_transferencias_internas_usuario_fecha", "usuario_id", "fecha"),
+        Index("ix_transferencias_internas_billetera_origen_id", "billetera_origen_id"),
+        Index("ix_transferencias_internas_billetera_destino_id", "billetera_destino_id"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     usuario_id: Mapped[UUID] = mapped_column(
