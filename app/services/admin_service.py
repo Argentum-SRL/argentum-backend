@@ -7,9 +7,10 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import select, or_, func, update
 
-from app.models.usuario import Usuario, EstadoUsuario, AuthProvider
+from app.models.usuario import Usuario, EstadoUsuario, AuthProvider, RolUsuario
 from app.models.refresh_token import RefreshToken
 from app.services.email_service import enviar_reset_password_email
+from app.services import usuario_service
 from app.core.config import settings
 
 
@@ -255,6 +256,65 @@ def resetear_onboarding(db: Session, usuario_id: UUID) -> Usuario:
     db.commit()
     db.refresh(user)
     return user
+
+
+def cambiar_rol_admin(
+    db: Session, usuario_id: UUID, is_admin: bool, admin_id: UUID
+) -> Usuario:
+    user = obtener_usuario(db, usuario_id)
+
+    if usuario_id == admin_id and not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "ADMIN_CANNOT_DEMOTE_SELF",
+                    "message": "No podés revocar tus propios permisos de administrador.",
+                },
+            },
+        )
+
+    user.is_admin = is_admin
+    user.rol = RolUsuario.ADMIN if is_admin else RolUsuario.USUARIO
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def eliminar_usuario_admin(
+    db: Session, usuario_id: UUID, email_confirmacion: str, admin_id: UUID
+) -> dict:
+    if usuario_id == admin_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "ADMIN_CANNOT_DELETE_SELF",
+                    "message": "No podés eliminar tu propia cuenta desde el panel de administración.",
+                },
+            },
+        )
+
+    user = obtener_usuario(db, usuario_id)
+
+    target_identifier = (user.email or user.telefono or "").strip().lower()
+    provided_identifier = (email_confirmacion or "").strip().lower()
+
+    if not provided_identifier or provided_identifier != target_identifier:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "EMAIL_MISMATCH",
+                    "message": "El email ingresado no coincide con el de la cuenta a eliminar.",
+                },
+            },
+        )
+
+    return usuario_service.eliminar_usuario(db, user)
 
 
 def obtener_estadisticas(db: Session) -> dict:
