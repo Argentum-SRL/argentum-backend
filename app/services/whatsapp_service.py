@@ -4,6 +4,7 @@ app/services/whatsapp_service.py — Servicio de mensajería y verificación por
 
 import logging
 import random
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -15,6 +16,23 @@ logger = logging.getLogger(__name__)
 
 CODIGO_EXPIRACION_SEGUNDOS = 10 * 60  # 10 minutos
 MAX_INTENTOS = 3
+
+
+def _enmascarar_telefono(telefono: str | None) -> str:
+    """Enmascara el número de teléfono mostrando solo los últimos 4 dígitos."""
+    if not telefono:
+        return "****"
+    tel_clean = "".join(c for c in str(telefono) if c.isdigit())
+    if len(tel_clean) >= 4:
+        return f"***{tel_clean[-4:]}"
+    return "****"
+
+
+def _enmascarar_otp_en_mensaje(mensaje: str | None) -> str:
+    """Enmascara códigos numéricos de verificación (ej. OTPs) en el cuerpo del mensaje."""
+    if not mensaje:
+        return ""
+    return re.sub(r"\b\d{4,8}\b", "***", mensaje)
 
 
 @dataclass
@@ -117,9 +135,11 @@ def enviar_whatsapp(numero: str, mensaje: str) -> bool:
     if not settings.WHATSAPP_ACCESS_TOKEN or not settings.WHATSAPP_PHONE_NUMBER_ID:
         logger.warning(
             "WhatsApp / Meta API no configurado; mensaje simulado para %s",
-            numero,
+            _enmascarar_telefono(numero),
         )
-        logger.info("[WHATSAPP-DEV] to=%s body=%s", to_whatsapp, mensaje)
+        if settings.ENVIRONMENT == "development":
+            mensaje_log = _enmascarar_otp_en_mensaje(mensaje)
+            logger.info("[WHATSAPP-DEV] to=%s body=%s", _enmascarar_telefono(to_whatsapp), mensaje_log)
         return True
 
     url = f"https://graph.facebook.com/v21.0/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
@@ -143,7 +163,7 @@ def enviar_whatsapp(numero: str, mensaje: str) -> bool:
                 "Enviando WhatsApp vía Meta (intento %d/%d) a %s",
                 intento,
                 max_intentos,
-                to_whatsapp,
+                _enmascarar_telefono(to_whatsapp),
             )
             with httpx.Client(timeout=15) as client:
                 response = client.post(url, headers=headers, json=payload)
@@ -157,7 +177,7 @@ def enviar_whatsapp(numero: str, mensaje: str) -> bool:
                     )
                     logger.info(
                         "WhatsApp enviado exitosamente a %s vía Meta. Message ID: %s",
-                        to_whatsapp,
+                        _enmascarar_telefono(to_whatsapp),
                         msg_id,
                     )
                     return True
@@ -166,7 +186,7 @@ def enviar_whatsapp(numero: str, mensaje: str) -> bool:
                 if 400 <= response.status_code < 500:
                     logger.error(
                         "Error de cliente al enviar WhatsApp a %s (HTTP %d): %s",
-                        to_whatsapp,
+                        _enmascarar_telefono(to_whatsapp),
                         response.status_code,
                         response.text,
                     )
@@ -175,27 +195,27 @@ def enviar_whatsapp(numero: str, mensaje: str) -> bool:
                 # Error 5xx del servidor de Meta
                 logger.warning(
                     "Error de servidor de Meta al enviar WhatsApp a %s (HTTP %d): %s. Reintentando...",
-                    to_whatsapp,
+                    _enmascarar_telefono(to_whatsapp),
                     response.status_code,
                     response.text,
                 )
         except (httpx.TimeoutException, httpx.NetworkError) as exc:
             logger.warning(
                 "Timeout o error de red al enviar WhatsApp a %s (intento %d/%d): %s",
-                to_whatsapp,
+                _enmascarar_telefono(to_whatsapp),
                 intento,
                 max_intentos,
                 exc,
             )
         except Exception as exc:
-            logger.error("Error inesperado al enviar WhatsApp a %s: %s", to_whatsapp, exc)
+            logger.error("Error inesperado al enviar WhatsApp a %s: %s", _enmascarar_telefono(to_whatsapp), exc)
             return False
 
         if intento < max_intentos:
             time.sleep(backoff)
             backoff *= 2
 
-    logger.error("Fallaron todos los intentos (%d) para enviar WhatsApp a %s", max_intentos, to_whatsapp)
+    logger.error("Fallaron todos los intentos (%d) para enviar WhatsApp a %s", max_intentos, _enmascarar_telefono(to_whatsapp))
     return False
 
 

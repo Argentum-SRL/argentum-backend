@@ -7,7 +7,7 @@ from sqlalchemy import select, desc, or_
 from sqlalchemy.orm import Session
 
 from app.models.transaccion import Transaccion, OrigenTransaccion
-from app.models.billetera import Billetera
+from app.models.billetera import Billetera, EstadoBilletera
 from app.models.transaccion_recurrente import TransaccionRecurrente, EstadoTransaccionRecurrente
 from app.schemas.transaccion_recurrente import TransaccionRecurrenteCreate, TransaccionRecurrenteUpdate
 from app.services import presupuesto_service
@@ -42,7 +42,11 @@ def obtener_recurrente(db: Session, usuario_id: UUID, recurrente_id: UUID) -> Tr
 def crear_recurrente(db: Session, usuario_id: UUID, data: TransaccionRecurrenteCreate) -> TransaccionRecurrente:
     # Validar billetera
     billetera = db.execute(
-        select(Billetera).where(Billetera.id == data.billetera_id, Billetera.usuario_id == usuario_id)
+        select(Billetera).where(
+            Billetera.id == data.billetera_id,
+            Billetera.usuario_id == usuario_id,
+            Billetera.estado == EstadoBilletera.ACTIVA,
+        )
     ).scalar_one_or_none()
     
     if not billetera:
@@ -86,6 +90,18 @@ def actualizar_recurrente(
     recurrente = obtener_recurrente(db, usuario_id, recurrente_id)
 
     update_data = data.model_dump(exclude_unset=True)
+
+    if "billetera_id" in update_data and update_data["billetera_id"] is not None:
+        billetera = db.execute(
+            select(Billetera).where(
+                Billetera.id == update_data["billetera_id"],
+                Billetera.usuario_id == usuario_id,
+                Billetera.estado == EstadoBilletera.ACTIVA,
+            )
+        ).scalar_one_or_none()
+        if not billetera:
+            raise HTTPException(status_code=404, detail="Billetera no encontrada")
+
     for key, value in update_data.items():
         setattr(recurrente, key, value)
 

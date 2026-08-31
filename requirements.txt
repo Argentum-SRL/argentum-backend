@@ -13,16 +13,13 @@ pydantic-settings>=2.6.1
 python-dotenv==1.2.2
 
 # Auth
-python-jose[cryptography]==3.3.0
+python-jose[cryptography]>=3.4.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1  # pinned: passlib 1.7.4 is incompatible with bcrypt >= 4.1
 python-multipart>=0.0.12
 
 # AI / OpenAI
 openai==2.32.0
-
-# WhatsApp
-twilio==9.10.5
 
 # HTTP client (DolarAPI, webhooks)
 httpx==0.28.1
@@ -31,11 +28,12 @@ httpx==0.28.1
 apscheduler==3.11.2
 
 # Image processing (GPT-4o Vision)
-pillow==12.2.0
+pillow>=12.3.0
 python-dateutil==2.9.0
 
 # PDF parsing
-pdfplumber==0.11.0
+pdfplumber>=0.11.10
+pdfminer-six>=20251230
 
 # Timezone IANA database for zoneinfo
 tzdata>=2024.1
@@ -45,4 +43,7 @@ structlog>=24.1.0
 
 # In-memory Caching
 cachetools>=5.5.0
+
+# Rate Limiting
+slowapi>=0.1.9
 

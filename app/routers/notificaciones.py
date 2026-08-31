@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from jose import jwt, JWTError
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.auth import get_current_user, verificar_access_token
 from app.models.usuario import Usuario
@@ -130,6 +132,7 @@ def actualizar_configuracion(
 async def sse_notificaciones(
     request: Request,
     token: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
 ):
     """
     Endpoint SSE para streaming en vivo de notificaciones nuevas sin leer.
@@ -142,7 +145,8 @@ async def sse_notificaciones(
     if not access_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token de acceso requerido"
+            detail="Token de acceso requerido",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     try:
@@ -151,7 +155,34 @@ async def sse_notificaciones(
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token de acceso inválido o expirado"
+            detail="Token de acceso inválido o expirado",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    usuario = db.get(Usuario, usuario_id)
+    if not usuario:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No encontramos una cuenta con esos datos.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        payload = jwt.decode(access_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        iat_timestamp = payload.get("iat")
+        iat_dt = datetime.fromtimestamp(iat_timestamp, tz=timezone.utc) if iat_timestamp else None
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token de acceso inválido o expirado",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if usuario.tokens_revocados_at and iat_dt and iat_dt < usuario.tokens_revocados_at:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sesión revocada. Por favor iniciá sesión nuevamente.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     async def event_generator():
@@ -166,6 +197,13 @@ async def sse_notificaciones(
             from app.core.database import SessionLocal
             db_session = SessionLocal()
             try:
+                # Verificar si la sesión fue revocada durante el stream abierto
+                if iat_dt:
+                    u_live = db_session.get(Usuario, usuario_id)
+                    if not u_live or (u_live.tokens_revocados_at and iat_dt < u_live.tokens_revocados_at):
+                        yield "data: {\"event\": \"revoked\"}\n\n"
+                        break
+
                 # Buscar notificaciones nuevas creadas después de ultimo_check
                 nuevas = (
                     db_session.query(Notificacion)

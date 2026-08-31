@@ -3,6 +3,7 @@ from app.models.categoria import Categoria
 from app.models.categoria_excluida import CategoriaExcluida
 from app.models.configuracion_notificacion import ConfiguracionNotificacion
 from app.models.conversacion_wpp import ConversacionWpp
+from app.models.mensaje_whatsapp_procesado import MensajeWhatsappProcesado
 from app.models.cuota import Cuota
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.historial_suscripcion import HistorialSuscripcion
@@ -36,6 +37,7 @@ __all__ = [
     "CategoriaExcluida",
     "ConfiguracionNotificacion",
     "ConversacionWpp",
+    "MensajeWhatsappProcesado",
     "Cuota",
     "GrupoCuotas",
     "HistorialSuscripcion",

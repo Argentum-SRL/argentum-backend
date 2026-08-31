@@ -136,6 +136,17 @@ def _validar_moneda_coincide(moneda_operacion, billetera: Billetera) -> None:
         )
 
 
+def _validar_tarjeta(db: Session, tarjeta_id: UUID, usuario_id: UUID) -> TarjetaCredito:
+    """Valida que la tarjeta pertenezca al usuario."""
+    tarjeta = db.query(TarjetaCredito).filter(
+        TarjetaCredito.id == tarjeta_id,
+        TarjetaCredito.usuario_id == usuario_id
+    ).first()
+    if not tarjeta:
+        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+    return tarjeta
+
+
 def _evaluar_gasto_inusual_safe(usuario_id: UUID, transaccion_id: UUID) -> None:
     """Wrapper seguro para evaluar_gasto_inusual en background tasks. Abre su propia sesión de DB."""
     from app.core.database import SessionLocal
@@ -236,12 +247,7 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, co
         # Determinar primer vencimiento
         primer_vencimiento = None
         if data.metodo_pago == MetodoPago.CREDITO and data.tarjeta_id:
-            tarjeta = db.query(TarjetaCredito).filter(
-                TarjetaCredito.id == data.tarjeta_id,
-                TarjetaCredito.usuario_id == usuario_id
-            ).first()
-            if not tarjeta:
-                raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+            tarjeta = _validar_tarjeta(db, data.tarjeta_id, usuario_id)
             proximo_resumen = data.info_cuotas.proximo_resumen if data.info_cuotas else False
             primer_vencimiento = calcular_primer_vencimiento(
                 data.fecha, tarjeta.dia_cierre, tarjeta.dia_vencimiento, proximo_resumen
@@ -294,6 +300,9 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, co
         return nueva_transaccion
 
     # 3. Transacción normal
+    if data.tarjeta_id:
+        _validar_tarjeta(db, data.tarjeta_id, usuario_id)
+
     nueva_transaccion = Transaccion(
         **data.model_dump(exclude={"usuario_id", "info_cuotas"}),
         usuario_id=usuario_id
@@ -363,6 +372,10 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
         raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
     
     _validar_moneda_coincide(data.moneda if data.moneda is not None else transaccion.moneda, billetera)
+
+    # Validar tarjeta si se actualiza tarjeta_id
+    if data.tarjeta_id is not None:
+        _validar_tarjeta(db, data.tarjeta_id, usuario_id)
 
     # Impacto en presupuestos (Revertir con datos viejos)
     presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=True)

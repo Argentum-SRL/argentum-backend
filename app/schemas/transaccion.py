@@ -36,7 +36,6 @@ class InfoCuotas(BaseModel):
 
 
 class TransaccionBase(BaseModel):
-    usuario_id: UUID | None = None
     tipo: TipoTransaccion
     monto: Decimal = Field(gt=0, max_digits=15, decimal_places=2, description="Monto mayor a 0")
     moneda: Moneda
@@ -79,12 +78,6 @@ class TransaccionUpdate(BaseModel):
     tarjeta_id: UUID | None = None
     primer_vencimiento_manual: date | None = None
     es_recurrente: bool | None = None
-    recurrente_id: UUID | None = None
-    es_cuota_hija: bool | None = None
-    es_padre_cuotas: bool | None = None
-    grupo_cuotas_id: UUID | None = None
-    origen: OrigenTransaccion | None = None
-    estado_verificacion: EstadoVerificacionTransaccion | None = None
 
     @field_validator("descripcion")
     @classmethod
@@ -96,6 +89,7 @@ class TransaccionUpdate(BaseModel):
 
 class TransaccionRead(TransaccionBase):
     id: UUID
+    usuario_id: UUID
     categoria_id: UUID | None = None
     metodo_pago: MetodoPago | None = None
     fecha_creacion: datetime

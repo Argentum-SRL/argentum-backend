@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 365
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     # OpenAI
     OPENAI_API_KEY: str = ""
@@ -22,13 +22,6 @@ class Settings(BaseSettings):
     # Dolar API
     DOLAR_API_BASE_URL: str = "https://dolarapi.com"
     DOLAR_API_TIMEOUT_SECONDS: int = 10
-
-    # Twilio / WhatsApp (Legacy)
-    TWILIO_ACCOUNT_SID: str = ""
-    TWILIO_AUTH_TOKEN: str = ""
-    TWILIO_WHATSAPP_FROM: str = ""
-    # Compatibilidad hacia atras con implementaciones previas
-    TWILIO_WHATSAPP_NUMBER: str = ""
 
     # Meta WhatsApp Cloud API
     WHATSAPP_ACCESS_TOKEN: str = ""
@@ -43,7 +36,6 @@ class Settings(BaseSettings):
     # URLs
     FRONTEND_URL: str = "http://localhost:5173"
     BACKEND_URL: str = "http://localhost:8000"
-    TWILIO_WEBHOOK_URL: str = ""
 
     # SMTP / Email
     SMTP_HOST: str = "smtp.gmail.com"
@@ -56,7 +48,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()
