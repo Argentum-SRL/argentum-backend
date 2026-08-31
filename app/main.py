@@ -692,6 +692,7 @@ app.include_router(importacion.router)
 # Servir archivos estáticos de media (Ignorado por git)
 os.makedirs("media/fotos", exist_ok=True)
 app.mount("/media", StaticFiles(directory="media"), name="media")
+app.mount("/api/media", StaticFiles(directory="media"), name="api_media")
 
 
 @app.get("/")
