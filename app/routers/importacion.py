@@ -161,16 +161,23 @@ def preview_importacion(
                 }
             }
         )
+
+    # Si se seleccionó una tarjeta en este paso, persistirla en la importación
+    tarjeta_efectiva_id = tarjeta_id or importacion.tarjeta_id
+    if tarjeta_id and importacion.tarjeta_id != tarjeta_id:
+        importacion.tarjeta_id = tarjeta_id
+        db.commit()
+        db.refresh(importacion)
     
     transacciones_preview = []
     if importacion.transacciones_parseadas:
         for t_dict in importacion.transacciones_parseadas:
             t_obj = TransaccionCruda.model_validate(t_dict)
             
-            # Calcular hash para detectar si es duplicada
+            # Calcular hash para detectar si es duplicada con la tarjeta real
             hash_val = calcular_import_hash(
                 usuario_id=current_user.id,
-                tarjeta_id=tarjeta_id or importacion.tarjeta_id,
+                tarjeta_id=tarjeta_efectiva_id,
                 fecha=t_obj.fecha,
                 monto=t_obj.monto,
                 descripcion=t_obj.descripcion,
@@ -251,12 +258,87 @@ def confirmar_importacion(
                 }
             }
         )
-        
+
+    # Validar que la tarjeta pertenezca al usuario autenticado
+    from app.models.tarjeta_credito import TarjetaCredito
+    tarjeta = db.query(TarjetaCredito).filter(
+        TarjetaCredito.id == body.tarjeta_id,
+        TarjetaCredito.usuario_id == current_user.id
+    ).first()
+    if not tarjeta:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "TARJETA_INVALIDA",
+                    "message": "La tarjeta seleccionada no existe o no pertenece a tu cuenta."
+                }
+            }
+        )
+
+    # Validar que la billetera en pesos pertenezca al usuario y sea de moneda ARS
+    from app.models.billetera import Billetera, Moneda
+    billetera_ars = db.query(Billetera).filter(
+        Billetera.id == body.billetera_id,
+        Billetera.usuario_id == current_user.id
+    ).first()
+    if not billetera_ars:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "BILLETERA_INVALIDA",
+                    "message": "La billetera en pesos seleccionada no existe o no pertenece a tu cuenta."
+                }
+            }
+        )
+    if billetera_ars.moneda != Moneda.ARS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "MONEDA_BILLETERA_INVALIDA",
+                    "message": "La billetera principal debe estar configurada en Pesos Argentinos (ARS)."
+                }
+            }
+        )
+
+    # Validar la billetera en dólares si fue proporcionada
+    if body.billetera_usd_id:
+        billetera_usd = db.query(Billetera).filter(
+            Billetera.id == body.billetera_usd_id,
+            Billetera.usuario_id == current_user.id
+        ).first()
+        if not billetera_usd:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "success": False,
+                    "error": {
+                        "code": "BILLETERA_USD_INVALIDA",
+                        "message": "La billetera en dólares seleccionada no existe o no pertenece a tu cuenta."
+                    }
+                }
+            )
+        if billetera_usd.moneda != Moneda.USD:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "success": False,
+                    "error": {
+                        "code": "MONEDA_BILLETERA_USD_INVALIDA",
+                        "message": "La billetera secundaria para gastos internacionales debe estar configurada en Dólares (USD)."
+                    }
+                }
+            )
+
     # Comparar transacciones y registrar correcciones (best-effort)
     for idx, final_item in enumerate(body.transacciones_finales):
         if idx >= len(importacion.transacciones_parseadas):
             break
-        original_item = importacion.transacciones_parseadas[idx]
         
         # 1. Excluida
         if not final_item.incluir:
@@ -284,14 +366,16 @@ def confirmar_importacion(
             except Exception as e:
                 logger.warning(f"Error registrando corrección CATEGORIA_CAMBIADA: {e}")
 
-    # Filtrar transacciones a importar (las que tienen incluir=True)
+    # Filtrar transacciones a importar e inyectar categoria_id seleccionada
     transacciones_a_importar = []
     for idx, final_item in enumerate(body.transacciones_finales):
         if idx >= len(importacion.transacciones_parseadas):
             break
         if final_item.incluir:
             t_dict = importacion.transacciones_parseadas[idx]
-            transacciones_a_importar.append(TransaccionCruda.model_validate(t_dict))
+            t_cruda = TransaccionCruda.model_validate(t_dict)
+            t_cruda.categoria_id = final_item.categoria_id
+            transacciones_a_importar.append(t_cruda)
             
     # Ejecutar importación real llamando al servicio existente
     resultado_importacion = importar_transacciones_resumen(
@@ -303,32 +387,6 @@ def confirmar_importacion(
         billetera_usd_id=body.billetera_usd_id,
         transacciones_crudas=transacciones_a_importar
     )
-    
-    # Asignar categorías personalizadas a las transacciones creadas (best-effort)
-    for idx, final_item in enumerate(body.transacciones_finales):
-        if idx >= len(importacion.transacciones_parseadas):
-            break
-        if final_item.incluir and final_item.categoria_id:
-            t_dict = importacion.transacciones_parseadas[idx]
-            t_obj = TransaccionCruda.model_validate(t_dict)
-            hash_val = calcular_import_hash(
-                usuario_id=current_user.id,
-                tarjeta_id=body.tarjeta_id,
-                fecha=t_obj.fecha,
-                monto=t_obj.monto,
-                descripcion=t_obj.descripcion,
-                cuota_numero=t_obj.cuota_actual
-            )
-            try:
-                from app.models.transaccion import Transaccion
-                tx_record = db.query(Transaccion).filter(
-                    Transaccion.usuario_id == current_user.id,
-                    Transaccion.import_hash == hash_val
-                ).first()
-                if tx_record:
-                    tx_record.categoria_id = final_item.categoria_id
-            except Exception as e:
-                logger.warning(f"Error al actualizar categoría para transacción: {e}")
                 
     # Actualizar campos adicionales en importación
     total_excluidas = sum(1 for item in body.transacciones_finales if not item.incluir)

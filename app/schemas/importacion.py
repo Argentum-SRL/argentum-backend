@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ProcesarResumenResponse(BaseModel):
@@ -26,6 +26,14 @@ class TransaccionPreview(BaseModel):
     es_cargo_bancario: bool = False
     titular_seccion: str | None = None
     posible_duplicado: bool
+
+    @field_validator('moneda')
+    @classmethod
+    def validar_moneda(cls, v: str) -> str:
+        v_upper = v.upper().strip()
+        if v_upper not in ('ARS', 'USD'):
+            raise ValueError('La moneda debe ser ARS o USD')
+        return v_upper
 
 
 class PreviewImportacionResponse(BaseModel):
@@ -55,6 +63,13 @@ class ConfirmarImportacionRequest(BaseModel):
     billetera_usd_id: UUID | None = None
     titulares_seleccionados: list[str] | None = None
     transacciones_finales: list[TransaccionConfirmarItem]
+
+    @field_validator('transacciones_finales')
+    @classmethod
+    def validar_transacciones_finales(cls, v: list[TransaccionConfirmarItem]) -> list[TransaccionConfirmarItem]:
+        if not v:
+            raise ValueError('Debe enviar la lista de transacciones para confirmar la importación')
+        return v
 
 
 class ConfirmarImportacionResponse(BaseModel):

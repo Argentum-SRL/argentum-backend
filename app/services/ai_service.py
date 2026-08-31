@@ -17,7 +17,7 @@ from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria, EstadoCategoria
 from app.models.meta import Meta, EstadoMeta
 from app.models.presupuesto import Presupuesto, EstadoPresupuesto
-from app.models.subcategoria import Subcategoria
+from app.models.subcategoria import Subcategoria, EstadoSubcategoria
 from app.models.usuario import Usuario
 from app.services.dashboard_service import get_ciclo_fechas, get_dashboard_resumen
 from app.services.openai_client import get_openai_client
@@ -184,14 +184,13 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
         )
     ).scalars().all()
 
-    # 3. Subcategorías personalizadas (si tiene)
-    subs_personales = []
-    if cats_personales:
-        subs_personales = db.execute(
-            select(Subcategoria).where(
-                Subcategoria.creador_id == usuario.id
-            )
-        ).scalars().all()
+    # 3. Subcategorías personalizadas activas del usuario
+    subs_personales = db.execute(
+        select(Subcategoria).where(
+            Subcategoria.creador_id == usuario.id,
+            Subcategoria.estado == EstadoSubcategoria.ACTIVA
+        )
+    ).scalars().all()
 
     subcats_por_cat: dict[str, list[str]] = {}
     for s in subs_globales:
@@ -231,8 +230,11 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
         )
     ).scalars().all()
 
+    from sqlalchemy.orm import selectinload
     presupuestos = db.execute(
-        select(Presupuesto).where(
+        select(Presupuesto)
+        .options(selectinload(Presupuesto.periodos))
+        .where(
             Presupuesto.usuario_id == usuario.id,
             Presupuesto.estado == EstadoPresupuesto.ACTIVO
         )
@@ -251,6 +253,13 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
         saldo_disponible_usd = 0.0
         disponible_real_usd = 0.0
 
+    def _obtener_monto_usado_presupuesto(p: Presupuesto) -> float:
+        if getattr(p, "monto_usado_actual", None) is not None:
+            return float(p.monto_usado_actual)
+        if p.periodos:
+            return float(p.periodos[-1].monto_usado)
+        return 0.0
+
     res = {
         "billeteras": [
             {"id": str(b.id), "nombre": b.nombre, "moneda": b.moneda.value, "saldo": float(b.saldo_actual)}
@@ -267,7 +276,13 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
             for m in metas
         ],
         "presupuestos_activos": [
-            {"nombre": p.nombre, "limite": float(p.monto), "moneda": p.moneda.value}
+            {
+                "nombre": p.nombre,
+                "limite": float(p.monto),
+                "monto_usado": _obtener_monto_usado_presupuesto(p),
+                "monto_disponible": max(0.0, float(p.monto) - _obtener_monto_usado_presupuesto(p)),
+                "moneda": p.moneda.value
+            }
             for p in presupuestos
         ],
         "saldo_total_billeteras_pesos": saldo_disponible_ars,
