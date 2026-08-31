@@ -1,7 +1,4 @@
-# app/services/email_templates.py
-"""
-app/services/email_templates.py — Plantillas de email HTML profesionales para Argentum.
-"""
+from app.core.config import settings
 
 
 def _generar_html_base(
@@ -340,4 +337,43 @@ def template_reset_password_email(nombre: str, reset_url: str) -> str:
         nota_footer_body="Si no fuiste vos, podés ignorar este email. Tu cuenta está segura.",
         texto_footer="Recibís este correo porque se solicitó un restablecimiento de contraseña para tu cuenta.",
     )
+
+
+def template_bienvenida(nombre: str) -> str:
+    """
+    Template: Bienvenida tras completar la configuración de la cuenta (onboarding).
+    """
+    dashboard_url = f"{settings.FRONTEND_URL}/app/dashboard"
+    contenido = f"""
+    <p style="font-size: 14px; color: #3a3d42; line-height: 1.6; margin: 0 0 16px 0;">
+      Hola {nombre}, ya completaste la configuración inicial de tu cuenta en Argentum.
+    </p>
+    <p style="font-size: 14px; color: #3a3d42; line-height: 1.6; margin: 0 0 24px 0;">
+      A partir de ahora podés empezar a registrar tus gastos e ingresos fácilmente enviando mensajes por WhatsApp o directamente desde la aplicación web.
+    </p>
+
+    <!-- CTA BUTTON -->
+    <div style="text-align: center; margin-bottom: 24px;">
+      <a href="{dashboard_url}" style="display: inline-block; background-color: #0D2045; color: #ffffff; font-size: 14px; font-weight: 600; text-decoration: none; padding: 13px 28px; border-radius: 8px;">
+        Ir a mi dashboard
+      </a>
+    </div>
+
+    <!-- INFO BOX -->
+    <div style="background-color: #F5F4F0; border-radius: 8px; padding: 16px 20px; font-size: 13px; color: #3a3d42; line-height: 1.5;">
+      Podés consultar tus saldos, billeteras y presupuestos en cualquier momento desde tu panel de control.
+    </div>
+    """
+    return _generar_html_base(
+        color_header="#0D2045",
+        subtitulo="BIENVENIDO A ARGENTUM",
+        badge_bg="#EAF3DE",
+        badge_text="#27500A",
+        badge_label="Cuenta lista",
+        titulo=f"Tu cuenta ya está lista, {nombre}",
+        contenido_html=contenido,
+        nota_footer_body="Gracias por sumarte a Argentum.",
+        texto_footer="Recibís este correo porque completaste la configuración de tu cuenta en Argentum.",
+    )
+
 

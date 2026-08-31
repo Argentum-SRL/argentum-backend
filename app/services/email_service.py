@@ -20,6 +20,7 @@ from app.services.email_templates import (
     template_verificacion_email,
     template_recupero_contrasena,
     template_reset_password_email,
+    template_bienvenida,
 )
 
 logger = logging.getLogger(__name__)
@@ -301,3 +302,18 @@ def enviar_email_aviso_google(destinatario: str) -> bool:
     </div>
     """
     return _enviar_email(destinatario, asunto, cuerpo, cuerpo_html)
+
+
+def enviar_email_bienvenida(destinatario: str, nombre: str) -> bool:
+    asunto = "¡Bienvenido a Argentum!"
+    dashboard_url = f"{settings.FRONTEND_URL}/app/dashboard"
+    cuerpo = (
+        f"Hola {nombre},\n\n"
+        f"Tu cuenta de Argentum ya está lista para usar.\n\n"
+        f"Podés ingresar a tu panel de control desde el siguiente enlace:\n"
+        f"{dashboard_url}\n\n"
+        f"A partir de ahora podés empezar a registrar tus gastos e ingresos por WhatsApp o desde la aplicación web."
+    )
+    cuerpo_html = template_bienvenida(nombre=nombre)
+    return _enviar_email(destinatario, asunto, cuerpo, cuerpo_html)
+
