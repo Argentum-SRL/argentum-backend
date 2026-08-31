@@ -196,7 +196,7 @@ def template_cambio_contrasena(nombre: str, fecha_hora_argentina: str, dispositi
 
     <!-- DANGER BOX -->
     <div style="background-color: #FCEBEB; border-left: 3px solid #A32D2D; border-radius: 0 6px 6px 0; padding: 12px 16px; font-size: 13px; color: #791F1F; line-height: 1.5;">
-      Si no realizaste este cambio, contactanos de inmediato escribiendo a <a href="mailto:soporte@argentum.app" style="color: #791F1F; font-weight: bold; text-decoration: underline;">soporte@argentum.app</a>
+      Si no realizaste este cambio, contactanos de inmediato escribiendo a <a href="mailto:srlargentum@gmail.com" style="color: #791F1F; font-weight: bold; text-decoration: underline;">srlargentum@gmail.com</a>
     </div>
     """
     return _generar_html_base(
@@ -240,7 +240,7 @@ def template_nuevo_dispositivo(nombre: str, fecha_hora_argentina: str, dispositi
       </a>
     </div>
     <div style="text-align: center; font-size: 13px; color: #8A95A8; margin-bottom: 24px;">
-      O escribinos a <a href="mailto:soporte@argentum.app" style="color: #8A95A8; text-decoration: underline;">soporte@argentum.app</a> y te ayudamos.
+      O escribinos a <a href="mailto:srlargentum@gmail.com" style="color: #8A95A8; text-decoration: underline;">srlargentum@gmail.com</a> y te ayudamos.
     </div>
     """
     return _generar_html_base(

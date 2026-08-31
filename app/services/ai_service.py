@@ -19,7 +19,7 @@ from app.models.meta import Meta, EstadoMeta
 from app.models.presupuesto import Presupuesto, EstadoPresupuesto
 from app.models.subcategoria import Subcategoria, EstadoSubcategoria
 from app.models.usuario import Usuario
-from app.services.dashboard_service import get_ciclo_fechas, get_dashboard_resumen
+from app.services.dashboard_service import get_ciclo_fechas
 from app.services.openai_client import get_openai_client
 from app.services.proyeccion_service import calcular_proyeccion
 from app.services import categoria_service
@@ -159,10 +159,19 @@ REGLAS CRÍTICAS:
 - confianza entre 0.60-0.84 → pedí confirmación explícita
 - confianza < 0.60 → preguntá qué quiso decir
 - Para transferencias: tipo="egreso" en billetera_origen, billetera_destino obligatorio
-- La fecha por defecto es hoy si no se menciona
+- Usá "fecha_actual" del contexto financiero como única referencia de qué día es hoy.
+- Si el usuario menciona una fecha relativa ("ayer", "el lunes pasado", "hace 3 días"), calculala a partir de "fecha_actual", NUNCA de tu conocimiento propio.
+- Si el usuario menciona sólo un día del mes sin mes ni año (ej: "el 12", "el 5"), asumí el mes y año de "fecha_actual" (a menos que ese día aún no haya ocurrido en el mes corriente, en cuyo caso usá el mes anterior — igual criterio que usaría una persona).
+- Si no se menciona fecha, o si hay cualquier ambigüedad o no podés resolverla con certeza, devolvé "fecha": null (el backend asignará hoy por defecto).
 - Al categorizar un gasto o ingreso, usá EXACTAMENTE los nombres de categorías y subcategorías del contexto. Si podés identificar la subcategoría, indicala en el campo "categoria" con el formato "Categoría > Subcategoría" (ej: "Alimentación > Verdulería", "Transporte > Taxi / Apps", "Salud > Farmacia"). Si no podés identificar la subcategoría, usá solo la categoría principal.
 - Nunca respondas fuera del JSON. Solo JSON, nada más.
 """
+
+_DIAS_SEMANA_ES = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+_MESES_ES = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
+]
 
 
 def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
@@ -221,7 +230,12 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
         for cp in cats_personales
     ]
 
-    fecha_inicio, fecha_fin = get_ciclo_fechas(usuario, hoy_argentina())
+    hoy = hoy_argentina()
+    dia_semana_str = _DIAS_SEMANA_ES[hoy.weekday()]
+    mes_str = _MESES_ES[hoy.month - 1]
+    texto_fecha = f"{dia_semana_str} {hoy.day} de {mes_str} de {hoy.year}"
+
+    fecha_inicio, fecha_fin = get_ciclo_fechas(usuario, hoy)
 
     metas = db.execute(
         select(Meta).where(
@@ -241,13 +255,14 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
     ).scalars().all()
 
     try:
-        resumen = get_dashboard_resumen(db, usuario)
-        saldo_disponible_ars = resumen["disponible_real"]["ars"]["saldo_billeteras"]
-        disponible_real_ars = resumen["disponible_real"]["ars"]["disponible"]
-        saldo_disponible_usd = resumen["disponible_real"]["usd"]["saldo_billeteras"]
-        disponible_real_usd = resumen["disponible_real"]["usd"]["disponible"]
+        from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
+        disp_ctx = _calcular_saldo_disponible_sync(db, usuario.id, wallets_override=billeteras)
+        saldo_disponible_ars = float(disp_ctx["ars"]["total_billeteras"])
+        disponible_real_ars = float(disp_ctx["ars"]["saldo_disponible"])
+        saldo_disponible_usd = float(disp_ctx["usd"]["total_billeteras"])
+        disponible_real_usd = float(disp_ctx["usd"]["saldo_disponible"])
     except Exception:
-        logger.exception("Error al obtener resumen del dashboard en ai_service")
+        logger.exception("Error al obtener disponible real en ai_service")
         saldo_disponible_ars = 0.0
         disponible_real_ars = 0.0
         saldo_disponible_usd = 0.0
@@ -261,6 +276,10 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
         return 0.0
 
     res = {
+        "fecha_actual": {
+            "iso": hoy.isoformat(),
+            "texto": texto_fecha,
+        },
         "billeteras": [
             {"id": str(b.id), "nombre": b.nombre, "moneda": b.moneda.value, "saldo": float(b.saldo_actual)}
             for b in billeteras

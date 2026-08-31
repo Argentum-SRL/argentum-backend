@@ -18,20 +18,24 @@ from app.utils.fecha import hoy_argentina
 def _calcular_saldo_disponible_sync(
     db: Session,
     usuario_id: UUID,
-    billetera_ids: Optional[List[UUID]] = None
+    billetera_ids: Optional[List[UUID]] = None,
+    wallets_override: Optional[List[Billetera]] = None
 ) -> dict:
     usuario = db.get(Usuario, usuario_id)
     if not usuario:
         raise ValueError(f"Usuario {usuario_id} no encontrado")
 
     # 1. Saldo de Billeteras activas
-    query_b = db.query(Billetera).filter(
-        Billetera.usuario_id == usuario_id,
-        Billetera.estado == EstadoBilletera.ACTIVA
-    )
-    if billetera_ids:
-        query_b = query_b.filter(Billetera.id.in_(billetera_ids))
-    wallets = query_b.all()
+    if wallets_override is not None:
+        wallets = wallets_override
+    else:
+        query_b = db.query(Billetera).filter(
+            Billetera.usuario_id == usuario_id,
+            Billetera.estado == EstadoBilletera.ACTIVA
+        )
+        if billetera_ids:
+            query_b = query_b.filter(Billetera.id.in_(billetera_ids))
+        wallets = query_b.all()
 
     total_billeteras_ars = Decimal("0")
     total_billeteras_usd = Decimal("0")
