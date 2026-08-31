@@ -17,6 +17,9 @@ from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from slowapi.errors import RateLimitExceeded
+
+from app.core.limiter import limiter
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,6 +67,37 @@ from app.services.notificacion_scheduler_service import (
 # Inicialización automática de Base de Datos
 # ---------------------------------------------------------------------------
 from scripts.init_full_db import init_full_db
+
+class SecurityHeadersMiddleware:
+    """
+    Middleware ASGI puro para agregar headers de seguridad HTTP en todas las respuestas.
+    """
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                security_headers = [
+                    (b"strict-transport-security", b"max-age=63072000; includeSubDomains"),
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"x-frame-options", b"DENY"),
+                    (b"referrer-policy", b"strict-origin-when-cross-origin"),
+                ]
+                existing_keys = {h[0].lower() for h in headers}
+                for k, v in security_headers:
+                    if k not in existing_keys:
+                        headers.append((k, v))
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
 
 class TimeoutMiddleware:
     """
@@ -516,14 +550,23 @@ async def lifespan(app: FastAPI):
 # App
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="Argentum API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(
+    title="Argentum API",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url=None if settings.ENVIRONMENT == "production" else "/docs",
+    redoc_url=None if settings.ENVIRONMENT == "production" else "/redoc",
+    openapi_url=None if settings.ENVIRONMENT == "production" else "/openapi.json",
+)
+app.state.limiter = limiter
 
 # Starlette apila middlewares en orden inverso: el último en add_middleware
 # es el outermost y ejecuta PRIMERO para cada request.
 # Orden correcto de registro (el último = el primero en ejecutar):
 #   1. GZipMiddleware
 #   2. TimeoutMiddleware
-#   3. CORSMiddleware  ← último registrado = primero en ejecutar
+#   3. SecurityHeadersMiddleware
+#   4. CORSMiddleware  ← último registrado = primero en ejecutar
 _origins = [settings.FRONTEND_URL]
 if settings.ENVIRONMENT == "development":
     _origins.extend([
@@ -537,8 +580,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(TimeoutMiddleware, timeout=30.0)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={
+            "success": False,
+            "error": {
+                "code": "RATE_LIMIT_EXCEEDED",
+                "message": "Demasiadas solicitudes. Por favor, esperá un momento antes de volver a intentar.",
+            }
+        }
+    )
 
 
 @app.exception_handler(RequestValidationError)

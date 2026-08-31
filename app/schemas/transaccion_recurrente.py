@@ -15,7 +15,6 @@ from app.models.usuario import Moneda
 
 
 class TransaccionRecurrenteBase(BaseModel):
-    usuario_id: UUID | None = None
     tipo: TipoTransaccionRecurrente
     monto: Decimal = Field(..., gt=0, max_digits=15, decimal_places=2, description="Monto mayor a 0")
     moneda: Moneda
@@ -47,6 +46,7 @@ class TransaccionRecurrenteUpdate(BaseModel):
 
 class TransaccionRecurrenteRead(TransaccionRecurrenteBase):
     id: UUID
+    usuario_id: UUID
     categoria_id: UUID | None = None
     fecha_creacion: datetime
 

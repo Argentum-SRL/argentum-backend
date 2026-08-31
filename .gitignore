@@ -5,3 +5,4 @@ __pycache__/
 .DS_Store
 media/
 tests/fixtures/*.pdf
+gitleaks-*.json

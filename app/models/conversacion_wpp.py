@@ -25,6 +25,7 @@ class ConversacionWpp(Base):
     usuario_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False
     )
+    wamid: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     mensaje_usuario: Mapped[str] = mapped_column(Text, nullable=False)
     tipo_mensaje: Mapped[TipoMensajeWpp] = mapped_column(
         SAEnum(TipoMensajeWpp, values_callable=lambda obj: [e.value for e in obj], name="tipo_mensaje_wpp_enum"),

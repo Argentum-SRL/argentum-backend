@@ -397,7 +397,10 @@ def procesar_mensaje(
         # Agregar mensaje actual
         messages_openai.append({"role": "user", "content": mensaje})
 
-        logger.info(f"Enviando {len(messages_openai)} mensajes a OpenAI. Último mensaje: {messages_openai[-1]['content'][:100]}")
+        if settings.ENVIRONMENT == "production":
+            logger.info(f"Enviando {len(messages_openai)} mensajes a OpenAI. Longitud último mensaje: {len(messages_openai[-1]['content'])} caracteres")
+        else:
+            logger.info(f"Enviando {len(messages_openai)} mensajes a OpenAI. Último mensaje: {messages_openai[-1]['content'][:100]}")
 
         client = _get_client()
         response = client.chat.completions.create(
@@ -409,7 +412,10 @@ def procesar_mensaje(
         )
 
         content = response.choices[0].message.content
-        logger.info(f"Respuesta OpenAI cruda: '{content[:200] if content else 'VACÍA'}'")
+        if settings.ENVIRONMENT == "production":
+            logger.info(f"Respuesta OpenAI recibida: {'OK' if content else 'VACÍA'} (longitud: {len(content) if content else 0} caracteres)")
+        else:
+            logger.info(f"Respuesta OpenAI cruda: '{content[:200] if content else 'VACÍA'}'")
         logger.info(f"finish_reason: {response.choices[0].finish_reason}")
         if not content:
             logger.error("La respuesta de OpenAI fue vacía")

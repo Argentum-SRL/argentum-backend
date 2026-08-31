@@ -21,6 +21,7 @@ FLUJOS:
 """
 
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
@@ -29,6 +30,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.core.config import settings
+from app.core.limiter import limiter
 
 from app.core.auth import (
     crear_access_token,
@@ -93,6 +95,38 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # Helpers
 # ---------------------------------------------------------------------------
 
+_envios_otp_telefono: dict[str, list[float]] = {}
+MAX_OTP_POR_TELEFONO = 3
+VENTANA_OTP_SEGUNDOS = 10 * 60  # 10 minutos
+
+
+def _verificar_rate_limit_otp_telefono(telefono: str) -> bool:
+    ahora = time.time()
+    limite_tiempo = ahora - VENTANA_OTP_SEGUNDOS
+    tel_key = normalizar_telefono_ar(telefono) or telefono.strip()
+
+    timestamps = _envios_otp_telefono.get(tel_key, [])
+    timestamps = [t for t in timestamps if t > limite_tiempo]
+
+    if len(timestamps) >= MAX_OTP_POR_TELEFONO:
+        _envios_otp_telefono[tel_key] = timestamps
+        return False
+
+    timestamps.append(ahora)
+    _envios_otp_telefono[tel_key] = timestamps
+
+    # Purgar periódicamente si el diccionario crece demasiado
+    if len(_envios_otp_telefono) > 2000:
+        for k in list(_envios_otp_telefono.keys()):
+            filtrados = [t for t in _envios_otp_telefono[k] if t > limite_tiempo]
+            if not filtrados:
+                del _envios_otp_telefono[k]
+            else:
+                _envios_otp_telefono[k] = filtrados
+
+    return True
+
+
 def _device_info(request: Request) -> str | None:
     ua = request.headers.get("user-agent")
     return ua[:200] if ua else None
@@ -132,7 +166,8 @@ def _requiere_onboarding(user: Usuario) -> bool:
 # ---------------------------------------------------------------------------
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-def register(user_in: RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+@limiter.limit("5/hour")
+def register(request: Request, user_in: RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Registra un usuario con email/password.
     No devuelve tokens: primero debe verificar email y luego teléfono.
@@ -191,7 +226,8 @@ def register(user_in: RegisterRequest, background_tasks: BackgroundTasks, db: Se
 
 
 @router.post("/login", response_model=AuthResponse)
-def login(user_in: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def login(request: Request, user_in: LoginRequest, response: Response, db: Session = Depends(get_db)):
     """Login con email y password. Requiere email verificado y contraseña configurada."""
     email_clean = user_in.email.strip().lower()
     user = db.execute(select(Usuario).where(Usuario.email.ilike(email_clean))).scalar_one_or_none()
@@ -565,8 +601,15 @@ def login_google(
 # ---------------------------------------------------------------------------
 
 @router.post("/telefono/enviar-codigo")
-def enviar_codigo_telefono(body: EnviarCodigoRequest):
+@limiter.limit("5/minute")
+def enviar_codigo_telefono(request: Request, body: EnviarCodigoRequest):
     """Envía un código de 6 dígitos al número dado. Expira en 10 minutos."""
+    if not _verificar_rate_limit_otp_telefono(body.telefono):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Superaste el límite de envíos de código para este número (máximo 3 cada 10 minutos). Por favor, esperá unos minutos.",
+        )
+
     codigo = generar_codigo()
     guardar_codigo(body.telefono, codigo)
 
@@ -778,6 +821,7 @@ def completar_perfil(
 # ---------------------------------------------------------------------------
 
 @router.post("/refresh", response_model=TokenResponse)
+@limiter.limit("20/minute")
 def refresh(
     request: Request,
     response: Response,

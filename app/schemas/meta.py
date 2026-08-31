@@ -13,7 +13,6 @@ from app.schemas.movimiento_meta import MovimientoMetaRead
 
 
 class MetaBase(BaseModel):
-    usuario_id: UUID | None = None
     nombre: str = Field(..., min_length=1, max_length=100)
     monto_objetivo: Decimal = Field(..., gt=Decimal("0"), le=Decimal("9999999999999.99"))
     moneda: Moneda
@@ -95,6 +94,7 @@ class MetaUpdate(BaseModel):
 
 class MetaRead(MetaBase):
     id: UUID
+    usuario_id: UUID
     fecha_creacion: datetime
     movimientos: List[MovimientoMetaRead] = []
 
