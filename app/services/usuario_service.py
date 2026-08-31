@@ -34,6 +34,7 @@ from app.models.tarjeta_credito import TarjetaCredito
 from app.models.importacion import ImportacionResumen, CorreccionImportacion
 from app.core.security import get_password_hash, verify_password
 from app.services import email_service, whatsapp_service
+from app.services.storage_service import storage_service
 from app.utils.telefono import normalizar_telefono_ar
 from app.schemas.usuario import (
     EditarDatosPersonales,
@@ -295,25 +296,51 @@ def actualizar_foto(
     if size > 5 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="La imagen no debe superar los 5MB")
     
-    if not os.path.exists(FOTOS_DIR):
-        os.makedirs(FOTOS_DIR, exist_ok=True)
-    
-    if usuario.foto_url and not usuario.foto_url.startswith("http"):
-        clean_url = usuario.foto_url.split("?")[0]
-        old_path = os.path.join(os.getcwd(), clean_url.lstrip("/"))
-        if os.path.exists(old_path):
-            try:
-                os.remove(old_path)
-            except Exception:
-                logger.warning("Error al eliminar archivo de foto anterior", exc_info=True)
+    content_type_map = {
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "png": "image/png",
+        "webp": "image/webp"
+    }
+    content_type = content_type_map.get(extension, "image/jpeg")
 
+    file_bytes = archivo.file.read()
     filename = f"{usuario.id}.{extension}"
-    filepath = os.path.join(FOTOS_DIR, filename)
-    
-    with open(filepath, "wb") as buffer:
-        shutil.copyfileobj(archivo.file, buffer)
-    
-    usuario.foto_url = f"/{FOTOS_DIR}/{filename}?v={int(time.time())}"
+    nueva_url = None
+
+    # 1. Intentar subir a Supabase Storage (persistente en la nube / CDN)
+    if storage_service.esta_disponible():
+        try:
+            url_supabase = storage_service.subir_archivo(file_bytes, filename, content_type=content_type)
+            nueva_url = f"{url_supabase}?v={int(time.time())}"
+        except Exception as e:
+            logger.warning(f"Error al subir a Supabase Storage, aplicando fallback local: {e}")
+
+    # 2. Fallback a almacenamiento local en disco
+    if not nueva_url:
+        if not os.path.exists(FOTOS_DIR):
+            os.makedirs(FOTOS_DIR, exist_ok=True)
+        filepath = os.path.join(FOTOS_DIR, filename)
+        with open(filepath, "wb") as buffer:
+            buffer.write(file_bytes)
+        nueva_url = f"/{FOTOS_DIR}/{filename}?v={int(time.time())}"
+
+    # 3. Limpiar foto anterior
+    if usuario.foto_url:
+        if "supabase.co" in usuario.foto_url:
+            old_name = usuario.foto_url.split("/")[-1].split("?")[0]
+            if old_name != filename:
+                storage_service.eliminar_archivo(old_name)
+        elif not usuario.foto_url.startswith("http"):
+            clean_url = usuario.foto_url.split("?")[0]
+            old_path = os.path.join(os.getcwd(), clean_url.lstrip("/"))
+            if os.path.exists(old_path):
+                try:
+                    os.remove(old_path)
+                except Exception:
+                    logger.warning("Error al eliminar archivo de foto anterior", exc_info=True)
+
+    usuario.foto_url = nueva_url
     db.commit()
     db.refresh(usuario)
     
@@ -326,14 +353,17 @@ def eliminar_foto(db: Session, usuario: Usuario) -> dict:
             detail="Tu cuenta utiliza Google OAuth. La foto de perfil se sincroniza desde tu cuenta de Google."
         )
 
-    if usuario.foto_url and not usuario.foto_url.startswith("http"):
-        clean_url = usuario.foto_url.split("?")[0]
-        path = os.path.join(os.getcwd(), clean_url.lstrip("/"))
-        if os.path.exists(path):
-            try:
-                os.remove(path)
-            except Exception:
-                logger.warning("Error al eliminar archivo de foto", exc_info=True)
+    if usuario.foto_url:
+        if "supabase.co" in usuario.foto_url:
+            storage_service.eliminar_archivo(usuario.foto_url)
+        elif not usuario.foto_url.startswith("http"):
+            clean_url = usuario.foto_url.split("?")[0]
+            path = os.path.join(os.getcwd(), clean_url.lstrip("/"))
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception:
+                    logger.warning("Error al eliminar archivo de foto", exc_info=True)
     
     usuario.foto_url = None
     db.commit()
@@ -342,14 +372,17 @@ def eliminar_foto(db: Session, usuario: Usuario) -> dict:
 def eliminar_usuario(db: Session, usuario: Usuario) -> dict:
     usuario_id = usuario.id
     
-    if usuario.foto_url and not usuario.foto_url.startswith("http"):
-        clean_url = usuario.foto_url.split("?")[0]
-        path = os.path.join(os.getcwd(), clean_url.lstrip("/"))
-        if os.path.exists(path):
-            try:
-                os.remove(path)
-            except Exception:
-                logger.warning("Error al eliminar archivo de foto del usuario", exc_info=True)
+    if usuario.foto_url:
+        if "supabase.co" in usuario.foto_url:
+            storage_service.eliminar_archivo(usuario.foto_url)
+        elif not usuario.foto_url.startswith("http"):
+            clean_url = usuario.foto_url.split("?")[0]
+            path = os.path.join(os.getcwd(), clean_url.lstrip("/"))
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception:
+                    logger.warning("Error al eliminar archivo de foto del usuario", exc_info=True)
 
     try:
         # Reasignar admin_id de importaciones de otros usuarios donde este usuario sea admin para evitar violación de FK
