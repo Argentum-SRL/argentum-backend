@@ -78,6 +78,7 @@ class TransaccionUpdate(BaseModel):
     tarjeta_id: UUID | None = None
     primer_vencimiento_manual: date | None = None
     es_recurrente: bool | None = None
+    estado_verificacion: EstadoVerificacionTransaccion | None = None
 
     @field_validator("descripcion")
     @classmethod
