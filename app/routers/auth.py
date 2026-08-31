@@ -349,14 +349,12 @@ def validar_token(token: str, db: Session = Depends(get_db)):
     return {"success": True, "data": {"nombre": nombre}}
 
 
-@router.post("/reset-password/confirmar", response_model=AuthResponse)
+@router.post("/reset-password/confirmar", response_model=dict)
 def confirmar_token(
     body: ConfirmarResetPasswordRequest,
-    request: Request,
-    response: Response,
     db: Session = Depends(get_db)
 ):
-    """Verifica el token, actualiza la contraseña, revoca las sesiones y emite tokens de acceso."""
+    """Verifica el token, actualiza la contraseña y revoca las sesiones existentes."""
     usuario = confirmar_reset_password(db, body.token, body.nueva_password)
 
     try:
@@ -375,13 +373,10 @@ def confirmar_token(
     except Exception:
         pass
 
-    access, refresh = _tokens(usuario, request, db)
-    setear_cookies_auth(response, access, refresh, settings)
-    return AuthResponse(
-        access_token=access,
-        usuario=UsuarioRead.model_validate(usuario),
-        requiere_onboarding=_requiere_onboarding(usuario),
-    )
+    return {
+        "success": True,
+        "message": "Tu contraseña fue actualizada. Iniciá sesión con tu nueva contraseña.",
+    }
 
 
 # ---------------------------------------------------------------------------
