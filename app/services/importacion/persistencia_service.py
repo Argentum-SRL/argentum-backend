@@ -320,6 +320,7 @@ def importar_transacciones_resumen(
                         metodo_pago=MetodoPago.CREDITO if t_id else MetodoPago.DEBITO,
                         billetera_id=billetera_actual_id,
                         tarjeta_id=t_id,
+                        categoria_id=cruda.categoria_id,
                         es_cuota_hija=False,
                         es_padre_cuotas=False,
                         origen=OrigenTransaccion.IA_PDF,
@@ -345,6 +346,7 @@ def importar_transacciones_resumen(
                         moneda=cruda.moneda,
                         fecha=cruda.fecha,
                         descripcion=cruda.descripcion,
+                        categoria_id=cruda.categoria_id,
                         metodo_pago=MetodoPago.CREDITO,
                         billetera_id=billetera_actual_id,
                         tarjeta_id=t_id,
@@ -398,6 +400,7 @@ def importar_transacciones_resumen(
                             cuota.pagada = True
                             tx_hija = cuota.transaccion
                             if tx_hija:
+                                tx_hija.categoria_id = cruda.categoria_id
                                 tx_hija.estado_verificacion = EstadoVerificacionTransaccion.CONFIRMADA
                                 tx_hija.import_hash = hash_val
                                 tx_hija.importacion_id = imp_id
@@ -430,6 +433,8 @@ def importar_transacciones_resumen(
                                 tx_hija = cuota.transaccion
                                 if tx_hija:
                                     tx_hija.monto = monto_round
+                                    if cruda.categoria_id:
+                                        tx_hija.categoria_id = cruda.categoria_id
                                     tx_hija.origen = OrigenTransaccion.IA_PDF
                                     tx_hija.estado_verificacion = EstadoVerificacionTransaccion.CONFIRMADA
                                     tx_hija.import_hash = hash_val
@@ -449,6 +454,7 @@ def importar_transacciones_resumen(
                                 moneda=cruda.moneda,
                                 fecha=venc_cuota,
                                 descripcion=f"{grupo_existente.descripcion} (Cuota {cruda.cuota_actual}/{total_cuotas})",
+                                categoria_id=cruda.categoria_id,
                                 metodo_pago=MetodoPago.CREDITO,
                                 billetera_id=billetera_actual_id,
                                 tarjeta_id=t_id,
@@ -489,6 +495,7 @@ def importar_transacciones_resumen(
                             moneda=cruda.moneda,
                             fecha=cruda.fecha,
                             descripcion=cruda.descripcion,
+                            categoria_id=cruda.categoria_id,
                             metodo_pago=MetodoPago.CREDITO,
                             billetera_id=billetera_actual_id,
                             tarjeta_id=t_id,
@@ -541,6 +548,7 @@ def importar_transacciones_resumen(
                                 cuota.pagada = True
                                 tx_hija = cuota.transaccion
                                 if tx_hija:
+                                    tx_hija.categoria_id = cruda.categoria_id
                                     tx_hija.estado_verificacion = EstadoVerificacionTransaccion.CONFIRMADA
                                     tx_hija.import_hash = hash_val
                                     tx_hija.importacion_id = imp_id

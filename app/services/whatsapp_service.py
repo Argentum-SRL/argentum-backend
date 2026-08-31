@@ -40,7 +40,8 @@ def generar_codigo() -> str:
 
 def guardar_codigo(telefono: str, codigo: str) -> None:
     _limpiar_expirados()
-    _codigo_cache[telefono] = EntradaCodigo(
+    key = formatear_numero_whatsapp(telefono) or telefono.strip()
+    _codigo_cache[key] = EntradaCodigo(
         codigo=codigo,
         expiracion=time.time() + CODIGO_EXPIRACION_SEGUNDOS,
     )
@@ -53,23 +54,30 @@ def verificar_codigo(telefono: str, codigo: str) -> tuple[bool, str | None]:
     """
     _limpiar_expirados()
 
-    entrada = _codigo_cache.get(telefono)
+    key = formatear_numero_whatsapp(telefono) or telefono.strip()
+    entrada = _codigo_cache.get(key)
+    if not entrada:
+        entrada = _codigo_cache.get(telefono.strip())
+
     if not entrada:
         return False, "El código expiró. Pedí uno nuevo."
 
     if time.time() > entrada.expiracion:
-        del _codigo_cache[telefono]
+        _codigo_cache.pop(key, None)
+        _codigo_cache.pop(telefono.strip(), None)
         return False, "El código expiró. Pedí uno nuevo."
 
     if entrada.codigo != codigo:
         entrada.intentos_fallidos += 1
         restantes = MAX_INTENTOS - entrada.intentos_fallidos
         if restantes <= 0:
-            del _codigo_cache[telefono]
+            _codigo_cache.pop(key, None)
+            _codigo_cache.pop(telefono.strip(), None)
             return False, "Demasiados intentos fallidos. Pedí un código nuevo."
         return False, f"Código incorrecto. Te quedan {restantes} intento{'s' if restantes != 1 else ''}."
 
-    del _codigo_cache[telefono]
+    _codigo_cache.pop(key, None)
+    _codigo_cache.pop(telefono.strip(), None)
     return True, None
 
 

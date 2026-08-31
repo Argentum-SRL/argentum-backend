@@ -17,7 +17,7 @@ from uuid import UUID
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse
-from openai import OpenAI
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -36,6 +36,7 @@ from app.models.transaccion import (
 )
 from app.models.usuario import EstadoUsuario, Moneda, Usuario
 from app.services import ai_service
+from app.services.openai_client import get_openai_client
 from app.services.whatsapp_service import enviar_whatsapp
 from app.utils.telefono import normalizar_telefono_ar
 import structlog
@@ -145,15 +146,52 @@ def _merge_entidades(estado_previo: dict | None, entidades_nuevas: dict | None) 
 def _resolver_billetera(nombre: str | None, usuario_id: UUID, db: Session) -> UUID | None:
     if not nombre:
         return None
-    billetera = db.execute(
+
+    billeteras = db.execute(
         select(Billetera)
         .where(
             Billetera.usuario_id == usuario_id,
             Billetera.estado == EstadoBilletera.ACTIVA,
-            Billetera.nombre.ilike(f"%{nombre}%")
         )
-    ).scalars().first()
-    return billetera.id if billetera else None
+    ).scalars().all()
+
+    if not billeteras:
+        return None
+
+    nombre_norm = _normalizar_texto(nombre)
+
+    # 1. Match exacto o normalizado
+    for b in billeteras:
+        if _normalizar_texto(b.nombre) == nombre_norm:
+            return b.id
+
+    # 2. Match de alias comunes argentinos
+    alias_map = {
+        "mp": "mercado pago",
+        "merca": "mercado pago",
+        "mercadopago": "mercado pago",
+        "bru": "brubank",
+        "gali": "galicia",
+        "santander": "santander",
+        "rio": "santander",
+        "bbva": "bbva",
+        "frances": "bbva",
+        "lemon": "lemon",
+        "uala": "ualá",
+        "efectivo": "efectivo",
+        "cash": "efectivo",
+    }
+    alias_target = alias_map.get(nombre_norm)
+
+    # 3. Substring match
+    for b in billeteras:
+        b_norm = _normalizar_texto(b.nombre)
+        if nombre_norm in b_norm or b_norm in nombre_norm:
+            return b.id
+        if alias_target and (alias_target in b_norm or b_norm in alias_target):
+            return b.id
+
+    return None
 
 
 def _resolver_categoria_y_subcategoria(
@@ -166,7 +204,8 @@ def _resolver_categoria_y_subcategoria(
     Parsea y valida el campo categoría/subcategoría contra las tablas reales de la base de datos.
     1. Filtra categorías por tipo (egreso vs ingreso) y visibilidad (globales o del usuario).
     2. Realiza matching exacto por nombre, normalizado (sin tildes/mayúsculas) o substring.
-    3. Si no hay coincidencia o si no viene categoría, cae al default real de 'Otros' (con subcategoría 'Otros').
+    3. Si no hay coincidencia directa de categoría, busca en subcategorías activas.
+    4. Si no hay coincidencia o si no viene categoría, cae al default real de 'Otros' (con subcategoría 'Otros').
     Retorna siempre (categoria_id, subcategoria_id) válidos de la base de datos.
     """
     tipo_enum = TipoCategoria.INGRESO if tipo == "ingreso" else TipoCategoria.EGRESO
@@ -241,6 +280,23 @@ def _resolver_categoria_y_subcategoria(
                 break
 
     if not categoria_match:
+        # Intentar buscar si nombre_cat coincide con alguna subcategoría directamente
+        subcat_directa = db.execute(
+            select(Subcategoria)
+            .join(Categoria, Subcategoria.categoria_id == Categoria.id)
+            .where(
+                Categoria.estado == EstadoCategoria.ACTIVA,
+                Categoria.tipo == tipo_enum,
+                Subcategoria.estado == EstadoSubcategoria.ACTIVA,
+                (Subcategoria.es_global == True) | (Subcategoria.creador_id == usuario_id)
+            )
+        ).scalars().all()
+
+        for s in subcat_directa:
+            s_norm = _normalizar_texto(s.nombre)
+            if s_norm == norm_cat or norm_cat in s_norm or s_norm in norm_cat:
+                return s.categoria_id, s.id
+
         return _obtener_fallback_otros()
 
     # 4. Match de subcategoría
@@ -407,15 +463,21 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
             ).scalars().first()
 
             if tx:
-                # Confirmar transacción existente
+                # Confirmar transacción existente y actualizar saldo de billetera
                 tx.estado_verificacion = EstadoVerificacionTransaccion.CONFIRMADA
+                billetera = db.get(Billetera, tx.billetera_id)
+                if billetera:
+                    if tx.tipo == TipoTransaccion.INGRESO:
+                        billetera.saldo_actual += tx.monto
+                    else:
+                        billetera.saldo_actual -= tx.monto
                 db.flush()
                 return str(tx.id)
             else:
                 # Buscar conversación previa con datos de transacción pendiente de confirmar
                 from datetime import datetime, timezone, timedelta
 
-                # Solo buscar conversaciones de los últimos 10 minutos
+                # Solo buscar conversaciones de los últimos 10 minutos sin acción ya ejecutada
                 limite_tiempo = datetime.now(timezone.utc) - timedelta(minutes=10)
 
                 conv_previa = db.execute(
@@ -424,6 +486,7 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                         ConversacionWpp.usuario_id == usuario.id,
                         ConversacionWpp.intent_detectado == "registrar_transaccion",
                         ConversacionWpp.slot_filling_activo == False,
+                        ConversacionWpp.accion_ejecutada.is_(None),
                         ConversacionWpp.confianza >= Decimal("0.85"),
                         ConversacionWpp.fecha >= limite_tiempo,
                     )
@@ -436,50 +499,98 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                     if monto is None:
                         return None
 
+                    try:
+                        monto_decimal = Decimal(str(monto))
+                    except Exception:
+                        return None
+
+                    # Validación de monto: estrictamente positivo y dentro de límites reales
+                    if monto_decimal <= Decimal("0") or monto_decimal > Decimal("1000000000000"):
+                        return None
+
                     tipo_val = entidades.get("tipo") or "egreso"
+                    moneda_solicitada = Moneda.USD if entidades.get("moneda") == "USD" else Moneda.ARS
+
                     # Para ingresos usar billetera_destino, para egresos billetera_origen
                     nombre_billetera = (
                         entidades.get("billetera_destino")
                         if tipo_val == "ingreso"
                         else entidades.get("billetera_origen")
                     ) or entidades.get("billetera_origen") or entidades.get("billetera_destino")
+
                     billetera_id = _resolver_billetera(nombre_billetera, usuario.id, db)
-                    if not billetera_id:
+
+                    # Validar coincidencia de moneda con la billetera
+                    if billetera_id:
+                        billetera_obj = db.get(Billetera, billetera_id)
+                        if billetera_obj and billetera_obj.moneda != moneda_solicitada:
+                            # Buscar una billetera activa de la misma moneda solicitada
+                            billetera_coincidente = db.execute(
+                                select(Billetera.id).where(
+                                    Billetera.usuario_id == usuario.id,
+                                    Billetera.estado == EstadoBilletera.ACTIVA,
+                                    Billetera.moneda == moneda_solicitada
+                                ).order_by(Billetera.es_principal.desc())
+                            ).scalars().first()
+                            if billetera_coincidente:
+                                billetera_id = billetera_coincidente
+                    else:
+                        # Buscar billetera principal o activa para la moneda solicitada
                         billetera_id = db.execute(
                             select(Billetera.id).where(
                                 Billetera.usuario_id == usuario.id,
                                 Billetera.estado == EstadoBilletera.ACTIVA,
+                                Billetera.moneda == moneda_solicitada,
                                 Billetera.es_principal == True
                             )
                         ).scalar_one_or_none()
-                    if not billetera_id:
-                        billetera_id = db.execute(
-                            select(Billetera.id).where(
-                                Billetera.usuario_id == usuario.id,
-                                Billetera.estado == EstadoBilletera.ACTIVA
-                            )
-                        ).scalars().first()
+                        if not billetera_id:
+                            billetera_id = db.execute(
+                                select(Billetera.id).where(
+                                    Billetera.usuario_id == usuario.id,
+                                    Billetera.estado == EstadoBilletera.ACTIVA,
+                                    Billetera.moneda == moneda_solicitada
+                                )
+                            ).scalars().first()
+                        if not billetera_id:
+                            billetera_id = db.execute(
+                                select(Billetera.id).where(
+                                    Billetera.usuario_id == usuario.id,
+                                    Billetera.estado == EstadoBilletera.ACTIVA
+                                ).order_by(Billetera.es_principal.desc())
+                            ).scalars().first()
 
                     if not billetera_id:
                         return None
 
+                    billetera = db.get(Billetera, billetera_id)
+                    if not billetera:
+                        return None
+
+                    # La moneda de la transacción siempre coincide con la billetera para evitar descalce
+                    moneda_val = billetera.moneda
+
                     categoria_id, subcategoria_id = _resolver_categoria_y_subcategoria(
                         entidades.get("categoria"), usuario.id, db, tipo=tipo_val
                     )
-                    moneda_val = Moneda.USD if entidades.get("moneda") == "USD" else Moneda.ARS
 
                     fecha_val = entidades.get("fecha")
                     fecha_obj = hoy_argentina()
                     if fecha_val:
                         try:
-                            fecha_obj = date.fromisoformat(str(fecha_val))
+                            fecha_candidata = date.fromisoformat(str(fecha_val))
+                            # No permitir fechas futuras
+                            if fecha_candidata <= hoy_argentina():
+                                fecha_obj = fecha_candidata
+                            else:
+                                fecha_obj = hoy_argentina()
                         except Exception:
                             fecha_obj = hoy_argentina()
 
                     transaccion = Transaccion(
                         usuario_id=usuario.id,
                         tipo=TipoTransaccion.INGRESO if tipo_val == "ingreso" else TipoTransaccion.EGRESO,
-                        monto=Decimal(str(monto)),
+                        monto=monto_decimal,
                         moneda=moneda_val,
                         fecha=fecha_obj,
                         descripcion=entidades.get("descripcion") or _nombre_corto_categoria(entidades.get("categoria")),
@@ -493,6 +604,15 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                         es_padre_cuotas=False
                     )
                     db.add(transaccion)
+
+                    # Actualizar saldo de la billetera
+                    if transaccion.tipo == TipoTransaccion.INGRESO:
+                        billetera.saldo_actual += monto_decimal
+                    else:
+                        billetera.saldo_actual -= monto_decimal
+
+                    # Marcar la conversación previa como ejecutada
+                    conv_previa.accion_ejecutada = str(transaccion.id)
                     db.flush()
                     return str(transaccion.id)
 
@@ -512,6 +632,19 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
             if tx:
                 db.delete(tx)
                 db.flush()
+
+            # Desactivar cualquier slot filling activo del usuario
+            convs_activas = db.execute(
+                select(ConversacionWpp)
+                .where(
+                    ConversacionWpp.usuario_id == usuario.id,
+                    ConversacionWpp.slot_filling_activo == True
+                )
+            ).scalars().all()
+            for c in convs_activas:
+                c.slot_filling_activo = False
+            db.flush()
+
             return None
 
         return None
@@ -590,7 +723,7 @@ def _transcribir_audio(media_id: str, media_content_type: str = "audio/ogg") -> 
             tmp_path = tmp.name
 
         try:
-            client_oai = OpenAI(api_key=settings.OPENAI_API_KEY)
+            client_oai = get_openai_client()
             with open(tmp_path, "rb") as audio_file:
                 transcripcion = client_oai.audio.transcriptions.create(
                     model="whisper-1",
@@ -636,7 +769,7 @@ def _extraer_transaccion_de_imagen(
 
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
 
-        client_oai = OpenAI(api_key=settings.OPENAI_API_KEY)
+        client_oai = get_openai_client()
 
         vision_response = client_oai.chat.completions.create(
             model="gpt-4o",
@@ -1010,6 +1143,52 @@ async def whatsapp_webhook(
             except Exception:
                 logger.exception("Error al calcular saldo para WhatsApp")
 
+        elif intent_detectado == "consultar_balance":
+            try:
+                from app.services.dashboard_service import get_dashboard_resumen
+                resumen = get_dashboard_resumen(db, usuario)
+                b_ars = resumen["balance"]["ars"]
+                ing_ars = b_ars.get("ingresos", 0.0)
+                egr_ars = b_ars.get("egresos", 0.0)
+                bal_ars = b_ars.get("balance", 0.0)
+
+                signo_ars = "+" if bal_ars >= 0 else ""
+                msg = f"En este ciclo llevás ingresados {_fmt(ing_ars)} y gastados {_fmt(egr_ars)} en pesos (balance: {signo_ars}{_fmt(bal_ars)})."
+
+                b_usd = resumen["balance"]["usd"]
+                ing_usd = b_usd.get("ingresos", 0.0)
+                egr_usd = b_usd.get("egresos", 0.0)
+                bal_usd = b_usd.get("balance", 0.0)
+                if ing_usd > 0 or egr_usd > 0:
+                    signo_usd = "+" if bal_usd >= 0 else ""
+                    msg += f" En dólares: ingresos US$ {ing_usd:,.2f}, gastos US$ {egr_usd:,.2f} (balance: {signo_usd}US$ {bal_usd:,.2f})."
+
+                resultado_ia["respuesta_usuario"] = msg
+            except Exception:
+                logger.exception("Error al calcular balance para WhatsApp")
+
+        elif intent_detectado == "consultar_cotizacion":
+            try:
+                from app.services.dolar_service import get_cotizaciones_dolar
+                cots_data = get_cotizaciones_dolar()
+                cots = cots_data.get("cotizaciones", {})
+                blue = cots.get("blue", {})
+                oficial = cots.get("oficial", {})
+                mep = cots.get("mep", {})
+
+                msg_parts = []
+                if blue and blue.get("venta"):
+                    msg_parts.append(f"Dólar Blue: ${_fmt(blue['venta'])}")
+                if mep and mep.get("venta"):
+                    msg_parts.append(f"MEP: ${_fmt(mep['venta'])}")
+                if oficial and oficial.get("venta"):
+                    msg_parts.append(f"Oficial: ${_fmt(oficial['venta'])}")
+
+                if msg_parts:
+                    resultado_ia["respuesta_usuario"] = "Cotizaciones del dólar: " + " | ".join(msg_parts)
+            except Exception:
+                logger.exception("Error al consultar cotizaciones para WhatsApp")
+
         # Sobreescribir propuesta de transacción con mensaje limpio generado por backend
         if (
             intent_detectado == "registrar_transaccion"
@@ -1147,6 +1326,13 @@ async def whatsapp_webhook(
             resultado_ia["respuesta_usuario"] = "Listo, cancelado."
 
         slot_activo = resultado_ia.get("slot_filling", False)
+        confianza_val = resultado_ia.get("confianza", 0.0)
+        try:
+            confianza_float = max(0.0, min(1.0, float(confianza_val)))
+            confianza_dec = Decimal(f"{confianza_float:.3f}")
+        except (ValueError, TypeError):
+            confianza_dec = Decimal("0.000")
+
         nueva_conv = ConversacionWpp(
             usuario_id=usuario.id,
             mensaje_usuario=mensaje_texto,
@@ -1156,7 +1342,7 @@ async def whatsapp_webhook(
             intent_detectado=resultado_ia.get("intent"),
             entidades=resultado_ia.get("entidades"),
             accion_ejecutada=str(transaccion_id) if transaccion_id else None,
-            confianza=Decimal(str(resultado_ia.get("confianza", 0))),
+            confianza=confianza_dec,
             slot_filling_activo=slot_activo,
             slot_filling_estado=resultado_ia.get("entidades") if slot_activo else None,
         )
@@ -1191,14 +1377,22 @@ async def whatsapp_webhook(
         return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
 
+class TestIAMessageRequest(BaseModel):
+    mensaje: str
+
+
 @router.post("/test")
 def test_ia(
-    mensaje: str,
+    body: TestIAMessageRequest | None = None,
+    mensaje: str | None = None,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_admin_user),
 ) -> dict:
+    texto = (body.mensaje if body else None) or mensaje
+    if not texto:
+        raise HTTPException(status_code=400, detail="Debe ingresar un mensaje para probar la IA.")
     return ai_service.procesar_mensaje(
-        mensaje=mensaje,
+        mensaje=texto,
         usuario=current_user,
         db=db,
         historial=None,
