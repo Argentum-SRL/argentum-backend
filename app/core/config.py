@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM: str = "Argentum <email@de.la.app>"
 
+    # Resend API
+    RESEND_API_KEY: str = ""
+
     # Environment
     ENVIRONMENT: str = "development"
     DEBUG: bool = False

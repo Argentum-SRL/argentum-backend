@@ -1,3 +1,4 @@
+import httpx
 import smtplib
 import logging
 from email.mime.multipart import MIMEMultipart
@@ -19,35 +20,48 @@ def enviar_email_notificacion(
     cuerpo_texto: str,
 ) -> bool:
     """
-    Envía un email de notificación. Retorna True si exitoso, False si falla.
+    Envía un email de notificación vía Resend API. Retorna True si exitoso, False si falla.
     SIEMPRE usa timeout=10 para evitar bloqueos del worker.
     """
-    try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = asunto
-        msg["From"] = f"Argentum <{settings.SMTP_USER}>"
-        msg["To"] = destinatario_email
-
-        msg.attach(MIMEText(cuerpo_texto, "plain", "utf-8"))
-        msg.attach(MIMEText(cuerpo_html, "html", "utf-8"))
-
-        # timeout=10 es OBLIGATORIO — sin esto el worker puede quedar bloqueado indefinidamente
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            server.sendmail(settings.SMTP_USER, destinatario_email, msg.as_string())
-
-        logger.info("Email de notificación enviado a %s, asunto: %s", destinatario_email, asunto)
+    if not settings.RESEND_API_KEY:
+        logger.warning("⚠️ RESEND_API_KEY no configurada — email de notificación para %s: %s", destinatario_email, cuerpo_texto)
+        logger.info("EMAIL NOTIFICACIÓN (modo desarrollo) para=%s asunto=%s cuerpo=%s", destinatario_email, asunto, cuerpo_texto)
         return True
-    except smtplib.SMTPException as e:
-        logger.error("Error SMTP enviando a %s: %s", destinatario_email, e)
-        return False
-    except TimeoutError:
-        logger.error("Timeout enviando email a %s", destinatario_email)
+
+    payload = {
+        "from": "Argentum <no-responder@miargentum.com>",
+        "to": [destinatario_email],
+        "subject": asunto,
+        "html": cuerpo_html,
+        "text": cuerpo_texto,
+    }
+
+    try:
+        response = httpx.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {settings.RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=10.0,
+        )
+        if response.status_code >= 400:
+            logger.error(
+                "Error en API de Resend al enviar email de notificación a %s (status %s): %s",
+                destinatario_email,
+                response.status_code,
+                response.text,
+            )
+            return False
+
+        logger.info("Email de notificación enviado exitosamente a %s vía Resend", destinatario_email)
+        return True
+    except httpx.TimeoutException:
+        logger.error("Timeout enviando email de notificación a %s vía Resend", destinatario_email)
         return False
     except Exception as e:
-        logger.error("Error inesperado enviando email a %s: %s", destinatario_email, e)
+        logger.error("Error inesperado enviando email de notificación a %s vía Resend: %s", destinatario_email, e)
         return False
 
 
