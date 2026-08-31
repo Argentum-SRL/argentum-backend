@@ -37,6 +37,12 @@ class PaginatedUsuariosResponse(BaseModel):
 class CambiarEstadoRequest(BaseModel):
     is_active: bool = Field(description="Nuevo estado activo o suspendido de la cuenta")
 
+class CambiarRolAdminRequest(BaseModel):
+    is_admin: bool = Field(description="Indica si el usuario tendrá rol de administrador")
+
+class EliminarCuentaAdminRequest(BaseModel):
+    email_confirmacion: str = Field(description="Email del usuario para confirmar la eliminación irreversible")
+
 class ResetearOnboardingRequest(BaseModel):
     confirmar: bool = Field(description="Confirmación requerida para reiniciar la configuración inicial")
 

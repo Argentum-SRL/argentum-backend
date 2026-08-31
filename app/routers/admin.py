@@ -12,6 +12,8 @@ from app.schemas.admin import (
     UsuarioAdminListResponse,
     PaginatedUsuariosResponse,
     CambiarEstadoRequest,
+    CambiarRolAdminRequest,
+    EliminarCuentaAdminRequest,
     ResetearOnboardingRequest,
     AdminStatsResponse,
 )
@@ -195,6 +197,46 @@ def resetear_onboarding_usuario(
         "success": True,
         "data": user_data.model_dump(mode="json"),
         "message": "Onboarding reseteado correctamente."
+    }
+
+
+@router.patch("/usuarios/{usuario_id}/admin", response_model=dict)
+def cambiar_rol_admin(
+    usuario_id: UUID = Path(..., description="Identificador único del usuario"),
+    body: CambiarRolAdminRequest = ...,
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_current_admin_user),
+):
+    """Promueve o revoca permisos de administrador a un usuario."""
+    logger.info("[ADMIN] Admin %s (%s) cambió rol admin de usuario %s a %s", admin.id, admin.email, usuario_id, body.is_admin)
+    user = admin_service.cambiar_rol_admin(db, usuario_id, is_admin=body.is_admin, admin_id=admin.id)
+    
+    user_data = UsuarioAdminResponse.model_validate(user)
+    user_data.paso_onboarding_actual = _map_onboarding_step(user)
+    
+    return {
+        "success": True,
+        "data": user_data.model_dump(mode="json"),
+        "message": f"Usuario {'promovido a administrador' if body.is_admin else 'removido de administradores'} correctamente."
+    }
+
+
+@router.delete("/usuarios/{usuario_id}", response_model=dict)
+def eliminar_usuario_admin(
+    usuario_id: UUID = Path(..., description="Identificador único del usuario"),
+    body: EliminarCuentaAdminRequest = ...,
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_current_admin_user),
+):
+    """Elimina permanentemente una cuenta de usuario y todos sus datos."""
+    logger.info("[ADMIN] Admin %s (%s) solicitó eliminación de usuario %s", admin.id, admin.email, usuario_id)
+    res = admin_service.eliminar_usuario_admin(
+        db, usuario_id, email_confirmacion=body.email_confirmacion, admin_id=admin.id
+    )
+    return {
+        "success": True,
+        "message": "Usuario y todos sus datos fueron eliminados correctamente.",
+        "data": res
     }
 
 
