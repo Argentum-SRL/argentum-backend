@@ -638,8 +638,9 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                     if fecha_val:
                         try:
                             fecha_candidata = date.fromisoformat(str(fecha_val))
-                            # No permitir fechas futuras
-                            if fecha_candidata <= hoy_argentina():
+                            # No permitir fechas futuras ni con más de 60 días de antigüedad
+                            limite_antiguedad = hoy_argentina() - timedelta(days=60)
+                            if limite_antiguedad <= fecha_candidata <= hoy_argentina():
                                 fecha_obj = fecha_candidata
                             else:
                                 fecha_obj = hoy_argentina()
@@ -1020,7 +1021,7 @@ async def whatsapp_webhook(
                 respondido=debe_responder,
             )
             if debe_responder:
-                enviar_whatsapp(from_number, "No encontramos tu cuenta. Registrate en argentum.app")
+                enviar_whatsapp(from_number, "No encontramos tu cuenta. Registrate en miargentum.com")
             return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
         # Rate limit para usuario registrado (evaluado antes de llamar a Whisper, GPT-4o Vision o ai_service)
@@ -1142,8 +1143,6 @@ async def whatsapp_webhook(
                 )
                 return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
-            # Inyectar la billetera seleccionada en el mensaje para que la IA lo procese
-            mensaje_enriquecido = f"{mensaje_texto} (billetera: {nombre_billetera})"
             if estado_previo is None:
                 estado_previo = {}
             estado_previo["billetera_origen"] = nombre_billetera
@@ -1153,16 +1152,17 @@ async def whatsapp_webhook(
                     if d not in ("billetera_origen", "billetera")
                 ]
 
-            t_ia_start = time.perf_counter()
-            resultado_ia = ai_service.procesar_mensaje(
-                mensaje=mensaje_enriquecido,
-                usuario=usuario,
-                db=db,
-                historial=_obtener_historial_reciente(usuario.id, db),
-                estado_previo=estado_previo,
-            )
-            t_ia_end = time.perf_counter()
-            logger.info("[LATENCIA][IA] Procesamiento con menú de billeteras: %.2fs", t_ia_end - t_ia_start)
+            resultado_ia = {
+                "intent": "registrar_transaccion",
+                "entidades": {
+                    k: v for k, v in estado_previo.items() if k != "datos_faltantes"
+                },
+                "confianza": 1.0,
+                "slot_filling": False,
+                "datos_faltantes": [],
+                "respuesta_usuario": "",
+            }
+            logger.info("[SELECCION_NUMERICA] Billetera '%s' resuelta en memoria sin llamada a IA", nombre_billetera)
         else:
             t_ia_start = time.perf_counter()
             resultado_ia = ai_service.procesar_mensaje(
