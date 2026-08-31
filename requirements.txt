@@ -21,8 +21,9 @@ python-multipart>=0.0.12
 # AI / OpenAI
 openai==2.32.0
 
-# HTTP client (DolarAPI, webhooks)
+# HTTP client (DolarAPI, webhooks, IPC datos.gob.ar)
 httpx==0.28.1
+requests>=2.31.0
 
 # Scheduled tasks
 apscheduler==3.11.2
