@@ -6,6 +6,7 @@ Dos caches independientes:
   - _recuperacion_cache: códigos para recuperar contraseña (15 min, uso único)
 """
 
+import httpx
 import logging
 import random
 import smtplib
@@ -68,41 +69,46 @@ def _obtener_nombre_usuario(email: str) -> str:
 
 
 def _enviar_email(destinatario: str, asunto: str, cuerpo: str, cuerpo_html: str = None) -> bool:
-    if not settings.SMTP_USER or "email de la app" in settings.SMTP_FROM:
-        logger.warning("⚠️ SMTP no configurado — email para %s: %s", destinatario, cuerpo)
+    if not settings.RESEND_API_KEY:
+        logger.warning("⚠️ RESEND_API_KEY no configurada — email para %s: %s", destinatario, cuerpo)
         logger.info("EMAIL (modo desarrollo) para=%s asunto=%s cuerpo=%s", destinatario, asunto, cuerpo)
         return True
 
+    payload = {
+        "from": "Argentum <no-responder@miargentum.com>",
+        "to": [destinatario],
+        "subject": asunto,
+        "text": cuerpo,
+    }
+    if cuerpo_html:
+        payload["html"] = cuerpo_html
+
     try:
-        if cuerpo_html:
-            msg = MIMEMultipart("alternative")
-            msg.attach(MIMEText(cuerpo, "plain", "utf-8"))
-            msg.attach(MIMEText(cuerpo_html, "html", "utf-8"))
-        else:
-            msg = MIMEMultipart()
-            msg.attach(MIMEText(cuerpo, "plain", "utf-8"))
-
-        msg["From"] = settings.SMTP_FROM
-        msg["To"] = destinatario
-        msg["Subject"] = asunto
-
-        server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10)
-        server.starttls()
-        server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-        server.send_message(msg)
-        server.quit()
-
-        logger.info("Email enviado exitosamente a %s", destinatario)
-        return True
-    except smtplib.SMTPAuthenticationError as e:
-        logger.error(
-            "SMTPAuthenticationError enviando email a %s. Gmail suele requerir App Password o 2FA habilitado: %s",
-            destinatario,
-            e,
+        response = httpx.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {settings.RESEND_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=10.0,
         )
+        if response.status_code >= 400:
+            logger.error(
+                "Error en API de Resend al enviar email a %s (status %s): %s",
+                destinatario,
+                response.status_code,
+                response.text,
+            )
+            return False
+
+        logger.info("Email enviado exitosamente a %s vía Resend", destinatario)
+        return True
+    except httpx.TimeoutException:
+        logger.error("Timeout enviando email a %s vía Resend", destinatario)
         return False
     except Exception as e:
-        logger.exception("Error crítico al enviar email a %s", destinatario)
+        logger.exception("Error crítico al enviar email a %s vía Resend: %s", destinatario, e)
         return False
 
 
