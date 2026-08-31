@@ -39,6 +39,7 @@ from app.models.transaccion import (
 )
 from app.models.usuario import EstadoUsuario, Moneda, Usuario
 from app.services import ai_service
+from app.services.evento_service import emitir_evento_actualizacion
 from app.services.openai_client import get_openai_client
 from app.services.whatsapp_service import enviar_whatsapp
 from app.utils.telefono import normalizar_telefono_ar
@@ -530,6 +531,8 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                         billetera.saldo_actual += tx.monto
                     else:
                         billetera.saldo_actual -= tx.monto
+                emitir_evento_actualizacion(db, usuario.id, "transacciones")
+                emitir_evento_actualizacion(db, usuario.id, "billeteras")
                 db.flush()
                 return str(tx.id)
             else:
@@ -673,6 +676,8 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
 
                     # Marcar la conversación previa como ejecutada
                     conv_previa.accion_ejecutada = str(transaccion.id)
+                    emitir_evento_actualizacion(db, usuario.id, "transacciones")
+                    emitir_evento_actualizacion(db, usuario.id, "billeteras")
                     db.flush()
                     return str(transaccion.id)
 
@@ -691,6 +696,7 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
 
             if tx:
                 db.delete(tx)
+                emitir_evento_actualizacion(db, usuario.id, "transacciones")
                 db.flush()
 
             # Desactivar cualquier slot filling activo del usuario
