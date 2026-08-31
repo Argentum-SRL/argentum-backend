@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.auth import get_current_user
 from app.core.database import get_db
@@ -18,6 +18,7 @@ from app.services.onboarding_service import (
     validar_ciclo
 )
 from app.services.dolar_service import get_cotizaciones_dolar
+from app.services.email_service import enviar_email_bienvenida
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
 
@@ -111,6 +112,7 @@ def post_ciclo_financiero(
 @router.post("/moneda", response_model=OnboardingStepResponse)
 def post_moneda(
     body: MonedaRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
@@ -137,6 +139,14 @@ def post_moneda(
     current_user.moneda_secundaria_activa = body.moneda_secundaria_activa
     if body.tipo_dolar:
         current_user.tipo_dolar = body.tipo_dolar
+
+    # Enviar email de bienvenida la primera vez que completa el onboarding
+    if not current_user.onboarding_completo and current_user.email:
+        background_tasks.add_task(
+            enviar_email_bienvenida,
+            current_user.email,
+            current_user.nombre or "Usuario"
+        )
     
     # Marcar onboarding como completo al terminar el paso de moneda
     current_user.onboarding_completo = True

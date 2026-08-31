@@ -227,7 +227,13 @@ def register(request: Request, user_in: RegisterRequest, background_tasks: Backg
 
 @router.post("/login", response_model=AuthResponse)
 @limiter.limit("5/minute")
-def login(request: Request, user_in: LoginRequest, response: Response, db: Session = Depends(get_db)):
+def login(
+    request: Request,
+    user_in: LoginRequest,
+    response: Response,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
     """Login con email y password. Requiere email verificado y contraseña configurada."""
     email_clean = user_in.email.strip().lower()
     user = db.execute(select(Usuario).where(Usuario.email.ilike(email_clean))).scalar_one_or_none()
@@ -245,8 +251,32 @@ def login(request: Request, user_in: LoginRequest, response: Response, db: Sessi
         )
 
     if not verify_password(user_in.password, user.password_hash):
+        user.intentos_fallidos_login = (user.intentos_fallidos_login or 0) + 1
+        user.ultimo_intento_fallido_at = datetime.now(timezone.utc)
+        db.commit()
+
+        if user.intentos_fallidos_login == 3 and user.email:
+            try:
+                from app.utils.fecha import ahora_argentina
+                from app.services.notificacion_email_service import (
+                    enviar_email_notificacion,
+                    generar_email_intentos_login,
+                )
+                fecha_str = ahora_argentina().strftime("%d/%m/%Y a las %H:%M")
+                link_recupero = f"{settings.FRONTEND_URL}/auth/recuperar-password"
+                asunto, html, texto = generar_email_intentos_login(
+                    usuario_nombre=user.nombre or "Usuario",
+                    cantidad_intentos=3,
+                    fecha_hora_argentina=fecha_str,
+                    link_recupero=link_recupero,
+                )
+                background_tasks.add_task(enviar_email_notificacion, user.email, asunto, html, texto)
+            except Exception as e:
+                logger.error("Error al disparar alerta de intentos fallidos de login: %s", e)
+
         raise HTTPException(status_code=401, detail="El email o la contraseña no son correctos. Revisalos e intentá de nuevo.")
 
+    user.intentos_fallidos_login = 0
     user.ultimo_acceso = datetime.now(timezone.utc)
 
     # Asegurar que tenga las billeteras de efectivo default
@@ -384,7 +414,8 @@ def confirmar_token(
 # ---------------------------------------------------------------------------
 
 @router.post("/email/enviar-codigo")
-def enviar_codigo_email(body: EnviarCodigoEmailRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def enviar_codigo_email(request: Request, body: EnviarCodigoEmailRequest, db: Session = Depends(get_db)):
     """Reenvía el código de verificación de email."""
     email_clean = body.email.strip().lower()
     user = db.execute(select(Usuario).where(Usuario.email.ilike(email_clean))).scalar_one_or_none()

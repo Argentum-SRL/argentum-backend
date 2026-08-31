@@ -4,7 +4,7 @@ from datetime import datetime, date, timezone
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, String
+from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, Integer, String
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -124,6 +124,8 @@ class Usuario(Base):
     reset_token_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     reset_token_expira_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     tokens_revocados_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    intentos_fallidos_login: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ultimo_intento_fallido_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     @property
     def is_active(self) -> bool:
