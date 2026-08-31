@@ -14,6 +14,7 @@ from app.core.database import get_db
 from app.core.auth import get_current_user, verificar_access_token
 from app.models.usuario import Usuario
 from app.models.notificacion import Notificacion, NivelNotificacion
+from app.models.evento_actualizacion import EventoActualizacion
 from app.schemas.notificacion import NotificacionRead, NotificacionUpdate
 from app.schemas.configuracion_notificacion import ConfiguracionNotificacionRead, ConfiguracionNotificacionUpdate
 from app.services import notificacion_service
@@ -190,6 +191,7 @@ async def sse_notificaciones(
         yield "data: {\"event\": \"connected\"}\n\n"
 
         ultimo_check = datetime.now(timezone.utc)
+        ultimo_check_eventos = datetime.now(timezone.utc)
         while True:
             await asyncio.sleep(5)
 
@@ -231,7 +233,28 @@ async def sse_notificaciones(
                             "created_at": n.created_at.isoformat(),
                         }
                         yield f"data: {json.dumps(data_json)}\n\n"
-                else:
+
+                # Buscar eventos de actualización de datos creados después de ultimo_check_eventos
+                nuevos_eventos = (
+                    db_session.query(EventoActualizacion)
+                    .filter(
+                        EventoActualizacion.usuario_id == usuario_id,
+                        EventoActualizacion.created_at > ultimo_check_eventos,
+                    )
+                    .order_by(EventoActualizacion.created_at.asc())
+                    .all()
+                )
+
+                if nuevos_eventos:
+                    ultimo_check_eventos = datetime.now(timezone.utc)
+                    for ev in nuevos_eventos:
+                        data_json = {
+                            "event": "data_update",
+                            "entidad": ev.entidad,
+                        }
+                        yield f"data: {json.dumps(data_json)}\n\n"
+
+                if not nuevas and not nuevos_eventos:
                     # Heartbeat
                     yield ": ping\n\n"
             except Exception as e:
