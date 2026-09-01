@@ -145,7 +145,7 @@ class TimeoutMiddleware:
             # El cliente se desconectó — salir limpiamente sin loguear como error
             raise
 
-async def _job_limpiar_tokens():
+def _job_limpiar_tokens():
     """Tarea programada: elimina refresh tokens viejos cada 6 horas."""
     db = SessionLocal()
     lock_adquirido = False
@@ -168,7 +168,7 @@ async def _job_limpiar_tokens():
         db.close()
 
 
-async def _job_procesar_recurrentes():
+def _job_procesar_recurrentes():
     """Tarea programada: genera transacciones recurrentes una vez al día."""
     db = SessionLocal()
     lock_adquirido = False
@@ -191,7 +191,7 @@ async def _job_procesar_recurrentes():
         db.close()
 
 
-async def _job_vencimientos_tarjetas():
+def _job_vencimientos_tarjetas():
     """Tarea programada: genera transacciones de vencimiento de tarjetas una vez al día."""
     db = SessionLocal()
     lock_adquirido = False
@@ -213,7 +213,7 @@ async def _job_vencimientos_tarjetas():
         db.close()
 
 
-async def _job_renovar_presupuestos():
+def _job_renovar_presupuestos():
     """Tarea programada: renueva presupuestos automáticamente una vez al día."""
     db = SessionLocal()
     lock_adquirido = False
@@ -235,7 +235,7 @@ async def _job_renovar_presupuestos():
         db.close()
 
 
-async def _job_cobros_suscripciones():
+def _job_cobros_suscripciones():
     """Tarea programada: procesa cobros de suscripciones automáticamente una vez al día."""
     db = SessionLocal()
     lock_adquirido = False
@@ -257,52 +257,43 @@ async def _job_cobros_suscripciones():
         db.close()
 
 
-async def job_notificaciones_cuotas():
+def job_notificaciones_cuotas():
     _job_notificaciones_cuotas(SessionLocal)
 
 
-async def job_notificaciones_presupuestos():
+def job_notificaciones_presupuestos():
     _job_notificaciones_presupuestos(SessionLocal)
 
 
-async def job_notificaciones_suscripciones():
+def job_notificaciones_suscripciones():
     _job_notificaciones_suscripciones(SessionLocal)
 
 
-async def job_notificaciones_inactividad():
+def job_notificaciones_inactividad():
     _job_notificaciones_inactividad(SessionLocal)
 
 
-async def job_entrega_whatsapp_batched():
+def job_entrega_whatsapp_batched():
     _job_entrega_whatsapp_batched(SessionLocal)
 
 
-async def job_resumen_cierre_ciclo():
+def job_resumen_cierre_ciclo():
     _job_resumen_cierre_ciclo(SessionLocal)
 
 
-async def job_resumen_semanal():
+def job_resumen_semanal():
     _job_resumen_semanal(SessionLocal)
 
 
-async def job_proyeccion_negativa():
-    await _job_proyeccion_negativa(SessionLocal)
+def job_proyeccion_negativa():
+    _job_proyeccion_negativa(SessionLocal)
 
 
-async def _job_actualizar_perfiles():
+def _job_actualizar_perfiles():
     """Tarea programada: Recalcula el perfil financiero de todos los usuarios activos a las 02:00 UTC."""
     from sqlalchemy import select
     from app.models.usuario import Usuario, EstadoUsuario
     from app.services.perfil_financiero_service import calcular_y_persistir_perfil
-    from contextlib import asynccontextmanager
-
-    @asynccontextmanager
-    async def get_db_context():
-        db_sub = SessionLocal()
-        try:
-            yield db_sub
-        finally:
-            db_sub.close()
 
     db = SessionLocal()
     lock_adquirido = False
@@ -318,20 +309,18 @@ async def _job_actualizar_perfiles():
             select(Usuario.id).where(Usuario.estado == EstadoUsuario.ACTIVO)
         ).scalars().all()
 
-        semaforo = asyncio.Semaphore(50)
         cant_actualizados = 0
 
-        async def procesar_usuario(usuario_id):
-            nonlocal cant_actualizados
-            async with semaforo:
-                try:
-                    async with get_db_context() as db_ctx:
-                        await calcular_y_persistir_perfil(db_ctx, usuario_id)
-                        cant_actualizados += 1
-                except Exception as e:
-                    logger.error(f"Error actualizando perfil {usuario_id}: {e}")
+        for uid in usuarios_activos:
+            db_sub = SessionLocal()
+            try:
+                calcular_y_persistir_perfil(db_sub, uid)
+                cant_actualizados += 1
+            except Exception as e:
+                logger.error(f"Error actualizando perfil {uid}: {e}")
+            finally:
+                db_sub.close()
 
-        await asyncio.gather(*[procesar_usuario(uid) for uid in usuarios_activos])
         logger.info(f"Se actualizaron {cant_actualizados} perfiles financieros en el job programado.")
     except Exception:
         logger.exception("Error en job _job_actualizar_perfiles")

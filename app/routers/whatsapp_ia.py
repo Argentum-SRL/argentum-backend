@@ -16,6 +16,7 @@ from decimal import Decimal
 from uuid import UUID
 
 import httpx
+import anyio
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
@@ -23,7 +24,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_admin_user, get_db
+from app.core.auth import get_current_admin_user
+from app.core.database import SessionLocal, get_db
 from app.core.config import settings
 from app.utils.fecha import hoy_argentina
 from app.models.billetera import Billetera, EstadoBilletera
@@ -996,15 +998,604 @@ async def verify_webhook(request: Request) -> PlainTextResponse:
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Parámetros inválidos")
 
 
+def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> PlainTextResponse:
+    """
+    Procesa el webhook de WhatsApp de forma síncrona dentro del worker thread de AnyIO.
+    Administra su propia sesión de base de datos de corta duración con SessionLocal.
+    """
+    try:
+        payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
+    except Exception:
+        logger.warning("Error al decodificar JSON del webhook")
+        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+    # Extraer mensajes del payload de Meta
+    entries = payload.get("entry", [])
+    if not entries:
+        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+    changes = entries[0].get("changes", [])
+    if not changes:
+        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+    value = changes[0].get("value", {})
+    messages = value.get("messages", [])
+    if not messages:
+        # Eventos de estado (sent, delivered, read, etc.)
+        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+    msg = messages[0]
+    wamid = msg.get("id")
+    from_number = msg.get("from", "")
+    msg_type = msg.get("type", "text")
+
+    db = SessionLocal()
+    try:
+        # Idempotencia: Verificar y persistir wamid ANTES de ejecutar lógica de negocio
+        if wamid:
+            wamid_existente = db.execute(
+                select(MensajeWhatsappProcesado.id).where(MensajeWhatsappProcesado.wamid == wamid)
+            ).scalar_one_or_none()
+
+            if wamid_existente:
+                logger.info("whatsapp_wamid_duplicado_ignorado", wamid=wamid, from_number=from_number)
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            try:
+                registro_wamid = MensajeWhatsappProcesado(
+                    wamid=wamid,
+                    telefono=from_number,
+                    tipo_mensaje=msg_type,
+                )
+                db.add(registro_wamid)
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                logger.info("whatsapp_wamid_concurrente_duplicado_ignorado", wamid=wamid)
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+            except Exception as e:
+                db.rollback()
+                logger.error("whatsapp_error_registro_wamid", wamid=wamid, error=str(e))
+
+        try:
+            usuario = _buscar_usuario_por_telefono(from_number, db)
+            if not usuario:
+                telefono_norm = normalizar_telefono_ar(from_number)
+                debe_responder = _debe_responder_no_registrado(telefono_norm)
+                logger.warning(
+                    "whatsapp_usuario_no_encontrado",
+                    telefono_ultimos_4=telefono_norm[-4:] if telefono_norm else None,
+                    respondido=debe_responder,
+                )
+                if debe_responder:
+                    enviar_whatsapp(from_number, "No encontramos tu cuenta. Registrate en miargentum.com")
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            # Rate limit para usuario registrado (evaluado antes de llamar a Whisper, GPT-4o Vision o ai_service)
+            es_medio = (msg_type in ("audio", "image"))
+            tel_usuario = usuario.telefono_normalizado or normalizar_telefono_ar(from_number) or from_number
+            permitido, motivo_rate_limit = _verificar_rate_limit_registrado(tel_usuario, es_medio=es_medio)
+            if not permitido:
+                logger.warning(
+                    "whatsapp_rate_limit_registrado_superado",
+                    usuario_id=str(usuario.id),
+                    tipo_mensaje=msg_type,
+                )
+                if motivo_rate_limit:
+                    enviar_whatsapp(from_number, motivo_rate_limit)
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            logger.info(
+                "whatsapp_mensaje_recibido",
+                usuario_id=str(usuario.id),
+                tipo_mensaje=msg_type,
+            )
+
+            mensaje_texto = ""
+            transcripcion = None
+
+            if msg_type == "text":
+                mensaje_texto = msg.get("text", {}).get("body", "").strip()
+
+            elif msg_type == "audio":
+                audio_obj = msg.get("audio", {})
+                media_id = audio_obj.get("id")
+                mime_type = audio_obj.get("mime_type", "audio/ogg")
+
+                if media_id:
+                    t_media_start = time.perf_counter()
+                    transcripcion = _transcribir_audio(media_id, mime_type)
+                    t_media_end = time.perf_counter()
+                    logger.info(
+                        "[LATENCIA][MEDIA-AUDIO] Transcripción Whisper: %.2fs",
+                        t_media_end - t_media_start,
+                    )
+
+                    if transcripcion:
+                        mensaje_texto = transcripcion
+                        if settings.ENVIRONMENT == "production":
+                            logger.info("Audio transcripto exitosamente (longitud: %d caracteres)", len(transcripcion))
+                        else:
+                            logger.info("Audio transcripto: '%s'", transcripcion[:100])
+                    else:
+                        enviar_whatsapp(
+                            from_number, "No pude escuchar el audio. Mandame el mensaje en texto."
+                        )
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                else:
+                    enviar_whatsapp(
+                        from_number, "No pude escuchar el audio. Mandame el mensaje en texto."
+                    )
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            elif msg_type == "image":
+                image_obj = msg.get("image", {})
+                media_id = image_obj.get("id")
+                mime_type = image_obj.get("mime_type", "image/jpeg")
+                nombre_usuario = f"{usuario.nombre or ''} {usuario.apellido or ''}".strip()
+
+                if media_id:
+                    t_media_start = time.perf_counter()
+                    descripcion_imagen = _extraer_transaccion_de_imagen(
+                        media_id, mime_type, nombre_usuario
+                    )
+                    t_media_end = time.perf_counter()
+                    logger.info(
+                        "[LATENCIA][MEDIA-IMAGEN] Análisis GPT-4o Vision: %.2fs",
+                        t_media_end - t_media_start,
+                    )
+
+                    if descripcion_imagen:
+                        mensaje_texto = descripcion_imagen
+                        if settings.ENVIRONMENT == "production":
+                            logger.info("Imagen analizada exitosamente (longitud: %d caracteres)", len(descripcion_imagen))
+                        else:
+                            logger.info("Imagen analizada: '%s'", descripcion_imagen[:100])
+                    else:
+                        enviar_whatsapp(
+                            from_number, "No pude leer el comprobante. Mandame los datos en texto."
+                        )
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                else:
+                    enviar_whatsapp(
+                        from_number, "No pude leer el comprobante. Mandame los datos en texto."
+                    )
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            if not mensaje_texto:
+                enviar_whatsapp(
+                    from_number,
+                    "No entendí bien lo que quisiste decir. Podés contarme qué gastaste, por ejemplo: *Almuerzo $1500*",
+                )
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            # Buscar conversación activa previa con slot_filling
+            conv_activa = _buscar_slot_filling_activo(usuario.id, db)
+            estado_previo = (
+                dict(conv_activa.slot_filling_estado)
+                if conv_activa and conv_activa.slot_filling_estado
+                else None
+            )
+
+            # Detectar selección numérica de billetera
+            es_seleccion, nombre_billetera = _resolver_seleccion_numerica(
+                mensaje_texto, usuario.id, db, conv_activa
+            )
+            if es_seleccion:
+                if nombre_billetera is None:
+                    # Número fuera de rango
+                    billeteras = _obtener_billeteras_activas(usuario.id, db)
+                    enviar_whatsapp(
+                        from_number, f"Opción inválida. Elegí un número del 1 al {len(billeteras)}."
+                    )
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                if estado_previo is None:
+                    estado_previo = {}
+                estado_previo["billetera_origen"] = nombre_billetera
+                if "datos_faltantes" in estado_previo:
+                    estado_previo["datos_faltantes"] = [
+                        d for d in estado_previo["datos_faltantes"]
+                        if d not in ("billetera_origen", "billetera")
+                    ]
+
+                resultado_ia = {
+                    "intent": "registrar_transaccion",
+                    "entidades": {
+                        k: v for k, v in estado_previo.items() if k != "datos_faltantes"
+                    },
+                    "confianza": 1.0,
+                    "slot_filling": False,
+                    "datos_faltantes": [],
+                    "respuesta_usuario": "",
+                }
+                logger.info("[SELECCION_NUMERICA] Billetera '%s' resuelta en memoria sin llamada a IA", nombre_billetera)
+            else:
+                t_ia_start = time.perf_counter()
+                resultado_ia = ai_service.procesar_mensaje(
+                    mensaje=mensaje_texto,
+                    usuario=usuario,
+                    db=db,
+                    historial=_obtener_historial_reciente(usuario.id, db),
+                    estado_previo=estado_previo,
+                )
+                t_ia_end = time.perf_counter()
+                logger.info("[LATENCIA][IA] Procesamiento: %.2fs", t_ia_end - t_ia_start)
+
+            # Mergear determinísticamente entidades para no perder campos de turnos previos
+            if estado_previo:
+                resultado_ia["entidades"] = _merge_entidades(estado_previo, resultado_ia.get("entidades", {}))
+
+            # Categorización automática por defecto si no viene ninguna categoría
+            entidades_actuales = resultado_ia.get("entidades", {})
+            if not entidades_actuales.get("categoria"):
+                entidades_actuales["categoria"] = "Otros > Otros"
+                resultado_ia["entidades"] = entidades_actuales
+
+            # Si tenemos las entidades mínimas (monto + billetera), asegurar transición a registrar_transaccion
+            tiene_monto = entidades_actuales.get("monto") is not None
+            tipo_act = entidades_actuales.get("tipo") or "egreso"
+            tiene_billetera = bool(
+                entidades_actuales.get("billetera_origen")
+                if tipo_act == "egreso"
+                else (entidades_actuales.get("billetera_destino") or entidades_actuales.get("billetera_origen"))
+            )
+            if tiene_monto and tiene_billetera and resultado_ia.get("intent") in ("slot_filling", "registrar_transaccion"):
+                resultado_ia["intent"] = "registrar_transaccion"
+                resultado_ia["slot_filling"] = False
+                resultado_ia["confianza"] = max(float(resultado_ia.get("confianza", 0.0)), 0.85)
+
+            # Enriquecer respuesta con datos reales para intents de consulta
+            intent_detectado = resultado_ia.get("intent")
+
+            if intent_detectado == "consultar_proyeccion":
+                try:
+                    from app.services.proyeccion_service import calcular_proyeccion
+                    proyeccion = calcular_proyeccion(db, usuario)
+
+                    # Pesos
+                    p_ars = proyeccion["ars"]
+                    balance_ars = p_ars.get("balance_proyectado", 0)
+                    dias_rest = p_ars.get("periodo", {}).get("dias_restantes", 0)
+                    confianza_ars = p_ars.get("nivel_confianza", "bajo")
+                    advertencias_ars = p_ars.get("advertencias", [])
+
+                    # Dolares
+                    p_usd = proyeccion["usd"]
+                    balance_usd = p_usd.get("balance_proyectado", 0)
+                    confianza_usd = p_usd.get("nivel_confianza", "bajo")
+                    advertencias_usd = p_usd.get("advertencias", [])
+
+                    if confianza_ars == "bajo":
+                        msg = "Todavía no tenés suficiente historial para una proyección confiable en pesos."
+                    elif balance_ars >= 0:
+                        msg = f"Si seguís así en pesos, terminás el ciclo con aproximadamente {_fmt(balance_ars)} disponibles ({dias_rest} días restantes)."
+                    else:
+                        msg = f"Ojo — si seguís así en pesos, terminarías el ciclo con {_fmt(abs(balance_ars))} en rojo ({dias_rest} días restantes)."
+
+                    if advertencias_ars:
+                        msg += f" {advertencias_ars[0]}"
+
+                    # USD
+                    tiene_usd = (p_usd.get("gasto_proyectado_total", 0) > 0 or p_usd.get("ingresos_proyectados", 0) > 0)
+                    if tiene_usd:
+                        if confianza_usd == "bajo":
+                            msg += " Aún no tenés historial suficiente para una proyección en dólares."
+                        elif balance_usd >= 0:
+                            msg += f" En dólares, terminarías con aproximadamente US$ {balance_usd:,.2f}."
+                        else:
+                            msg += f" Ojo: en dólares terminarías con US$ {abs(balance_usd):,.2f} en rojo."
+
+                        if advertencias_usd:
+                            msg += f" {advertencias_usd[0]}"
+
+                    resultado_ia["respuesta_usuario"] = msg
+                except Exception:
+                    logger.exception("Error al calcular proyección para WhatsApp")
+
+            elif intent_detectado == "consultar_saldo":
+                try:
+                    from app.services.dashboard_service import get_dashboard_resumen
+                    resumen = get_dashboard_resumen(db, usuario)
+                    ars_total = resumen["disponible_real"]["ars"]["saldo_billeteras"]
+                    ars_disp = resumen["disponible_real"]["ars"]["disponible"]
+                    usd_total = resumen["disponible_real"]["usd"]["saldo_billeteras"]
+                    usd_disp = resumen["disponible_real"]["usd"]["disponible"]
+
+                    msg = f"Tenés {_fmt(ars_total)} en tus billeteras en pesos. Disponible real (descontando cuotas): {_fmt(ars_disp)}."
+                    if usd_total > 0 or usd_disp > 0:
+                        msg += f" Y tenés US$ {usd_total:,.2f} en tus billeteras en dólares. Disponible real: US$ {usd_disp:,.2f}."
+                    resultado_ia["respuesta_usuario"] = msg
+                except Exception:
+                    logger.exception("Error al calcular saldo para WhatsApp")
+
+            elif intent_detectado == "consultar_balance":
+                try:
+                    from app.services.dashboard_service import get_dashboard_resumen
+                    resumen = get_dashboard_resumen(db, usuario)
+                    b_ars = resumen["balance"]["ars"]
+                    ing_ars = b_ars.get("ingresos", 0.0)
+                    egr_ars = b_ars.get("egresos", 0.0)
+                    bal_ars = b_ars.get("balance", 0.0)
+
+                    signo_ars = "+" if bal_ars >= 0 else ""
+                    msg = f"En este ciclo llevás ingresados {_fmt(ing_ars)} y gastados {_fmt(egr_ars)} en pesos (balance: {signo_ars}{_fmt(bal_ars)})."
+
+                    b_usd = resumen["balance"]["usd"]
+                    ing_usd = b_usd.get("ingresos", 0.0)
+                    egr_usd = b_usd.get("egresos", 0.0)
+                    bal_usd = b_usd.get("balance", 0.0)
+                    if ing_usd > 0 or egr_usd > 0:
+                        signo_usd = "+" if bal_usd >= 0 else ""
+                        msg += f" En dólares: ingresos US$ {ing_usd:,.2f}, gastos US$ {egr_usd:,.2f} (balance: {signo_usd}US$ {bal_usd:,.2f})."
+
+                    resultado_ia["respuesta_usuario"] = msg
+                except Exception:
+                    logger.exception("Error al calcular balance para WhatsApp")
+
+            elif intent_detectado == "consultar_cotizacion":
+                try:
+                    from app.services.dolar_service import get_cotizaciones_dolar
+                    cots_data = get_cotizaciones_dolar()
+                    cots = cots_data.get("cotizaciones", {})
+                    blue = cots.get("blue", {})
+                    oficial = cots.get("oficial", {})
+                    mep = cots.get("mep", {})
+
+                    msg_parts = []
+                    if blue and blue.get("venta"):
+                        msg_parts.append(f"Dólar Blue: ${_fmt(blue['venta'])}")
+                    if mep and mep.get("venta"):
+                        msg_parts.append(f"MEP: ${_fmt(mep['venta'])}")
+                    if oficial and oficial.get("venta"):
+                        msg_parts.append(f"Oficial: ${_fmt(oficial['venta'])}")
+
+                    if msg_parts:
+                        resultado_ia["respuesta_usuario"] = "Cotizaciones del dólar: " + " | ".join(msg_parts)
+                except Exception:
+                    logger.exception("Error al consultar cotizaciones para WhatsApp")
+
+            # Sobreescribir propuesta de transacción con mensaje limpio generado por backend
+            if (
+                intent_detectado == "registrar_transaccion"
+                and resultado_ia.get("confianza", 0) >= 0.85
+                and not resultado_ia.get("slot_filling", False)
+            ):
+                try:
+                    entidades = resultado_ia.get("entidades", {})
+                    monto = entidades.get("monto")
+                    categoria_raw = entidades.get("categoria")
+                    tipo = entidades.get("tipo", "egreso")
+                    billetera_raw = (
+                        entidades.get("billetera_destino")
+                        if tipo == "ingreso"
+                        else entidades.get("billetera_origen")
+                    ) or entidades.get("billetera_origen") or entidades.get("billetera_destino")
+
+                    adicionales = entidades.get("transacciones_adicionales")
+
+                    if monto is not None:
+                        # Nombre de billetera
+                        bill_display = None
+                        if billetera_raw:
+                            bill = db.execute(
+                                select(Billetera).where(
+                                    Billetera.usuario_id == usuario.id,
+                                    Billetera.estado == EstadoBilletera.ACTIVA,
+                                    Billetera.nombre.ilike(f"%{billetera_raw}%")
+                                )
+                            ).scalars().first()
+                            bill_display = bill.nombre if bill else billetera_raw
+
+                        if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
+                            total_movs = 1 + len(adicionales)
+                            items_desc = [f"{_fmt(float(monto))} en {_nombre_corto_categoria(categoria_raw)}"]
+                            for ad in adicionales:
+                                if isinstance(ad, dict) and ad.get("monto") is not None:
+                                    items_desc.append(
+                                        f"{_fmt(float(ad['monto']))} en {_nombre_corto_categoria(ad.get('categoria'))}"
+                                    )
+                            lista_str = ", ".join(items_desc)
+                            origen_str = f" desde {bill_display}" if bill_display else (f" a {bill_display}" if tipo == "ingreso" else "")
+                            resultado_ia["respuesta_usuario"] = f"Voy a anotar {total_movs} movimientos{origen_str}: {lista_str}. ¿Va?"
+                        else:
+                            monto_str = _fmt(float(monto))
+                            cat_display = _nombre_corto_categoria(categoria_raw)
+
+                            if tipo == "ingreso":
+                                partes = [f"Voy a registrar un ingreso de {monto_str}"]
+                                if cat_display:
+                                    partes.append(f"en {cat_display}")
+                                if bill_display:
+                                    partes.append(f"a {bill_display}")
+                            else:
+                                partes = [f"Voy a anotar {monto_str}"]
+                                if cat_display:
+                                    partes.append(f"en {cat_display}")
+                                if bill_display:
+                                    partes.append(f"desde {bill_display}")
+                            partes.append("¿Va?")
+
+                            resultado_ia["respuesta_usuario"] = " ".join(partes)
+                except Exception:
+                    logger.exception("Error al construir propuesta de transacción")
+
+            # Si la IA pide que el usuario elija billetera, mostrar menú numerado
+            if resultado_ia.get("slot_filling") and resultado_ia.get("entidades", {}).get("billetera_origen") is None:
+                datos_faltantes = resultado_ia.get("datos_faltantes", [])
+                entidades = resultado_ia.get("entidades", {})
+                necesita_billetera = (
+                    "billetera_origen" in datos_faltantes
+                    or "billetera" in datos_faltantes
+                    or (
+                        resultado_ia.get("intent") == "registrar_transaccion"
+                        and entidades.get("monto") is not None
+                        and entidades.get("billetera_origen") is None
+                    )
+                )
+                if necesita_billetera:
+                    billeteras = _obtener_billeteras_activas(usuario.id, db)
+                    if len(billeteras) > 1:
+                        resultado_ia["respuesta_usuario"] = _generar_menu_billeteras(billeteras)
+                        # Guardar datos_faltantes en slot_filling_estado para que _resolver_seleccion_numerica lo detecte
+                        if resultado_ia.get("entidades") is None:
+                            resultado_ia["entidades"] = {}
+                        resultado_ia["entidades"]["datos_faltantes"] = ["billetera_origen"]
+
+            transaccion_id = _ejecutar_intent(resultado_ia, usuario, db)
+
+            # Si se confirmó o creó una transacción, sobreescribir la respuesta con confirmación real
+            if transaccion_id and intent_detectado == "confirmar":
+                try:
+                    tx = db.execute(
+                        select(Transaccion).where(Transaccion.id == UUID(transaccion_id))
+                    ).scalars().first()
+                    if tx:
+                        tipo_str = "ingreso" if tx.tipo == TipoTransaccion.INGRESO else "egreso"
+                        monto_str = _fmt(float(tx.monto))
+
+                        # Obtener nombre de billetera
+                        bill_nombre = None
+                        if tx.billetera_id:
+                            bill = db.execute(
+                                select(Billetera).where(Billetera.id == tx.billetera_id)
+                            ).scalars().first()
+                            bill_nombre = bill.nombre if bill else None
+
+                        # Verificar si la conversación previa ejecutada incluía transacciones adicionales
+                        conv_ejecutada = db.execute(
+                            select(ConversacionWpp)
+                            .where(
+                                ConversacionWpp.usuario_id == usuario.id,
+                                ConversacionWpp.accion_ejecutada == str(tx.id),
+                            )
+                        ).scalars().first()
+
+                        adicionales = (
+                            conv_ejecutada.entidades.get("transacciones_adicionales")
+                            if conv_ejecutada and conv_ejecutada.entidades
+                            else None
+                        )
+
+                        if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
+                            total_movs = 1 + len(adicionales)
+                            cat_display = _nombre_corto_categoria(
+                                conv_ejecutada.entidades.get("categoria")
+                            )
+                            items_str = [f"{monto_str} en {cat_display}"]
+                            for ad in adicionales:
+                                if isinstance(ad, dict) and ad.get("monto") is not None:
+                                    items_str.append(
+                                        f"{_fmt(float(ad['monto']))} en {_nombre_corto_categoria(ad.get('categoria'))}"
+                                    )
+                            origen_str = f" desde {bill_nombre}" if bill_nombre else (f" a {bill_nombre}" if tx.tipo == TipoTransaccion.INGRESO else "")
+                            resultado_ia["respuesta_usuario"] = f"Listo. {total_movs} movimientos{origen_str}: {', '.join(items_str)} — registrados."
+                        else:
+                            # Obtener nombre de categoría
+                            cat_nombre = None
+                            if tx.categoria_id:
+                                cat = db.execute(
+                                    select(Categoria).where(Categoria.id == tx.categoria_id)
+                                ).scalars().first()
+                                cat_nombre = cat.nombre if cat else None
+
+                            # Si hay subcategoría, mostrar su nombre en vez de la categoría principal
+                            subcat_nombre = None
+                            if tx.subcategoria_id:
+                                subcat = db.execute(
+                                    select(Subcategoria).where(Subcategoria.id == tx.subcategoria_id)
+                                ).scalars().first()
+                                subcat_nombre = subcat.nombre if subcat else None
+
+                            nombre_categoria_display = subcat_nombre or cat_nombre or "Otros"
+
+                            if tx.tipo == TipoTransaccion.INGRESO:
+                                partes = [f"Listo. Ingreso de {monto_str}"]
+                                if nombre_categoria_display:
+                                    partes.append(f"en {nombre_categoria_display}")
+                                if bill_nombre:
+                                    partes.append(f"a {bill_nombre}")
+                                partes.append("— registrado.")
+                            else:
+                                partes = [f"Listo. {monto_str}"]
+                                if nombre_categoria_display:
+                                    partes.append(f"en {nombre_categoria_display}")
+                                if bill_nombre:
+                                    partes.append(f"desde {bill_nombre}")
+                                partes.append("— registrado.")
+
+                            resultado_ia["respuesta_usuario"] = " ".join(partes)
+                except Exception:
+                    logger.exception("Error al construir mensaje de confirmación")
+
+            # Si se canceló, asegurar tono rioplatense
+            if intent_detectado == "cancelar":
+                resultado_ia["respuesta_usuario"] = "Listo, cancelado."
+
+            slot_activo = resultado_ia.get("slot_filling", False)
+            confianza_val = resultado_ia.get("confianza", 0.0)
+            try:
+                confianza_float = max(0.0, min(1.0, float(confianza_val)))
+                confianza_dec = Decimal(f"{confianza_float:.3f}")
+            except (ValueError, TypeError):
+                confianza_dec = Decimal("0.000")
+
+            nueva_conv = ConversacionWpp(
+                usuario_id=usuario.id,
+                wamid=wamid,
+                mensaje_usuario=mensaje_texto,
+                tipo_mensaje=TipoMensajeWpp.AUDIO if transcripcion else TipoMensajeWpp.TEXTO,
+                transcripcion=transcripcion,
+                mensaje_bot=resultado_ia["respuesta_usuario"],
+                intent_detectado=resultado_ia.get("intent"),
+                entidades=resultado_ia.get("entidades"),
+                accion_ejecutada=str(transaccion_id) if transaccion_id else None,
+                confianza=confianza_dec,
+                slot_filling_activo=slot_activo,
+                slot_filling_estado=resultado_ia.get("entidades") if slot_activo else None,
+            )
+            db.add(nueva_conv)
+            db.commit()
+
+            # Envío saliente vía Meta Graph API
+            t_envio_start = time.perf_counter()
+            enviar_whatsapp(from_number, resultado_ia["respuesta_usuario"])
+            t_envio_end = time.perf_counter()
+            logger.info("[LATENCIA][ENVIO_META] Envío de mensaje: %.2fs", t_envio_end - t_envio_start)
+
+            t_total = time.perf_counter() - t_inicio
+            logger.info(
+                "[LATENCIA][TOTAL][TIPO=%s] Duración total del webhook: %.2fs",
+                msg_type.upper(),
+                t_total,
+            )
+
+            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+        except Exception as e:
+            db.rollback()
+            logger.error("whatsapp_webhook_error", error=str(e), exc_info=True)
+            try:
+                if from_number:
+                    enviar_whatsapp(
+                        from_number, "Hubo un problema al procesar tu mensaje. Intentá de nuevo."
+                    )
+            except Exception:
+                logger.exception("Error al enviar mensaje de fallback")
+            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+    finally:
+        db.close()
+
+
 @router.post("/webhook", response_class=PlainTextResponse)
 async def whatsapp_webhook(
     request: Request,
-    db: Session = Depends(get_db),
 ) -> PlainTextResponse:
     """
     Webhook de WhatsApp Cloud API (Meta Graph API).
-    Valida firma HMAC-SHA256, procesa mensajes entrantes (texto/audio/imagen),
-    ejecuta IA conversacional y envía respuesta de forma asíncrona vía Graph API.
+    Valida firma HMAC-SHA256 en el event loop y delega el procesamiento síncrono
+    pesado (I/O de DB, OpenAI y Meta Graph API) al threadpool de AnyIO.
     """
     t_inicio = time.perf_counter()
     body_bytes = await request.body()
@@ -1039,584 +1630,7 @@ async def whatsapp_webhook(
             detail="Firma inválida",
         )
 
-    try:
-        payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
-    except Exception:
-        logger.warning("Error al decodificar JSON del webhook")
-        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-
-    # Extraer mensajes del payload de Meta
-    entries = payload.get("entry", [])
-    if not entries:
-        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-
-    changes = entries[0].get("changes", [])
-    if not changes:
-        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-
-    value = changes[0].get("value", {})
-    messages = value.get("messages", [])
-    if not messages:
-        # Eventos de estado (sent, delivered, read, etc.)
-        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-
-    msg = messages[0]
-    wamid = msg.get("id")
-    from_number = msg.get("from", "")
-    msg_type = msg.get("type", "text")
-
-    # Idempotencia: Verificar y persistir wamid ANTES de ejecutar lógica de negocio
-    if wamid:
-        wamid_existente = db.execute(
-            select(MensajeWhatsappProcesado.id).where(MensajeWhatsappProcesado.wamid == wamid)
-        ).scalar_one_or_none()
-
-        if wamid_existente:
-            logger.info("whatsapp_wamid_duplicado_ignorado", wamid=wamid, from_number=from_number)
-            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-
-        try:
-            registro_wamid = MensajeWhatsappProcesado(
-                wamid=wamid,
-                telefono=from_number,
-                tipo_mensaje=msg_type,
-            )
-            db.add(registro_wamid)
-            db.commit()
-        except IntegrityError:
-            db.rollback()
-            logger.info("whatsapp_wamid_concurrente_duplicado_ignorado", wamid=wamid)
-            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-        except Exception as e:
-            db.rollback()
-            logger.error("whatsapp_error_registro_wamid", wamid=wamid, error=str(e))
-
-    try:
-        usuario = _buscar_usuario_por_telefono(from_number, db)
-        if not usuario:
-            telefono_norm = normalizar_telefono_ar(from_number)
-            debe_responder = _debe_responder_no_registrado(telefono_norm)
-            logger.warning(
-                "whatsapp_usuario_no_encontrado",
-                telefono_ultimos_4=telefono_norm[-4:] if telefono_norm else None,
-                respondido=debe_responder,
-            )
-            if debe_responder:
-                enviar_whatsapp(from_number, "No encontramos tu cuenta. Registrate en miargentum.com")
-            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-
-        # Rate limit para usuario registrado (evaluado antes de llamar a Whisper, GPT-4o Vision o ai_service)
-        es_medio = (msg_type in ("audio", "image"))
-        tel_usuario = usuario.telefono_normalizado or normalizar_telefono_ar(from_number) or from_number
-        permitido, motivo_rate_limit = _verificar_rate_limit_registrado(tel_usuario, es_medio=es_medio)
-        if not permitido:
-            logger.warning(
-                "whatsapp_rate_limit_registrado_superado",
-                usuario_id=str(usuario.id),
-                tipo_mensaje=msg_type,
-            )
-            if motivo_rate_limit:
-                enviar_whatsapp(from_number, motivo_rate_limit)
-            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-
-        logger.info(
-            "whatsapp_mensaje_recibido",
-            usuario_id=str(usuario.id),
-            tipo_mensaje=msg_type,
-        )
-
-        mensaje_texto = ""
-        transcripcion = None
-
-        if msg_type == "text":
-            mensaje_texto = msg.get("text", {}).get("body", "").strip()
-
-        elif msg_type == "audio":
-            audio_obj = msg.get("audio", {})
-            media_id = audio_obj.get("id")
-            mime_type = audio_obj.get("mime_type", "audio/ogg")
-
-            if media_id:
-                t_media_start = time.perf_counter()
-                transcripcion = _transcribir_audio(media_id, mime_type)
-                t_media_end = time.perf_counter()
-                logger.info(
-                    "[LATENCIA][MEDIA-AUDIO] Transcripción Whisper: %.2fs",
-                    t_media_end - t_media_start,
-                )
-
-                if transcripcion:
-                    mensaje_texto = transcripcion
-                    if settings.ENVIRONMENT == "production":
-                        logger.info("Audio transcripto exitosamente (longitud: %d caracteres)", len(transcripcion))
-                    else:
-                        logger.info("Audio transcripto: '%s'", transcripcion[:100])
-                else:
-                    enviar_whatsapp(
-                        from_number, "No pude escuchar el audio. Mandame el mensaje en texto."
-                    )
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-            else:
-                enviar_whatsapp(
-                    from_number, "No pude escuchar el audio. Mandame el mensaje en texto."
-                )
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-
-        elif msg_type == "image":
-            image_obj = msg.get("image", {})
-            media_id = image_obj.get("id")
-            mime_type = image_obj.get("mime_type", "image/jpeg")
-            nombre_usuario = f"{usuario.nombre or ''} {usuario.apellido or ''}".strip()
-
-            if media_id:
-                t_media_start = time.perf_counter()
-                descripcion_imagen = _extraer_transaccion_de_imagen(
-                    media_id, mime_type, nombre_usuario
-                )
-                t_media_end = time.perf_counter()
-                logger.info(
-                    "[LATENCIA][MEDIA-IMAGEN] Análisis GPT-4o Vision: %.2fs",
-                    t_media_end - t_media_start,
-                )
-
-                if descripcion_imagen:
-                    mensaje_texto = descripcion_imagen
-                    if settings.ENVIRONMENT == "production":
-                        logger.info("Imagen analizada exitosamente (longitud: %d caracteres)", len(descripcion_imagen))
-                    else:
-                        logger.info("Imagen analizada: '%s'", descripcion_imagen[:100])
-                else:
-                    enviar_whatsapp(
-                        from_number, "No pude leer el comprobante. Mandame los datos en texto."
-                    )
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-            else:
-                enviar_whatsapp(
-                    from_number, "No pude leer el comprobante. Mandame los datos en texto."
-                )
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-
-        if not mensaje_texto:
-            enviar_whatsapp(
-                from_number,
-                "No entendí bien lo que quisiste decir. Podés contarme qué gastaste, por ejemplo: *Almuerzo $1500*",
-            )
-            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-
-        # Buscar conversación activa previa con slot_filling
-        conv_activa = _buscar_slot_filling_activo(usuario.id, db)
-        estado_previo = (
-            dict(conv_activa.slot_filling_estado)
-            if conv_activa and conv_activa.slot_filling_estado
-            else None
-        )
-
-        # Detectar selección numérica de billetera
-        es_seleccion, nombre_billetera = _resolver_seleccion_numerica(
-            mensaje_texto, usuario.id, db, conv_activa
-        )
-        if es_seleccion:
-            if nombre_billetera is None:
-                # Número fuera de rango
-                billeteras = _obtener_billeteras_activas(usuario.id, db)
-                enviar_whatsapp(
-                    from_number, f"Opción inválida. Elegí un número del 1 al {len(billeteras)}."
-                )
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-
-            if estado_previo is None:
-                estado_previo = {}
-            estado_previo["billetera_origen"] = nombre_billetera
-            if "datos_faltantes" in estado_previo:
-                estado_previo["datos_faltantes"] = [
-                    d for d in estado_previo["datos_faltantes"]
-                    if d not in ("billetera_origen", "billetera")
-                ]
-
-            resultado_ia = {
-                "intent": "registrar_transaccion",
-                "entidades": {
-                    k: v for k, v in estado_previo.items() if k != "datos_faltantes"
-                },
-                "confianza": 1.0,
-                "slot_filling": False,
-                "datos_faltantes": [],
-                "respuesta_usuario": "",
-            }
-            logger.info("[SELECCION_NUMERICA] Billetera '%s' resuelta en memoria sin llamada a IA", nombre_billetera)
-        else:
-            t_ia_start = time.perf_counter()
-            resultado_ia = ai_service.procesar_mensaje(
-                mensaje=mensaje_texto,
-                usuario=usuario,
-                db=db,
-                historial=_obtener_historial_reciente(usuario.id, db),
-                estado_previo=estado_previo,
-            )
-            t_ia_end = time.perf_counter()
-            logger.info("[LATENCIA][IA] Procesamiento: %.2fs", t_ia_end - t_ia_start)
-
-        # Mergear determinísticamente entidades para no perder campos de turnos previos
-        if estado_previo:
-            resultado_ia["entidades"] = _merge_entidades(estado_previo, resultado_ia.get("entidades", {}))
-
-        # Categorización automática por defecto si no viene ninguna categoría
-        entidades_actuales = resultado_ia.get("entidades", {})
-        if not entidades_actuales.get("categoria"):
-            entidades_actuales["categoria"] = "Otros > Otros"
-            resultado_ia["entidades"] = entidades_actuales
-
-        # Si tenemos las entidades mínimas (monto + billetera), asegurar transición a registrar_transaccion
-        tiene_monto = entidades_actuales.get("monto") is not None
-        tipo_act = entidades_actuales.get("tipo") or "egreso"
-        tiene_billetera = bool(
-            entidades_actuales.get("billetera_origen")
-            if tipo_act == "egreso"
-            else (entidades_actuales.get("billetera_destino") or entidades_actuales.get("billetera_origen"))
-        )
-        if tiene_monto and tiene_billetera and resultado_ia.get("intent") in ("slot_filling", "registrar_transaccion"):
-            resultado_ia["intent"] = "registrar_transaccion"
-            resultado_ia["slot_filling"] = False
-            resultado_ia["confianza"] = max(float(resultado_ia.get("confianza", 0.0)), 0.85)
-
-        # Enriquecer respuesta con datos reales para intents de consulta
-        intent_detectado = resultado_ia.get("intent")
-
-        if intent_detectado == "consultar_proyeccion":
-            try:
-                from app.services.proyeccion_service import calcular_proyeccion
-                proyeccion = calcular_proyeccion(db, usuario)
-
-                # Pesos
-                p_ars = proyeccion["ars"]
-                balance_ars = p_ars.get("balance_proyectado", 0)
-                dias_rest = p_ars.get("periodo", {}).get("dias_restantes", 0)
-                confianza_ars = p_ars.get("nivel_confianza", "bajo")
-                advertencias_ars = p_ars.get("advertencias", [])
-
-                # Dolares
-                p_usd = proyeccion["usd"]
-                balance_usd = p_usd.get("balance_proyectado", 0)
-                confianza_usd = p_usd.get("nivel_confianza", "bajo")
-                advertencias_usd = p_usd.get("advertencias", [])
-
-                if confianza_ars == "bajo":
-                    msg = "Todavía no tenés suficiente historial para una proyección confiable en pesos."
-                elif balance_ars >= 0:
-                    msg = f"Si seguís así en pesos, terminás el ciclo con aproximadamente {_fmt(balance_ars)} disponibles ({dias_rest} días restantes)."
-                else:
-                    msg = f"Ojo — si seguís así en pesos, terminarías el ciclo con {_fmt(abs(balance_ars))} en rojo ({dias_rest} días restantes)."
-
-                if advertencias_ars:
-                    msg += f" {advertencias_ars[0]}"
-
-                # USD
-                tiene_usd = (p_usd.get("gasto_proyectado_total", 0) > 0 or p_usd.get("ingresos_proyectados", 0) > 0)
-                if tiene_usd:
-                    if confianza_usd == "bajo":
-                        msg += " Aún no tenés historial suficiente para una proyección en dólares."
-                    elif balance_usd >= 0:
-                        msg += f" En dólares, terminarías con aproximadamente US$ {balance_usd:,.2f}."
-                    else:
-                        msg += f" Ojo: en dólares terminarías con US$ {abs(balance_usd):,.2f} en rojo."
-
-                    if advertencias_usd:
-                        msg += f" {advertencias_usd[0]}"
-
-                resultado_ia["respuesta_usuario"] = msg
-            except Exception:
-                logger.exception("Error al calcular proyección para WhatsApp")
-
-        elif intent_detectado == "consultar_saldo":
-            try:
-                from app.services.dashboard_service import get_dashboard_resumen
-                resumen = get_dashboard_resumen(db, usuario)
-                ars_total = resumen["disponible_real"]["ars"]["saldo_billeteras"]
-                ars_disp = resumen["disponible_real"]["ars"]["disponible"]
-                usd_total = resumen["disponible_real"]["usd"]["saldo_billeteras"]
-                usd_disp = resumen["disponible_real"]["usd"]["disponible"]
-
-                msg = f"Tenés {_fmt(ars_total)} en tus billeteras en pesos. Disponible real (descontando cuotas): {_fmt(ars_disp)}."
-                if usd_total > 0 or usd_disp > 0:
-                    msg += f" Y tenés US$ {usd_total:,.2f} en tus billeteras en dólares. Disponible real: US$ {usd_disp:,.2f}."
-                resultado_ia["respuesta_usuario"] = msg
-            except Exception:
-                logger.exception("Error al calcular saldo para WhatsApp")
-
-        elif intent_detectado == "consultar_balance":
-            try:
-                from app.services.dashboard_service import get_dashboard_resumen
-                resumen = get_dashboard_resumen(db, usuario)
-                b_ars = resumen["balance"]["ars"]
-                ing_ars = b_ars.get("ingresos", 0.0)
-                egr_ars = b_ars.get("egresos", 0.0)
-                bal_ars = b_ars.get("balance", 0.0)
-
-                signo_ars = "+" if bal_ars >= 0 else ""
-                msg = f"En este ciclo llevás ingresados {_fmt(ing_ars)} y gastados {_fmt(egr_ars)} en pesos (balance: {signo_ars}{_fmt(bal_ars)})."
-
-                b_usd = resumen["balance"]["usd"]
-                ing_usd = b_usd.get("ingresos", 0.0)
-                egr_usd = b_usd.get("egresos", 0.0)
-                bal_usd = b_usd.get("balance", 0.0)
-                if ing_usd > 0 or egr_usd > 0:
-                    signo_usd = "+" if bal_usd >= 0 else ""
-                    msg += f" En dólares: ingresos US$ {ing_usd:,.2f}, gastos US$ {egr_usd:,.2f} (balance: {signo_usd}US$ {bal_usd:,.2f})."
-
-                resultado_ia["respuesta_usuario"] = msg
-            except Exception:
-                logger.exception("Error al calcular balance para WhatsApp")
-
-        elif intent_detectado == "consultar_cotizacion":
-            try:
-                from app.services.dolar_service import get_cotizaciones_dolar
-                cots_data = get_cotizaciones_dolar()
-                cots = cots_data.get("cotizaciones", {})
-                blue = cots.get("blue", {})
-                oficial = cots.get("oficial", {})
-                mep = cots.get("mep", {})
-
-                msg_parts = []
-                if blue and blue.get("venta"):
-                    msg_parts.append(f"Dólar Blue: ${_fmt(blue['venta'])}")
-                if mep and mep.get("venta"):
-                    msg_parts.append(f"MEP: ${_fmt(mep['venta'])}")
-                if oficial and oficial.get("venta"):
-                    msg_parts.append(f"Oficial: ${_fmt(oficial['venta'])}")
-
-                if msg_parts:
-                    resultado_ia["respuesta_usuario"] = "Cotizaciones del dólar: " + " | ".join(msg_parts)
-            except Exception:
-                logger.exception("Error al consultar cotizaciones para WhatsApp")
-
-        # Sobreescribir propuesta de transacción con mensaje limpio generado por backend
-        if (
-            intent_detectado == "registrar_transaccion"
-            and resultado_ia.get("confianza", 0) >= 0.85
-            and not resultado_ia.get("slot_filling", False)
-        ):
-            try:
-                entidades = resultado_ia.get("entidades", {})
-                monto = entidades.get("monto")
-                categoria_raw = entidades.get("categoria")
-                tipo = entidades.get("tipo", "egreso")
-                billetera_raw = (
-                    entidades.get("billetera_destino")
-                    if tipo == "ingreso"
-                    else entidades.get("billetera_origen")
-                ) or entidades.get("billetera_origen") or entidades.get("billetera_destino")
-
-                adicionales = entidades.get("transacciones_adicionales")
-
-                if monto is not None:
-                    # Nombre de billetera
-                    bill_display = None
-                    if billetera_raw:
-                        bill = db.execute(
-                            select(Billetera).where(
-                                Billetera.usuario_id == usuario.id,
-                                Billetera.estado == EstadoBilletera.ACTIVA,
-                                Billetera.nombre.ilike(f"%{billetera_raw}%")
-                            )
-                        ).scalars().first()
-                        bill_display = bill.nombre if bill else billetera_raw
-
-                    if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
-                        total_movs = 1 + len(adicionales)
-                        items_desc = [f"{_fmt(float(monto))} en {_nombre_corto_categoria(categoria_raw)}"]
-                        for ad in adicionales:
-                            if isinstance(ad, dict) and ad.get("monto") is not None:
-                                items_desc.append(
-                                    f"{_fmt(float(ad['monto']))} en {_nombre_corto_categoria(ad.get('categoria'))}"
-                                )
-                        lista_str = ", ".join(items_desc)
-                        origen_str = f" desde {bill_display}" if bill_display else (f" a {bill_display}" if tipo == "ingreso" else "")
-                        resultado_ia["respuesta_usuario"] = f"Voy a anotar {total_movs} movimientos{origen_str}: {lista_str}. ¿Va?"
-                    else:
-                        monto_str = _fmt(float(monto))
-                        cat_display = _nombre_corto_categoria(categoria_raw)
-
-                        if tipo == "ingreso":
-                            partes = [f"Voy a registrar un ingreso de {monto_str}"]
-                            if cat_display:
-                                partes.append(f"en {cat_display}")
-                            if bill_display:
-                                partes.append(f"a {bill_display}")
-                        else:
-                            partes = [f"Voy a anotar {monto_str}"]
-                            if cat_display:
-                                partes.append(f"en {cat_display}")
-                            if bill_display:
-                                partes.append(f"desde {bill_display}")
-                        partes.append("¿Va?")
-
-                        resultado_ia["respuesta_usuario"] = " ".join(partes)
-            except Exception:
-                logger.exception("Error al construir propuesta de transacción")
-
-        # Si la IA pide que el usuario elija billetera, mostrar menú numerado
-        if resultado_ia.get("slot_filling") and resultado_ia.get("entidades", {}).get("billetera_origen") is None:
-            datos_faltantes = resultado_ia.get("datos_faltantes", [])
-            entidades = resultado_ia.get("entidades", {})
-            necesita_billetera = (
-                "billetera_origen" in datos_faltantes
-                or "billetera" in datos_faltantes
-                or (
-                    resultado_ia.get("intent") == "registrar_transaccion"
-                    and entidades.get("monto") is not None
-                    and entidades.get("billetera_origen") is None
-                )
-            )
-            if necesita_billetera:
-                billeteras = _obtener_billeteras_activas(usuario.id, db)
-                if len(billeteras) > 1:
-                    resultado_ia["respuesta_usuario"] = _generar_menu_billeteras(billeteras)
-                    # Guardar datos_faltantes en slot_filling_estado para que _resolver_seleccion_numerica lo detecte
-                    if resultado_ia.get("entidades") is None:
-                        resultado_ia["entidades"] = {}
-                    resultado_ia["entidades"]["datos_faltantes"] = ["billetera_origen"]
-
-        transaccion_id = _ejecutar_intent(resultado_ia, usuario, db)
-
-        # Si se confirmó o creó una transacción, sobreescribir la respuesta con confirmación real
-        if transaccion_id and intent_detectado == "confirmar":
-            try:
-                tx = db.execute(
-                    select(Transaccion).where(Transaccion.id == UUID(transaccion_id))
-                ).scalars().first()
-                if tx:
-                    tipo_str = "ingreso" if tx.tipo == TipoTransaccion.INGRESO else "egreso"
-                    monto_str = _fmt(float(tx.monto))
-
-                    # Obtener nombre de billetera
-                    bill_nombre = None
-                    if tx.billetera_id:
-                        bill = db.execute(
-                            select(Billetera).where(Billetera.id == tx.billetera_id)
-                        ).scalars().first()
-                        bill_nombre = bill.nombre if bill else None
-
-                    # Verificar si la conversación previa ejecutada incluía transacciones adicionales
-                    conv_ejecutada = db.execute(
-                        select(ConversacionWpp)
-                        .where(
-                            ConversacionWpp.usuario_id == usuario.id,
-                            ConversacionWpp.accion_ejecutada == str(tx.id),
-                        )
-                    ).scalars().first()
-
-                    adicionales = (
-                        conv_ejecutada.entidades.get("transacciones_adicionales")
-                        if conv_ejecutada and conv_ejecutada.entidades
-                        else None
-                    )
-
-                    if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
-                        total_movs = 1 + len(adicionales)
-                        cat_display = _nombre_corto_categoria(
-                            conv_ejecutada.entidades.get("categoria")
-                        )
-                        items_str = [f"{monto_str} en {cat_display}"]
-                        for ad in adicionales:
-                            if isinstance(ad, dict) and ad.get("monto") is not None:
-                                items_str.append(
-                                    f"{_fmt(float(ad['monto']))} en {_nombre_corto_categoria(ad.get('categoria'))}"
-                                )
-                        origen_str = f" desde {bill_nombre}" if bill_nombre else (f" a {bill_nombre}" if tx.tipo == TipoTransaccion.INGRESO else "")
-                        resultado_ia["respuesta_usuario"] = f"Listo. {total_movs} movimientos{origen_str}: {', '.join(items_str)} — registrados."
-                    else:
-                        # Obtener nombre de categoría
-                        cat_nombre = None
-                        if tx.categoria_id:
-                            cat = db.execute(
-                                select(Categoria).where(Categoria.id == tx.categoria_id)
-                            ).scalars().first()
-                            cat_nombre = cat.nombre if cat else None
-
-                        # Si hay subcategoría, mostrar su nombre en vez de la categoría principal
-                        subcat_nombre = None
-                        if tx.subcategoria_id:
-                            subcat = db.execute(
-                                select(Subcategoria).where(Subcategoria.id == tx.subcategoria_id)
-                            ).scalars().first()
-                            subcat_nombre = subcat.nombre if subcat else None
-
-                        nombre_categoria_display = subcat_nombre or cat_nombre or "Otros"
-
-                        if tx.tipo == TipoTransaccion.INGRESO:
-                            partes = [f"Listo. Ingreso de {monto_str}"]
-                            if nombre_categoria_display:
-                                partes.append(f"en {nombre_categoria_display}")
-                            if bill_nombre:
-                                partes.append(f"a {bill_nombre}")
-                            partes.append("— registrado.")
-                        else:
-                            partes = [f"Listo. {monto_str}"]
-                            if nombre_categoria_display:
-                                partes.append(f"en {nombre_categoria_display}")
-                            if bill_nombre:
-                                partes.append(f"desde {bill_nombre}")
-                            partes.append("— registrado.")
-
-                        resultado_ia["respuesta_usuario"] = " ".join(partes)
-            except Exception:
-                logger.exception("Error al construir mensaje de confirmación")
-
-        # Si se canceló, asegurar tono rioplatense
-        if intent_detectado == "cancelar":
-            resultado_ia["respuesta_usuario"] = "Listo, cancelado."
-
-        slot_activo = resultado_ia.get("slot_filling", False)
-        confianza_val = resultado_ia.get("confianza", 0.0)
-        try:
-            confianza_float = max(0.0, min(1.0, float(confianza_val)))
-            confianza_dec = Decimal(f"{confianza_float:.3f}")
-        except (ValueError, TypeError):
-            confianza_dec = Decimal("0.000")
-
-        nueva_conv = ConversacionWpp(
-            usuario_id=usuario.id,
-            wamid=wamid,
-            mensaje_usuario=mensaje_texto,
-            tipo_mensaje=TipoMensajeWpp.AUDIO if transcripcion else TipoMensajeWpp.TEXTO,
-            transcripcion=transcripcion,
-            mensaje_bot=resultado_ia["respuesta_usuario"],
-            intent_detectado=resultado_ia.get("intent"),
-            entidades=resultado_ia.get("entidades"),
-            accion_ejecutada=str(transaccion_id) if transaccion_id else None,
-            confianza=confianza_dec,
-            slot_filling_activo=slot_activo,
-            slot_filling_estado=resultado_ia.get("entidades") if slot_activo else None,
-        )
-        db.add(nueva_conv)
-        db.commit()
-
-        # Envío saliente vía Meta Graph API
-        t_envio_start = time.perf_counter()
-        enviar_whatsapp(from_number, resultado_ia["respuesta_usuario"])
-        t_envio_end = time.perf_counter()
-        logger.info("[LATENCIA][ENVIO_META] Envío de mensaje: %.2fs", t_envio_end - t_envio_start)
-
-        t_total = time.perf_counter() - t_inicio
-        logger.info(
-            "[LATENCIA][TOTAL][TIPO=%s] Duración total del webhook: %.2fs",
-            msg_type.upper(),
-            t_total,
-        )
-
-        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-
-    except Exception as e:
-        db.rollback()
-        logger.error("whatsapp_webhook_error", error=str(e), exc_info=True)
-        try:
-            if from_number:
-                enviar_whatsapp(
-                    from_number, "Hubo un problema al procesar tu mensaje. Intentá de nuevo."
-                )
-        except Exception:
-            logger.exception("Error al enviar mensaje de fallback")
-        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+    return await anyio.to_thread.run_sync(_procesar_webhook_whatsapp_sync, body_bytes, t_inicio)
 
 
 class TestIAMessageRequest(BaseModel):
