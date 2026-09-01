@@ -133,11 +133,11 @@ def construir_interpretaciones(perfil) -> dict:
 
 
 @router.get("", response_model=PerfilFinancieroResponse)
-async def get_perfil_financiero(
+def get_perfil_financiero(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
-    perfil = await perfil_financiero_service.obtener_perfil(db, current_user.id)
+    perfil = perfil_financiero_service.obtener_perfil(db, current_user.id)
     interpretaciones = construir_interpretaciones(perfil)
     
     # Mapear a esquema de respuesta
@@ -149,11 +149,11 @@ async def get_perfil_financiero(
 
 
 @router.post("/recalcular", response_model=PerfilFinancieroResponse)
-async def recalcular_perfil_financiero(
+def recalcular_perfil_financiero(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
-    perfil = await perfil_financiero_service.calcular_y_persistir_perfil(db, current_user.id)
+    perfil = perfil_financiero_service.calcular_y_persistir_perfil(db, current_user.id)
     interpretaciones = construir_interpretaciones(perfil)
     
     # Mapear a esquema de respuesta

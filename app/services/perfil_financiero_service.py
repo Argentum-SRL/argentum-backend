@@ -470,7 +470,7 @@ async def calcular_porcentaje_suscripciones(db: Session, usuario_id: UUID, fecha
     return res
 
 
-async def calcular_y_persistir_perfil(db: Session, usuario_id: UUID) -> PerfilFinanciero | None:
+def calcular_y_persistir_perfil(db: Session, usuario_id: UUID) -> PerfilFinanciero | None:
     res = _calcular_y_persistir_perfil_sync(db, usuario_id)
     if res is None:
         usuario = db.get(Usuario, usuario_id)
@@ -500,7 +500,7 @@ async def calcular_y_persistir_perfil(db: Session, usuario_id: UUID) -> PerfilFi
     return res
 
 
-async def obtener_perfil(db: Session, usuario_id: UUID) -> PerfilFinanciero | None:
+def obtener_perfil(db: Session, usuario_id: UUID) -> PerfilFinanciero | None:
     res = _obtener_perfil_sync(db, usuario_id)
     if res is None:
         usuario = db.get(Usuario, usuario_id)

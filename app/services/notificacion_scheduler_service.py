@@ -760,26 +760,16 @@ def _job_resumen_semanal(db_session_factory):
         db.close()
 
 
-async def _job_proyeccion_negativa(db_session_factory):
+def _job_proyeccion_negativa(db_session_factory):
     """
     Recalcula la proyección para todos los usuarios activos.
     Si el balance proyectado es negativo en alguna moneda con datos suficientes,
     crea una notificación de tipo PROYECCION_NEGATIVA deduplicada por ciclo del usuario.
     """
-    import asyncio
-    from contextlib import asynccontextmanager
     from sqlalchemy import select
     from app.models.usuario import EstadoUsuario, Moneda
     from app.services.proyeccion_service import calcular_proyeccion
     from app.services.dashboard_service import get_ciclo_fechas
-
-    @asynccontextmanager
-    async def get_db_context():
-        db_sub = db_session_factory()
-        try:
-            yield db_sub
-        finally:
-            db_sub.close()
 
     db = db_session_factory()
     lock_adquirido = False
@@ -795,63 +785,60 @@ async def _job_proyeccion_negativa(db_session_factory):
             select(Usuario.id).where(Usuario.estado == EstadoUsuario.ACTIVO)
         ).scalars().all()
 
-        semaforo = asyncio.Semaphore(50)
         cant_notificaciones_creadas = 0
 
-        async def procesar_usuario(usuario_id):
-            nonlocal cant_notificaciones_creadas
-            
+        for usuario_id in usuarios_activos:
             # Prohibición absoluta de Manuel
             if str(usuario_id) in ("931c28da-96b0-4dd3-892e-79fbd73451c6", "fdc16c1a-8442-4e50-bcf6-cdb2ccf6884a"):
-                return
+                continue
 
-            async with semaforo:
-                try:
-                    async with get_db_context() as db_ctx:
-                        usuario = db_ctx.get(Usuario, usuario_id)
-                        if not usuario:
-                            return
-                        
-                        proyecciones = calcular_proyeccion(db_ctx, usuario)
-                        hoy = hoy_argentina()
-                        fecha_inicio_ciclo, _ = get_ciclo_fechas(usuario, hoy)
+            db_ctx = db_session_factory()
+            try:
+                usuario = db_ctx.get(Usuario, usuario_id)
+                if not usuario:
+                    continue
 
-                        for moneda_key, moneda_label, simbolo in [("ars", "pesos", "$"), ("usd", "dólares", "US$")]:
-                            proj = proyecciones.get(moneda_key)
-                            if proj and proj.get("datos_suficientes") is True:
-                                balance = proj.get("balance_proyectado", 0.0)
-                                if balance < 0:
-                                    if moneda_key == "ars":
-                                        mensaje = f"¡Atención! Estimamos que tu saldo en pesos va a terminar este ciclo en negativo por {simbolo}{abs(balance):,.0f}. Te sugerimos revisar tus gastos."
-                                    else:
-                                        mensaje = f"¡Atención! Estimamos que tu saldo en dólares va a terminar este ciclo en negativo por {simbolo}{abs(balance):,.2f}. Te sugerimos revisar tus gastos."
-                                    
-                                    # Clave de deduplicación que incluye ID de usuario, moneda y fecha inicio del ciclo
-                                    grupo_override = f"proyeccion_negativa/{usuario.id}/{moneda_key}/{fecha_inicio_ciclo.strftime('%Y%m%d')}"
-                                    
-                                    from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion
-                                    config = obtener_configuracion(db_ctx, usuario.id)
-                                    canales = resolver_canales_notificacion(config, TipoNotificacion.PROYECCION_NEGATIVA)
-                                    if canales is not None:
-                                        canal_web, canal_whatsapp = canales
-                                        notif = crear_notificacion(
-                                            db=db_ctx,
-                                            usuario_id=usuario.id,
-                                            tipo=TipoNotificacion.PROYECCION_NEGATIVA,
-                                            nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                                            mensaje=mensaje,
-                                            canal_web=canal_web,
-                                            canal_whatsapp=canal_whatsapp,
-                                            canal_email=False,
-                                            grupo_agrupacion_override=grupo_override
-                                        )
-                                        if notif:
-                                            cant_notificaciones_creadas += 1
+                proyecciones = calcular_proyeccion(db_ctx, usuario)
+                hoy = hoy_argentina()
+                fecha_inicio_ciclo, _ = get_ciclo_fechas(usuario, hoy)
 
-                except Exception as e:
-                    logger.error(f"Error en _job_proyeccion_negativa para usuario {usuario_id}: {e}")
+                for moneda_key, moneda_label, simbolo in [("ars", "pesos", "$"), ("usd", "dólares", "US$")]:
+                    proj = proyecciones.get(moneda_key)
+                    if proj and proj.get("datos_suficientes") is True:
+                        balance = proj.get("balance_proyectado", 0.0)
+                        if balance < 0:
+                            if moneda_key == "ars":
+                                mensaje = f"¡Atención! Estimamos que tu saldo en pesos va a terminar este ciclo en negativo por {simbolo}{abs(balance):,.0f}. Te sugerimos revisar tus gastos."
+                            else:
+                                mensaje = f"¡Atención! Estimamos que tu saldo en dólares va a terminar este ciclo en negativo por {simbolo}{abs(balance):,.2f}. Te sugerimos revisar tus gastos."
 
-        await asyncio.gather(*[procesar_usuario(uid) for uid in usuarios_activos])
+                            # Clave de deduplicación que incluye ID de usuario, moneda y fecha inicio del ciclo
+                            grupo_override = f"proyeccion_negativa/{usuario.id}/{moneda_key}/{fecha_inicio_ciclo.strftime('%Y%m%d')}"
+
+                            from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion
+                            config = obtener_configuracion(db_ctx, usuario.id)
+                            canales = resolver_canales_notificacion(config, TipoNotificacion.PROYECCION_NEGATIVA)
+                            if canales is not None:
+                                canal_web, canal_whatsapp = canales
+                                notif = crear_notificacion(
+                                    db=db_ctx,
+                                    usuario_id=usuario.id,
+                                    tipo=TipoNotificacion.PROYECCION_NEGATIVA,
+                                    nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                                    mensaje=mensaje,
+                                    canal_web=canal_web,
+                                    canal_whatsapp=canal_whatsapp,
+                                    canal_email=False,
+                                    grupo_agrupacion_override=grupo_override
+                                )
+                                if notif:
+                                    cant_notificaciones_creadas += 1
+
+            except Exception as e:
+                logger.error(f"Error en _job_proyeccion_negativa para usuario {usuario_id}: {e}")
+            finally:
+                db_ctx.close()
+
         logger.info(f"Job _job_proyeccion_negativa finalizado. Notificaciones creadas: {cant_notificaciones_creadas}")
     except Exception:
         logger.exception("Error general en job _job_proyeccion_negativa")
