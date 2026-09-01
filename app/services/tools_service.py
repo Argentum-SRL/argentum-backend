@@ -51,7 +51,30 @@ def _parse_month_str(date_input: str) -> str:
     raise ValueError(f"Formato de fecha no reconocido: {date_input}")
 
 
-def _get_closest_ipc_record(db: Session, target_fecha: str) -> IPCCache:
+def _get_closest_ipc_record(
+    db: Session | None = None,
+    target_fecha: str = "",
+    ipc_records: list[IPCCache] | None = None
+) -> IPCCache:
+    if ipc_records is not None:
+        if not ipc_records:
+            raise ValueError("No hay datos de IPC cargados en la base de datos")
+        for r in ipc_records:
+            if r.fecha_dato == target_fecha:
+                return r
+        ty, tm = map(int, target_fecha.split('-'))
+        target_val = ty * 12 + tm
+        closest_record = None
+        min_dist = float('inf')
+        for r in ipc_records:
+            ry, rm = map(int, r.fecha_dato.split('-'))
+            r_val = ry * 12 + rm
+            dist = abs(target_val - r_val)
+            if dist < min_dist:
+                min_dist = dist
+                closest_record = r
+        return closest_record
+
     exact = db.execute(select(IPCCache).where(IPCCache.fecha_dato == target_fecha)).scalars().first()
     if exact:
         return exact
@@ -245,13 +268,19 @@ def ejecutar_backfill_ipc(db: Session) -> dict:
     }
 
 
-def ajustar_por_ipc(monto: float, fecha_origen: str, fecha_destino: str | None = None, db: Session = None) -> float:
+def ajustar_por_ipc(
+    monto: float,
+    fecha_origen: str,
+    fecha_destino: str | None = None,
+    db: Session | None = None,
+    ipc_records: list[IPCCache] | None = None
+) -> float:
     """
     Ajusta un monto monetario por inflación desde una fecha de origen hasta una fecha de destino
     utilizando la serie del índice acumulado oficial.
     """
-    if db is None:
-        raise ValueError("Se requiere una sesión de base de datos para realizar el ajuste por IPC")
+    if db is None and ipc_records is None:
+        raise ValueError("Se requiere una sesión de base de datos o ipc_records para realizar el ajuste por IPC")
 
     try:
         fo_str = _parse_month_str(fecha_origen)
@@ -259,16 +288,22 @@ def ajustar_por_ipc(monto: float, fecha_origen: str, fecha_destino: str | None =
         logger.error(f"Error al parsear fecha_origen: {e}")
         return AjusteIPCFloat(monto, ajuste_posible=False)
 
-    oldest_record = db.execute(select(IPCCache).order_by(IPCCache.fecha_dato.asc())).scalars().first()
-    if not oldest_record:
-        logger.warning("Base de datos de IPC vacía. No es posible realizar el ajuste.")
-        return AjusteIPCFloat(monto, ajuste_posible=False)
+    if ipc_records is not None:
+        if not ipc_records:
+            logger.warning("Base de datos de IPC vacía. No es posible realizar el ajuste.")
+            return AjusteIPCFloat(monto, ajuste_posible=False)
+        oldest_record = ipc_records[0]
+    else:
+        oldest_record = db.execute(select(IPCCache).order_by(IPCCache.fecha_dato.asc())).scalars().first()
+        if not oldest_record:
+            logger.warning("Base de datos de IPC vacía. No es posible realizar el ajuste.")
+            return AjusteIPCFloat(monto, ajuste_posible=False)
 
     if fo_str < oldest_record.fecha_dato:
         logger.warning(f"La fecha de origen {fo_str} es anterior al inicio de la serie disponible ({oldest_record.fecha_dato}). Sin ajuste posible.")
         return AjusteIPCFloat(monto, ajuste_posible=False)
 
-    record_origen = _get_closest_ipc_record(db, fo_str)
+    record_origen = _get_closest_ipc_record(db=db, target_fecha=fo_str, ipc_records=ipc_records)
     if not record_origen or record_origen.indice_acumulado <= 0:
         logger.warning(f"Índice de origen inválido para {fo_str}.")
         return AjusteIPCFloat(monto, ajuste_posible=False)
@@ -279,10 +314,13 @@ def ajustar_por_ipc(monto: float, fecha_origen: str, fecha_destino: str | None =
         except Exception as e:
             logger.error(f"Error al parsear fecha_destino: {e}")
             return AjusteIPCFloat(monto, ajuste_posible=False)
-        record_destino = _get_closest_ipc_record(db, fd_str)
+        record_destino = _get_closest_ipc_record(db=db, target_fecha=fd_str, ipc_records=ipc_records)
     else:
-        # Usa el período disponible más reciente en la tabla
-        record_destino = db.execute(select(IPCCache).order_by(IPCCache.fecha_dato.desc())).scalars().first()
+        if ipc_records is not None:
+            record_destino = ipc_records[-1]
+        else:
+            # Usa el período disponible más reciente en la tabla
+            record_destino = db.execute(select(IPCCache).order_by(IPCCache.fecha_dato.desc())).scalars().first()
 
     if not record_destino or record_destino.indice_acumulado <= 0:
         logger.warning("No hay registros de IPC destino válidos disponibles.")
