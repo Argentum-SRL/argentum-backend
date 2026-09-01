@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from jose import jwt, JWTError
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.core.auth import get_current_user, verificar_access_token
 from app.models.usuario import Usuario
 from app.models.notificacion import Notificacion, NivelNotificacion
@@ -133,7 +133,6 @@ def actualizar_configuracion(
 async def sse_notificaciones(
     request: Request,
     token: Optional[str] = Query(default=None),
-    db: Session = Depends(get_db),
 ):
     """
     Endpoint SSE para streaming en vivo de notificaciones nuevas sin leer.
@@ -160,13 +159,18 @@ async def sse_notificaciones(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    usuario = db.get(Usuario, usuario_id)
-    if not usuario:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No encontramos una cuenta con esos datos.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    db_auth = SessionLocal()
+    try:
+        usuario = db_auth.get(Usuario, usuario_id)
+        if not usuario:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="No encontramos una cuenta con esos datos.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        tokens_revocados_at = usuario.tokens_revocados_at
+    finally:
+        db_auth.close()
 
     try:
         payload = jwt.decode(access_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
@@ -179,7 +183,7 @@ async def sse_notificaciones(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if usuario.tokens_revocados_at and iat_dt and iat_dt < usuario.tokens_revocados_at:
+    if tokens_revocados_at and iat_dt and iat_dt < tokens_revocados_at:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Sesión revocada. Por favor iniciá sesión nuevamente.",
