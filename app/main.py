@@ -41,7 +41,8 @@ logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 # ---------------------------------------------------------------------------
 # APScheduler — limpieza periódica de refresh tokens expirados/revocados
 # ---------------------------------------------------------------------------
-from app.core.database import SessionLocal
+import time
+from app.core.database import SessionLocal, db_query_duration_var
 from app.core.auth import limpiar_tokens_expirados
 from app.core.job_lock import intentar_tomar_lock_job, liberar_lock_job
 import structlog
@@ -144,6 +145,62 @@ class TimeoutMiddleware:
         except asyncio.CancelledError:
             # El cliente se desconectó — salir limpiamente sin loguear como error
             raise
+
+
+class RequestTimingMiddleware:
+    """
+    Middleware ASGI puro para medir la duración total de cada solicitud HTTP
+    y el tiempo total acumulado en queries de base de datos (db_duration_ms).
+    """
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        method = scope.get("method", "")
+
+        # Inicializar el acumulador mutable de tiempo de DB por request
+        db_container = [0.0]
+        db_query_duration_var.set(db_container)
+        t_start = time.perf_counter()
+        status_code = 500
+
+        async def send_wrapper(message):
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message.get("status", 200)
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            # Excluir /notificaciones/sse de la métrica de duration_ms / slow_request (es un stream long-lived)
+            if path != "/notificaciones/sse":
+                duration_ms = round((time.perf_counter() - t_start) * 1000.0, 2)
+                db_duration_ms = round(db_container[0], 2)
+
+                if duration_ms > 800.0:
+                    struct_logger.warning(
+                        "slow_request",
+                        method=method,
+                        path=path,
+                        status_code=status_code,
+                        duration_ms=duration_ms,
+                        db_duration_ms=db_duration_ms,
+                    )
+                else:
+                    struct_logger.info(
+                        "request_completed",
+                        method=method,
+                        path=path,
+                        status_code=status_code,
+                        duration_ms=duration_ms,
+                        db_duration_ms=db_duration_ms,
+                    )
 
 def _job_limpiar_tokens():
     """Tarea programada: elimina refresh tokens viejos cada 6 horas."""
@@ -554,8 +611,9 @@ app.state.limiter = limiter
 # Orden correcto de registro (el último = el primero en ejecutar):
 #   1. GZipMiddleware
 #   2. TimeoutMiddleware
-#   3. SecurityHeadersMiddleware
-#   4. CORSMiddleware  ← último registrado = primero en ejecutar
+#   3. RequestTimingMiddleware
+#   4. SecurityHeadersMiddleware
+#   5. CORSMiddleware  ← último registrado = primero en ejecutar
 _origins = [settings.FRONTEND_URL]
 if settings.ENVIRONMENT == "development":
     _origins.extend([
@@ -570,6 +628,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestTimingMiddleware)
 app.add_middleware(TimeoutMiddleware, timeout=30.0)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
