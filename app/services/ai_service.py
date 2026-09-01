@@ -107,6 +107,14 @@ Cuando tenés todos los datos para registrar una transacción (monto + tipo + bi
 3. Esperá que el usuario confirme con "sí", "dale", "ok", etc.
 4. Recién entonces el intent es "confirmar" y el backend ejecuta
 
+MÚLTIPLES OPERACIONES EN UN SOLO MENSAJE:
+- Si el mensaje describe 2 o más operaciones simples de gasto o ingreso (NO transferencias, NO compras en cuotas):
+  * Tomá la primera como la transacción principal en los campos directos de "entidades" (monto, moneda, tipo, categoria, descripcion, fecha).
+  * Colocá el resto en la lista "transacciones_adicionales" dentro de "entidades", donde cada elemento es un objeto con exactamente los campos: monto, moneda, tipo, categoria, descripcion, fecha (con el mismo significado y aplicando las mismas reglas de categorización automática y fecha relativa que la principal).
+  * Si alguna operación adicional detectada es una transferencia o una compra en cuotas, NO la incluyas en "transacciones_adicionales" — tratá el mensaje como si solo mencionara la transacción principal.
+  * Si falta la billetera y el usuario tiene más de una activa, hacé UNA SOLA pregunta de billetera que aplicará a todas las operaciones.
+  * Cuando haya transacciones adicionales y la billetera esté resuelta, el resumen de confirmación en "respuesta_usuario" las lista todas en un solo mensaje. Ejemplo: "Voy a anotar 3 movimientos desde Efectivo ARS: $10.560 en Verdulería, $6.000 en Otros, $14.550 en Carnicería. ¿Va?"
+
 FLUJO DE SLOT FILLING Y CATEGORIZACIÓN AUTOMÁTICA:
 1. CATEGORIZACIÓN SIEMPRE AUTOMÁTICA (NUNCA PREGUNTAR CATEGORÍA):
    - La categoría NUNCA se pregunta al usuario bajo ninguna circunstancia.
@@ -127,8 +135,8 @@ MANEJO DE ESTADO PREVIO Y RESPUESTAS A MENÚS / SELECCIONES:
 - Si se te proporciona un bloque de "DATOS YA CONFIRMADOS/RESUELTOS EN ESTA CONVERSACIÓN", esos datos son la verdad establecida:
   * NO los descartes, NO los pises con null, NO los vuelvas a preguntar.
   * Si el usuario responde a una pregunta de billetera con un número o texto (ej: "1", "1 (billetera: Mercado Pago)", "mercado pago"), interpretalo como la selección de la billetera que faltaba para completar la transacción previa, NUNCA como un nuevo monto ni como una transacción nueva de $1.
-  * Devolvé en el JSON de salida TODAS las entidades acumuladas (monto previo, tipo previo, categoría previa + la nueva billetera resuelta).
-  * Si con este dato ya contás con monto, tipo y billetera, establecé intent="registrar_transaccion", confianza >= 0.85, slot_filling=false, y generá la propuesta pidiendo confirmación: "Voy a anotar $X en [Categoría] desde [Billetera]. ¿Va?".
+  * Devolvé en el JSON de salida TODAS las entidades acumuladas (monto previo, tipo previo, categoría previa, transacciones_adicionales previas + la nueva billetera resuelta).
+  * Si con este dato ya contás con monto, tipo y billetera, establecé intent="registrar_transaccion", confianza >= 0.85, slot_filling=false, y generá la propuesta pidiendo confirmación: "Voy a anotar $X en [Categoría] desde [Billetera]. ¿Va?" (o listando todos los movimientos si hay adicionales).
 
 FORMATO DE RESPUESTA — siempre respondé con un JSON válido con exactamente esta estructura, sin texto fuera del JSON:
 {
@@ -142,7 +150,17 @@ FORMATO DE RESPUESTA — siempre respondé con un JSON válido con exactamente e
     "billetera_destino": null o string,
     "cantidad_cuotas": null o número entero,
     "fecha": null o "YYYY-MM-DD",
-    "descripcion": null o string
+    "descripcion": null o string,
+    "transacciones_adicionales": [
+      {
+        "monto": número,
+        "moneda": null o "ARS" o "USD",
+        "tipo": "ingreso" o "egreso",
+        "categoria": null o string,
+        "descripcion": null o string,
+        "fecha": null o "YYYY-MM-DD"
+      }
+    ]
   },
   "confianza": número entre 0.0 y 1.0,
   "slot_filling": true o false,

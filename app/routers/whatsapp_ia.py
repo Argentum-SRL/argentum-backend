@@ -199,6 +199,8 @@ def _merge_entidades(estado_previo: dict | None, entidades_nuevas: dict | None) 
         if k == "datos_faltantes":
             continue
         if v is not None:
+            if k == "transacciones_adicionales" and not v and estado_previo.get("transacciones_adicionales"):
+                continue
             merged[k] = v
     return merged
 
@@ -499,6 +501,84 @@ def _obtener_historial_reciente(usuario_id: UUID, db: Session, n: int = 6) -> li
     return resultado
 
 
+def _resolver_fecha_transaccion(fecha_val: str | None) -> date:
+    fecha_obj = hoy_argentina()
+    if fecha_val:
+        try:
+            fecha_candidata = date.fromisoformat(str(fecha_val))
+            # No permitir fechas futuras ni con más de 60 días de antigüedad
+            limite_antiguedad = hoy_argentina() - timedelta(days=60)
+            if limite_antiguedad <= fecha_candidata <= hoy_argentina():
+                fecha_obj = fecha_candidata
+            else:
+                fecha_obj = hoy_argentina()
+        except Exception:
+            fecha_obj = hoy_argentina()
+    return fecha_obj
+
+
+def _crear_transaccion_adicional(
+    datos: dict,
+    usuario_id: UUID,
+    billetera: Billetera,
+    db: Session,
+) -> Transaccion | None:
+    monto_raw = datos.get("monto")
+    if monto_raw is None:
+        return None
+    try:
+        monto_decimal = Decimal(str(monto_raw))
+    except Exception:
+        return None
+
+    # Validación de monto: estrictamente positivo y dentro de límites reales
+    if monto_decimal <= Decimal("0") or monto_decimal > Decimal("1000000000000"):
+        return None
+
+    # Validación de moneda: si el ítem adicional especifica una moneda que no coincide con la billetera resuelta, descartar
+    moneda_solicitada_str = datos.get("moneda")
+    if moneda_solicitada_str:
+        moneda_solicitada = Moneda.USD if moneda_solicitada_str == "USD" else Moneda.ARS
+        if moneda_solicitada != billetera.moneda:
+            logger.warning(
+                "Descartando transaccion adicional por descalce de moneda: solicitada=%s, billetera=%s",
+                moneda_solicitada.value,
+                billetera.moneda.value,
+            )
+            return None
+
+    tipo_item = datos.get("tipo") or "egreso"
+    categoria_id, subcategoria_id = _resolver_categoria_y_subcategoria(
+        datos.get("categoria"), usuario_id, db, tipo=tipo_item
+    )
+    fecha_obj = _resolver_fecha_transaccion(datos.get("fecha"))
+
+    tx = Transaccion(
+        usuario_id=usuario_id,
+        tipo=TipoTransaccion.INGRESO if tipo_item == "ingreso" else TipoTransaccion.EGRESO,
+        monto=monto_decimal,
+        moneda=billetera.moneda,
+        fecha=fecha_obj,
+        descripcion=datos.get("descripcion") or _nombre_corto_categoria(datos.get("categoria")),
+        billetera_id=billetera.id,
+        categoria_id=categoria_id,
+        subcategoria_id=subcategoria_id,
+        origen=OrigenTransaccion.IA_WPP,
+        estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+        es_recurrente=False,
+        es_cuota_hija=False,
+        es_padre_cuotas=False,
+    )
+    db.add(tx)
+
+    if tx.tipo == TipoTransaccion.INGRESO:
+        billetera.saldo_actual += monto_decimal
+    else:
+        billetera.saldo_actual -= monto_decimal
+
+    return tx
+
+
 def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str | None:
     try:
         intent = resultado_ia.get("intent")
@@ -636,19 +716,7 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                         entidades.get("categoria"), usuario.id, db, tipo=tipo_val
                     )
 
-                    fecha_val = entidades.get("fecha")
-                    fecha_obj = hoy_argentina()
-                    if fecha_val:
-                        try:
-                            fecha_candidata = date.fromisoformat(str(fecha_val))
-                            # No permitir fechas futuras ni con más de 60 días de antigüedad
-                            limite_antiguedad = hoy_argentina() - timedelta(days=60)
-                            if limite_antiguedad <= fecha_candidata <= hoy_argentina():
-                                fecha_obj = fecha_candidata
-                            else:
-                                fecha_obj = hoy_argentina()
-                        except Exception:
-                            fecha_obj = hoy_argentina()
+                    fecha_obj = _resolver_fecha_transaccion(entidades.get("fecha"))
 
                     transaccion = Transaccion(
                         usuario_id=usuario.id,
@@ -673,6 +741,13 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                         billetera.saldo_actual += monto_decimal
                     else:
                         billetera.saldo_actual -= monto_decimal
+
+                    # Crear transacciones adicionales si existen
+                    adicionales = entidades.get("transacciones_adicionales")
+                    if adicionales and isinstance(adicionales, list):
+                        for adic in adicionales:
+                            if isinstance(adic, dict):
+                                _crear_transaccion_adicional(adic, usuario.id, billetera, db)
 
                     # Marcar la conversación previa como ejecutada
                     conv_previa.accion_ejecutada = str(transaccion.id)
@@ -1331,12 +1406,9 @@ async def whatsapp_webhook(
                     else entidades.get("billetera_origen")
                 ) or entidades.get("billetera_origen") or entidades.get("billetera_destino")
 
+                adicionales = entidades.get("transacciones_adicionales")
+
                 if monto is not None:
-                    monto_str = _fmt(float(monto))
-
-                    # Nombre corto de categoría
-                    cat_display = _nombre_corto_categoria(categoria_raw)
-
                     # Nombre de billetera
                     bill_display = None
                     if billetera_raw:
@@ -1349,21 +1421,36 @@ async def whatsapp_webhook(
                         ).scalars().first()
                         bill_display = bill.nombre if bill else billetera_raw
 
-                    if tipo == "ingreso":
-                        partes = [f"Voy a registrar un ingreso de {monto_str}"]
-                        if cat_display:
-                            partes.append(f"en {cat_display}")
-                        if bill_display:
-                            partes.append(f"a {bill_display}")
+                    if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
+                        total_movs = 1 + len(adicionales)
+                        items_desc = [f"{_fmt(float(monto))} en {_nombre_corto_categoria(categoria_raw)}"]
+                        for ad in adicionales:
+                            if isinstance(ad, dict) and ad.get("monto") is not None:
+                                items_desc.append(
+                                    f"{_fmt(float(ad['monto']))} en {_nombre_corto_categoria(ad.get('categoria'))}"
+                                )
+                        lista_str = ", ".join(items_desc)
+                        origen_str = f" desde {bill_display}" if bill_display else (f" a {bill_display}" if tipo == "ingreso" else "")
+                        resultado_ia["respuesta_usuario"] = f"Voy a anotar {total_movs} movimientos{origen_str}: {lista_str}. ¿Va?"
                     else:
-                        partes = [f"Voy a anotar {monto_str}"]
-                        if cat_display:
-                            partes.append(f"en {cat_display}")
-                        if bill_display:
-                            partes.append(f"desde {bill_display}")
-                    partes.append("¿Va?")
+                        monto_str = _fmt(float(monto))
+                        cat_display = _nombre_corto_categoria(categoria_raw)
 
-                    resultado_ia["respuesta_usuario"] = " ".join(partes)
+                        if tipo == "ingreso":
+                            partes = [f"Voy a registrar un ingreso de {monto_str}"]
+                            if cat_display:
+                                partes.append(f"en {cat_display}")
+                            if bill_display:
+                                partes.append(f"a {bill_display}")
+                        else:
+                            partes = [f"Voy a anotar {monto_str}"]
+                            if cat_display:
+                                partes.append(f"en {cat_display}")
+                            if bill_display:
+                                partes.append(f"desde {bill_display}")
+                        partes.append("¿Va?")
+
+                        resultado_ia["respuesta_usuario"] = " ".join(partes)
             except Exception:
                 logger.exception("Error al construir propuesta de transacción")
 
@@ -1401,24 +1488,6 @@ async def whatsapp_webhook(
                     tipo_str = "ingreso" if tx.tipo == TipoTransaccion.INGRESO else "egreso"
                     monto_str = _fmt(float(tx.monto))
 
-                    # Obtener nombre de categoría
-                    cat_nombre = None
-                    if tx.categoria_id:
-                        cat = db.execute(
-                            select(Categoria).where(Categoria.id == tx.categoria_id)
-                        ).scalars().first()
-                        cat_nombre = cat.nombre if cat else None
-
-                    # Si hay subcategoría, mostrar su nombre en vez de la categoría principal
-                    subcat_nombre = None
-                    if tx.subcategoria_id:
-                        subcat = db.execute(
-                            select(Subcategoria).where(Subcategoria.id == tx.subcategoria_id)
-                        ).scalars().first()
-                        subcat_nombre = subcat.nombre if subcat else None
-
-                    nombre_categoria_display = subcat_nombre or cat_nombre or "Otros"
-
                     # Obtener nombre de billetera
                     bill_nombre = None
                     if tx.billetera_id:
@@ -1427,22 +1496,69 @@ async def whatsapp_webhook(
                         ).scalars().first()
                         bill_nombre = bill.nombre if bill else None
 
-                    if tx.tipo == TipoTransaccion.INGRESO:
-                        partes = [f"Listo. Ingreso de {monto_str}"]
-                        if nombre_categoria_display:
-                            partes.append(f"en {nombre_categoria_display}")
-                        if bill_nombre:
-                            partes.append(f"a {bill_nombre}")
-                        partes.append("— registrado.")
-                    else:
-                        partes = [f"Listo. {monto_str}"]
-                        if nombre_categoria_display:
-                            partes.append(f"en {nombre_categoria_display}")
-                        if bill_nombre:
-                            partes.append(f"desde {bill_nombre}")
-                        partes.append("— registrado.")
+                    # Verificar si la conversación previa ejecutada incluía transacciones adicionales
+                    conv_ejecutada = db.execute(
+                        select(ConversacionWpp)
+                        .where(
+                            ConversacionWpp.usuario_id == usuario.id,
+                            ConversacionWpp.accion_ejecutada == str(tx.id),
+                        )
+                    ).scalars().first()
 
-                    resultado_ia["respuesta_usuario"] = " ".join(partes)
+                    adicionales = (
+                        conv_ejecutada.entidades.get("transacciones_adicionales")
+                        if conv_ejecutada and conv_ejecutada.entidades
+                        else None
+                    )
+
+                    if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
+                        total_movs = 1 + len(adicionales)
+                        cat_display = _nombre_corto_categoria(
+                            conv_ejecutada.entidades.get("categoria")
+                        )
+                        items_str = [f"{monto_str} en {cat_display}"]
+                        for ad in adicionales:
+                            if isinstance(ad, dict) and ad.get("monto") is not None:
+                                items_str.append(
+                                    f"{_fmt(float(ad['monto']))} en {_nombre_corto_categoria(ad.get('categoria'))}"
+                                )
+                        origen_str = f" desde {bill_nombre}" if bill_nombre else (f" a {bill_nombre}" if tx.tipo == TipoTransaccion.INGRESO else "")
+                        resultado_ia["respuesta_usuario"] = f"Listo. {total_movs} movimientos{origen_str}: {', '.join(items_str)} — registrados."
+                    else:
+                        # Obtener nombre de categoría
+                        cat_nombre = None
+                        if tx.categoria_id:
+                            cat = db.execute(
+                                select(Categoria).where(Categoria.id == tx.categoria_id)
+                            ).scalars().first()
+                            cat_nombre = cat.nombre if cat else None
+
+                        # Si hay subcategoría, mostrar su nombre en vez de la categoría principal
+                        subcat_nombre = None
+                        if tx.subcategoria_id:
+                            subcat = db.execute(
+                                select(Subcategoria).where(Subcategoria.id == tx.subcategoria_id)
+                            ).scalars().first()
+                            subcat_nombre = subcat.nombre if subcat else None
+
+                        nombre_categoria_display = subcat_nombre or cat_nombre or "Otros"
+
+                        if tx.tipo == TipoTransaccion.INGRESO:
+                            partes = [f"Listo. Ingreso de {monto_str}"]
+                            if nombre_categoria_display:
+                                partes.append(f"en {nombre_categoria_display}")
+                            if bill_nombre:
+                                partes.append(f"a {bill_nombre}")
+                            partes.append("— registrado.")
+                        else:
+                            partes = [f"Listo. {monto_str}"]
+                            if nombre_categoria_display:
+                                partes.append(f"en {nombre_categoria_display}")
+                            if bill_nombre:
+                                partes.append(f"desde {bill_nombre}")
+                            partes.append("— registrado.")
+
+                        resultado_ia["respuesta_usuario"] = " ".join(partes)
             except Exception:
                 logger.exception("Error al construir mensaje de confirmación")
 
