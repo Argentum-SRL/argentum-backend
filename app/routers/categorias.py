@@ -49,7 +49,7 @@ def list_subcategorias(
         Subcategoria.categoria_id == categoria_id,
         Subcategoria.creador_id == current_user.id,
         Subcategoria.estado == EstadoSubcategoria.ACTIVA
-    )
+    ).order_by(Subcategoria.orden, Subcategoria.nombre)
     subs_personales = db.execute(stmt).scalars().all()
     
     return [*subs_glob_filtradas, *subs_personales]
@@ -67,7 +67,7 @@ def list_all_subcategorias(
     stmt = select(Subcategoria).where(
         Subcategoria.creador_id == current_user.id,
         Subcategoria.estado == EstadoSubcategoria.ACTIVA
-    )
+    ).order_by(Subcategoria.orden, Subcategoria.nombre)
     subs_personales = db.execute(stmt).scalars().all()
     
     return [*subs_globales, *subs_personales]

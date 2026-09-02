@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.categoria import Categoria
 
-from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, String, Index
+from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, Integer, String, Index
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,6 +32,7 @@ class Subcategoria(Base):
         PGUUID(as_uuid=True), ForeignKey("categorias.id"), nullable=False
     )
     nombre: Mapped[str] = mapped_column(String(100), nullable=False)
+    orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     es_global: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     creador_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=True
