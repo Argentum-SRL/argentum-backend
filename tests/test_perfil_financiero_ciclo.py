@@ -276,7 +276,6 @@ def test_evaluar_gasto_inusual_con_ciclo_regla(db_session):
         id=uuid4(),
         nombre="Restaurantes",
         tipo=TipoCategoria.EGRESO,
-        es_global=True,
     )
     db_session.add(cat)
 
@@ -366,7 +365,6 @@ def test_usuario_sin_ciclo_fallback_seguro(db_session):
         id=uuid4(),
         nombre="General",
         tipo=TipoCategoria.EGRESO,
-        es_global=True,
     )
     db_session.add(cat)
 

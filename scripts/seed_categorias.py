@@ -144,17 +144,16 @@ CATEGORIAS_SEED = [
 def seed_categorias(db: Session):
     """
     Seed idempotente de las 16 categorías canónicas y sus 57 subcategorías oficiales.
-    - Idempotencia estricta en categorías: busca por nombre, tipo y es_global.
-    - Idempotencia estricta en subcategorías: busca por categoria_id, nombre y es_global.
+    - Idempotencia estricta en categorías: busca por (nombre, tipo).
+    - Idempotencia estricta en subcategorías: busca por (categoria_id, nombre).
     - Actualiza icono y color si ya existían, y actualiza el campo orden según la lista canónica.
-    - Archiva subcategorías globales que ya no formen parte de la lista canónica.
+    - Archiva subcategorías que ya no formen parte de la lista canónica.
     """
     for cat_data in CATEGORIAS_SEED:
-        # 1. Buscar si ya existe la categoría por nombre, tipo y global
+        # 1. Buscar si ya existe la categoría por nombre y tipo
         existente = db.query(Categoria).filter(
             Categoria.nombre == cat_data["nombre"],
-            Categoria.tipo == cat_data["tipo"],
-            Categoria.es_global == True
+            Categoria.tipo == cat_data["tipo"]
         ).first()
 
         if not existente:
@@ -163,8 +162,6 @@ def seed_categorias(db: Session):
                 tipo=cat_data["tipo"],
                 icono=cat_data["icono"],
                 color=cat_data["color"],
-                es_global=True,
-                creador_id=None,
                 estado="activa"
             )
             db.add(categoria)
@@ -179,8 +176,7 @@ def seed_categorias(db: Session):
         for idx, nombre_sub in enumerate(cat_data["subcategorias"]):
             sub_existente = db.query(Subcategoria).filter(
                 Subcategoria.categoria_id == categoria.id,
-                Subcategoria.nombre == nombre_sub,
-                Subcategoria.es_global == True
+                Subcategoria.nombre == nombre_sub
             ).first()
 
             if not sub_existente:
@@ -188,8 +184,6 @@ def seed_categorias(db: Session):
                     categoria_id=categoria.id,
                     nombre=nombre_sub,
                     orden=idx,
-                    es_global=True,
-                    creador_id=None,
                     estado="activa"
                 )
                 db.add(subcategoria)
@@ -198,10 +192,9 @@ def seed_categorias(db: Session):
                 sub_existente.orden = idx
                 sub_existente.estado = "activa"
 
-        # 3. Archivar subcategorías globales obsoletas de esta categoría
+        # 3. Archivar subcategorías obsoletas de esta categoría
         sub_sobrantes = db.query(Subcategoria).filter(
             Subcategoria.categoria_id == categoria.id,
-            Subcategoria.es_global == True,
             ~Subcategoria.nombre.in_(cat_data["subcategorias"])
         ).all()
         for sub_del in sub_sobrantes:

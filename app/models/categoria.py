@@ -8,12 +8,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.subcategoria import Subcategoria
 
-from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, String, Index
+from sqlalchemy import Enum as SAEnum, String
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
-from app.models.usuario import Usuario
 
 
 class TipoCategoria(str, Enum):
@@ -28,10 +27,6 @@ class EstadoCategoria(str, Enum):
 
 class Categoria(Base):
     __tablename__ = "categorias"
-    __table_args__ = (
-        Index("ix_categorias_creador_id", "creador_id"),
-        Index("ix_categorias_es_global_estado", "es_global", "estado"),
-    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     nombre: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -40,10 +35,6 @@ class Categoria(Base):
     )
     icono: Mapped[str | None] = mapped_column(String(50), nullable=True)
     color: Mapped[str | None] = mapped_column(String(7), nullable=True)
-    es_global: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    creador_id: Mapped[UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=True
-    )
     estado: Mapped[EstadoCategoria] = mapped_column(
         SAEnum(EstadoCategoria, values_callable=lambda obj: [e.value for e in obj], name="estado_categoria_enum"),
         nullable=False,
@@ -51,7 +42,6 @@ class Categoria(Base):
     )
 
     subcategorias: Mapped[list["Subcategoria"]] = relationship("Subcategoria", back_populates="categoria")
-    creador: Mapped[Usuario | None] = relationship("Usuario")
 
     def __repr__(self) -> str:
         return (
@@ -59,7 +49,6 @@ class Categoria(Base):
             f"id={self.id!r}, "
             f"nombre={self.nombre!r}, "
             f"tipo={self.tipo.value!r}, "
-            f"es_global={self.es_global!r}, "
             f"estado={self.estado.value!r}"
             ")"
         )

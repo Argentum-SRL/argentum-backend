@@ -535,11 +535,7 @@ def get_subcategorias_gasto(
     subcategorias_stmt = select(Subcategoria).where(
         and_(
             Subcategoria.categoria_id == cat_uuid,
-            Subcategoria.estado == EstadoSubcategoria.ACTIVA,
-            or_(
-                Subcategoria.es_global == True,
-                Subcategoria.creador_id == usuario.id
-            )
+            Subcategoria.estado == EstadoSubcategoria.ACTIVA
         )
     )
     subcategorias = db.execute(subcategorias_stmt).scalars().all()

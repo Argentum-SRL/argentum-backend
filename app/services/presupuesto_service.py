@@ -31,8 +31,6 @@ def _validar_categorias_presupuesto(db: Session, categorias_input: List, usuario
 
     if cat_ids:
         query = select(Categoria).where(Categoria.id.in_(cat_ids))
-        if usuario_id is not None:
-            query = query.where(or_(Categoria.creador_id == usuario_id, Categoria.es_global == True))
         cats = db.execute(query).scalars().all()
         found_cat_ids = {c.id for c in cats}
         if len(found_cat_ids) != len(cat_ids):
@@ -46,8 +44,6 @@ def _validar_categorias_presupuesto(db: Session, categorias_input: List, usuario
 
     if subcat_ids:
         query = select(Subcategoria).options(joinedload(Subcategoria.categoria)).where(Subcategoria.id.in_(subcat_ids))
-        if usuario_id is not None:
-            query = query.where(or_(Subcategoria.creador_id == usuario_id, Subcategoria.es_global == True))
         subs = db.execute(query).scalars().all()
         found_subcat_ids = {s.id for s in subs}
         if len(found_subcat_ids) != len(subcat_ids):

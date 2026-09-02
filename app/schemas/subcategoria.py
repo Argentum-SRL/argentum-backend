@@ -11,22 +11,7 @@ class SubcategoriaBase(BaseModel):
     categoria_id: UUID
     nombre: str
     orden: int = 0
-    es_global: bool = False
-    creador_id: UUID | None = None
     estado: EstadoSubcategoria = EstadoSubcategoria.ACTIVA
-
-
-class SubcategoriaCreate(SubcategoriaBase):
-    pass
-
-
-class SubcategoriaUpdate(BaseModel):
-    categoria_id: UUID | None = None
-    nombre: str | None = None
-    orden: int | None = None
-    es_global: bool | None = None
-    creador_id: UUID | None = None
-    estado: EstadoSubcategoria | None = None
 
 
 class SubcategoriaRead(SubcategoriaBase):

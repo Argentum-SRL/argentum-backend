@@ -74,16 +74,14 @@ def run_smoke_test():
     categoria = Categoria(
         id=uuid4(),
         nombre="Servicios",
-        tipo=TipoCategoria.EGRESO,
-        es_global=True
+        tipo=TipoCategoria.EGRESO
     )
     session.add(categoria)
 
     subcategoria = Subcategoria(
         id=uuid4(),
         categoria_id=categoria.id,
-        nombre="Luz",
-        es_global=True
+        nombre="Luz"
     )
     session.add(subcategoria)
     session.commit()

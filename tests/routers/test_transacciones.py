@@ -100,7 +100,6 @@ def setup_data_fixture(db_session):
         id=uuid4(),
         nombre="Alimentación",
         tipo=TipoTransaccion.EGRESO,
-        es_global=True,
     )
     db_session.add(categoria)
 
@@ -108,7 +107,6 @@ def setup_data_fixture(db_session):
         id=uuid4(),
         categoria_id=categoria.id,
         nombre="Supermercado",
-        es_global=True,
     )
     db_session.add(subcategoria)
 

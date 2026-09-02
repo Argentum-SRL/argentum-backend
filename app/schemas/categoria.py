@@ -12,23 +12,7 @@ class CategoriaBase(BaseModel):
     tipo: TipoCategoria
     icono: str | None = None
     color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
-    es_global: bool = False
-    creador_id: UUID | None = None
     estado: EstadoCategoria = EstadoCategoria.ACTIVA
-
-
-class CategoriaCreate(CategoriaBase):
-    pass
-
-
-class CategoriaUpdate(BaseModel):
-    nombre: str | None = None
-    tipo: TipoCategoria | None = None
-    icono: str | None = None
-    color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
-    es_global: bool | None = None
-    creador_id: UUID | None = None
-    estado: EstadoCategoria | None = None
 
 
 class CategoriaRead(CategoriaBase):

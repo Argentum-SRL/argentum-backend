@@ -78,14 +78,12 @@ def obtener_categorias_globales(db: Session) -> Tuple[List[Dict[str, Any]], List
 
     # 1. Consultar categorías globales activas con orden determinístico
     categorias_stmt = select(Categoria).where(
-        Categoria.es_global == True,
         Categoria.estado == EstadoCategoria.ACTIVA,
     ).order_by(Categoria.nombre.asc(), Categoria.id.asc())
     categorias = db.execute(categorias_stmt).scalars().all()
 
     # 2. Consultar subcategorías globales activas con orden determinístico
     subcategorias_stmt = select(Subcategoria).where(
-        Subcategoria.es_global == True,
         Subcategoria.estado == EstadoSubcategoria.ACTIVA,
     ).order_by(Subcategoria.orden.asc(), Subcategoria.nombre.asc(), Subcategoria.id.asc())
     subcategorias = db.execute(subcategorias_stmt).scalars().all()
@@ -97,8 +95,6 @@ def obtener_categorias_globales(db: Session) -> Tuple[List[Dict[str, Any]], List
             "tipo": c.tipo,
             "icono": c.icono,
             "color": c.color,
-            "es_global": c.es_global,
-            "creador_id": c.creador_id,
             "estado": c.estado,
         }
         for c in categorias
@@ -110,8 +106,6 @@ def obtener_categorias_globales(db: Session) -> Tuple[List[Dict[str, Any]], List
             "categoria_id": s.categoria_id,
             "nombre": s.nombre,
             "orden": s.orden,
-            "es_global": s.es_global,
-            "creador_id": s.creador_id,
             "estado": s.estado,
         }
         for s in subcategorias
