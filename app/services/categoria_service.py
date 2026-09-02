@@ -77,7 +77,7 @@ def obtener_categorias_globales(db: Session) -> Tuple[List[Dict[str, Any]], List
     subcategorias_stmt = select(Subcategoria).where(
         Subcategoria.es_global == True,
         Subcategoria.estado == EstadoSubcategoria.ACTIVA,
-    ).order_by(Subcategoria.nombre)
+    ).order_by(Subcategoria.orden, Subcategoria.nombre)
     subcategorias = db.execute(subcategorias_stmt).scalars().all()
 
     cats_data = [
@@ -99,6 +99,7 @@ def obtener_categorias_globales(db: Session) -> Tuple[List[Dict[str, Any]], List
             "id": s.id,
             "categoria_id": s.categoria_id,
             "nombre": s.nombre,
+            "orden": s.orden,
             "es_global": s.es_global,
             "creador_id": s.creador_id,
             "estado": s.estado,

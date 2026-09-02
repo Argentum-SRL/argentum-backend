@@ -17,7 +17,7 @@ CATEGORIAS_SEED = [
         "tipo": "egreso",
         "icono": "alimentacion",
         "color": "#F97316",
-        "subcategorias": ["Supermercado", "Verdulería", "Carnicería", "Kiosco", "Otros"]
+        "subcategorias": ["Supermercado", "Kiosco", "Verdulería", "Carnicería"]
     },
     {
         "nombre": "Indumentaria",
@@ -31,33 +31,33 @@ CATEGORIAS_SEED = [
         "tipo": "egreso",
         "icono": "luz",
         "color": "#EAB308",
-        "subcategorias": ["Alquiler", "Expensas", "Luz", "Gas", "Agua", "Seguros", "Impuestos"]
+        "subcategorias": ["Luz", "Gas", "Agua", "Alquiler", "Expensas", "Impuestos", "Seguros"]
     },
     {
         "nombre": "Hogar",
         "tipo": "egreso",
         "icono": "casa",
         "color": "#8B5CF6",
-        "subcategorias": ["Muebles y electrodomésticos", "Reparaciones", "Limpieza"]
+        "subcategorias": ["Limpieza", "Reparaciones", "Muebles y electrodomésticos"]
     },
     {
         "nombre": "Salud",
         "tipo": "egreso",
         "icono": "medicina",
         "color": "#10B981",
-        "subcategorias": ["Médico / Consulta", "Odontología", "Estudios y análisis", "Farmacia", "Obra social / Prepaga", "Terapias"]
+        "subcategorias": ["Farmacia", "Médico / Consulta", "Obra social / Prepaga", "Estudios y análisis", "Odontología", "Terapias"]
     },
     {
         "nombre": "Transporte",
         "tipo": "egreso",
         "icono": "transporte",
         "color": "#0284C7",
-        "subcategorias": ["Combustible", "Transporte público", "Taxi / Apps", "Mantenimiento y seguro del auto", "Peajes", "Estacionamiento"]
+        "subcategorias": ["Taxi / Apps", "Transporte público", "Combustible", "Peajes", "Estacionamiento", "Mantenimiento y seguro del auto"]
     },
     {
         "nombre": "Comunicación",
         "tipo": "egreso",
-        "icono": "serviciosdigitales",
+        "icono": "internet",
         "color": "#6366F1",
         "subcategorias": ["Celular", "Internet y cable"]
     },
@@ -66,7 +66,7 @@ CATEGORIAS_SEED = [
         "tipo": "egreso",
         "icono": "entretenimiento",
         "color": "#EC4899",
-        "subcategorias": ["Suscripciones", "Salidas", "Deportes y gimnasio", "Hobbies y juegos", "Viajes"]
+        "subcategorias": ["Salidas", "Deportes y gimnasio", "Hobbies y juegos", "Viajes"]
     },
     {
         "nombre": "Educación",
@@ -87,14 +87,14 @@ CATEGORIAS_SEED = [
         "tipo": "egreso",
         "icono": "herramienta",
         "color": "#6B7280",
-        "subcategorias": ["Cuidado personal", "Mascotas", "Regalos", "Otros"]
+        "subcategorias": ["Cuidado personal", "Mascotas", "Regalos"]
     },
     {
         "nombre": "Banco",
         "tipo": "egreso",
         "icono": "banco",
         "color": "#64748B",
-        "subcategorias": ["Comisiones y gastos bancarios", "Préstamos", "Intereses pagados", "Impuesto al cheque / movimientos"]
+        "subcategorias": ["Comisiones y gastos bancarios", "Impuesto al cheque / movimientos", "Préstamos", "Intereses pagados"]
     },
     # ── INGRESOS (4) ─────────────────────────────────────
     {
@@ -102,7 +102,7 @@ CATEGORIAS_SEED = [
         "tipo": "ingreso",
         "icono": "salario",
         "color": "#16A34A",
-        "subcategorias": ["Sueldo", "Aguinaldo", "Bonos y horas extras"]
+        "subcategorias": ["Sueldo", "Bonos y horas extras", "Aguinaldo"]
     },
     {
         "nombre": "Trabajo independiente",
@@ -123,7 +123,7 @@ CATEGORIAS_SEED = [
         "tipo": "ingreso",
         "icono": "dineroenmano",
         "color": "#9CA3AF",
-        "subcategorias": ["Regalos", "Reintegros", "Otros"]
+        "subcategorias": ["Reintegros", "Regalos"]
     },
 ]
 
@@ -143,10 +143,11 @@ CATEGORIAS_SEED = [
 
 def seed_categorias(db: Session):
     """
-    Seed idempotente de las 16 categorías canónicas y sus 61 subcategorías oficiales.
+    Seed idempotente de las 16 categorías canónicas y sus 60 subcategorías oficiales.
     - Idempotencia estricta en categorías: busca por nombre, tipo y es_global.
     - Idempotencia estricta en subcategorías: busca por categoria_id, nombre y es_global.
-    - Actualiza icono y color si ya existían.
+    - Actualiza icono y color si ya existían, y actualiza el campo orden según la lista canónica.
+    - Archiva subcategorías globales que ya no formen parte de la lista canónica.
     """
     for cat_data in CATEGORIAS_SEED:
         # 1. Buscar si ya existe la categoría por nombre, tipo y global
@@ -175,7 +176,7 @@ def seed_categorias(db: Session):
             categoria.color = cat_data["color"]
 
         # 2. Seedear subcategorías con idempotencia estricta por categoría
-        for nombre_sub in cat_data["subcategorias"]:
+        for idx, nombre_sub in enumerate(cat_data["subcategorias"]):
             sub_existente = db.query(Subcategoria).filter(
                 Subcategoria.categoria_id == categoria.id,
                 Subcategoria.nombre == nombre_sub,
@@ -186,12 +187,26 @@ def seed_categorias(db: Session):
                 subcategoria = Subcategoria(
                     categoria_id=categoria.id,
                     nombre=nombre_sub,
+                    orden=idx,
                     es_global=True,
                     creador_id=None,
                     estado="activa"
                 )
                 db.add(subcategoria)
-                print(f"  [+] Subcategoria creada: {nombre_sub} en {categoria.nombre}")
+                print(f"  [+] Subcategoria creada: {nombre_sub} en {categoria.nombre} (orden {idx})")
+            else:
+                sub_existente.orden = idx
+                sub_existente.estado = "activa"
+
+        # 3. Archivar subcategorías globales obsoletas de esta categoría
+        sub_sobrantes = db.query(Subcategoria).filter(
+            Subcategoria.categoria_id == categoria.id,
+            Subcategoria.es_global == True,
+            ~Subcategoria.nombre.in_(cat_data["subcategorias"])
+        ).all()
+        for sub_del in sub_sobrantes:
+            sub_del.estado = "archivada"
+            print(f"  [-] Subcategoria archivada: {sub_del.nombre} en {categoria.nombre}")
 
     db.commit()
     try:
