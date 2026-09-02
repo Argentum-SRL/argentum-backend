@@ -8,7 +8,6 @@ from app.utils.genero import (
     flexionar_saludo,
     flexionar_palabra,
     get_asunto_bienvenida,
-    get_subtitulo_bienvenida,
 )
 from app.services.email_templates import template_bienvenida
 
@@ -44,22 +43,15 @@ def test_get_asunto_bienvenida():
     assert get_asunto_bienvenida(None) == "¡Te damos la bienvenida a Argentum!"
 
 
-def test_get_subtitulo_bienvenida():
-    assert get_subtitulo_bienvenida(Sexo.FEMENINO) == "BIENVENIDA A ARGENTUM"
-    assert get_subtitulo_bienvenida(Sexo.MASCULINO) == "BIENVENIDO A ARGENTUM"
-    assert get_subtitulo_bienvenida(Sexo.NO_BINARIO) == "TE DAMOS LA BIENVENIDA A ARGENTUM"
-    assert get_subtitulo_bienvenida(None) == "TE DAMOS LA BIENVENIDA A ARGENTUM"
-
-
 def test_template_bienvenida():
     html_fem = template_bienvenida("Lucía", Sexo.FEMENINO)
-    assert "BIENVENIDA A ARGENTUM" in html_fem
     assert "Lucía" in html_fem
+    assert "Tu cuenta ya está lista, Lucía" in html_fem
 
     html_masc = template_bienvenida("Martín", Sexo.MASCULINO)
-    assert "BIENVENIDO A ARGENTUM" in html_masc
     assert "Martín" in html_masc
+    assert "Tu cuenta ya está lista, Martín" in html_masc
 
     html_nb = template_bienvenida("Alex", Sexo.NO_BINARIO)
-    assert "TE DAMOS LA BIENVENIDA A ARGENTUM" in html_nb
     assert "Alex" in html_nb
+    assert "Tu cuenta ya está lista, Alex" in html_nb
