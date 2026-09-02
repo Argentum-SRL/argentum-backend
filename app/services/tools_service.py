@@ -481,7 +481,7 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
         Transaccion.tipo == TipoTransaccion.EGRESO,
         Transaccion.moneda == Moneda.ARS,
         Transaccion.es_padre_cuotas == False,
-        or_(Transaccion.metodo_pago != MetodoPago.CREDITO, Transaccion.metodo_pago == None),
+        Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
         or_(Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA, Transaccion.estado_verificacion == None),
         Transaccion.fecha >= start_range,
         Transaccion.fecha <= end_range

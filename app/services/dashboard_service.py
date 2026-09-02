@@ -133,7 +133,7 @@ def get_dashboard_resumen(
     res_stmt_where = and_(
         Transaccion.usuario_id == usuario.id,
         Transaccion.es_padre_cuotas == False,
-        Transaccion.metodo_pago != MetodoPago.CREDITO,
+        Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
         or_(Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA, Transaccion.estado_verificacion == None)
     )
     if billetera_ids:
@@ -167,7 +167,7 @@ def get_dashboard_resumen(
         Transaccion.fecha >= fecha_inicio,
         Transaccion.fecha <= fecha_fin,
         Transaccion.es_padre_cuotas == False,
-        Transaccion.metodo_pago != MetodoPago.CREDITO
+        Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO)
     )
     if billetera_ids:
         m_stmt_where = and_(m_stmt_where, Transaccion.billetera_id.in_(billetera_ids))
@@ -549,7 +549,7 @@ def get_subcategorias_gasto(
         Transaccion.fecha <= fecha_fin,
         Transaccion.tipo == TipoTransaccion.EGRESO,
         Transaccion.es_padre_cuotas == False,
-        Transaccion.metodo_pago != MetodoPago.CREDITO,
+        Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
         or_(
             Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
             Transaccion.estado_verificacion == None

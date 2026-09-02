@@ -42,6 +42,7 @@ from app.models.usuario import EstadoUsuario, Moneda, Usuario
 from app.services import ai_service
 from app.services.evento_service import emitir_evento_actualizacion
 from app.services.openai_client import get_openai_client
+from app.services.transaccion_service import deducir_metodo_pago
 from app.services.whatsapp_service import enviar_whatsapp
 from app.utils.telefono import normalizar_telefono_ar
 import structlog
@@ -602,6 +603,7 @@ def _crear_transaccion_adicional(
         moneda=billetera.moneda,
         fecha=fecha_obj,
         descripcion=datos.get("descripcion") or _nombre_corto_categoria(datos.get("categoria")),
+        metodo_pago=deducir_metodo_pago(billetera, tarjeta_id=None),
         billetera_id=billetera.id,
         categoria_id=categoria_id,
         subcategoria_id=subcategoria_id,
@@ -767,6 +769,7 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                         moneda=moneda_val,
                         fecha=fecha_obj,
                         descripcion=entidades.get("descripcion") or _nombre_corto_categoria(entidades.get("categoria")),
+                        metodo_pago=deducir_metodo_pago(billetera, tarjeta_id=None),
                         billetera_id=billetera_id,
                         categoria_id=categoria_id,
                         subcategoria_id=subcategoria_id,
