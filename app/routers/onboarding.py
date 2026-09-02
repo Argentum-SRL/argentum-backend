@@ -145,7 +145,8 @@ def post_moneda(
         background_tasks.add_task(
             enviar_email_bienvenida,
             current_user.email,
-            current_user.nombre or "Usuario"
+            current_user.nombre or "Usuario",
+            current_user.sexo
         )
     
     # Marcar onboarding como completo al terminar el paso de moneda
