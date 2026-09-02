@@ -575,7 +575,7 @@ def get_subcategorias_gasto(
 
     # 3. Consolidar resultados
     sub_gastos = {}
-    otros_total = {"ars": Decimal("0"), "usd": Decimal("0")}
+    general_total = {"ars": Decimal("0"), "usd": Decimal("0")}
     for row in res:
         sub_id = row.subcategoria_id
         moneda_val = row.moneda.value.lower() if row.moneda else "ars"
@@ -586,8 +586,8 @@ def get_subcategorias_gasto(
             if moneda_val in sub_gastos[sub_id]:
                 sub_gastos[sub_id][moneda_val] += total
         else:
-            if moneda_val in otros_total:
-                otros_total[moneda_val] += total
+            if moneda_val in general_total:
+                general_total[moneda_val] += total
 
     desglose = []
     for sub in subcategorias:
@@ -601,13 +601,13 @@ def get_subcategorias_gasto(
             }
         })
 
-    if otros_total["ars"] > 0 or otros_total["usd"] > 0:
+    if general_total["ars"] > 0 or general_total["usd"] > 0:
         desglose.append({
-            "subcategoria_id": "otros",
-            "subcategoria_nombre": "Otros",
+            "subcategoria_id": "general",
+            "subcategoria_nombre": "General",
             "gasto_actual_ciclo": {
-                "ars": float(otros_total["ars"]),
-                "usd": float(otros_total["usd"])
+                "ars": float(general_total["ars"]),
+                "usd": float(general_total["usd"])
             }
         })
 

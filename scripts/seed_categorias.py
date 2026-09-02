@@ -143,7 +143,7 @@ CATEGORIAS_SEED = [
 
 def seed_categorias(db: Session):
     """
-    Seed idempotente de las 16 categorías canónicas y sus 60 subcategorías oficiales.
+    Seed idempotente de las 16 categorías canónicas y sus 57 subcategorías oficiales.
     - Idempotencia estricta en categorías: busca por nombre, tipo y es_global.
     - Idempotencia estricta en subcategorías: busca por categoria_id, nombre y es_global.
     - Actualiza icono y color si ya existían, y actualiza el campo orden según la lista canónica.

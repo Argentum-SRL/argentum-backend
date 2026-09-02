@@ -10,7 +10,6 @@ import os
 import secrets
 import tempfile
 import time
-import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
@@ -47,6 +46,9 @@ from app.services.whatsapp_service import enviar_whatsapp
 from app.utils.telefono import normalizar_telefono_ar
 import structlog
 
+from app.core.constants import CATEGORIAS_SISTEMA
+from app.utils.texto import normalizar_texto
+
 logger = structlog.get_logger("whatsapp")
 
 
@@ -55,13 +57,8 @@ def _fmt(monto: float) -> str:
     return f"${monto:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def _normalizar_texto(texto: str | None) -> str:
-    """Normaliza texto: quita acentos/diacríticos, pasa a minúsculas y elimina espacios sobrantes."""
-    if not texto:
-        return ""
-    nfkd = unicodedata.normalize("NFD", str(texto))
-    sin_diacriticos = "".join(c for c in nfkd if unicodedata.category(c) != "Mn")
-    return sin_diacriticos.lower().strip()
+# Alias unificado de normalización
+_normalizar_texto = normalizar_texto
 
 
 def _nombre_corto_categoria(nombre: str | None) -> str:
@@ -258,6 +255,25 @@ def _resolver_billetera(nombre: str | None, usuario_id: UUID, db: Session) -> UU
     return None
 
 
+def _obtener_fallback_otros(
+    tipo: str,
+    categorias: list[Categoria],
+    db: Session | None = None,
+) -> tuple[UUID | None, UUID | None]:
+    """
+    Retorna (categoria_otros_id, None) de forma determinística.
+    Elimina por completo cualquier selección arbitraria o aleatoria de subcategorías.
+    """
+    cat_otros = next(
+        (c for c in categorias if normalizar_texto(c.nombre) == "otros"),
+        None
+    )
+    if not cat_otros:
+        logger.error("No se encontró la categoría 'Otros' para el tipo '%s'", tipo)
+        return None, None
+    return cat_otros.id, None
+
+
 def _resolver_categoria_y_subcategoria(
     nombre: str | None,
     usuario_id: UUID,
@@ -265,143 +281,169 @@ def _resolver_categoria_y_subcategoria(
     tipo: str = "egreso",
 ) -> tuple[UUID | None, UUID | None]:
     """
-    Parsea y valida el campo categoría/subcategoría contra las tablas reales de la base de datos.
-    1. Filtra categorías por tipo (egreso vs ingreso) y visibilidad (globales o del usuario).
-    2. Realiza matching exacto por nombre, normalizado (sin tildes/mayúsculas) o substring.
-    3. Si no hay coincidencia directa de categoría, busca en subcategorías activas.
-    4. Si no hay coincidencia o si no viene categoría, cae al default real de 'Otros' (con subcategoría 'Otros').
-    Retorna siempre (categoria_id, subcategoria_id) válidos de la base de datos.
+    Parsea y valida el campo categoría/subcategoría contra las tablas reales de la base de datos
+    de manera 100% determinística y en memoria (máximo 2 consultas con ORDER BY estable).
+
+    Cascada de resolución:
+    1. Carga categorías activas del tipo correspondiente y subcategorías activas con ORDER BY explícito.
+    2. Excluye categorías del sistema (CATEGORIAS_SISTEMA como 'Ahorro').
+    3. Separa string por '>' en nombre_categoria y nombre_subcategoria.
+    4. Resuelve categoría:
+       a) Coincidencia exacta normalizada.
+       b) Coincidencia por contención (min 4 chars) SOLO SI produce exactamente 1 candidata.
+       c) Coincidencia exacta normalizada por subcategoría única en todo el conjunto.
+       d) Fallback a categoría 'Otros' con subcategoría NULL.
+    5. Resuelve subcategoría SOLO dentro de la categoría determinada:
+       a) Coincidencia exacta normalizada.
+       b) Coincidencia por contención única dentro de esa categoría (min 4 chars).
+       c) Si no hay match -> NULL.
+
+    Retorna (categoria_id, subcategoria_id).
     """
     tipo_enum = TipoCategoria.INGRESO if tipo == "ingreso" else TipoCategoria.EGRESO
 
-    # 1. Obtener todas las categorías activas para este tipo y usuario
-    categorias = db.execute(
-        select(Categoria).where(
+    # 1. Cargar UNA sola vez por invocación con order_by estable
+    stmt_cats = (
+        select(Categoria)
+        .where(
             Categoria.estado == EstadoCategoria.ACTIVA,
             Categoria.tipo == tipo_enum,
             (Categoria.es_global == True) | (Categoria.creador_id == usuario_id)
         )
-    ).scalars().all()
+        .order_by(Categoria.nombre.asc(), Categoria.id.asc())
+    )
+    categorias = db.execute(stmt_cats).scalars().all()
 
-    def _obtener_fallback_otros() -> tuple[UUID | None, UUID | None]:
-        cat_otros = next((c for c in categorias if _normalizar_texto(c.nombre) == "otros"), None)
-        if not cat_otros and categorias:
-            cat_otros = categorias[0]
+    # Excluir categorías de sistema ("Ahorro")
+    categorias_candidatas = [
+        c for c in categorias
+        if normalizar_texto(c.nombre) not in {normalizar_texto(s) for s in CATEGORIAS_SISTEMA}
+    ]
 
-        if not cat_otros:
-            return None, None
+    cat_ids_validas = {c.id for c in categorias_candidatas}
 
-        sub_otros = db.execute(
-            select(Subcategoria).where(
-                Subcategoria.categoria_id == cat_otros.id,
-                Subcategoria.estado == EstadoSubcategoria.ACTIVA,
-                Subcategoria.nombre.ilike("otros")
-            )
-        ).scalars().first()
-
-        if not sub_otros:
-            sub_otros = db.execute(
-                select(Subcategoria).where(
-                    Subcategoria.categoria_id == cat_otros.id,
-                    Subcategoria.estado == EstadoSubcategoria.ACTIVA
-                )
-            ).scalars().first()
-
-        return cat_otros.id, (sub_otros.id if sub_otros else None)
-
-    if not nombre:
-        return _obtener_fallback_otros()
-
-    # 2. Separar categoría y subcategoría si viene con formato "Cat > Subcat"
-    if ">" in nombre:
-        partes = [p.strip() for p in nombre.split(">", 1)]
-        nombre_cat = partes[0]
-        nombre_subcat = partes[1]
-    else:
-        nombre_cat = nombre.strip()
-        nombre_subcat = None
-
-    norm_cat = _normalizar_texto(nombre_cat)
-
-    # 3. Match de categoría (exacto -> normalizado -> substring)
-    categoria_match = None
-    for c in categorias:
-        if c.nombre == nombre_cat:
-            categoria_match = c
-            break
-
-    if not categoria_match:
-        for c in categorias:
-            if _normalizar_texto(c.nombre) == norm_cat:
-                categoria_match = c
-                break
-
-    if not categoria_match:
-        for c in categorias:
-            c_norm = _normalizar_texto(c.nombre)
-            if norm_cat in c_norm or c_norm in norm_cat:
-                categoria_match = c
-                break
-
-    if not categoria_match:
-        # Intentar buscar si nombre_cat coincide con alguna subcategoría directamente
-        subcat_directa = db.execute(
-            select(Subcategoria)
-            .join(Categoria, Subcategoria.categoria_id == Categoria.id)
-            .where(
-                Categoria.estado == EstadoCategoria.ACTIVA,
-                Categoria.tipo == tipo_enum,
-                Subcategoria.estado == EstadoSubcategoria.ACTIVA,
-                (Subcategoria.es_global == True) | (Subcategoria.creador_id == usuario_id)
-            )
-        ).scalars().all()
-
-        for s in subcat_directa:
-            s_norm = _normalizar_texto(s.nombre)
-            if s_norm == norm_cat or norm_cat in s_norm or s_norm in norm_cat:
-                return s.categoria_id, s.id
-
-        return _obtener_fallback_otros()
-
-    # 4. Match de subcategoría
-    subcategorias = db.execute(
-        select(Subcategoria).where(
-            Subcategoria.categoria_id == categoria_match.id,
+    stmt_subs = (
+        select(Subcategoria)
+        .where(
             Subcategoria.estado == EstadoSubcategoria.ACTIVA,
+            Subcategoria.categoria_id.in_(cat_ids_validas),
             (Subcategoria.es_global == True) | (Subcategoria.creador_id == usuario_id)
         )
-    ).scalars().all()
+        .order_by(Subcategoria.orden.asc(), Subcategoria.nombre.asc(), Subcategoria.id.asc())
+    )
+    subcategorias_candidatas = db.execute(stmt_subs).scalars().all()
 
-    if not nombre_subcat:
-        sub_default = next((s for s in subcategorias if _normalizar_texto(s.nombre) == "otros"), None)
-        return categoria_match.id, (sub_default.id if sub_default else None)
+    if not nombre:
+        cat_id, _ = _obtener_fallback_otros(tipo, categorias_candidatas, db)
+        logger.debug("[CATEGORIZACION] Fallback por nombre vacío -> (%s, None), confianza=fallback", cat_id)
+        return cat_id, None
 
-    norm_subcat = _normalizar_texto(nombre_subcat)
-    subcat_match = None
+    # 2. Separar por '>' si viene con formato 'Cat > Subcat'
+    if ">" in nombre:
+        partes = [p.strip() for p in nombre.split(">", 1)]
+        nombre_categoria_raw = partes[0]
+        nombre_subcategoria_raw = partes[1] if len(partes) > 1 else None
+    else:
+        nombre_categoria_raw = nombre.strip()
+        nombre_subcategoria_raw = None
 
-    for s in subcategorias:
-        if s.nombre == nombre_subcat:
-            subcat_match = s
-            break
+    norm_cat = normalizar_texto(nombre_categoria_raw)
+    categoria_match: Categoria | None = None
+    sub_unica_detectada: Subcategoria | None = None
+    confianza_cat = "fallback"
 
-    if not subcat_match:
-        for s in subcategorias:
-            if _normalizar_texto(s.nombre) == norm_subcat:
-                subcat_match = s
+    # 3. Resolución de categoría
+    if norm_cat:
+        # a) Coincidencia exacta del nombre normalizado de categoría
+        for c in categorias_candidatas:
+            if normalizar_texto(c.nombre) == norm_cat:
+                categoria_match = c
+                confianza_cat = "exacta"
                 break
 
-    if not subcat_match:
-        for s in subcategorias:
-            s_norm = _normalizar_texto(s.nombre)
-            if norm_subcat in s_norm or s_norm in norm_subcat:
-                subcat_match = s
-                break
+        # b) Coincidencia por contención SOLO SI produce exactamente 1 candidata (min 4 chars)
+        if not categoria_match:
+            candidatas_b = []
+            for c in categorias_candidatas:
+                c_norm = normalizar_texto(c.nombre)
+                min_len = min(len(norm_cat), len(c_norm))
+                if min_len >= 4 and (norm_cat in c_norm or c_norm in norm_cat):
+                    candidatas_b.append(c)
+            if len(candidatas_b) == 1:
+                categoria_match = candidatas_b[0]
+                confianza_cat = "aproximada"
 
-    if not subcat_match:
-        # Fallback a "Otros" dentro de esta categoría si existe
-        subcat_match = next((s for s in subcategorias if _normalizar_texto(s.nombre) == "otros"), None)
+        # c) Búsqueda por subcategoría exacta y única en todo el árbol (solo si a y b fallaron)
+        if not categoria_match:
+            candidatas_sub = []
+            for s in subcategorias_candidatas:
+                s_norm = normalizar_texto(s.nombre)
+                if s_norm == norm_cat:
+                    candidatas_sub.append(s)
+            if len(candidatas_sub) == 1:
+                sub_unica_detectada = candidatas_sub[0]
+                cat_padre = next((c for c in categorias_candidatas if c.id == sub_unica_detectada.categoria_id), None)
+                if cat_padre:
+                    categoria_match = cat_padre
+                    confianza_cat = "aproximada"
 
-    return categoria_match.id, (subcat_match.id if subcat_match else None)
+    # d) Fallback si nada resolvió
+    if not categoria_match:
+        cat_id, _ = _obtener_fallback_otros(tipo, categorias_candidatas, db)
+        logger.debug(
+            "[CATEGORIZACION] Fallback categoría 'Otros' para input='%s' -> (%s, None), confianza=fallback",
+            nombre,
+            cat_id,
+        )
+        return cat_id, None
+
+    # 4. Resolución de subcategoría
+    subcategoria_match: Subcategoria | None = None
+    confianza_sub = "ninguna"
+
+    # Caso especial: la categoría se resolvió por match exacto de subcategoría única (paso 3.c)
+    if sub_unica_detectada and sub_unica_detectada.categoria_id == categoria_match.id:
+        subcategoria_match = sub_unica_detectada
+        confianza_sub = "exacta"
+    elif nombre_subcategoria_raw:
+        # ÚNICAMENTE se evalúa el texto explícito posterior al '>'
+        norm_sub = normalizar_texto(nombre_subcategoria_raw)
+        if norm_sub:
+            subcategorias_de_cat = [
+                s for s in subcategorias_candidatas if s.categoria_id == categoria_match.id
+            ]
+            # a) Coincidencia exacta normalizada
+            for s in subcategorias_de_cat:
+                if normalizar_texto(s.nombre) == norm_sub:
+                    subcategoria_match = s
+                    confianza_sub = "exacta"
+                    break
+
+            # b) Coincidencia por contención única dentro de la categoría (min 4 chars)
+            if not subcategoria_match:
+                candidatas_sub_b = []
+                for s in subcategorias_de_cat:
+                    s_norm = normalizar_texto(s.nombre)
+                    min_len = min(len(norm_sub), len(s_norm))
+                    if min_len >= 4 and (norm_sub in s_norm or s_norm in norm_sub):
+                        candidatas_sub_b.append(s)
+                if len(candidatas_sub_b) == 1:
+                    subcategoria_match = candidatas_sub_b[0]
+                    confianza_sub = "aproximada"
+    else:
+        # No vino texto de subcategoría tras '>' -> NULL estricto
+        subcategoria_match = None
+
+    sub_id = subcategoria_match.id if subcategoria_match else None
+    logger.debug(
+        "[CATEGORIZACION] Input='%s' -> Cat=%s (%s), Sub=%s (%s)",
+        nombre,
+        categoria_match.nombre,
+        confianza_cat,
+        subcategoria_match.nombre if subcategoria_match else "NULL",
+        confianza_sub,
+    )
+    return categoria_match.id, sub_id
 
 
 def _obtener_billeteras_activas(usuario_id: UUID, db: Session) -> list[Billetera]:
@@ -1226,11 +1268,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
             if estado_previo:
                 resultado_ia["entidades"] = _merge_entidades(estado_previo, resultado_ia.get("entidades", {}))
 
-            # Categorización automática por defecto si no viene ninguna categoría
             entidades_actuales = resultado_ia.get("entidades", {})
-            if not entidades_actuales.get("categoria"):
-                entidades_actuales["categoria"] = "Otros > Otros"
-                resultado_ia["entidades"] = entidades_actuales
 
             # Si tenemos las entidades mínimas (monto + billetera), asegurar transición a registrar_transaccion
             tiene_monto = entidades_actuales.get("monto") is not None
