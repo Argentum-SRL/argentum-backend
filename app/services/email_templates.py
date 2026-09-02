@@ -339,11 +339,15 @@ def template_reset_password_email(nombre: str, reset_url: str) -> str:
     )
 
 
-def template_bienvenida(nombre: str) -> str:
+def template_bienvenida(nombre: str, sexo: object = None) -> str:
     """
     Template: Bienvenida tras completar la configuración de la cuenta (onboarding).
     """
+    from app.utils.genero import get_subtitulo_bienvenida
+
     dashboard_url = f"{settings.FRONTEND_URL}/app/dashboard"
+    subtitulo = get_subtitulo_bienvenida(sexo)
+
     contenido = f"""
     <p style="font-size: 14px; color: #3a3d42; line-height: 1.6; margin: 0 0 16px 0;">
       Hola {nombre}, ya completaste la configuración inicial de tu cuenta en Argentum.
@@ -366,7 +370,7 @@ def template_bienvenida(nombre: str) -> str:
     """
     return _generar_html_base(
         color_header="#0D2045",
-        subtitulo="BIENVENIDO A ARGENTUM",
+        subtitulo=subtitulo,
         badge_bg="#EAF3DE",
         badge_text="#27500A",
         badge_label="Cuenta lista",
@@ -375,5 +379,6 @@ def template_bienvenida(nombre: str) -> str:
         nota_footer_body="Gracias por sumarte a Argentum.",
         texto_footer="Recibís este correo porque completaste la configuración de tu cuenta en Argentum.",
     )
+
 
 

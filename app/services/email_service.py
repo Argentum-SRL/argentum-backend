@@ -304,8 +304,9 @@ def enviar_email_aviso_google(destinatario: str) -> bool:
     return _enviar_email(destinatario, asunto, cuerpo, cuerpo_html)
 
 
-def enviar_email_bienvenida(destinatario: str, nombre: str) -> bool:
-    asunto = "¡Bienvenido a Argentum!"
+def enviar_email_bienvenida(destinatario: str, nombre: str, sexo: object = None) -> bool:
+    from app.utils.genero import get_asunto_bienvenida
+    asunto = get_asunto_bienvenida(sexo)
     dashboard_url = f"{settings.FRONTEND_URL}/app/dashboard"
     cuerpo = (
         f"Hola {nombre},\n\n"
@@ -314,6 +315,7 @@ def enviar_email_bienvenida(destinatario: str, nombre: str) -> bool:
         f"{dashboard_url}\n\n"
         f"A partir de ahora podés empezar a registrar tus gastos e ingresos por WhatsApp o desde la aplicación web."
     )
-    cuerpo_html = template_bienvenida(nombre=nombre)
+    cuerpo_html = template_bienvenida(nombre=nombre, sexo=sexo)
     return _enviar_email(destinatario, asunto, cuerpo, cuerpo_html)
+
 
