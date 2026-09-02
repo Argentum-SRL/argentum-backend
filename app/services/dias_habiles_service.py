@@ -70,7 +70,7 @@ def _get_feriados_cached_sync(anio: int) -> list[date]:
     Retorna feriados desde la caché en memoria o BD de forma sincrónica.
     Si no existen datos para el año, emite advertencia explícita.
     """
-    if anio in _feriados_cache and _feriados_cache[anio]:
+    if anio in _feriados_cache:
         return _feriados_cache[anio]
 
     # Intentar cargar desde BD

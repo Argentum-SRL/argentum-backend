@@ -285,7 +285,7 @@ def test_get_ciclo_fechas_dia_fijo_posterior(db_session):
 def test_get_ciclo_fechas_regla_direccion_none_default_anterior(db_session):
     """
     Usuario REGLA ultimo_viernes con ciclo_ajuste_direccion=None.
-    Debe asumir default 'anterior' sin fallar y dar 24/12/2026.
+    Sin ajuste de día hábil, debe devolver la fecha nominal estricta (25/12/2026).
     """
     usuario = Usuario(
         id=uuid4(),
@@ -299,7 +299,7 @@ def test_get_ciclo_fechas_regla_direccion_none_default_anterior(db_session):
     )
     hoy = date(2026, 12, 26)
     inicio, fin = get_ciclo_fechas(usuario, hoy)
-    assert inicio == date(2026, 12, 24)
+    assert inicio == date(2026, 12, 25)
 
 def test_get_ciclo_fechas_regla_direccion_posterior(db_session):
     """
