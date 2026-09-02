@@ -53,13 +53,3 @@ def get_asunto_bienvenida(sexo: Any) -> str:
     if s == "masculino":
         return "¡Bienvenido a Argentum!"
     return "¡Te damos la bienvenida a Argentum!"
-
-
-def get_subtitulo_bienvenida(sexo: Any) -> str:
-    """Retorna el subtítulo en mayúsculas para el header del template de bienvenida."""
-    s = normalizar_sexo(sexo)
-    if s == "femenino":
-        return "BIENVENIDA A ARGENTUM"
-    if s == "masculino":
-        return "BIENVENIDO A ARGENTUM"
-    return "TE DAMOS LA BIENVENIDA A ARGENTUM"

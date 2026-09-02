@@ -3,7 +3,6 @@ from app.core.config import settings
 
 def _generar_html_base(
     color_header: str,
-    subtitulo: str,
     badge_bg: str,
     badge_text: str,
     badge_label: str,
@@ -39,7 +38,6 @@ def _generar_html_base(
                   </td>
                   <td style="vertical-align: middle;">
                     <div style="font-size: 18px; font-weight: 600; color: #ffffff; letter-spacing: -0.3px; line-height: 1.2;">Argentum</div>
-                    <div style="font-size: 10px; color: rgba(255,255,255,0.5); letter-spacing: 1px; margin-top: 2px;">{subtitulo}</div>
                   </td>
                 </tr>
               </table>
@@ -121,7 +119,6 @@ def template_verificacion_email(nombre: str, codigo: str) -> str:
     """
     return _generar_html_base(
         color_header="#0D2045",
-        subtitulo="VERIFICACIÓN DE CUENTA",
         badge_bg="#E6F1FB",
         badge_text="#0C447C",
         badge_label="Verificación requerida",
@@ -161,7 +158,6 @@ def template_recupero_contrasena(nombre: str, link: str) -> str:
     """
     return _generar_html_base(
         color_header="#0D2045",
-        subtitulo="RECUPERO DE CONTRASEÑA",
         badge_bg="#E6F1FB",
         badge_text="#0C447C",
         badge_label="Acción solicitada",
@@ -198,7 +194,6 @@ def template_cambio_contrasena(nombre: str, fecha_hora_argentina: str, dispositi
     """
     return _generar_html_base(
         color_header="#0D2045",
-        subtitulo="SEGURIDAD DE CUENTA",
         badge_bg="#EAF3DE",
         badge_text="#27500A",
         badge_label="Contraseña actualizada",
@@ -242,7 +237,6 @@ def template_nuevo_dispositivo(nombre: str, fecha_hora_argentina: str, dispositi
     """
     return _generar_html_base(
         color_header="#791F1F",
-        subtitulo="ALERTA DE SEGURIDAD",
         badge_bg="#FCEBEB",
         badge_text="#791F1F",
         badge_label="Acción requerida",
@@ -286,7 +280,6 @@ def template_intentos_login(nombre: str, cantidad_intentos: int, fecha_hora_arge
     """
     return _generar_html_base(
         color_header="#791F1F",
-        subtitulo="ALERTA DE SEGURIDAD",
         badge_bg="#FCEBEB",
         badge_text="#791F1F",
         badge_label="Actividad inusual",
@@ -328,7 +321,6 @@ def template_reset_password_email(nombre: str, reset_url: str) -> str:
     """
     return _generar_html_base(
         color_header="#0D2045",
-        subtitulo="Alguien pidió cambiar tu contraseña de Argentum",
         badge_bg="#FFF3E0",
         badge_text="#A8905A",
         badge_label="Acción requerida",
@@ -343,10 +335,7 @@ def template_bienvenida(nombre: str, sexo: object = None) -> str:
     """
     Template: Bienvenida tras completar la configuración de la cuenta (onboarding).
     """
-    from app.utils.genero import get_subtitulo_bienvenida
-
     dashboard_url = f"{settings.FRONTEND_URL}/app/dashboard"
-    subtitulo = get_subtitulo_bienvenida(sexo)
 
     contenido = f"""
     <p style="font-size: 14px; color: #3a3d42; line-height: 1.6; margin: 0 0 16px 0;">
@@ -370,7 +359,6 @@ def template_bienvenida(nombre: str, sexo: object = None) -> str:
     """
     return _generar_html_base(
         color_header="#0D2045",
-        subtitulo=subtitulo,
         badge_bg="#EAF3DE",
         badge_text="#27500A",
         badge_label="Cuenta lista",
