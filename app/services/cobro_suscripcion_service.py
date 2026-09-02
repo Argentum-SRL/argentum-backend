@@ -64,6 +64,13 @@ def _cobrar_suscripcion(db: Session, suscripcion: Suscripcion, hoy: date, primer
         if not tarjeta:
             return False
 
+        billetera = db.query(Billetera).filter(Billetera.id == tarjeta.billetera_id).first()
+        if not billetera:
+            return False
+
+        from app.services.transaccion_service import _validar_moneda_coincide
+        _validar_moneda_coincide(precio.moneda, billetera)
+
         # Si no se pasa primer_vencimiento explícito, calcularlo desde la fecha del cobro
         if primer_vencimiento is None:
             primer_vencimiento = tarjeta_service.calcular_primer_vencimiento(

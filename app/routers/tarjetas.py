@@ -11,7 +11,8 @@ from app.schemas.tarjeta_credito import (
     TarjetaCreditoResponse,
     ResumenTarjeta,
     PagarTarjetaBody,
-    PresionFuturaResponse
+    PresionFuturaResponse,
+    ResultadoPagoTarjeta
 )
 from app.schemas.transaccion import TransaccionRead
 from app.services import tarjeta_service
@@ -107,7 +108,7 @@ def get_resumen_tarjeta(
     return tarjeta_service.calcular_resumen_actual(db, tarjeta)
 
 
-@router.post("/{tarjeta_id}/pagar", response_model=TransaccionRead)
+@router.post("/{tarjeta_id}/pagar", response_model=ResultadoPagoTarjeta)
 def pagar_tarjeta(
     tarjeta_id: UUID,
     body: PagarTarjetaBody | None = None,
