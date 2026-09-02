@@ -409,6 +409,29 @@ async def _job_refresh_feriados():
         db.close()
 
 
+def _job_guardar_cotizaciones_diarias():
+    """Tarea programada diaria: persiste cotizaciones de cierre de mercado a las 21:00 UTC (18:00 ART)."""
+    from app.services.dolar_service import guardar_cotizaciones_del_dia
+    db = SessionLocal()
+    lock_adquirido = False
+    try:
+        if not intentar_tomar_lock_job(db, "_job_guardar_cotizaciones_diarias"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_guardar_cotizaciones_diarias",
+            )
+            return
+        lock_adquirido = True
+        guardadas = guardar_cotizaciones_del_dia(db)
+        logger.info("Job guardar_cotizaciones_diarias ejecutado exitosamente (%d guardadas).", len(guardadas))
+    except Exception:
+        logger.exception("Error en job _job_guardar_cotizaciones_diarias")
+    finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_guardar_cotizaciones_diarias")
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Crear el scheduler y registrar jobs aquí para evitar que se
@@ -563,6 +586,16 @@ async def lifespan(app: FastAPI):
         hour=3,
         minute=0,
         id="refresh_feriados_argentina",
+        misfire_grace_time=300,
+        max_instances=1,
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _job_guardar_cotizaciones_diarias,
+        "cron",
+        hour=21,
+        minute=0,
+        id="guardar_cotizaciones_diarias",
         misfire_grace_time=300,
         max_instances=1,
         replace_existing=True,

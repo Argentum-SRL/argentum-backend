@@ -48,6 +48,21 @@ class EstadoVerificacionTransaccion(str, Enum):
 
 
 class Transaccion(Base):
+    """
+    Modelo de transacciones de ingresos y egresos.
+
+    REGLA DE CAMPOS DE TRAZABILIDAD MULTIMONEDA:
+    Los campos `monto_original`, `moneda_original`, `cotizacion_aplicada` y `tipo_dolar_usado`
+    se completan ÚNICAMENTE cuando existió una conversión de moneda en la transacción
+    (por ejemplo, un gasto realizado en USD liquidado sobre una billetera en ARS, o viceversa).
+    Si el movimiento se registró originalmente en la misma moneda de la billetera, estos campos
+    permanecen estrictamente NULOS (None). Nunca se duplica información.
+
+    DELIBERACIÓN DE LA ETAPA 2:
+    En esta etapa de infraestructura, estos 4 campos quedan sin utilizar en la lógica de negocio.
+    Su creación prepara el esquema de datos para la Etapa 3 en adelante, donde se introducirá
+    la conversión automática. Ningún endpoint ni esquema Pydantic expone estos campos aún.
+    """
     __tablename__ = "transacciones"
     __table_args__ = (
         Index("ix_transacciones_usuario_id", "usuario_id"),
@@ -110,6 +125,15 @@ class Transaccion(Base):
     import_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     importacion_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("importaciones_resumen.id"), nullable=True)
     titular_pdf: Mapped[str | None] = mapped_column(String(150), nullable=True)
+
+    # Campos de trazabilidad de conversión multimoneda (Etapa 2 - Infraestructura)
+    monto_original: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
+    moneda_original: Mapped[Moneda | None] = mapped_column(
+        SAEnum(Moneda, values_callable=lambda obj: [e.value for e in obj], name="moneda_enum"), nullable=True
+    )
+    cotizacion_aplicada: Mapped[Decimal | None] = mapped_column(Numeric(15, 4), nullable=True)
+    tipo_dolar_usado: Mapped[str | None] = mapped_column(String(30), nullable=True)
+
     fecha_creacion: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )

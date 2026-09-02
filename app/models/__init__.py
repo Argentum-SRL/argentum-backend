@@ -28,6 +28,7 @@ from app.models.usuario import Usuario
 from app.models.tools import IPCCache
 from app.models.feriado import FeriadoAR
 from app.models.evento_actualizacion import EventoActualizacion
+from app.models.cotizacion_dolar import CotizacionDolar
 
 __all__ = [
     "Usuario",
@@ -61,6 +62,7 @@ __all__ = [
     "IPCCache",
     "FeriadoAR",
     "EventoActualizacion",
+    "CotizacionDolar",
 ]
 
 
