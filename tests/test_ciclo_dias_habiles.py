@@ -610,14 +610,12 @@ def test_proyeccion_desglose_cuando_ciclo_finalizado(db_session, monkeypatch):
     cat1 = Categoria(
         id=uuid4(),
         nombre="Supermercado Test",
-        tipo=TipoCategoria.EGRESO,
-        es_global=True
+        tipo=TipoCategoria.EGRESO
     )
     cat2 = Categoria(
         id=uuid4(),
         nombre="Servicios Test",
-        tipo=TipoCategoria.EGRESO,
-        es_global=True
+        tipo=TipoCategoria.EGRESO
     )
     db_session.add_all([cat1, cat2])
     db_session.commit()

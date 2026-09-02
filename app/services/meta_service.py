@@ -464,7 +464,6 @@ def obtener_o_crear_categoria_ahorro(db: Session, usuario_id: UUID, tipo: str) -
     
     # Buscar categoría "Ahorro"
     categoria = db.query(Categoria).filter(
-        (Categoria.creador_id == usuario_id) | (Categoria.es_global == True),
         Categoria.nombre == "Ahorro",
         Categoria.tipo == tipo_cat
     ).first()
@@ -475,8 +474,6 @@ def obtener_o_crear_categoria_ahorro(db: Session, usuario_id: UUID, tipo: str) -
             tipo=tipo_cat,
             icono="ahorro",
             color="#2563EB",
-            es_global=True,
-            creador_id=None,
             estado=EstadoCategoria.ACTIVA
         )
         db.add(categoria)

@@ -211,7 +211,6 @@ def test_crear_presupuesto_mensual_con_ciclo_custom(db_session):
         id=uuid4(),
         nombre="Comida",
         tipo=TipoCategoria.EGRESO,
-        es_global=True,
     )
     db_session.add(cat)
     db_session.commit()
@@ -252,7 +251,6 @@ def test_renovar_presupuestos_mensual_con_ciclo_custom(db_session):
         id=uuid4(),
         nombre="Transporte",
         tipo=TipoCategoria.EGRESO,
-        es_global=True,
     )
     db_session.add(cat)
     db_session.commit()

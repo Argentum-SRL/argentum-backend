@@ -183,10 +183,6 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, co
     categoria = db.execute(
         select(Categoria).where(
             Categoria.id == data.categoria_id,
-            or_(
-                Categoria.creador_id == usuario_id,
-                Categoria.es_global == True
-            ),
             Categoria.estado == EstadoCategoria.ACTIVA
         )
     ).scalar_one_or_none()

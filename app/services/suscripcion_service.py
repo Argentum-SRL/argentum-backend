@@ -99,8 +99,7 @@ def crear_suscripcion(db: Session, usuario_id: UUID, data: SuscripcionCreate) ->
     if data.subcategoria_id:
         from app.models.subcategoria import Subcategoria
         sub = db.query(Subcategoria).filter(
-            Subcategoria.id == data.subcategoria_id,
-            (Subcategoria.creador_id == usuario_id) | (Subcategoria.es_global == True)
+            Subcategoria.id == data.subcategoria_id
         ).first()
         if not sub:
             raise HTTPException(status_code=404, detail="Subcategoría no encontrada.")
@@ -248,8 +247,7 @@ def actualizar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID, 
     if nueva_sub_id:
         from app.models.subcategoria import Subcategoria
         sub = db.query(Subcategoria).filter(
-            Subcategoria.id == nueva_sub_id,
-            (Subcategoria.creador_id == usuario_id) | (Subcategoria.es_global == True)
+            Subcategoria.id == nueva_sub_id
         ).first()
         if not sub:
             raise HTTPException(status_code=404, detail="Subcategoría no encontrada.")

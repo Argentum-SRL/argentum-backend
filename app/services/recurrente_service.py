@@ -3,7 +3,7 @@ import logging
 from uuid import UUID
 from datetime import date
 from fastapi import HTTPException
-from sqlalchemy import select, desc, or_
+from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
 
 from app.models.transaccion import Transaccion, OrigenTransaccion
@@ -60,10 +60,6 @@ def crear_recurrente(db: Session, usuario_id: UUID, data: TransaccionRecurrenteC
     categoria = db.execute(
         select(Categoria).where(
             Categoria.id == data.categoria_id,
-            or_(
-                Categoria.creador_id == usuario_id,
-                Categoria.es_global == True
-            ),
             Categoria.estado == EstadoCategoria.ACTIVA
         )
     ).scalar_one_or_none()

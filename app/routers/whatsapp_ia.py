@@ -307,8 +307,7 @@ def _resolver_categoria_y_subcategoria(
         select(Categoria)
         .where(
             Categoria.estado == EstadoCategoria.ACTIVA,
-            Categoria.tipo == tipo_enum,
-            (Categoria.es_global == True) | (Categoria.creador_id == usuario_id)
+            Categoria.tipo == tipo_enum
         )
         .order_by(Categoria.nombre.asc(), Categoria.id.asc())
     )
@@ -326,8 +325,7 @@ def _resolver_categoria_y_subcategoria(
         select(Subcategoria)
         .where(
             Subcategoria.estado == EstadoSubcategoria.ACTIVA,
-            Subcategoria.categoria_id.in_(cat_ids_validas),
-            (Subcategoria.es_global == True) | (Subcategoria.creador_id == usuario_id)
+            Subcategoria.categoria_id.in_(cat_ids_validas)
         )
         .order_by(Subcategoria.orden.asc(), Subcategoria.nombre.asc(), Subcategoria.id.asc())
     )

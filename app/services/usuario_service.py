@@ -25,8 +25,6 @@ from app.models.transferencia_interna import TransferenciaInterna
 from app.models.categoria_excluida import CategoriaExcluida
 from app.models.configuracion_notificacion import ConfiguracionNotificacion
 from app.models.historial_suscripcion import HistorialSuscripcion
-from app.models.categoria import Categoria
-from app.models.subcategoria import Subcategoria
 from app.models.movimiento_meta import MovimientoMeta
 from app.models.periodo_presupuesto import PeriodoPresupuesto
 from app.models.presupuesto_categoria import PresupuestoCategoria
@@ -440,12 +438,7 @@ def eliminar_usuario(db: Session, usuario: Usuario) -> dict:
         for modelo in modelos_usuario:
             db.execute(delete(modelo).where(modelo.usuario_id == usuario_id))
         
-        # 3. Modelos con creador_id (Categorías y Subcategorías personalizadas)
-        modelos_creador = [Subcategoria, Categoria]
-        for modelo in modelos_creador:
-            db.execute(delete(modelo).where(modelo.creador_id == usuario_id))
-        
-        # 4. Finalmente el usuario
+        # 3. Finalmente el usuario
         db.delete(usuario)
         db.commit()
     except Exception:

@@ -457,16 +457,14 @@ def pagar_resumen_tarjeta(
     from app.models.subcategoria import Subcategoria
 
     categoria = db.query(Categoria).filter(
-        Categoria.nombre.ilike("Banco"),
-        (Categoria.creador_id == usuario_id) | (Categoria.es_global == True)
+        Categoria.nombre.ilike("Banco")
     ).first()
 
     subcategoria = None
     if categoria:
         subcategoria = db.query(Subcategoria).filter(
             Subcategoria.categoria_id == categoria.id,
-            Subcategoria.nombre.ilike("Tarjeta%de%crédito") | Subcategoria.nombre.ilike("Tarjetas%de%crédito"),
-            (Subcategoria.creador_id == usuario_id) | (Subcategoria.es_global == True)
+            Subcategoria.nombre.ilike("Tarjeta%de%crédito") | Subcategoria.nombre.ilike("Tarjetas%de%crédito")
         ).first()
 
     # 6. Crear la transacción de egreso

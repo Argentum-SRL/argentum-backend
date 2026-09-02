@@ -14,10 +14,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.billetera import Billetera, EstadoBilletera
-from app.models.categoria import Categoria, EstadoCategoria
 from app.models.meta import Meta, EstadoMeta
 from app.models.presupuesto import Presupuesto, EstadoPresupuesto
-from app.models.subcategoria import Subcategoria, EstadoSubcategoria
 from app.models.usuario import Usuario
 from app.services.dashboard_service import get_ciclo_fechas
 from app.services.openai_client import get_openai_client
@@ -205,34 +203,12 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
     # 1. Categorías y subcategorías globales desde cache en memoria
     cats_globales, subs_globales = categoria_service.obtener_categorias_globales(db)
 
-    # 2. Categorías personalizadas del usuario
-    cats_personales = db.execute(
-        select(Categoria).where(
-            Categoria.creador_id == usuario.id,
-            Categoria.estado == EstadoCategoria.ACTIVA
-        )
-    ).scalars().all()
-
-    # 3. Subcategorías personalizadas activas del usuario
-    subs_personales = db.execute(
-        select(Subcategoria).where(
-            Subcategoria.creador_id == usuario.id,
-            Subcategoria.estado == EstadoSubcategoria.ACTIVA
-        )
-    ).scalars().all()
-
     subcats_por_cat: dict[str, list[str]] = {}
     for s in subs_globales:
         key = str(s["categoria_id"])
         if key not in subcats_por_cat:
             subcats_por_cat[key] = []
         subcats_por_cat[key].append(s["nombre"])
-
-    for sp in subs_personales:
-        key = str(sp.categoria_id)
-        if key not in subcats_por_cat:
-            subcats_por_cat[key] = []
-        subcats_por_cat[key].append(sp.nombre)
 
     categorias_lista = [
         {
@@ -242,14 +218,6 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
         }
         for cg in cats_globales
         if cg["nombre"] not in CATEGORIAS_SISTEMA
-    ] + [
-        {
-            "nombre": cp.nombre,
-            "tipo": cp.tipo.value if hasattr(cp.tipo, "value") else str(cp.tipo),
-            "subcategorias": subcats_por_cat.get(str(cp.id), [])
-        }
-        for cp in cats_personales
-        if cp.nombre not in CATEGORIAS_SISTEMA
     ]
 
     hoy = hoy_argentina()
