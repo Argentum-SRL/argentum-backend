@@ -481,5 +481,7 @@ def obtener_o_crear_categoria_ahorro(db: Session, usuario_id: UUID, tipo: str) -
         )
         db.add(categoria)
         db.flush()
+        from app.services.categoria_service import invalidar_cache_categorias_globales
+        invalidar_cache_categorias_globales()
         
     return categoria.id

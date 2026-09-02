@@ -118,10 +118,10 @@ MÚLTIPLES OPERACIONES EN UN SOLO MENSAJE:
 FLUJO DE SLOT FILLING Y CATEGORIZACIÓN AUTOMÁTICA:
 1. CATEGORIZACIÓN SIEMPRE AUTOMÁTICA (NUNCA PREGUNTAR CATEGORÍA):
    - La categoría NUNCA se pregunta al usuario bajo ninguna circunstancia.
-   - Si el mensaje contiene alguna pista, concepto, rubro o comercio (ej: "nafta", "coto", "almuerzo", "farmacity", "gym", "sueldo"), asigná SIEMPRE de forma automática la categoría y subcategoría canónica más semejante del contexto (formato "Categoría > Subcategoría").
-   - Si el mensaje NO contiene ninguna pista (ej: monto pelado como "gasté 500", "pagué 2000", "me entraron 10000"), asigná SIEMPRE:
-     * Para egresos: "Otros > Otros"
-     * Para ingresos: "Otros > Otros"
+   - Si conocés la categoría y la subcategoría, devolvé "Categoría > Subcategoría" (ej: "Alimentación > Verdulería", "Transporte > Taxi / Apps", "Salud > Farmacia").
+   - Si conocés la categoría pero no la subcategoría, devolvé solo "Categoría" (ej: "Alimentación", "Transporte", "Restaurantes y delivery").
+   - Si el mensaje NO contiene ninguna pista (ej: monto pelado como "gasté 500", "pagué 2000", "me entraron 10000"), devolvé SIEMPRE: "Otros".
+   - Nunca inventes nombres de categorías o subcategorías que no estén en la lista provista.
    - No generes NUNCA preguntas tipo "¿En qué categoría?".
 2. BILLETERA (NO ASUMIR SI HAY VARIAS):
    - Si el usuario tiene más de una billetera activa y no la especificó, preguntá "¿Desde qué billetera?" (o "¿A qué billetera?" si es ingreso). NUNCA asumas una billetera por tu cuenta si no fue indicada y hay múltiples opciones.
@@ -181,7 +181,7 @@ REGLAS CRÍTICAS:
 - Si el usuario menciona una fecha relativa ("ayer", "el lunes pasado", "hace 3 días"), calculala a partir de "fecha_actual", NUNCA de tu conocimiento propio.
 - Si el usuario menciona sólo un día del mes sin mes ni año (ej: "el 12", "el 5"), asumí el mes y año de "fecha_actual" (a menos que ese día aún no haya ocurrido en el mes corriente, en cuyo caso usá el mes anterior — igual criterio que usaría una persona).
 - Si no se menciona fecha, o si hay cualquier ambigüedad o no podés resolverla con certeza, devolvé "fecha": null (el backend asignará hoy por defecto).
-- Al categorizar un gasto o ingreso, usá EXACTAMENTE los nombres de categorías y subcategorías del contexto. Si podés identificar la subcategoría, indicala en el campo "categoria" con el formato "Categoría > Subcategoría" (ej: "Alimentación > Verdulería", "Transporte > Taxi / Apps", "Salud > Farmacia"). Si no podés identificar la subcategoría, usá solo la categoría principal.
+- Al categorizar un gasto o ingreso, usá EXACTAMENTE los nombres de categorías y subcategorías del contexto. Si podés identificar la subcategoría, indicala en el campo "categoria" con el formato "Categoría > Subcategoría". Si conocés la categoría pero no la subcategoría, usá solo la categoría principal. Si no hay pista, usá "Otros". Nunca inventes nombres que no estén en la lista provista.
 - Nunca respondas fuera del JSON. Solo JSON, nada más.
 """
 
@@ -193,6 +193,8 @@ _MESES_ES = [
 
 
 def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
+    from app.core.constants import CATEGORIAS_SISTEMA
+
     billeteras = db.execute(
         select(Billetera).where(
             Billetera.usuario_id == usuario.id,
@@ -239,6 +241,7 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
             "subcategorias": subcats_por_cat.get(str(cg["id"]), [])
         }
         for cg in cats_globales
+        if cg["nombre"] not in CATEGORIAS_SISTEMA
     ] + [
         {
             "nombre": cp.nombre,
@@ -246,6 +249,7 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
             "subcategorias": subcats_por_cat.get(str(cp.id), [])
         }
         for cp in cats_personales
+        if cp.nombre not in CATEGORIAS_SISTEMA
     ]
 
     hoy = hoy_argentina()

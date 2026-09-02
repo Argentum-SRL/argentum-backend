@@ -1,9 +1,14 @@
 """
 app/services/categoria_service.py — Servicio de categorías y subcategorías con cache en memoria (TTLCache).
+
+ADVERTENCIA:
+Este cache en memoria es por proceso (in-process). No se comparte entre diferentes
+instancias ni réplicas del servidor. Su TTL está configurado en 300 segundos (5 minutos)
+para garantizar frescura sin sobrecargar consultas repetitivas de solo lectura.
 """
 import time
 import logging
-from typing import List, Dict, Any, Tuple, Optional
+from typing import List, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
@@ -12,13 +17,16 @@ from app.models.subcategoria import Subcategoria, EstadoSubcategoria
 
 logger = logging.getLogger(__name__)
 
+# TTL configurado a 300 segundos (5 minutos) por proceso
+_TTL_SEGUNDOS = 300
+
 try:
     from cachetools import TTLCache  # type: ignore[import-untyped,import-not-found]
-    _cache_categorias_globales = TTLCache(maxsize=10, ttl=900)
+    _cache_categorias_globales = TTLCache(maxsize=10, ttl=_TTL_SEGUNDOS)
 except ImportError:
     class _SimpleTTLCache(dict):
-        """Fallback de cache TTL en memoria cuando cachetools no está disponible en el entorno de análisis."""
-        def __init__(self, maxsize: int = 10, ttl: int = 900):
+        """Fallback de cache TTL en memoria cuando cachetools no está disponible en el entorno."""
+        def __init__(self, maxsize: int = 10, ttl: int = _TTL_SEGUNDOS):
             super().__init__()
             self._ttl = ttl
             self._expires: dict[str, float] = {}
@@ -44,10 +52,9 @@ except ImportError:
             self._expires.clear()
             super().clear()
 
-    _cache_categorias_globales = _SimpleTTLCache(maxsize=10, ttl=900)
+    _cache_categorias_globales = _SimpleTTLCache(maxsize=10, ttl=_TTL_SEGUNDOS)
 
 _CACHE_KEY_GLOBALES = "categorias_y_subcategorias_globales"
-
 
 
 def invalidar_cache_categorias_globales() -> None:
@@ -59,25 +66,28 @@ def invalidar_cache_categorias_globales() -> None:
 def obtener_categorias_globales(db: Session) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Devuelve las categorías y subcategorías globales activas.
-    Utiliza un cache en memoria del proceso con TTL de 15 minutos.
+    Utiliza un cache en memoria del proceso con TTL de 5 minutos (300s).
     Retorna una tupla (categorias_globales, subcategorias_globales) como listas de dicts.
+    Orden determinístico y estable:
+    - Categorías: Categoria.nombre.asc(), Categoria.id.asc()
+    - Subcategorías: Subcategoria.orden.asc(), Subcategoria.nombre.asc(), Subcategoria.id.asc()
     """
     cached = _cache_categorias_globales.get(_CACHE_KEY_GLOBALES)
     if cached is not None:
         return cached
 
-    # 1. Consultar categorías globales activas
+    # 1. Consultar categorías globales activas con orden determinístico
     categorias_stmt = select(Categoria).where(
         Categoria.es_global == True,
         Categoria.estado == EstadoCategoria.ACTIVA,
-    ).order_by(Categoria.nombre)
+    ).order_by(Categoria.nombre.asc(), Categoria.id.asc())
     categorias = db.execute(categorias_stmt).scalars().all()
 
-    # 2. Consultar subcategorías globales activas
+    # 2. Consultar subcategorías globales activas con orden determinístico
     subcategorias_stmt = select(Subcategoria).where(
         Subcategoria.es_global == True,
         Subcategoria.estado == EstadoSubcategoria.ACTIVA,
-    ).order_by(Subcategoria.orden, Subcategoria.nombre)
+    ).order_by(Subcategoria.orden.asc(), Subcategoria.nombre.asc(), Subcategoria.id.asc())
     subcategorias = db.execute(subcategorias_stmt).scalars().all()
 
     cats_data = [
