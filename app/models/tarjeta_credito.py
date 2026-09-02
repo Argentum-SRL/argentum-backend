@@ -57,7 +57,7 @@ class TarjetaCredito(Base):
     dia_vencimiento: Mapped[int] = mapped_column(Integer, nullable=False)
     limite_credito: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
     moneda: Mapped[Moneda] = mapped_column(
-        SAEnum(Moneda, values_callable=lambda obj: [e.value for e in obj], name="moneda_tarjeta_enum"),
+        SAEnum(Moneda, values_callable=lambda obj: [e.value for e in obj], name="moneda_enum"),
         nullable=False,
         default=Moneda.ARS,
     )
