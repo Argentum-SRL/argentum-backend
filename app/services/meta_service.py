@@ -14,8 +14,13 @@ from app.models.usuario import Moneda
 from app.schemas.meta import MetaCreate, MetaUpdate
 from app.schemas.movimiento_meta import MovimientoMetaCreate
 from app.utils.fecha import hoy_argentina
+from app.utils.formato import formatear_monto
 
 logger = logging.getLogger(__name__)
+
+COTIZACION_MINIMA_FALLBACK = Decimal("100")
+COTIZACION_MAXIMA_FALLBACK = Decimal("100000")
+TOLERANCIA_COTIZACION_PORCENTAJE = Decimal("0.30")
 
 def obtener_metas(db: Session, usuario_id: UUID, activas_solo: bool = False, skip: int = 0, limit: int = 50) -> List[Meta]:
     query = (
@@ -160,8 +165,47 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
     monto_impacto_meta = data.monto
     if data.moneda_movimiento != meta.moneda:
         if not data.cotizacion_usada or data.cotizacion_usada <= Decimal("0"):
-            raise HTTPException(status_code=400, detail="Se requiere una cotización válida mayor a 0 para movimientos en moneda distinta a la meta.")
-        
+            raise HTTPException(
+                status_code=400,
+                detail="Tenés que indicar una cotización válida mayor a cero para operar entre monedas distintas."
+            )
+
+        if data.cotizacion_usada == Decimal("1"):
+            raise HTTPException(
+                status_code=400,
+                detail="La cotización no puede ser 1 cuando la meta y el movimiento son en monedas distintas."
+            )
+
+        from app.services.dolar_service import get_cotizaciones_dolar
+        cotizacion_referencia: Decimal | None = None
+        try:
+            cots_data = get_cotizaciones_dolar()
+            cots = cots_data.get("cotizaciones", {})
+            tipo = (data.tipo_dolar_usado or "blue").lower()
+            info_dolar = cots.get(tipo) or cots.get("blue") or cots.get("oficial")
+            if info_dolar and info_dolar.get("promedio"):
+                cotizacion_referencia = Decimal(str(info_dolar["promedio"]))
+            elif info_dolar and info_dolar.get("venta"):
+                cotizacion_referencia = Decimal(str(info_dolar["venta"]))
+        except Exception as e:
+            logger.warning("No se pudo consultar cotización de referencia para meta: %s", e)
+            cotizacion_referencia = None
+
+        if cotizacion_referencia is not None:
+            min_permitido = (cotizacion_referencia * (Decimal("1") - TOLERANCIA_COTIZACION_PORCENTAJE)).quantize(Decimal("0.01"))
+            max_permitido = (cotizacion_referencia * (Decimal("1") + TOLERANCIA_COTIZACION_PORCENTAJE)).quantize(Decimal("0.01"))
+            if data.cotizacion_usada < min_permitido or data.cotizacion_usada > max_permitido:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"La cotización ingresada (${data.cotizacion_usada:,.2f}) difiere más del 30% de la cotización actual (${cotizacion_referencia:,.2f}). Ingresá un valor entre ${min_permitido:,.2f} y ${max_permitido:,.2f}."
+                )
+        else:
+            if data.cotizacion_usada < COTIZACION_MINIMA_FALLBACK or data.cotizacion_usada > COTIZACION_MAXIMA_FALLBACK:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"La cotización ingresada (${data.cotizacion_usada:,.2f}) no es válida. Debe estar entre ${COTIZACION_MINIMA_FALLBACK} y ${COTIZACION_MAXIMA_FALLBACK}."
+                )
+
         # Meta en USD, Movimiento en ARS. monto_impacto = monto_ars / cotizacion
         if meta.moneda == Moneda.USD and data.moneda_movimiento == Moneda.ARS:
             monto_impacto_meta = (data.monto / data.cotizacion_usada).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -254,7 +298,7 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
                         usuario_id=usuario_id,
                         tipo=TipoNotificacion.META_ALCANZADA,
                         nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                        mensaje=f"¡Completaste tu meta '{meta.nombre}'! Ahorraste ${meta.monto_objetivo:,.0f}.",
+                        mensaje=f"¡Completaste tu meta '{meta.nombre}'! Ahorraste {formatear_monto(meta.monto_objetivo, meta.moneda)}.",
                         entidad_tipo="meta",
                         entidad_id=meta.id,
                         deep_link="/app/metas",

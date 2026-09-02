@@ -237,6 +237,23 @@ def calcular_fecha_cierre_de_vencimiento(vencimiento: date, dia_cierre: int, dia
     return mes_cierre.replace(day=dia_real)
 
 
+def get_info_transaccion(cuota: Cuota) -> tuple[str, str | None]:
+    """Obtiene descripción limpia y nombre de subcategoría para una cuota."""
+    tx = cuota.transaccion
+    if not tx:
+        return "Sin descripción", None
+
+    sub_nombre = tx.subcategoria.nombre if tx.subcategoria else None
+
+    desc_limpia = tx.descripcion or ""
+    import re
+    desc_limpia = re.sub(r'\s*\(Cuota\s*\d+/\d+\)\s*$', '', desc_limpia).strip()
+
+    final_desc = desc_limpia or sub_nombre or "Transacción"
+
+    return final_desc, sub_nombre
+
+
 def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preloaded: list[Cuota] = None) -> ResumenTarjeta:
     hoy = hoy_argentina()
 
@@ -282,27 +299,6 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
             .all()
         )
 
-    # ── Obtener datos de la transacción vinculada ────────
-    def get_info_transaccion(cuota: Cuota):
-        # Usar la relación cargada en lugar de query manual
-        tx = cuota.transaccion
-        if not tx:
-            return "Sin descripción", None
-            
-        # Intentar obtener el nombre de la subcategoría desde la relación
-        sub_nombre = tx.subcategoria.nombre if tx.subcategoria else None
-        
-        # Limpiar la descripción: quitar el "(Cuota X/Y)" si existe
-        # ya que lo mostraremos en el subtítulo
-        desc_limpia = tx.descripcion
-        import re
-        desc_limpia = re.sub(r'\s*\(Cuota\s*\d+/\d+\)\s*$', '', desc_limpia).strip()
-        
-        # Si la descripción quedó vacía o es muy genérica, usar la subcategoría
-        final_desc = desc_limpia or sub_nombre or "Transacción"
-        
-        return final_desc, sub_nombre
-
     # ── Agrupar cuotas por resumen ─────────────────────────
     venc_siguiente = fecha_vencimiento_proximo + relativedelta(months=1)
     # Ajustar dia de vencimiento del mes siguiente
@@ -320,6 +316,12 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
 
         desc_final, sub_nombre = get_info_transaccion(cuota)
         
+        cuota_moneda = (
+            grupo.moneda.value if hasattr(grupo.moneda, "value") else str(grupo.moneda)
+        ) if (grupo and grupo.moneda) else (
+            tarjeta.moneda.value if hasattr(tarjeta.moneda, "value") else str(tarjeta.moneda)
+        )
+
         cuota_data = CuotaResumen(
             id=cuota.transaccion_id,
             descripcion=desc_final,
@@ -327,7 +329,7 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
             numero_cuota=cuota.numero_cuota,
             total_cuotas=total_cuotas,
             monto=cuota.monto_real if cuota.monto_real is not None else cuota.monto_proyectado,
-            moneda=tarjeta.moneda.value,
+            moneda=cuota_moneda,
             fecha_vencimiento=cuota.fecha_vencimiento,
             pagada=cuota.pagada
         )
@@ -394,11 +396,25 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
         for v in sorted(futuros_dict.values(), key=lambda x: x["mes_fecha"])
     ]
 
+    tarjeta_moneda_str = tarjeta.moneda.value if hasattr(tarjeta.moneda, "value") else str(tarjeta.moneda)
+    total_actual_tarjeta = sum(c.monto for c in cuotas_actual if c.moneda == tarjeta_moneda_str)
+    total_sig_tarjeta = sum(c.monto for c in cuotas_siguiente if c.moneda == tarjeta_moneda_str)
+    total_actual_ars = sum(c.monto for c in cuotas_actual if c.moneda == "ARS")
+    total_actual_usd = sum(c.monto for c in cuotas_actual if c.moneda == "USD")
+    total_sig_ars = sum(c.monto for c in cuotas_siguiente if c.moneda == "ARS")
+    total_sig_usd = sum(c.monto for c in cuotas_siguiente if c.moneda == "USD")
+
     return ResumenTarjeta(
         fecha_cierre_proximo=fecha_cierre_proximo,
         fecha_vencimiento_proximo=fecha_vencimiento_proximo,
-        total_comprometido_resumen_actual=sum(c.monto for c in cuotas_actual),
-        total_comprometido_resumen_siguiente=sum(c.monto for c in cuotas_siguiente),
+        total_comprometido_resumen_actual=total_actual_tarjeta,
+        total_comprometido_resumen_siguiente=total_sig_tarjeta,
+        total_actual_ars=total_actual_ars,
+        total_actual_usd=total_actual_usd,
+        total_siguiente_ars=total_sig_ars,
+        total_siguiente_usd=total_sig_usd,
+        totales_moneda_actual={"ARS": total_actual_ars, "USD": total_actual_usd},
+        totales_moneda_siguiente={"ARS": total_sig_ars, "USD": total_sig_usd},
         cuotas_resumen_actual=cuotas_actual,
         cuotas_resumen_siguiente=cuotas_siguiente,
         resumenes_futuros=resumenes_futuros,
@@ -437,16 +453,42 @@ def pagar_resumen_tarjeta(
             Cuota.pagada == False,
             Cuota.fecha_vencimiento <= limite_vencimiento
         )
+        .options(
+            joinedload(Cuota.grupo),
+            joinedload(Cuota.transaccion).joinedload(Transaccion.subcategoria)
+        )
         .all()
     )
 
     if not cuotas_a_pagar:
         raise HTTPException(status_code=400, detail="No hay saldo o cuotas pendientes de pago en el resumen actual.")
 
-    # 4. Calcular el monto total a pagar
+    # 3.1 Agrupar por moneda: prohibido sumar monedas distintas
+    tarjeta_moneda_str = tarjeta.moneda.value if hasattr(tarjeta.moneda, "value") else str(tarjeta.moneda)
+    cuotas_coincidentes = []
+    cuotas_otra_moneda = []
+
+    for c in cuotas_a_pagar:
+        c_moneda = (
+            c.grupo.moneda.value if hasattr(c.grupo.moneda, "value") else str(c.grupo.moneda)
+        ) if (c.grupo and c.grupo.moneda) else tarjeta_moneda_str
+        if c_moneda == tarjeta_moneda_str:
+            cuotas_coincidentes.append(c)
+        else:
+            cuotas_otra_moneda.append(c)
+
+    if not cuotas_coincidentes:
+        if cuotas_otra_moneda:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No hay cuotas pendientes en la moneda de la tarjeta ({tarjeta_moneda_str}). Quedan {len(cuotas_otra_moneda)} cuota(s) en otra moneda que no pueden pagarse con esta tarjeta/billetera."
+            )
+        raise HTTPException(status_code=400, detail="No hay saldo o cuotas pendientes de pago en el resumen actual.")
+
+    # 4. Calcular el monto total a pagar ÚNICAMENTE de las cuotas en la moneda de la tarjeta
     monto_total = sum(
         (c.monto_real if c.monto_real is not None else c.monto_proyectado)
-        for c in cuotas_a_pagar
+        for c in cuotas_coincidentes
     )
 
     if monto_total <= 0:
@@ -499,12 +541,41 @@ def pagar_resumen_tarjeta(
     try:
         tx = transaccion_service.crear_transaccion(db, usuario_id, tx_data, commit=False)
 
-        # 8. Marcar las cuotas como pagadas
-        for cuota in cuotas_a_pagar:
+        # 8. Marcar ÚNICAMENTE las cuotas coincidentes como pagadas
+        for cuota in cuotas_coincidentes:
             cuota.pagada = True
 
         db.commit()
         db.refresh(tx)
+
+        # 3.3 Construir información de cuotas en otra moneda no pagadas
+        from app.schemas.tarjeta_credito import CuotaPendienteOtraMoneda
+        pendientes = []
+        for c in cuotas_otra_moneda:
+            c_moneda = (
+                c.grupo.moneda.value if hasattr(c.grupo.moneda, "value") else str(c.grupo.moneda)
+            ) if (c.grupo and c.grupo.moneda) else "USD"
+            desc_final, _ = get_info_transaccion(c)
+            m = c.monto_real if c.monto_real is not None else c.monto_proyectado
+            pendientes.append(CuotaPendienteOtraMoneda(
+                id=c.transaccion_id,
+                descripcion=desc_final,
+                monto=m,
+                moneda=c_moneda,
+                numero_cuota=c.numero_cuota,
+                total_cuotas=c.grupo.cantidad_cuotas if c.grupo else 1,
+                fecha_vencimiento=c.fecha_vencimiento
+            ))
+
+        mensaje_adv = None
+        if cuotas_otra_moneda:
+            mensaje_adv = f"Se pagaron {len(cuotas_coincidentes)} cuota(s) en {tarjeta_moneda_str}. Quedaron {len(cuotas_otra_moneda)} cuota(s) en otra moneda pendientes de pago porque la tarjeta es en {tarjeta_moneda_str}."
+
+        setattr(tx, "cuotas_pagadas_count", len(cuotas_coincidentes))
+        setattr(tx, "moneda_pagada", tarjeta_moneda_str)
+        setattr(tx, "monto_pagado", monto_total)
+        setattr(tx, "cuotas_pendientes_otra_moneda", pendientes)
+        setattr(tx, "mensaje_advertencia", mensaje_adv)
         return tx
     except Exception:
         db.rollback()

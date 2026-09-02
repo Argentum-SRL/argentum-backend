@@ -56,6 +56,10 @@ def crear_recurrente(db: Session, usuario_id: UUID, data: TransaccionRecurrenteC
     if not data.categoria_id:
         raise HTTPException(status_code=400, detail="Debés seleccionar una categoría.")
 
+    # Validar coincidencia de moneda entre el recurrente y la billetera
+    from app.services.transaccion_service import _validar_moneda_coincide
+    _validar_moneda_coincide(data.moneda, billetera)
+
     from app.models.categoria import Categoria, EstadoCategoria
     categoria = db.execute(
         select(Categoria).where(
@@ -97,6 +101,14 @@ def actualizar_recurrente(
         ).scalar_one_or_none()
         if not billetera:
             raise HTTPException(status_code=404, detail="Billetera no encontrada")
+        target_billetera = billetera
+    else:
+        target_billetera = db.get(Billetera, recurrente.billetera_id)
+
+    target_moneda = update_data.get("moneda", recurrente.moneda)
+    if target_billetera and target_moneda:
+        from app.services.transaccion_service import _validar_moneda_coincide
+        _validar_moneda_coincide(target_moneda, target_billetera)
 
     for key, value in update_data.items():
         setattr(recurrente, key, value)
@@ -114,16 +126,31 @@ def cambiar_estado_recurrente(db: Session, usuario_id: UUID, recurrente_id: UUID
     return recurrente
 
 
-def eliminar_recurrente(db: Session, usuario_id: UUID, recurrente_id: UUID):
+def eliminar_recurrente(db: Session, usuario_id: UUID, recurrente_id: UUID) -> bool:
     recurrente = obtener_recurrente(db, usuario_id, recurrente_id)
     db.delete(recurrente)
     db.commit()
-    return {"detail": "Transacción recurrente eliminada exitosamente"}
+    return True
+
+
+class ResultadoProcesarRecurrentes(int):
+    """
+    Subclase de int para mantener total compatibilidad con llamadores que esperan un entero
+    (como 'if generadas:'), pero exponiendo los detalles de fallidas_descalce.
+    """
+    def __new__(cls, generadas: int, fallidas_descalce: list[dict] | None = None):
+        obj = super().__new__(cls, generadas)
+        obj.generadas = generadas
+        obj.fallidas_descalce = fallidas_descalce or []
+        return obj
+
+    def to_dict(self) -> dict:
+        return {"generadas": self.generadas, "fallidas_descalce": self.fallidas_descalce}
 
 
 # --- Background Job ---
 
-def procesar_recurrentes(db: Session):
+def procesar_recurrentes(db: Session) -> ResultadoProcesarRecurrentes:
     """
     Genera transacciones reales a partir de las plantillas recurrentes (Optimizado).
     """
@@ -135,7 +162,7 @@ def procesar_recurrentes(db: Session):
     ).scalars().all()
 
     if not recurrentes:
-        return 0
+        return ResultadoProcesarRecurrentes(0, [])
 
     # PRECARGA: Obtener IDs necesarios
     billeteras_ids = {r.billetera_id for r in recurrentes}
@@ -156,6 +183,7 @@ def procesar_recurrentes(db: Session):
 
     nuevas_txs = []
     generadas = 0
+    fallidas_descalce = []
 
     for rec in recurrentes:
         debe_generar = False
@@ -183,8 +211,18 @@ def procesar_recurrentes(db: Session):
                     from app.services.transaccion_service import _validar_moneda_coincide
                     _validar_moneda_coincide(rec.moneda, billetera)
                 except Exception as e:
+                    rec_error = {
+                        "recurrente_id": str(rec.id),
+                        "usuario_id": str(rec.usuario_id),
+                        "descripcion": rec.descripcion,
+                        "moneda_recurrente": rec.moneda.value if hasattr(rec.moneda, "value") else str(rec.moneda),
+                        "moneda_billetera": billetera.moneda.value if hasattr(billetera.moneda, "value") else str(billetera.moneda),
+                        "motivo": str(e)
+                    }
+                    fallidas_descalce.append(rec_error)
                     logger.error(
-                        f"Error de consistencia de moneda al procesar recurrente {rec.id} del usuario {rec.usuario_id}: {e}"
+                        "Descalce de moneda al procesar recurrente %s (usuario %s, moneda=%s, billetera_moneda=%s): %s",
+                        rec.id, rec.usuario_id, rec.moneda, billetera.moneda, e
                     )
                     continue
 
@@ -222,4 +260,4 @@ def procesar_recurrentes(db: Session):
         db.add_all(nuevas_txs)
         db.commit()
 
-    return generadas
+    return ResultadoProcesarRecurrentes(generadas, fallidas_descalce)

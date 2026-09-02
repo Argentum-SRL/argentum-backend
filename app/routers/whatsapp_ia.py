@@ -49,13 +49,15 @@ import structlog
 
 from app.core.constants import CATEGORIAS_SISTEMA
 from app.utils.texto import normalizar_texto
+from app.utils.formato import formatear_monto
+from app.models.usuario import Moneda
 
 logger = structlog.get_logger("whatsapp")
 
 
-def _fmt(monto: float) -> str:
-    """Formatea un número con formato argentino: punto para miles, sin decimales."""
-    return f"${monto:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+def _fmt(monto: float, moneda: Moneda | str = Moneda.ARS) -> str:
+    """Formatea un número con formato argentino y símbolo según moneda."""
+    return formatear_monto(monto, moneda)
 
 
 # Alias unificado de normalización
@@ -205,17 +207,17 @@ def _merge_entidades(estado_previo: dict | None, entidades_nuevas: dict | None) 
     return merged
 
 
-def _resolver_billetera(nombre: str | None, usuario_id: UUID, db: Session) -> UUID | None:
+def _resolver_billetera(nombre: str | None, usuario_id: UUID, db: Session, moneda: Moneda | None = None) -> UUID | None:
     if not nombre:
         return None
 
-    billeteras = db.execute(
-        select(Billetera)
-        .where(
-            Billetera.usuario_id == usuario_id,
-            Billetera.estado == EstadoBilletera.ACTIVA,
-        )
-    ).scalars().all()
+    query = select(Billetera).where(
+        Billetera.usuario_id == usuario_id,
+        Billetera.estado == EstadoBilletera.ACTIVA,
+    )
+    if moneda:
+        query = query.where(Billetera.moneda == moneda)
+    billeteras = db.execute(query).scalars().all()
 
     if not billeteras:
         return None
@@ -445,21 +447,22 @@ def _resolver_categoria_y_subcategoria(
     return categoria_match.id, sub_id
 
 
-def _obtener_billeteras_activas(usuario_id: UUID, db: Session) -> list[Billetera]:
+def _obtener_billeteras_activas(usuario_id: UUID, db: Session, moneda: Moneda | None = None) -> list[Billetera]:
+    query = select(Billetera).where(
+        Billetera.usuario_id == usuario_id,
+        Billetera.estado == EstadoBilletera.ACTIVA,
+    )
+    if moneda:
+        query = query.where(Billetera.moneda == moneda)
     return db.execute(
-        select(Billetera)
-        .where(
-            Billetera.usuario_id == usuario_id,
-            Billetera.estado == EstadoBilletera.ACTIVA,
-        )
-        .order_by(Billetera.es_principal.desc(), Billetera.nombre)
+        query.order_by(Billetera.es_principal.desc(), Billetera.nombre)
     ).scalars().all()
 
 
 def _generar_menu_billeteras(billeteras: list[Billetera]) -> str:
     lineas = ["¿Desde qué billetera?\n"]
     for i, b in enumerate(billeteras, 1):
-        saldo_str = _fmt(float(b.saldo_actual))
+        saldo_str = formatear_monto(b.saldo_actual, b.moneda)
         lineas.append(f"{i}. {b.nombre} — {saldo_str}")
     return "\n".join(lineas)
 
@@ -489,7 +492,12 @@ def _resolver_seleccion_numerica(
     if "billetera_origen" not in datos_faltantes and "billetera" not in datos_faltantes:
         return False, None
     
-    billeteras = _obtener_billeteras_activas(usuario_id, db)
+    moneda_sel = None
+    moneda_str = estado.get("moneda")
+    if moneda_str:
+        moneda_sel = Moneda.USD if moneda_str == "USD" else Moneda.ARS
+    
+    billeteras = _obtener_billeteras_activas(usuario_id, db, moneda=moneda_sel)
     if numero < 1 or numero > len(billeteras):
         return True, None
     
@@ -565,20 +573,20 @@ def _crear_transaccion_adicional(
     usuario_id: UUID,
     billetera: Billetera,
     db: Session,
-) -> Transaccion | None:
+) -> tuple[Transaccion | None, str | None]:
     monto_raw = datos.get("monto")
     if monto_raw is None:
-        return None
+        return None, None
     try:
         monto_decimal = Decimal(str(monto_raw))
     except Exception:
-        return None
+        return None, None
 
     # Validación de monto: estrictamente positivo y dentro de límites reales
     if monto_decimal <= Decimal("0") or monto_decimal > Decimal("1000000000000"):
-        return None
+        return None, None
 
-    # Validación de moneda: si el ítem adicional especifica una moneda que no coincide con la billetera resuelta, descartar
+    # Validación de moneda: si el ítem adicional especifica una moneda que no coincide con la billetera resuelta, no descartar en silencio
     moneda_solicitada_str = datos.get("moneda")
     if moneda_solicitada_str:
         moneda_solicitada = Moneda.USD if moneda_solicitada_str == "USD" else Moneda.ARS
@@ -588,7 +596,12 @@ def _crear_transaccion_adicional(
                 moneda_solicitada.value,
                 billetera.moneda.value,
             )
-            return None
+            desc = datos.get("descripcion") or _nombre_corto_categoria(datos.get("categoria"))
+            moneda_sol_str = "dólares" if moneda_solicitada == Moneda.USD else "pesos"
+            moneda_bill_str = "dólares" if billetera.moneda == Moneda.USD else "pesos"
+            monto_fmt = formatear_monto(monto_decimal, moneda_solicitada)
+            motivo = f"No pudimos registrar {desc} de {monto_fmt} porque es en {moneda_sol_str} y la billetera {billetera.nombre} es en {moneda_bill_str}."
+            return None, motivo
 
     tipo_item = datos.get("tipo") or "egreso"
     categoria_id, subcategoria_id = _resolver_categoria_y_subcategoria(
@@ -620,7 +633,7 @@ def _crear_transaccion_adicional(
     else:
         billetera.saldo_actual -= monto_decimal
 
-    return tx
+    return tx, None
 
 
 def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str | None:
@@ -704,24 +717,10 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                         else entidades.get("billetera_origen")
                     ) or entidades.get("billetera_origen") or entidades.get("billetera_destino")
 
-                    billetera_id = _resolver_billetera(nombre_billetera, usuario.id, db)
+                    billetera_id = _resolver_billetera(nombre_billetera, usuario.id, db, moneda=moneda_solicitada)
 
-                    # Validar coincidencia de moneda con la billetera
-                    if billetera_id:
-                        billetera_obj = db.get(Billetera, billetera_id)
-                        if billetera_obj and billetera_obj.moneda != moneda_solicitada:
-                            # Buscar una billetera activa de la misma moneda solicitada
-                            billetera_coincidente = db.execute(
-                                select(Billetera.id).where(
-                                    Billetera.usuario_id == usuario.id,
-                                    Billetera.estado == EstadoBilletera.ACTIVA,
-                                    Billetera.moneda == moneda_solicitada
-                                ).order_by(Billetera.es_principal.desc())
-                            ).scalars().first()
-                            if billetera_coincidente:
-                                billetera_id = billetera_coincidente
-                    else:
-                        # Buscar billetera principal o activa para la moneda solicitada
+                    if not billetera_id:
+                        # Buscar billetera principal o activa exclusivamente para la moneda solicitada
                         billetera_id = db.execute(
                             select(Billetera.id).where(
                                 Billetera.usuario_id == usuario.id,
@@ -736,25 +735,20 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                                     Billetera.usuario_id == usuario.id,
                                     Billetera.estado == EstadoBilletera.ACTIVA,
                                     Billetera.moneda == moneda_solicitada
-                                )
-                            ).scalars().first()
-                        if not billetera_id:
-                            billetera_id = db.execute(
-                                select(Billetera.id).where(
-                                    Billetera.usuario_id == usuario.id,
-                                    Billetera.estado == EstadoBilletera.ACTIVA
-                                ).order_by(Billetera.es_principal.desc())
+                                ).order_by(Billetera.es_principal.desc(), Billetera.fecha_creacion.asc())
                             ).scalars().first()
 
                     if not billetera_id:
                         return None
 
                     billetera = db.get(Billetera, billetera_id)
-                    if not billetera:
+                    if not billetera or billetera.moneda != moneda_solicitada:
                         return None
 
-                    # La moneda de la transacción siempre coincide con la billetera para evitar descalce
-                    moneda_val = billetera.moneda
+                    # 2.1: Usar la moneda solicitada por el usuario (no pisarla con billetera.moneda)
+                    moneda_val = moneda_solicitada
+                    from app.services.transaccion_service import _validar_moneda_coincide
+                    _validar_moneda_coincide(moneda_val, billetera)
 
                     categoria_id, subcategoria_id = _resolver_categoria_y_subcategoria(
                         entidades.get("categoria"), usuario.id, db, tipo=tipo_val
@@ -789,10 +783,15 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
 
                     # Crear transacciones adicionales si existen
                     adicionales = entidades.get("transacciones_adicionales")
+                    descartadas = []
                     if adicionales and isinstance(adicionales, list):
                         for adic in adicionales:
                             if isinstance(adic, dict):
-                                _crear_transaccion_adicional(adic, usuario.id, billetera, db)
+                                _, motivo = _crear_transaccion_adicional(adic, usuario.id, billetera, db)
+                                if motivo:
+                                    descartadas.append(motivo)
+                    if descartadas:
+                        resultado_ia["operaciones_descartadas"] = descartadas
 
                     # Marcar la conversación previa como ejecutada
                     conv_previa.accion_ejecutada = str(transaccion.id)
@@ -1271,6 +1270,18 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
 
             entidades_actuales = resultado_ia.get("entidades", {})
 
+            # 2.2, 2.3, 2.4: Validar existencia de billetera para la moneda solicitada
+            if resultado_ia.get("intent") in ("registrar_transaccion", "slot_filling") or entidades_actuales.get("monto") is not None:
+                moneda_sol_str = entidades_actuales.get("moneda")
+                moneda_sol = Moneda.USD if moneda_sol_str == "USD" else Moneda.ARS
+                billeteras_moneda = _obtener_billeteras_activas(usuario.id, db, moneda=moneda_sol)
+                if not billeteras_moneda:
+                    nom_moneda = "dólares" if moneda_sol == Moneda.USD else "pesos"
+                    resultado_ia["respuesta_usuario"] = f"No tenés ninguna billetera en {nom_moneda} para registrar este movimiento. Podés crear una desde la web de Argentum."
+                    resultado_ia["intent"] = "sin_billetera_moneda"
+                    resultado_ia["slot_filling"] = False
+                    resultado_ia["datos_faltantes"] = []
+
             # Si tenemos las entidades mínimas (monto + billetera), asegurar transición a registrar_transaccion
             tiene_monto = entidades_actuales.get("monto") is not None
             tipo_act = entidades_actuales.get("tipo") or "egreso"
@@ -1383,11 +1394,11 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
 
                     msg_parts = []
                     if blue and blue.get("venta"):
-                        msg_parts.append(f"Dólar Blue: ${_fmt(blue['venta'])}")
+                        msg_parts.append(f"Dólar Blue: {formatear_monto(blue['venta'], Moneda.ARS)}")
                     if mep and mep.get("venta"):
-                        msg_parts.append(f"MEP: ${_fmt(mep['venta'])}")
+                        msg_parts.append(f"MEP: {formatear_monto(mep['venta'], Moneda.ARS)}")
                     if oficial and oficial.get("venta"):
-                        msg_parts.append(f"Oficial: ${_fmt(oficial['venta'])}")
+                        msg_parts.append(f"Oficial: {formatear_monto(oficial['venta'], Moneda.ARS)}")
 
                     if msg_parts:
                         resultado_ia["respuesta_usuario"] = "Cotizaciones del dólar: " + " | ".join(msg_parts)
@@ -1414,6 +1425,9 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     adicionales = entidades.get("transacciones_adicionales")
 
                     if monto is not None:
+                        # 2.6: Moneda solicitada para la propuesta
+                        moneda_propuesta = Moneda.USD if entidades.get("moneda") == "USD" else Moneda.ARS
+
                         # Nombre de billetera
                         bill_display = None
                         if billetera_raw:
@@ -1421,6 +1435,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                                 select(Billetera).where(
                                     Billetera.usuario_id == usuario.id,
                                     Billetera.estado == EstadoBilletera.ACTIVA,
+                                    Billetera.moneda == moneda_propuesta,
                                     Billetera.nombre.ilike(f"%{billetera_raw}%")
                                 )
                             ).scalars().first()
@@ -1428,17 +1443,18 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
 
                         if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
                             total_movs = 1 + len(adicionales)
-                            items_desc = [f"{_fmt(float(monto))} en {_nombre_corto_categoria(categoria_raw)}"]
+                            items_desc = [f"{formatear_monto(float(monto), moneda_propuesta)} en {_nombre_corto_categoria(categoria_raw)}"]
                             for ad in adicionales:
                                 if isinstance(ad, dict) and ad.get("monto") is not None:
+                                    moneda_ad = Moneda.USD if ad.get("moneda") == "USD" else Moneda.ARS
                                     items_desc.append(
-                                        f"{_fmt(float(ad['monto']))} en {_nombre_corto_categoria(ad.get('categoria'))}"
+                                        f"{formatear_monto(float(ad['monto']), moneda_ad)} en {_nombre_corto_categoria(ad.get('categoria'))}"
                                     )
                             lista_str = ", ".join(items_desc)
                             origen_str = f" desde {bill_display}" if bill_display else (f" a {bill_display}" if tipo == "ingreso" else "")
                             resultado_ia["respuesta_usuario"] = f"Voy a anotar {total_movs} movimientos{origen_str}: {lista_str}. ¿Va?"
                         else:
-                            monto_str = _fmt(float(monto))
+                            monto_str = formatear_monto(float(monto), moneda_propuesta)
                             cat_display = _nombre_corto_categoria(categoria_raw)
 
                             if tipo == "ingreso":
@@ -1459,7 +1475,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 except Exception:
                     logger.exception("Error al construir propuesta de transacción")
 
-            # Si la IA pide que el usuario elija billetera, mostrar menú numerado
+            # Si la IA pide que el usuario elija billetera, mostrar menú numerado filtrado por moneda
             if resultado_ia.get("slot_filling") and resultado_ia.get("entidades", {}).get("billetera_origen") is None:
                 datos_faltantes = resultado_ia.get("datos_faltantes", [])
                 entidades = resultado_ia.get("entidades", {})
@@ -1473,13 +1489,16 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     )
                 )
                 if necesita_billetera:
-                    billeteras = _obtener_billeteras_activas(usuario.id, db)
+                    moneda_sol_str = entidades.get("moneda")
+                    moneda_sol = Moneda.USD if moneda_sol_str == "USD" else Moneda.ARS
+                    billeteras = _obtener_billeteras_activas(usuario.id, db, moneda=moneda_sol)
                     if len(billeteras) > 1:
                         resultado_ia["respuesta_usuario"] = _generar_menu_billeteras(billeteras)
                         # Guardar datos_faltantes en slot_filling_estado para que _resolver_seleccion_numerica lo detecte
                         if resultado_ia.get("entidades") is None:
                             resultado_ia["entidades"] = {}
                         resultado_ia["entidades"]["datos_faltantes"] = ["billetera_origen"]
+                        resultado_ia["entidades"]["moneda"] = "USD" if moneda_sol == Moneda.USD else "ARS"
 
             transaccion_id = _ejecutar_intent(resultado_ia, usuario, db)
 
@@ -1491,7 +1510,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     ).scalars().first()
                     if tx:
                         tipo_str = "ingreso" if tx.tipo == TipoTransaccion.INGRESO else "egreso"
-                        monto_str = _fmt(float(tx.monto))
+                        monto_str = formatear_monto(float(tx.monto), tx.moneda)
 
                         # Obtener nombre de billetera
                         bill_nombre = None
@@ -1516,19 +1535,27 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                             else None
                         )
 
+                        descartadas = resultado_ia.get("operaciones_descartadas", [])
+
                         if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
-                            total_movs = 1 + len(adicionales)
+                            total_registrados = 1 + len(adicionales) - len(descartadas)
                             cat_display = _nombre_corto_categoria(
                                 conv_ejecutada.entidades.get("categoria")
                             )
                             items_str = [f"{monto_str} en {cat_display}"]
                             for ad in adicionales:
                                 if isinstance(ad, dict) and ad.get("monto") is not None:
-                                    items_str.append(
-                                        f"{_fmt(float(ad['monto']))} en {_nombre_corto_categoria(ad.get('categoria'))}"
-                                    )
+                                    ad_moneda = Moneda.USD if ad.get("moneda") == "USD" else Moneda.ARS
+                                    if ad_moneda == tx.moneda:
+                                        items_str.append(
+                                            f"{formatear_monto(float(ad['monto']), ad_moneda)} en {_nombre_corto_categoria(ad.get('categoria'))}"
+                                        )
                             origen_str = f" desde {bill_nombre}" if bill_nombre else (f" a {bill_nombre}" if tx.tipo == TipoTransaccion.INGRESO else "")
-                            resultado_ia["respuesta_usuario"] = f"Listo. {total_movs} movimientos{origen_str}: {', '.join(items_str)} — registrados."
+                            mov_palabra = "movimientos" if total_registrados != 1 else "movimiento"
+                            reg_palabra = "registrados" if total_registrados != 1 else "registrado"
+                            resultado_ia["respuesta_usuario"] = f"Listo. {total_registrados} {mov_palabra}{origen_str}: {', '.join(items_str)} — {reg_palabra}."
+                            if descartadas:
+                                resultado_ia["respuesta_usuario"] += "\n" + "\n".join(descartadas)
                         else:
                             # Obtener nombre de categoría
                             cat_nombre = None
@@ -1564,6 +1591,8 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                                 partes.append("— registrado.")
 
                             resultado_ia["respuesta_usuario"] = " ".join(partes)
+                            if descartadas:
+                                resultado_ia["respuesta_usuario"] += "\n" + "\n".join(descartadas)
                 except Exception:
                     logger.exception("Error al construir mensaje de confirmación")
 

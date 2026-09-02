@@ -80,10 +80,52 @@ class ResumenTarjeta(BaseModel):
     fecha_vencimiento_proximo: date
     total_comprometido_resumen_actual: Decimal
     total_comprometido_resumen_siguiente: Decimal
+    total_actual_ars: Decimal = Decimal("0")
+    total_actual_usd: Decimal = Decimal("0")
+    total_siguiente_ars: Decimal = Decimal("0")
+    total_siguiente_usd: Decimal = Decimal("0")
+    totales_moneda_actual: dict[str, Decimal] = Field(default_factory=dict)
+    totales_moneda_siguiente: dict[str, Decimal] = Field(default_factory=dict)
     cuotas_resumen_actual: list[CuotaResumen]
     cuotas_resumen_siguiente: list[CuotaResumen]
     resumenes_futuros: list[ResumenFuturo]
     resumenes_anteriores: list[ResumenAnterior] = []
+
+
+class CuotaPendienteOtraMoneda(BaseModel):
+    id: UUID
+    descripcion: str
+    monto: Decimal
+    moneda: str
+    numero_cuota: int
+    total_cuotas: int
+    fecha_vencimiento: date
+
+
+class ResultadoPagoTarjeta(BaseModel):
+    id: UUID
+    usuario_id: UUID
+    tipo: str
+    monto: Decimal
+    moneda: str
+    fecha: date
+    descripcion: str
+    categoria_id: UUID | None = None
+    subcategoria_id: UUID | None = None
+    metodo_pago: str | None = None
+    billetera_id: UUID | None = None
+    tarjeta_id: UUID | None = None
+    es_recurrente: bool = False
+    estado_verificacion: str | None = None
+    fecha_creacion: datetime | None = None
+    cuotas_pagadas_count: int = 0
+    moneda_pagada: str = ""
+    monto_pagado: Decimal = Decimal("0")
+    cuotas_pendientes_otra_moneda: list[CuotaPendienteOtraMoneda] = []
+    mensaje_advertencia: str | None = None
+
+    class Config:
+        from_attributes = True
 
 class TarjetaCreditoResponse(TarjetaCreditoBase):
     id: UUID

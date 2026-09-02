@@ -63,9 +63,7 @@ def _validar_categorias_presupuesto(db: Session, categorias_input: List, usuario
                         detail="La subcategoría seleccionada no pertenece a la categoría indicada"
                     )
 
-def formatear_monto(monto: Decimal) -> str:
-    # Formato simple para notificaciones
-    return f"${monto:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+from app.utils.formato import formatear_monto
 
 def calcular_fechas_periodo(
     periodo: str | PeriodoPresupuestoTipo, 
@@ -512,9 +510,9 @@ def verificar_alertas_presupuesto(db: Session, presupuesto: Presupuesto, periodo
     nombres_cats = ", ".join(set([c.subcategoria.nombre if c.subcategoria else (c.categoria.nombre if c.categoria else "") for c in presupuesto.categorias]))
     
     if tipo == TipoNotificacion.PRESUPUESTO_AGOTADO:
-        mensaje = f"Llevás {formatear_monto(periodo.monto_usado)} de {formatear_monto(periodo.monto_limite)} en {nombres_cats}. Ya superaste el límite."
+        mensaje = f"Llevás {formatear_monto(periodo.monto_usado, presupuesto.moneda)} de {formatear_monto(periodo.monto_limite, presupuesto.moneda)} en {nombres_cats}. Ya superaste el límite."
     else:
-        mensaje = f"Llevás {formatear_monto(periodo.monto_usado)} de {formatear_monto(periodo.monto_limite)}."
+        mensaje = f"Llevás {formatear_monto(periodo.monto_usado, presupuesto.moneda)} de {formatear_monto(periodo.monto_limite, presupuesto.moneda)}."
 
     # 4. Crear la notificación utilizando el servicio común (se encarga del commit/db.add/deduplicación)
     notif = crear_notificacion(
@@ -572,7 +570,7 @@ def renovar_presupuestos(db: Session):
                 if len(ultimos_3) == 3 and all(p.superado for p in ultimos_3):
                     promedio = sum(p.monto_usado for p in ultimos_3) / 3
                     from app.services.notificacion_service import crear_notificacion
-                    mensaje_sug = f"Superaste el límite del presupuesto '{presu.nombre}' por 3 períodos seguidos. El gasto promedio real fue de {formatear_monto(promedio)}. Considerá ajustar el límite."
+                    mensaje_sug = f"Superaste el límite del presupuesto '{presu.nombre}' por 3 períodos seguidos. El gasto promedio real fue de {formatear_monto(promedio, presu.moneda)}. Considerá ajustar el límite."
                     crear_notificacion(
                         db=db,
                         usuario_id=presu.usuario_id,
