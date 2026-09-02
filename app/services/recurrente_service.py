@@ -188,6 +188,7 @@ def procesar_recurrentes(db: Session):
                     )
                     continue
 
+            from app.services.transaccion_service import deducir_metodo_pago
             nueva_tx = Transaccion(
                 usuario_id=rec.usuario_id,
                 tipo=rec.tipo,
@@ -197,6 +198,7 @@ def procesar_recurrentes(db: Session):
                 descripcion=rec.descripcion,
                 categoria_id=rec.categoria_id,
                 subcategoria_id=rec.subcategoria_id,
+                metodo_pago=deducir_metodo_pago(billetera, tarjeta_id=None),
                 billetera_id=rec.billetera_id,
                 es_recurrente=True,
                 recurrente_id=rec.id,

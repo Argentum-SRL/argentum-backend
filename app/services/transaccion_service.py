@@ -136,6 +136,29 @@ def _validar_moneda_coincide(moneda_operacion, billetera: Billetera) -> None:
         )
 
 
+def deducir_metodo_pago(
+    billetera: Optional[Billetera], 
+    tarjeta_id: Optional[UUID] = None
+) -> MetodoPago:
+    """
+    Deduce el método de pago de una transacción según las siguientes reglas en orden de prioridad:
+    1. Si la transacción tiene tarjeta_id asignado (no nulo) -> MetodoPago.CREDITO.
+    2. Si no, y la billetera tiene es_efectivo == True -> MetodoPago.EFECTIVO.
+    3. En cualquier otro caso -> MetodoPago.DEBITO.
+
+    Si billetera es None (y tarjeta_id es None), se emite un log de nivel WARNING
+    y se devuelve MetodoPago.DEBITO. Nunca retorna None.
+    """
+    if tarjeta_id is not None:
+        return MetodoPago.CREDITO
+    if billetera is None:
+        logger.warning("Billetera no provista al deducir método de pago; usando DEBITO por defecto.")
+        return MetodoPago.DEBITO
+    if getattr(billetera, "es_efectivo", False):
+        return MetodoPago.EFECTIVO
+    return MetodoPago.DEBITO
+
+
 def _validar_tarjeta(db: Session, tarjeta_id: UUID, usuario_id: UUID) -> TarjetaCredito:
     """Valida que la tarjeta pertenezca al usuario."""
     tarjeta = db.query(TarjetaCredito).filter(
