@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
@@ -52,61 +53,88 @@ def get_date_by_rule(rule: str, month: int, year: int) -> date:
         return d
     return first_day
 
+def calcular_inicio_ciclo_para_mes_ancla(usuario: Usuario, anio: int, mes: int) -> date:
+    """
+    Calcula la fecha de inicio del ciclo correspondiente al mes ancla (anio, mes).
+    Nunca usa una fecha previamente ajustada para derivar año o mes.
+    """
+    ciclo_dir = getattr(usuario, "ciclo_ajuste_direccion", None)
+    direccion = (
+        ciclo_dir.value if hasattr(ciclo_dir, "value")
+        else (str(ciclo_dir) if ciclo_dir else None)
+    )
+
+    if usuario.ciclo_tipo == CicloTipo.DIA_FIJO:
+        from app.services.dias_habiles_service import ajustar_fecha_habil_sync
+        try:
+            dia = int(usuario.ciclo_valor)
+        except (ValueError, TypeError):
+            dia = 1
+        
+        ultimo_dia_mes = calendar.monthrange(anio, mes)[1]
+        dia_real = min(dia, ultimo_dia_mes)
+        fecha_nominal = date(anio, mes, dia_real)
+        
+        if direccion:
+            return ajustar_fecha_habil_sync(fecha_nominal, direccion=direccion)
+        return fecha_nominal
+
+    elif usuario.ciclo_tipo == CicloTipo.REGLA:
+        from app.services.dias_habiles_service import ajustar_fecha_habil_sync
+        fecha_nominal = get_date_by_rule(usuario.ciclo_valor or "primer_lunes", mes, anio)
+        if direccion:
+            return ajustar_fecha_habil_sync(fecha_nominal, direccion=direccion)
+        return fecha_nominal
+
+    else:
+        # Default mes calendario
+        return date(anio, mes, 1)
+
+
 def get_ciclo_fechas(usuario: Usuario, hoy: date) -> tuple[date, date]:
-    """Calcula fecha_inicio y fecha_fin del ciclo actual del usuario."""
+    """
+    Calcula fecha_inicio y fecha_fin del ciclo al que pertenece 'hoy'.
+    Basado en el modelo conceptual de Mes Ancla para garantizar rangos válidos,
+    sin huecos, superposiciones ni fechas invertidas.
+    """
     if not usuario.ciclo_tipo or not usuario.ciclo_valor:
         inicio = hoy.replace(day=1)
         fin = (inicio + relativedelta(months=1)) - timedelta(days=1)
         return inicio, fin
 
-    ciclo_dir = getattr(usuario, "ciclo_ajuste_direccion", None)
-    direccion = (
-        ciclo_dir.value
-        if hasattr(ciclo_dir, "value")
-        else (str(ciclo_dir) if ciclo_dir else "anterior")
-    )
-
-    if usuario.ciclo_tipo == CicloTipo.DIA_FIJO:
-        from app.services.dias_habiles_service import calcular_fecha_cobro_sync
-        try:
-            dia = int(usuario.ciclo_valor)
-        except ValueError:
-            dia = 1
+    # Determinamos los meses ancla candidatos alrededor de 'hoy'
+    # Evaluamos en orden de tiempo: mes + 1, mes 0, mes - 1, mes - 2
+    candidatos = [
+        hoy + relativedelta(months=1),
+        hoy,
+        hoy - relativedelta(months=1),
+        hoy - relativedelta(months=2),
+    ]
+    
+    # Encontramos el mes ancla M tal que inicio(M) <= hoy < inicio(M+1)
+    for i in range(len(candidatos) - 1):
+        m_curr = candidatos[i + 1]
+        m_next = candidatos[i]
+        ini_curr = calcular_inicio_ciclo_para_mes_ancla(usuario, m_curr.year, m_curr.month)
+        ini_next = calcular_inicio_ciclo_para_mes_ancla(usuario, m_next.year, m_next.month)
         
-        # Calcular inicio del ciclo actual con ajuste de día hábil
-        inicio_candidato_este_mes = calcular_fecha_cobro_sync(dia, hoy.month, hoy.year, direccion=direccion)
-        if hoy >= inicio_candidato_este_mes:
-            # El ciclo comenzó este mes
-            inicio = inicio_candidato_este_mes
-        else:
-            # El ciclo comenzó el mes anterior
-            prev_month = hoy - relativedelta(months=1)
-            inicio = calcular_fecha_cobro_sync(dia, prev_month.month, prev_month.year, direccion=direccion)
-        
-        # El ciclo termina el día antes del próximo inicio
-        proximo_mes = inicio + relativedelta(months=1)
-        proximo_inicio = calcular_fecha_cobro_sync(dia, proximo_mes.month, proximo_mes.year, direccion=direccion)
-        fin = proximo_inicio - timedelta(days=1)
-        
-        return inicio, fin
+        if ini_curr <= hoy < ini_next:
+            return ini_curr, ini_next - timedelta(days=1)
 
-    if usuario.ciclo_tipo == CicloTipo.REGLA:
-        from app.services.dias_habiles_service import ajustar_fecha_habil_sync
-        d_nominal_este_mes = get_date_by_rule(usuario.ciclo_valor, hoy.month, hoy.year)
-        d_regla = ajustar_fecha_habil_sync(d_nominal_este_mes, direccion=direccion)
-        if hoy >= d_regla:
-            inicio = d_regla
-        else:
-            prev = hoy - relativedelta(months=1)
-            d_nominal_prev = get_date_by_rule(usuario.ciclo_valor, prev.month, prev.year)
-            inicio = ajustar_fecha_habil_sync(d_nominal_prev, direccion=direccion)
-        prox = inicio + relativedelta(months=1)
-        d_nominal_prox = get_date_by_rule(usuario.ciclo_valor, prox.month, prox.year)
-        proximo_inicio = ajustar_fecha_habil_sync(d_nominal_prox, direccion=direccion)
-        fin = proximo_inicio - timedelta(days=1)
-        return inicio, fin
-
-    return hoy.replace(day=1), (hoy.replace(day=1) + relativedelta(months=1)) - timedelta(days=1)
+    # Fallback si hoy >= inicio(hoy + 1 mes)
+    m_top = candidatos[0]
+    m_top_next = m_top + relativedelta(months=1)
+    ini_top = calcular_inicio_ciclo_para_mes_ancla(usuario, m_top.year, m_top.month)
+    ini_top_next = calcular_inicio_ciclo_para_mes_ancla(usuario, m_top_next.year, m_top_next.month)
+    if hoy >= ini_top:
+        return ini_top, ini_top_next - timedelta(days=1)
+        
+    # Fallback general
+    m_bot = candidatos[-1]
+    m_bot_next = candidatos[-2]
+    ini_bot = calcular_inicio_ciclo_para_mes_ancla(usuario, m_bot.year, m_bot.month)
+    ini_bot_next = calcular_inicio_ciclo_para_mes_ancla(usuario, m_bot_next.year, m_bot_next.month)
+    return ini_bot, ini_bot_next - timedelta(days=1)
 
 def get_dashboard_resumen(
     db: Session, 
