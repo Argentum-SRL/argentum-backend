@@ -99,35 +99,51 @@ def calcular_fechas_periodo(
     
     raise ValueError(f"Periodo inválido: {periodo}")
 
+class GastoPresupuesto(Decimal):
+    """
+    Subclase de Decimal que encapsula el gasto total del presupuesto manteniendo
+    total compatibilidad numérica hacia atrás con cualquier consumidor existente
+    (comparaciones, float(), sumas, formateos, etc.), y exponiendo además el
+    desglose por moneda y montos sin cotización.
+    """
+    gasto_total: Decimal
+    monto_propio: Decimal
+    monto_convertido: Decimal
+    monto_sin_cotizacion: Decimal
+    moneda_sin_cotizacion: Optional[str]
+
+    def __new__(
+        cls, 
+        total: Decimal | str | float | int, 
+        propio: Decimal | str | float | int = Decimal("0"), 
+        convertido: Decimal | str | float | int = Decimal("0"), 
+        sin_cotizacion: Decimal | str | float | int = Decimal("0"), 
+        moneda_sin_cotizacion: Optional[str] = None
+    ):
+        dec_total = Decimal(str(total)).quantize(Decimal("0.01"))
+        instance = super().__new__(cls, dec_total)
+        instance.gasto_total = dec_total
+        instance.monto_propio = Decimal(str(propio)).quantize(Decimal("0.01"))
+        instance.monto_convertido = Decimal(str(convertido)).quantize(Decimal("0.01"))
+        instance.monto_sin_cotizacion = Decimal(str(sin_cotizacion)).quantize(Decimal("0.01"))
+        instance.moneda_sin_cotizacion = moneda_sin_cotizacion
+        return instance
+
+
 def calcular_gasto_en_periodo(
     db: Session, 
     usuario_id: UUID, 
     categorias_input: List, 
     fecha_inicio: date, 
     fecha_fin: date,
-    moneda: Optional[Moneda | str] = None
-) -> Decimal:
+    moneda: Optional[Moneda | str] = None,
+    usuario: Optional[Usuario] = None
+) -> GastoPresupuesto:
     # categorías_input puede ser PresupuestoCategoriaInput (schema) o PresupuestoCategoria (modelo)
     # Regla: Si tiene subcategoria_id especificado, aplica solo a esa subcategoría.
     # Si tiene categoria_id pero no subcategoria_id, aplica a toda la categoría padre.
     cat_ids = [c.categoria_id for c in categorias_input if c.categoria_id and not getattr(c, 'subcategoria_id', None)]
     subcat_ids = [c.subcategoria_id for c in categorias_input if getattr(c, 'subcategoria_id', None)]
-    
-    query = select(func.sum(Transaccion.monto)).where(
-        Transaccion.usuario_id == usuario_id,
-        Transaccion.tipo == TipoTransaccion.EGRESO,
-        or_(
-            Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
-            Transaccion.estado_verificacion == None
-        ),
-        Transaccion.es_padre_cuotas == False,
-        Transaccion.fecha >= fecha_inicio,
-        Transaccion.fecha <= fecha_fin
-    )
-    
-    if moneda is not None:
-        moneda_enum = moneda if isinstance(moneda, Moneda) else Moneda(moneda)
-        query = query.where(Transaccion.moneda == moneda_enum)
     
     conditions = []
     if cat_ids:
@@ -141,12 +157,105 @@ def calcular_gasto_en_periodo(
         conditions.append(Transaccion.subcategoria_id.in_(subcat_ids))
         
     if not conditions:
-        return Decimal("0")
-        
-    query = query.where(or_(*conditions))
+        return GastoPresupuesto(Decimal("0"))
+
+    # Normalizar moneda del presupuesto
+    presu_moneda_str = "ARS"
+    if moneda is not None:
+        moneda_enum = moneda if isinstance(moneda, Moneda) else Moneda(moneda)
+        presu_moneda_str = moneda_enum.value if hasattr(moneda_enum, "value") else str(moneda_enum)
+
+    # 1. Consultar transacciones en TODAS las monedas en una única consulta
+    query = select(
+        Transaccion.monto,
+        Transaccion.moneda,
+        Transaccion.fecha,
+        Transaccion.cotizacion_aplicada
+    ).where(
+        Transaccion.usuario_id == usuario_id,
+        Transaccion.tipo == TipoTransaccion.EGRESO,
+        or_(
+            Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
+            Transaccion.estado_verificacion == None
+        ),
+        Transaccion.es_padre_cuotas == False,
+        Transaccion.fecha >= fecha_inicio,
+        Transaccion.fecha <= fecha_fin,
+        or_(*conditions)
+    )
     
-    resultado = db.execute(query).scalar()
-    return resultado if resultado else Decimal("0")
+    rows = db.execute(query).all()
+    
+    monto_propio = Decimal("0")
+    monto_convertido = Decimal("0")
+    monto_sin_cotizacion = Decimal("0")
+    moneda_sin_cotizacion = None
+    
+    txs_otra_moneda = []
+    for r in rows:
+        r_moneda_str = r.moneda.value if hasattr(r.moneda, "value") else str(r.moneda)
+        if r_moneda_str == presu_moneda_str:
+            monto_propio += Decimal(str(r.monto))
+        else:
+            txs_otra_moneda.append(r)
+
+    # Si hay transacciones en otra moneda, resolver cotizaciones por bloque (máximo 1 consulta adicional)
+    if txs_otra_moneda:
+        fechas_necesarias = {
+            r.fecha for r in txs_otra_moneda 
+            if not (r.cotizacion_aplicada and r.cotizacion_aplicada > 0)
+        }
+        mapa_cotizaciones = {}
+        if fechas_necesarias:
+            if usuario is None:
+                usuario = db.get(Usuario, usuario_id)
+            tipo_dolar = getattr(usuario, "tipo_dolar", "blue") or "blue"
+            from app.services.dolar_service import obtener_cotizaciones_por_fechas
+            mapa_cotizaciones = obtener_cotizaciones_por_fechas(db, tipo_dolar, fechas_necesarias)
+
+        for r in txs_otra_moneda:
+            tx_monto = Decimal(str(r.monto))
+            tx_moneda_str = r.moneda.value if hasattr(r.moneda, "value") else str(r.moneda)
+
+            cotizacion = None
+            if r.cotizacion_aplicada and r.cotizacion_aplicada > 0:
+                cotizacion = Decimal(str(r.cotizacion_aplicada))
+            else:
+                cot_obj = mapa_cotizaciones.get(r.fecha)
+                if cot_obj is not None:
+                    cot_val = cot_obj.promedio or cot_obj.venta or cot_obj.compra
+                    if cot_val and cot_val > Decimal("0"):
+                        cotizacion = Decimal(str(cot_val))
+
+            if cotizacion is None or cotizacion <= Decimal("0"):
+                monto_sin_cotizacion += tx_monto
+                moneda_sin_cotizacion = tx_moneda_str
+                logger.info(
+                    "Gasto de %s %s del %s no contabilizado en presupuesto: sin cotización disponible.",
+                    tx_monto, tx_moneda_str, r.fecha
+                )
+                continue
+
+            # Dirección de conversión documentada:
+            # Si el presupuesto es en ARS y el gasto es en USD -> se MULTIPLICA (USD * cotizacion = ARS)
+            # Si el presupuesto es en USD y el gasto es en ARS -> se DIVIDE (ARS / cotizacion = USD)
+            if presu_moneda_str == "ARS" and tx_moneda_str == "USD":
+                conv = (tx_monto * cotizacion).quantize(Decimal("0.01"))
+            elif presu_moneda_str == "USD" and tx_moneda_str == "ARS":
+                conv = (tx_monto / cotizacion).quantize(Decimal("0.01"))
+            else:
+                conv = tx_monto
+
+            monto_convertido += conv
+
+    total = monto_propio + monto_convertido
+    return GastoPresupuesto(
+        total,
+        propio=monto_propio,
+        convertido=monto_convertido,
+        sin_cotizacion=monto_sin_cotizacion,
+        moneda_sin_cotizacion=moneda_sin_cotizacion
+    )
 
 def obtener_periodo_activo(db: Optional[Session], presupuesto: Presupuesto) -> Optional[PeriodoPresupuesto]:
     hoy = hoy_argentina()
@@ -163,7 +272,8 @@ def obtener_presupuestos(db: Session, usuario_id: UUID, estado: Optional[str] = 
         .options(
             selectinload(Presupuesto.categorias).joinedload(PresupuestoCategoria.categoria),
             selectinload(Presupuesto.categorias).joinedload(PresupuestoCategoria.subcategoria),
-            selectinload(Presupuesto.periodos)
+            selectinload(Presupuesto.periodos),
+            joinedload(Presupuesto.usuario)
         )
         .where(Presupuesto.usuario_id == usuario_id)
     )
@@ -171,7 +281,19 @@ def obtener_presupuestos(db: Session, usuario_id: UUID, estado: Optional[str] = 
     if estado:
         query = query.where(Presupuesto.estado == estado)
         
-    return db.execute(query).scalars().all()
+    presupuestos = db.execute(query).scalars().all()
+    for presu in presupuestos:
+        periodo_activo = obtener_periodo_activo(db, presu)
+        if periodo_activo:
+            gasto = calcular_gasto_en_periodo(
+                db, usuario_id, presu.categorias,
+                periodo_activo.fecha_inicio, periodo_activo.fecha_fin,
+                moneda=presu.moneda, usuario=presu.usuario
+            )
+            periodo_activo.monto_usado = gasto
+            periodo_activo.superado = gasto > periodo_activo.monto_limite
+
+    return presupuestos
 
 def crear_presupuesto(db: Session, usuario_id: UUID, data: PresupuestoCreate) -> Presupuesto:
     if data.monto <= 0:
@@ -272,6 +394,15 @@ def obtener_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto:
     presupuesto = db.execute(query).scalar_one_or_none()
     if not presupuesto:
         raise HTTPException(status_code=404, detail="No encontramos ese presupuesto.")
+    pa = obtener_periodo_activo(db, presupuesto)
+    if pa:
+        gasto = calcular_gasto_en_periodo(
+            db, usuario_id, presupuesto.categorias,
+            pa.fecha_inicio, pa.fecha_fin,
+            moneda=presupuesto.moneda, usuario=presupuesto.usuario
+        )
+        pa.monto_usado = gasto
+        pa.superado = gasto > pa.monto_limite
     return presupuesto
 
 def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: PresupuestoUpdate) -> Presupuesto:
@@ -418,7 +549,8 @@ def registrar_impacto_presupuesto(db: Session, transaccion: Transaccion, reverti
         select(Presupuesto)
         .options(
             selectinload(Presupuesto.periodos),
-            selectinload(Presupuesto.categorias)
+            selectinload(Presupuesto.categorias),
+            joinedload(Presupuesto.usuario)
         )
         .where(
             Presupuesto.usuario_id == transaccion.usuario_id,
@@ -434,9 +566,6 @@ def registrar_impacto_presupuesto(db: Session, transaccion: Transaccion, reverti
             tx_cat_id = sub.categoria_id
 
     for presu in presupuestos:
-        if transaccion.moneda != presu.moneda:
-            continue
-            
         aplica = False
         for c in presu.categorias:
             if c.subcategoria_id is not None:
@@ -457,11 +586,40 @@ def registrar_impacto_presupuesto(db: Session, transaccion: Transaccion, reverti
             
         if not (periodo_activo.fecha_inicio <= transaccion.fecha <= periodo_activo.fecha_fin):
             continue
+
+        presu_moneda_str = presu.moneda.value if hasattr(presu.moneda, "value") else str(presu.moneda)
+        tx_moneda_str = transaccion.moneda.value if hasattr(transaccion.moneda, "value") else str(transaccion.moneda)
+
+        if tx_moneda_str == presu_moneda_str:
+            monto_impacto = transaccion.monto
+        else:
+            cotizacion = None
+            if transaccion.cotizacion_aplicada and transaccion.cotizacion_aplicada > 0:
+                cotizacion = Decimal(str(transaccion.cotizacion_aplicada))
+            else:
+                from app.services.dolar_service import obtener_cotizacion_por_fecha
+                usuario_presu = presu.usuario or db.get(Usuario, presu.usuario_id)
+                tipo_dolar = getattr(usuario_presu, "tipo_dolar", "blue") or "blue"
+                cot_obj = obtener_cotizacion_por_fecha(db, tipo_dolar, transaccion.fecha)
+                if cot_obj:
+                    cot_val = cot_obj.promedio or cot_obj.venta or cot_obj.compra
+                    if cot_val and cot_val > Decimal("0"):
+                        cotizacion = Decimal(str(cot_val))
+
+            if not cotizacion or cotizacion <= Decimal("0"):
+                continue
+
+            if presu_moneda_str == "ARS" and tx_moneda_str == "USD":
+                monto_impacto = (transaccion.monto * cotizacion).quantize(Decimal("0.01"))
+            elif presu_moneda_str == "USD" and tx_moneda_str == "ARS":
+                monto_impacto = (transaccion.monto / cotizacion).quantize(Decimal("0.01"))
+            else:
+                monto_impacto = transaccion.monto
             
         if not revertir:
-            periodo_activo.monto_usado += transaccion.monto
+            periodo_activo.monto_usado += monto_impacto
         else:
-            periodo_activo.monto_usado -= transaccion.monto
+            periodo_activo.monto_usado -= monto_impacto
             periodo_activo.monto_usado = max(Decimal("0"), periodo_activo.monto_usado)
             
         periodo_activo.superado = periodo_activo.monto_usado > periodo_activo.monto_limite
