@@ -404,6 +404,7 @@ def confirmar_importacion(
         "importadas": resultado_importacion["importadas"],
         "duplicadas": resultado_importacion["duplicadas"],
         "sin_billetera_usd": resultado_importacion["sin_billetera_usd"],
+        "descartadas_manual": total_excluidas,
         "total_procesadas": resultado_importacion["total_procesadas"]
     }
     
