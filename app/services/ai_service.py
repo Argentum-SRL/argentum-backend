@@ -101,6 +101,7 @@ REGLAS DE CLASIFICACIÓN DE INTENTS:
 - "puse X", "metí X", "deposité X" SIN contexto claro → slot_filling=true, preguntá "¿Fue un gasto, ingreso o transferencia?"
 - "cuánta plata tengo", "cuánto tengo", "mi saldo" → consultar_saldo
 - "cómo voy", "cómo estoy este mes" → consultar_balance
+- Consultas de gastos o totales por un concepto, comercio o categoría específica (ej: "cuánto gasté en pizza", "cuánto gasté en el super", "cuánto se me fue en salidas") NO están soportadas → intent="desconocido", confianza=1.0, slot_filling=false.
 - "llego a fin de mes", "me alcanza", "cuánto me queda" → consultar_proyeccion
 - "cancelar", "no importa", "dejá", "olvidalo" → cancelar
 - "sí", "dale", "confirmá", "ok", "va" → confirmar
@@ -138,10 +139,13 @@ FLUJO DE SLOT FILLING Y CATEGORIZACIÓN AUTOMÁTICA:
 
 MANEJO DE ESTADO PREVIO Y RESPUESTAS A MENÚS / SELECCIONES:
 - Si se te proporciona un bloque de "DATOS YA CONFIRMADOS/RESUELTOS EN ESTA CONVERSACIÓN", esos datos son la verdad establecida:
-  * NO los descartes, NO los pises con null, NO los vuelvas a preguntar.
   * Si el usuario responde a una pregunta de billetera con un número o texto (ej: "1", "1 (billetera: Mercado Pago)", "mercado pago"), interpretalo como la selección de la billetera que faltaba para completar la transacción previa, NUNCA como un nuevo monto ni como una transacción nueva de $1.
   * Devolvé en el JSON de salida TODAS las entidades acumuladas (monto previo, tipo previo, categoría previa, transacciones_adicionales previas + la nueva billetera resuelta).
   * Si con este dato ya contás con monto, tipo y billetera, establecé intent="registrar_transaccion", confianza >= 0.85, slot_filling=false, y generá la propuesta pidiendo confirmación: "Voy a anotar $X en [Categoría] desde [Billetera]. ¿Va?" (o listando todos los movimientos si hay adicionales).
+- CAMBIO DE TEMA O NUEVA OPERACIÓN:
+  * Si el mensaje nuevo introduce una transacción independiente con su propio monto y concepto/categoría (por ejemplo: "gasté 12000 en verdulería" cuando había datos previos de kiosco), DESCARTÁ por completo los datos confirmados previos. NO los fusiones ni los agregues como transacciones adicionales. Procesá únicamente la nueva operación.
+  * Si el mensaje nuevo es un saludo, una consulta (saldo, balance, proyección) o una cancelación, DESCARTÁ los datos confirmados previos.
+  * La fusión o acumulación de datos previos aplica ÚNICAMENTE cuando el nuevo mensaje es una respuesta directa a lo que el sistema preguntó para completar la operación.
 
 FORMATO DE RESPUESTA — siempre respondé con un JSON válido con exactamente esta estructura, sin texto fuera del JSON:
 {
@@ -404,14 +408,16 @@ def procesar_mensaje(
                     messages_openai.append({"role": "user", "content": turno["usuario"]})
                 if turno.get("bot"):
                     # Pasar respuesta del bot como JSON para mantener el formato
-                    bot_json = json.dumps({
+                    bot_payload = {
                         "intent": turno.get("intent", "desconocido"),
                         "entidades": turno.get("entidades", {}),
-                        "confianza": turno.get("confianza", 0.9),
-                        "slot_filling": False,
-                        "datos_faltantes": [],
-                        "respuesta_usuario": turno["bot"]
-                    }, ensure_ascii=False)
+                        "slot_filling": turno.get("slot_filling", False),
+                        "datos_faltantes": turno.get("datos_faltantes", []),
+                        "respuesta_usuario": turno["bot"],
+                    }
+                    if turno.get("confianza") is not None:
+                        bot_payload["confianza"] = turno["confianza"]
+                    bot_json = json.dumps(bot_payload, ensure_ascii=False)
                     messages_openai.append({"role": "assistant", "content": bot_json})
 
         # Agregar mensaje actual

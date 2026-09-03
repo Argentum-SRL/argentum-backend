@@ -79,7 +79,103 @@ def _nombre_corto_categoria(nombre: str | None) -> str:
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp-ia"])
 
-EXPIRACION_PREGUNTA_BILLETERA_MINUTOS = 30
+PLAZO_EXPIRACION_ESTADO_MINUTOS = 30
+EXPIRACION_PREGUNTA_BILLETERA_MINUTOS = PLAZO_EXPIRACION_ESTADO_MINUTOS
+
+SALUDOS_RIOPLATENSE = {
+    "hola",
+    "buenas",
+    "buen dia",
+    "buen día",
+    "buenos dias",
+    "buenos días",
+    "buenas tardes",
+    "buenas noches",
+    "holis",
+    "holi",
+    "que tal",
+    "qué tal",
+    "buenas y santas",
+    "como va",
+    "cómo va",
+    "como andas",
+    "cómo andás",
+    "que onda",
+    "qué onda",
+    "che",
+    "che hola",
+    "hola che",
+    "hola buenas",
+    "hola buen dia",
+    "hola como va",
+    "hola que tal",
+    "buendia",
+}
+
+PALABRAS_CANCELACION = {
+    "no",
+    "cancela",
+    "cancelá",
+    "cancelar",
+    "cancelalo",
+    "cancelala",
+    "deja",
+    "dejá",
+    "dejalo",
+    "dejala",
+    "olvidate",
+    "olvidalo",
+    "olvidala",
+    "no importa",
+    "nada",
+    "borrar",
+    "descarta",
+    "descartar",
+    "no cancela",
+    "no gracias",
+    "no quiero",
+    "no hace falta",
+}
+
+PALABRAS_CONFIRMACION = {
+    "si",
+    "sí",
+    "dale",
+    "ok",
+    "confirmo",
+    "confirmar",
+    "va",
+    "listo",
+    "de una",
+    "correcto",
+    "perfecto",
+    "seh",
+    "sip",
+    "yes",
+}
+
+
+def _es_saludo(mensaje: str) -> bool:
+    norm = normalizar_texto(mensaje)
+    return bool(norm and norm in SALUDOS_RIOPLATENSE)
+
+
+def _es_cancelacion(mensaje: str) -> bool:
+    norm = normalizar_texto(mensaje)
+    if not norm:
+        return False
+    if norm in PALABRAS_CANCELACION:
+        return True
+    if re.match(r"^no+$", norm):  # no, noo, nooo, noooo...
+        return True
+    if norm.startswith("no cancela") or norm.startswith("no gracias") or norm.startswith("no, cancela"):
+        return True
+    return False
+
+
+def _es_confirmacion(mensaje: str) -> bool:
+    norm = normalizar_texto(mensaje)
+    return bool(norm and norm in PALABRAS_CONFIRMACION)
 
 ALIAS_BILLETERAS = {
     "mp": "mercado pago",
@@ -220,9 +316,28 @@ def _buscar_usuario_por_telefono(telefono_raw: str, db: Session) -> Usuario | No
 
 
 def _buscar_slot_filling_activo(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
     conv = db.execute(
         select(ConversacionWpp)
-        .where(ConversacionWpp.usuario_id == usuario_id, ConversacionWpp.slot_filling_activo == True)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.slot_filling_activo == True,
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+    return conv
+
+
+def _buscar_slot_filling_vencido(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    conv = db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.slot_filling_activo == True,
+            ConversacionWpp.fecha < limite,
+        )
         .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
     ).scalars().first()
     return conv
@@ -236,25 +351,67 @@ def _es_pregunta_billetera(conv: ConversacionWpp | None) -> bool:
     return any(d in datos_faltantes for d in ("billetera_origen", "billetera_destino", "billetera"))
 
 
-def _merge_entidades(estado_previo: dict | None, entidades_nuevas: dict | None) -> dict:
+def _merge_entidades(
+    estado_previo: dict | None,
+    entidades_nuevas: dict | None,
+    intent_nuevo: str | None = None,
+) -> dict:
     """
-    Fusiona el estado previo de entidades con las nuevas entidades detectadas por la IA.
-    Los campos no-nulos nuevos pisan a los viejos; los campos que la IA omite o devuelve como null
-    conservan el valor previamente resuelto.
+    Fusiona entidades únicamente si el mensaje nuevo es una respuesta a lo que el sistema preguntó
+    (slot filling), NUNCA si el mensaje nuevo representa una operación nueva o cambio de tema.
+
+    Reglas de fusión:
+    1. Si no hay estado previo o no hay entidades nuevas, no hay fusión.
+    2. Si el intent detectado es un cambio de tema explícito (saludo, cancelación, consultas, etc.),
+       se descarta el estado previo y se devuelven las entidades nuevas.
+    3. Si el mensaje nuevo trae monto y concepto/categoría propios y difiere del monto/categoría previos,
+       es una nueva operación: se descarta el estado previo por completo.
+    4. La fusión solo tiene sentido cuando se completan datos faltantes solicitados por el sistema
+       (datos_faltantes) o se resuelve la billetera requerida.
     """
     if not estado_previo:
         return entidades_nuevas or {}
     if not entidades_nuevas:
         return dict(estado_previo)
 
+    if intent_nuevo in (
+        "saludo",
+        "cancelar",
+        "consultar_saldo",
+        "consultar_balance",
+        "consultar_proyeccion",
+        "consultar_cotizacion",
+        "desconocido",
+    ):
+        return dict(entidades_nuevas)
+
+    monto_nuevo = entidades_nuevas.get("monto")
+    cat_nueva = entidades_nuevas.get("categoria")
+    desc_nueva = entidades_nuevas.get("descripcion")
+
+    monto_prev = estado_previo.get("monto")
+    cat_prev = estado_previo.get("categoria")
+
+    # Si trae un monto nuevo y categoría/descripción propia y difiere de la previa -> Operación nueva
+    if monto_nuevo is not None and (cat_nueva is not None or desc_nueva is not None):
+        if monto_prev is not None and (monto_nuevo != monto_prev or (cat_nueva and cat_nueva != cat_prev)):
+            return dict(entidades_nuevas)
+
+    datos_faltantes = estado_previo.get("datos_faltantes", [])
     merged = dict(estado_previo)
+
     for k, v in entidades_nuevas.items():
         if k == "datos_faltantes":
             continue
         if v is not None:
-            if k == "transacciones_adicionales" and not v and estado_previo.get("transacciones_adicionales"):
+            # Solo fusionar si era un campo pendiente o si es resolución de billetera
+            if k in datos_faltantes or (k in ("billetera_origen", "billetera_destino") and any("billetera" in d for d in datos_faltantes)):
+                merged[k] = v
+            elif k == "transacciones_adicionales" and not v and estado_previo.get("transacciones_adicionales"):
                 continue
-            merged[k] = v
+            elif estado_previo.get(k) is None:
+                merged[k] = v
+
     return merged
 
 
@@ -606,7 +763,7 @@ def _construir_propuesta_transaccion(
 
 
 def _buscar_propuesta_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
-    limite = datetime.now(timezone.utc) - timedelta(minutes=15)
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
     return db.execute(
         select(ConversacionWpp)
         .where(
@@ -737,48 +894,47 @@ def _resolver_seleccion_numerica(
 
 def _obtener_historial_reciente(usuario_id: UUID, db: Session, n: int = 6) -> list[dict]:
     """
-    Obtiene los últimos N turnos de conversación del usuario.
-    Retorna lista de dicts con keys 'usuario' y 'bot'.
-    Solo incluye conversaciones de los últimos 30 minutos para mantener contexto relevante.
+    Obtiene los últimos N turnos de conversación del usuario (por defecto 6).
+    Solo incluye conversaciones de los últimos 30 minutos (PLAZO_EXPIRACION_ESTADO_MINUTOS).
+    Incluye las preguntas que hizo el sistema para que la IA entienda a qué responde un 'sí'
+    o una selección suelta, y utiliza la confianza y estado reales sin inventar valores fijos.
     """
-    from datetime import datetime, timezone, timedelta
-    limite_tiempo = datetime.now(timezone.utc) - timedelta(minutes=30)
-    
+    limite_tiempo = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+
     convs = db.execute(
         select(ConversacionWpp)
         .where(
             ConversacionWpp.usuario_id == usuario_id,
             ConversacionWpp.fecha >= limite_tiempo,
         )
-        .order_by(ConversacionWpp.fecha.desc())
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
         .limit(n)
     ).scalars().all()
-    
+
     # Revertir para orden cronológico
     convs = list(reversed(convs))
-    
+
     resultado = []
     for c in convs:
-        # Excluir mensajes generados por el backend (menús, errores)
+        # Excluir únicamente fallbacks genéricos de error técnico que no aportan contexto conversacional
         if (
-            c.mensaje_bot.startswith("¿Desde qué billetera")
-            or c.mensaje_bot.startswith("¿A qué billetera")
-            or c.mensaje_bot.startswith("¿A cuál te referís")
-            or c.mensaje_bot.startswith("Esa operación ya venció")
-            or c.mensaje_bot.startswith("Opción inválida")
-            or c.mensaje_bot.startswith("No pude procesar")
-            or c.mensaje_bot.startswith("No pude leer")
-            or c.mensaje_bot.startswith("No entendí")
+            c.mensaje_bot.startswith("Hubo un problema al procesar tu mensaje")
+            or c.mensaje_bot.startswith("No pude escuchar el audio")
+            or c.mensaje_bot.startswith("No pude leer el comprobante")
         ):
             continue
         if c.intent_detectado is None:
             continue
+
+        estado = c.slot_filling_estado or {}
         resultado.append({
             "usuario": c.mensaje_usuario,
             "bot": c.mensaje_bot,
             "intent": c.intent_detectado or "desconocido",
             "entidades": c.entidades or {},
-            "confianza": float(c.confianza) if c.confianza else 0.9,
+            "confianza": float(c.confianza) if c.confianza is not None else None,
+            "slot_filling": c.slot_filling_activo,
+            "datos_faltantes": estado.get("datos_faltantes", []) if c.slot_filling_activo else [],
         })
     return resultado
 
@@ -879,15 +1035,17 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
             return None
 
         elif intent == "confirmar":
-            # Buscar transacción pendiente existente de IA
+            limite_tiempo = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+            # Buscar transacción pendiente existente de IA dentro del plazo de expiración
             tx = db.execute(
                 select(Transaccion)
                 .where(
                     Transaccion.usuario_id == usuario.id,
                     Transaccion.origen == OrigenTransaccion.IA_WPP,
-                    Transaccion.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE
+                    Transaccion.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE,
+                    Transaccion.fecha_creacion >= limite_tiempo,
                 )
-                .order_by(Transaccion.fecha_creacion.desc())
+                .order_by(Transaccion.fecha_creacion.desc(), Transaccion.id.desc())
             ).scalars().first()
 
             if tx:
@@ -904,12 +1062,7 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                 db.flush()
                 return str(tx.id)
             else:
-                # Buscar conversación previa con datos de transacción pendiente de confirmar
-                from datetime import datetime, timezone, timedelta
-
-                # Solo buscar conversaciones de los últimos 10 minutos sin acción ya ejecutada
-                limite_tiempo = datetime.now(timezone.utc) - timedelta(minutes=10)
-
+                # Buscar conversación previa con datos de transacción pendiente de confirmar dentro del plazo
                 conv_previa = db.execute(
                     select(ConversacionWpp)
                     .where(
@@ -920,7 +1073,7 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                         ConversacionWpp.confianza >= Decimal("0.85"),
                         ConversacionWpp.fecha >= limite_tiempo,
                     )
-                    .order_by(ConversacionWpp.fecha.desc())
+                    .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
                 ).scalars().first()
 
                 if conv_previa and conv_previa.entidades:
@@ -1032,33 +1185,45 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
             return None
 
         elif intent == "cancelar":
-            tx = db.execute(
+            txs_pendientes = db.execute(
                 select(Transaccion)
                 .where(
                     Transaccion.usuario_id == usuario.id,
                     Transaccion.origen == OrigenTransaccion.IA_WPP,
-                    Transaccion.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE
+                    Transaccion.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE,
                 )
-                .order_by(Transaccion.fecha_creacion.desc())
-            ).scalars().first()
+            ).scalars().all()
 
-            if tx:
+            for tx in txs_pendientes:
                 db.delete(tx)
+            if txs_pendientes:
                 emitir_evento_actualizacion(db, usuario.id, "transacciones")
-                db.flush()
 
-            # Desactivar cualquier slot filling activo del usuario
+            # Desactivar y marcar cancelado cualquier slot filling activo del usuario
             convs_activas = db.execute(
                 select(ConversacionWpp)
                 .where(
                     ConversacionWpp.usuario_id == usuario.id,
-                    ConversacionWpp.slot_filling_activo == True
+                    ConversacionWpp.slot_filling_activo == True,
                 )
             ).scalars().all()
             for c in convs_activas:
                 c.slot_filling_activo = False
-            db.flush()
+                c.accion_ejecutada = "cancelada"
 
+            # Marcar canceladas de forma definitiva todas las propuestas previas no ejecutadas
+            propuestas_previas = db.execute(
+                select(ConversacionWpp)
+                .where(
+                    ConversacionWpp.usuario_id == usuario.id,
+                    ConversacionWpp.intent_detectado == "registrar_transaccion",
+                    ConversacionWpp.accion_ejecutada.is_(None),
+                )
+            ).scalars().all()
+            for p in propuestas_previas:
+                p.accion_ejecutada = "cancelada"
+
+            db.flush()
             return None
 
         return None
@@ -1440,27 +1605,242 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 )
                 return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
-            # Buscar conversación activa previa con slot_filling
+            # 1. Chequeo determinístico de saludo rioplatense (Tarea 4)
+            if _es_saludo(mensaje_texto):
+                conv_activa_saludo = _buscar_slot_filling_activo(usuario.id, db)
+                msg_saludo = ""
+                if conv_activa_saludo and conv_activa_saludo.slot_filling_estado:
+                    est_saludo = conv_activa_saludo.slot_filling_estado
+                    monto_saludo = est_saludo.get("monto")
+                    cat_saludo = est_saludo.get("categoria")
+                    mon_saludo = est_saludo.get("moneda", "ARS")
+                    mon_enum = Moneda.USD if mon_saludo == "USD" else Moneda.ARS
+                    cat_disp = _nombre_corto_categoria(cat_saludo) if cat_saludo else ""
+                    if monto_saludo is not None:
+                        monto_fmt = formatear_monto(float(monto_saludo), mon_enum)
+                        if cat_disp:
+                            linea_pend = f"Tenías una operación a medias (anotar {monto_fmt} en {cat_disp}). Podés completarla o empezar de nuevo."
+                        else:
+                            linea_pend = f"Tenías una operación a medias de {monto_fmt}. Podés completarla o empezar de nuevo."
+                    else:
+                        linea_pend = "Tenías una operación a medias. Podés completarla o empezar de nuevo."
+                    msg_saludo = f"Hola. {linea_pend}\nTambién podés registrar otro gasto, ingreso o consultar tus saldos."
+                    # Desactivar para que el saludo no arrastre ni reactive nada
+                    conv_activa_saludo.slot_filling_activo = False
+                    conv_activa_saludo.accion_ejecutada = "interrumpida_por_saludo"
+                    db.flush()
+                else:
+                    msg_saludo = "Hola. Podés registrar gastos, ingresos o consultar tus saldos y proyecciones. Por ejemplo: 'gasté 5000 en el kiosco'."
+
+                nueva_conv = ConversacionWpp(
+                    usuario_id=usuario.id,
+                    wamid=wamid,
+                    mensaje_usuario=mensaje_texto,
+                    tipo_mensaje=TipoMensajeWpp.TEXTO,
+                    transcripcion=None,
+                    mensaje_bot=msg_saludo,
+                    intent_detectado="saludo",
+                    entidades={},
+                    accion_ejecutada=None,
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=False,
+                    slot_filling_estado=None,
+                )
+                db.add(nueva_conv)
+                db.commit()
+                enviar_whatsapp(from_number, msg_saludo)
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            # 2. Si hay una propuesta pendiente y el usuario menciona una billetera, corregirla determinísticamente
+            # Evaluado antes de cancelación para que "no, fue en Mercado Pago" o "no fue en galicia" corrijan y no cancelen
+            propuesta_pendiente = _buscar_propuesta_pendiente(usuario.id, db)
             conv_activa = _buscar_slot_filling_activo(usuario.id, db)
+            if propuesta_pendiente and not conv_activa:
+                es_corr, b_nueva, cands, err_moneda = _evaluar_correccion_billetera(
+                    mensaje_texto, usuario.id, propuesta_pendiente, db
+                )
+                if es_corr:
+                    if err_moneda:
+                        enviar_whatsapp(from_number, err_moneda)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    if len(cands) > 1:
+                        tipo_prop = propuesta_pendiente.entidades.get("tipo", "egreso")
+                        menu = _generar_menu_billeteras(cands, tipo=tipo_prop)
+                        propuesta_pendiente.slot_filling_activo = True
+                        clave_bill = "billetera_destino" if tipo_prop == "ingreso" else "billetera_origen"
+                        propuesta_pendiente.slot_filling_estado = {
+                            **propuesta_pendiente.entidades,
+                            "datos_faltantes": [clave_bill],
+                        }
+                        db.commit()
+                        enviar_whatsapp(from_number, f"¿A cuál te referís?\n{menu}")
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    if b_nueva:
+                        tipo_prop = propuesta_pendiente.entidades.get("tipo", "egreso")
+                        clave_bill = "billetera_destino" if tipo_prop == "ingreso" else "billetera_origen"
+                        clave_otra = "billetera_origen" if tipo_prop == "ingreso" else "billetera_destino"
+
+                        entidades_nuevas = dict(propuesta_pendiente.entidades)
+                        entidades_nuevas[clave_bill] = b_nueva.nombre
+                        entidades_nuevas.pop(clave_otra, None)
+
+                        nuevo_msg = _construir_propuesta_transaccion(
+                            entidades_nuevas, b_nueva.nombre, se_asumio_principal=False
+                        )
+
+                        propuesta_pendiente.entidades = entidades_nuevas
+                        propuesta_pendiente.mensaje_bot = nuevo_msg
+                        propuesta_pendiente.fecha = datetime.now(timezone.utc)
+
+                        nueva_conv = ConversacionWpp(
+                            usuario_id=usuario.id,
+                            wamid=wamid,
+                            mensaje_usuario=mensaje_texto,
+                            tipo_mensaje=TipoMensajeWpp.TEXTO,
+                            transcripcion=None,
+                            mensaje_bot=nuevo_msg,
+                            intent_detectado="registrar_transaccion",
+                            entidades=entidades_nuevas,
+                            accion_ejecutada=None,
+                            confianza=Decimal("1.000"),
+                            slot_filling_activo=False,
+                            slot_filling_estado=None,
+                        )
+                        db.add(nueva_conv)
+                        db.commit()
+                        enviar_whatsapp(from_number, nuevo_msg)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            # 3. Chequeo determinístico de cancelación (Tarea 5)
+            if _es_cancelacion(mensaje_texto):
+                txs_pend = db.execute(
+                    select(Transaccion)
+                    .where(
+                        Transaccion.usuario_id == usuario.id,
+                        Transaccion.origen == OrigenTransaccion.IA_WPP,
+                        Transaccion.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE,
+                    )
+                ).scalars().all()
+                for tx in txs_pend:
+                    db.delete(tx)
+                if txs_pend:
+                    emitir_evento_actualizacion(db, usuario.id, "transacciones")
+
+                convs_act = db.execute(
+                    select(ConversacionWpp)
+                    .where(
+                        ConversacionWpp.usuario_id == usuario.id,
+                        ConversacionWpp.slot_filling_activo == True,
+                    )
+                ).scalars().all()
+                for c in convs_act:
+                    c.slot_filling_activo = False
+                    c.accion_ejecutada = "cancelada"
+
+                props_pend = db.execute(
+                    select(ConversacionWpp)
+                    .where(
+                        ConversacionWpp.usuario_id == usuario.id,
+                        ConversacionWpp.intent_detectado == "registrar_transaccion",
+                        ConversacionWpp.accion_ejecutada.is_(None),
+                    )
+                ).scalars().all()
+                for p in props_pend:
+                    p.accion_ejecutada = "cancelada"
+
+                msg_cancel = "Listo, cancelado."
+                nueva_conv = ConversacionWpp(
+                    usuario_id=usuario.id,
+                    wamid=wamid,
+                    mensaje_usuario=mensaje_texto,
+                    tipo_mensaje=TipoMensajeWpp.TEXTO,
+                    transcripcion=None,
+                    mensaje_bot=msg_cancel,
+                    intent_detectado="cancelar",
+                    entidades={},
+                    accion_ejecutada="cancelada",
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=False,
+                    slot_filling_estado=None,
+                )
+                db.add(nueva_conv)
+                db.commit()
+                enviar_whatsapp(from_number, msg_cancel)
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            # 3. Chequeo determinístico de confirmación sin propuesta pendiente (Tarea 5.2 / 7.3)
+            if _es_confirmacion(mensaje_texto):
+                propuesta_existente = _buscar_propuesta_pendiente(usuario.id, db)
+                limite_tiempo_tx = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+                tx_existente = db.execute(
+                    select(Transaccion.id)
+                    .where(
+                        Transaccion.usuario_id == usuario.id,
+                        Transaccion.origen == OrigenTransaccion.IA_WPP,
+                        Transaccion.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE,
+                        Transaccion.fecha_creacion >= limite_tiempo_tx,
+                    )
+                ).scalars().first()
+
+                if not propuesta_existente and not tx_existente:
+                    msg_sin_pend = "No tenés ninguna operación pendiente para confirmar."
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=msg_sin_pend,
+                        intent_detectado="confirmar",
+                        entidades={},
+                        accion_ejecutada=None,
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, msg_sin_pend)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            # 4. Buscar conversación activa previa con slot_filling dentro del plazo (Tarea 2)
+            conv_activa = _buscar_slot_filling_activo(usuario.id, db)
+            conv_vencida = _buscar_slot_filling_vencido(usuario.id, db) if not conv_activa else None
+
+            # Si hay una conversación vencida, apagarla en base
+            if conv_vencida:
+                conv_vencida.slot_filling_activo = False
+                conv_vencida.accion_ejecutada = "vencida"
+                db.flush()
+                # Si el usuario mandó una respuesta numérica o intenta responder al menú vencido
+                if mensaje_texto.strip().isdigit() or _es_pregunta_billetera(conv_vencida):
+                    msg_vencida = "Esa operación ya venció. Podés volver a mandarla."
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=msg_vencida,
+                        intent_detectado="slot_filling",
+                        entidades={},
+                        accion_ejecutada=None,
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, msg_vencida)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
             estado_previo = (
                 dict(conv_activa.slot_filling_estado)
                 if conv_activa and conv_activa.slot_filling_estado
                 else None
             )
 
-            # 1. Chequeo de expiración de pregunta de billetera (Tarea 6)
-            if _es_pregunta_billetera(conv_activa):
-                ahora = datetime.now(timezone.utc)
-                fecha_conv = conv_activa.fecha
-                if fecha_conv.tzinfo is None:
-                    fecha_conv = fecha_conv.replace(tzinfo=timezone.utc)
-                if (ahora - fecha_conv) >= timedelta(minutes=EXPIRACION_PREGUNTA_BILLETERA_MINUTOS):
-                    conv_activa.slot_filling_activo = False
-                    db.commit()
-                    enviar_whatsapp(from_number, "Esa operación ya venció. Podés volver a mandarla.")
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-
-            # 2. Si hay pregunta de billetera pendiente, resolver selección numérica o por nombre (Tarea 5)
+            # 5. Si hay pregunta de billetera pendiente activa, resolver selección numérica o por nombre
             if _es_pregunta_billetera(conv_activa):
                 estado_previo_bill = dict(conv_activa.slot_filling_estado) if conv_activa.slot_filling_estado else {}
                 tipo_mov = estado_previo_bill.get("tipo", "egreso")
@@ -1545,65 +1925,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     enviar_whatsapp(from_number, propuesta_msg)
                     return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
-            # 3. Si hay una propuesta pendiente y el usuario menciona una billetera, corregirla determinísticamente (Tarea 7)
-            propuesta_pendiente = _buscar_propuesta_pendiente(usuario.id, db)
-            if propuesta_pendiente and not conv_activa:
-                es_corr, b_nueva, cands, err_moneda = _evaluar_correccion_billetera(
-                    mensaje_texto, usuario.id, propuesta_pendiente, db
-                )
-                if es_corr:
-                    if err_moneda:
-                        enviar_whatsapp(from_number, err_moneda)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-                    if len(cands) > 1:
-                        tipo_prop = propuesta_pendiente.entidades.get("tipo", "egreso")
-                        menu = _generar_menu_billeteras(cands, tipo=tipo_prop)
-                        propuesta_pendiente.slot_filling_activo = True
-                        clave_bill = "billetera_destino" if tipo_prop == "ingreso" else "billetera_origen"
-                        propuesta_pendiente.slot_filling_estado = {
-                            **propuesta_pendiente.entidades,
-                            "datos_faltantes": [clave_bill],
-                        }
-                        db.commit()
-                        enviar_whatsapp(from_number, f"¿A cuál te referís?\n{menu}")
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-                    if b_nueva:
-                        tipo_prop = propuesta_pendiente.entidades.get("tipo", "egreso")
-                        clave_bill = "billetera_destino" if tipo_prop == "ingreso" else "billetera_origen"
-                        clave_otra = "billetera_origen" if tipo_prop == "ingreso" else "billetera_destino"
-
-                        entidades_nuevas = dict(propuesta_pendiente.entidades)
-                        entidades_nuevas[clave_bill] = b_nueva.nombre
-                        entidades_nuevas.pop(clave_otra, None)
-
-                        nuevo_msg = _construir_propuesta_transaccion(
-                            entidades_nuevas, b_nueva.nombre, se_asumio_principal=False
-                        )
-
-                        propuesta_pendiente.entidades = entidades_nuevas
-                        propuesta_pendiente.mensaje_bot = nuevo_msg
-                        propuesta_pendiente.fecha = datetime.now(timezone.utc)
-
-                        nueva_conv = ConversacionWpp(
-                            usuario_id=usuario.id,
-                            wamid=wamid,
-                            mensaje_usuario=mensaje_texto,
-                            tipo_mensaje=TipoMensajeWpp.TEXTO,
-                            transcripcion=None,
-                            mensaje_bot=nuevo_msg,
-                            intent_detectado="registrar_transaccion",
-                            entidades=entidades_nuevas,
-                            accion_ejecutada=None,
-                            confianza=Decimal("1.000"),
-                            slot_filling_activo=False,
-                            slot_filling_estado=None,
-                        )
-                        db.add(nueva_conv)
-                        db.commit()
-                        enviar_whatsapp(from_number, nuevo_msg)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
-
-            # 3.5. Si el mensaje es únicamente un número sin pregunta pendiente (Punto 2.3)
+            # 7. Si el mensaje es únicamente un número sin pregunta pendiente
             if mensaje_texto.strip().isdigit():
                 msg_numero_suelto = (
                     "Mandaste solo un número. Si querés registrar un movimiento, "
@@ -1628,7 +1950,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 db.commit()
                 return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
-            # 4. Procesamiento normal de IA
+            # 8. Procesamiento normal de IA
             t_ia_start = time.perf_counter()
             resultado_ia = ai_service.procesar_mensaje(
                 mensaje=mensaje_texto,
@@ -1640,9 +1962,58 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
             t_ia_end = time.perf_counter()
             logger.info("[LATENCIA][IA] Procesamiento: %.2fs", t_ia_end - t_ia_start)
 
-            # Mergear determinísticamente entidades para no perder campos de turnos previos
+            # Si el intent es desconocido o la confianza es baja (< 0.60), dar respuesta clara con ejemplo
+            intent_ia_raw = resultado_ia.get("intent")
+            confianza_ia_raw = float(resultado_ia.get("confianza", 1.0))
+            if intent_ia_raw == "desconocido" or confianza_ia_raw < 0.60:
+                msg_desc = (
+                    "No entendí ese mensaje. Por ahora puedo registrar gastos e ingresos, "
+                    "o consultar tus saldos y proyecciones. Por ejemplo: 'gasté 5000 en el kiosco' o 'cuánta plata tengo'."
+                )
+                resultado_ia["respuesta_usuario"] = msg_desc
+                resultado_ia["intent"] = "desconocido"
+                resultado_ia["slot_filling"] = False
+
+            # Detección de cambio de tema con nueva operación (Tarea 3 / Cierre Punto 4)
+            aviso_cambio_tema = None
+            entidades_ia = resultado_ia.get("entidades") or {}
+            if resultado_ia.get("intent") in ("registrar_transaccion", "slot_filling"):
+                monto_ia = entidades_ia.get("monto")
+                cat_ia = entidades_ia.get("categoria")
+                if conv_activa and conv_activa.slot_filling_estado:
+                    monto_prev = conv_activa.slot_filling_estado.get("monto")
+                    cat_prev = conv_activa.slot_filling_estado.get("categoria")
+                    if monto_ia is not None and (monto_ia != monto_prev or (cat_ia and cat_ia != cat_prev)):
+                        # Es una nueva operación: descartar estado previo y preparar aviso
+                        conv_activa.slot_filling_activo = False
+                        conv_activa.accion_ejecutada = "descartada_por_nueva_operacion"
+                        db.flush()
+                        estado_previo = None
+
+                        mon_prev = conv_activa.slot_filling_estado.get("moneda", "ARS")
+                        mon_prev_enum = Moneda.USD if mon_prev == "USD" else Moneda.ARS
+                        cat_prev_disp = _nombre_corto_categoria(cat_prev) if cat_prev else ""
+                        monto_prev_fmt = formatear_monto(float(monto_prev), mon_prev_enum) if monto_prev is not None else ""
+
+                        mon_nuevo = entidades_ia.get("moneda", "ARS")
+                        mon_nuevo_enum = Moneda.USD if mon_nuevo == "USD" else Moneda.ARS
+                        cat_nuevo_disp = _nombre_corto_categoria(cat_ia) if cat_ia else ""
+                        monto_nuevo_fmt = formatear_monto(float(monto_ia), mon_nuevo_enum) if monto_ia is not None else ""
+
+                        if cat_prev_disp and cat_nuevo_disp:
+                            aviso_cambio_tema = f"Descarté la de {monto_prev_fmt} en {cat_prev_disp}. Para los {monto_nuevo_fmt} en {cat_nuevo_disp}:"
+                        elif cat_prev_disp:
+                            aviso_cambio_tema = f"Descarté la de {monto_prev_fmt} en {cat_prev_disp}. Para los {monto_nuevo_fmt}:"
+                        else:
+                            aviso_cambio_tema = f"Descarté la operación anterior de {monto_prev_fmt}."
+
+            # Mergear determinísticamente entidades para no perder campos de turnos previos si corresponde
             if estado_previo:
-                resultado_ia["entidades"] = _merge_entidades(estado_previo, resultado_ia.get("entidades", {}))
+                resultado_ia["entidades"] = _merge_entidades(
+                    estado_previo,
+                    resultado_ia.get("entidades", {}),
+                    intent_nuevo=resultado_ia.get("intent"),
+                )
 
             entidades_actuales = resultado_ia.get("entidades", {})
 
@@ -1952,6 +2323,14 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
             # Si se canceló, asegurar tono rioplatense
             if intent_detectado == "cancelar":
                 resultado_ia["respuesta_usuario"] = "Listo, cancelado."
+
+            # Si hubo descarte por cambio de tema, anteponer aviso en una línea (Cierre Punto 4)
+            if aviso_cambio_tema and resultado_ia.get("respuesta_usuario"):
+                resp_actual = resultado_ia["respuesta_usuario"]
+                if resp_actual.startswith("¿"):
+                    resultado_ia["respuesta_usuario"] = f"{aviso_cambio_tema}\n\n{resp_actual}"
+                else:
+                    resultado_ia["respuesta_usuario"] = f"{aviso_cambio_tema}\n{resp_actual}"
 
             slot_activo = resultado_ia.get("slot_filling", False)
             confianza_val = resultado_ia.get("confianza", 0.0)
