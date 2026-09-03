@@ -1,3 +1,5 @@
+from datetime import date
+from decimal import Decimal
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
@@ -12,7 +14,8 @@ from app.schemas.tarjeta_credito import (
     ResumenTarjeta,
     PagarTarjetaBody,
     PresionFuturaResponse,
-    ResultadoPagoTarjeta
+    ResultadoPagoTarjeta,
+    SimularPesificacionResponse
 )
 from app.schemas.transaccion import TransaccionRead
 from app.services import tarjeta_service
@@ -118,5 +121,42 @@ def pagar_tarjeta(
     fecha_pago = body.fecha_pago if body else None
     fecha_resumen = body.fecha_resumen if body else None
     monto = body.monto if body else None
-    return tarjeta_service.pagar_resumen_tarjeta(db, current_user.id, tarjeta_id, fecha_pago, fecha_resumen, monto=monto)
+    moneda = body.moneda if body else None
+    billetera_id = body.billetera_id if body else None
+    pesificar = body.pesificar if body else False
+    cotizacion_personalizada = body.cotizacion_personalizada if body else None
+    monto_pesos_personalizado = body.monto_pesos_personalizado if body else None
+    monto_percepcion_personalizado = body.monto_percepcion_personalizado if body else None
+
+    return tarjeta_service.pagar_resumen_tarjeta(
+        db,
+        current_user.id,
+        tarjeta_id,
+        fecha_pago=fecha_pago,
+        fecha_resumen=fecha_resumen,
+        monto=monto,
+        moneda=moneda,
+        billetera_id=billetera_id,
+        pesificar=pesificar,
+        cotizacion_personalizada=cotizacion_personalizada,
+        monto_pesos_personalizado=monto_pesos_personalizado,
+        monto_percepcion_personalizado=monto_percepcion_personalizado
+    )
+
+
+@router.get("/{tarjeta_id}/simular-pesificacion", response_model=SimularPesificacionResponse)
+def simular_pesificacion(
+    tarjeta_id: UUID,
+    fecha_resumen: date | None = None,
+    monto_usd: Decimal | None = None,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    return tarjeta_service.simular_pesificacion(
+        db,
+        current_user.id,
+        tarjeta_id,
+        fecha_resumen=fecha_resumen,
+        monto_usd=monto_usd
+    )
 

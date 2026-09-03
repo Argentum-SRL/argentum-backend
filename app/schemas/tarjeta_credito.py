@@ -12,6 +12,10 @@ class TarjetaCreditoBase(BaseModel):
     dia_vencimiento: int = Field(..., ge=1, le=28)
     limite_credito: Decimal | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
     moneda: Moneda = Moneda.ARS
+    percepcion_moneda_extranjera: Decimal = Field(
+        default=Decimal("30.00"), ge=0, le=100, max_digits=5, decimal_places=2,
+        description="Porcentaje de percepción sobre consumos en moneda extranjera (ej. 30 para 30%)"
+    )
     color: str | None = Field(None, max_length=7)
 
     @field_validator("nombre")
@@ -32,6 +36,7 @@ class TarjetaCreditoUpdate(BaseModel):
     dia_vencimiento: int | None = Field(None, ge=1, le=28)
     limite_credito: Decimal | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
     moneda: Moneda | None = None
+    percepcion_moneda_extranjera: Decimal | None = Field(default=None, ge=0, le=100, max_digits=5, decimal_places=2)
     color: str | None = Field(None, max_length=7)
 
     @field_validator("nombre")
@@ -66,6 +71,9 @@ class ResumenAnterior(BaseModel):
     moneda: str
     pagado: bool
     cuotas: list[CuotaResumen]
+    total_ars: Decimal = Decimal("0")
+    total_usd: Decimal = Decimal("0")
+    totales_por_moneda: dict[str, Decimal] = Field(default_factory=dict)
 
 class ResumenFuturo(BaseModel):
     mes: str           # "Junio 2026"
@@ -74,6 +82,9 @@ class ResumenFuturo(BaseModel):
     moneda: str
     cantidad_cuotas: int
     cuotas: list[CuotaResumen] = []
+    total_ars: Decimal = Decimal("0")
+    total_usd: Decimal = Decimal("0")
+    totales_por_moneda: dict[str, Decimal] = Field(default_factory=dict)
 
 class ItemSaldoArrastrado(BaseModel):
     id: UUID
@@ -85,6 +96,21 @@ class ItemSaldoArrastrado(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class BloqueResumenMoneda(BaseModel):
+    moneda: str
+    total_cuotas_periodo: Decimal = Decimal("0")
+    total_original_periodo: Decimal = Decimal("0")
+    total_deuda_vencida_anterior: Decimal = Decimal("0")
+    saldo_arrastrado_impago: Decimal = Decimal("0")
+    items_saldo_arrastrado: list[ItemSaldoArrastrado] = []
+    total_a_pagar: Decimal = Decimal("0")
+    pago_minimo_estimado: Decimal = Decimal("0")
+    # Para moneda extranjera (USD):
+    cotizacion_oficial_estimada: Decimal | None = None
+    porcentaje_percepcion: Decimal | None = None
+    total_estimado_ars: Decimal | None = None
 
 
 class ResumenTarjeta(BaseModel):
@@ -107,6 +133,7 @@ class ResumenTarjeta(BaseModel):
     total_siguiente_usd: Decimal = Decimal("0")
     totales_moneda_actual: dict[str, Decimal] = Field(default_factory=dict)
     totales_moneda_siguiente: dict[str, Decimal] = Field(default_factory=dict)
+    totales_por_moneda: dict[str, BloqueResumenMoneda] = Field(default_factory=dict)
     cuotas_resumen_actual: list[CuotaResumen]
     cuotas_resumen_siguiente: list[CuotaResumen]
     resumenes_futuros: list[ResumenFuturo]
@@ -146,6 +173,15 @@ class ResultadoPagoTarjeta(BaseModel):
     saldo_arrastrado_restante: Decimal | None = None
     cuotas_pendientes_otra_moneda: list[CuotaPendienteOtraMoneda] = []
     mensaje_advertencia: str | None = None
+    # Campos de trazabilidad multimoneda y percepción (Etapa 3C)
+    transaccion_percepcion_id: UUID | None = None
+    monto_percepcion: Decimal | None = None
+    monto_convertido_pesos: Decimal | None = None
+    monto_pesos_total: Decimal | None = None
+    monto_original: Decimal | None = None
+    moneda_original: str | None = None
+    cotizacion_aplicada: Decimal | None = None
+    tipo_dolar_usado: str | None = None
 
     class Config:
         from_attributes = True
@@ -167,6 +203,23 @@ class PagarTarjetaBody(BaseModel):
     monto: Decimal | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
     fecha_pago: date | None = None
     fecha_resumen: date | None = None
+    moneda: Moneda | None = None
+    billetera_id: UUID | None = None
+    pesificar: bool = False
+    cotizacion_personalizada: Decimal | None = Field(default=None, gt=0, max_digits=15, decimal_places=4)
+    monto_pesos_personalizado: Decimal | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
+    monto_percepcion_personalizado: Decimal | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
+
+
+class SimularPesificacionResponse(BaseModel):
+    fecha_cierre: date
+    monto_usd: Decimal
+    cotizacion_oficial: Decimal | None = None
+    cotizacion_disponible: bool = True
+    porcentaje_percepcion: Decimal
+    monto_convertido_ars: Decimal | None = None
+    monto_percepcion_ars: Decimal | None = None
+    total_estimado_ars: Decimal | None = None
 
 
 class DetalleTarjetaMes(BaseModel):

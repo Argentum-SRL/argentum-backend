@@ -77,6 +77,7 @@ class Transaccion(Base):
         Index("idx_transacciones_import_hash", "usuario_id", "import_hash", unique=True, postgresql_where=text("import_hash IS NOT NULL")),
         Index("ix_transacciones_recurrente_fecha", "recurrente_id", "fecha", postgresql_where=text("recurrente_id IS NOT NULL")),
         Index("ix_transacciones_pago_resumen_vencimiento", "tarjeta_id", "pago_resumen_vencimiento", postgresql_where=text("pago_resumen_vencimiento IS NOT NULL")),
+        Index("ix_transacciones_pago_origen_id", "pago_origen_id", postgresql_where=text("pago_origen_id IS NOT NULL")),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -137,6 +138,11 @@ class Transaccion(Base):
     )
     cotizacion_aplicada: Mapped[Decimal | None] = mapped_column(Numeric(15, 4), nullable=True)
     tipo_dolar_usado: Mapped[str | None] = mapped_column(String(30), nullable=True)
+
+    # Vínculo a la transacción de pago que originó este egreso (ej. percepción impositiva) (Etapa 3C)
+    pago_origen_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("transacciones.id", ondelete="CASCADE"), nullable=True
+    )
 
     fecha_creacion: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)

@@ -67,6 +67,15 @@ class TarjetaCredito(Base):
         default=EstadoTarjeta.ACTIVA,
     )
     color: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    # Etapa 3C: Porcentaje de percepción sobre consumos en moneda extranjera al pesificar (ej. 30 para 30%).
+    # IMPORTANTE: Es un porcentaje, no un factor (se almacena 30.00, no 0.30 ni 1.30).
+    percepcion_moneda_extranjera: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+        default=Decimal("30.00"),
+        server_default="30.00",
+        comment="Porcentaje de percepción sobre consumos en moneda extranjera (ej. 30 para 30%)"
+    )
     fecha_creacion: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
