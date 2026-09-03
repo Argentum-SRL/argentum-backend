@@ -32,11 +32,26 @@ def crear_cuotas(
     else:
         diferencia = Decimal('0.00')
 
+    from calendar import monthrange
+    from app.services.dias_habiles_service import ajustar_fecha_habil_sync
+    from app.models.tarjeta_credito import TarjetaCredito
+
+    tarjeta = None
+    t_id = grupo.tarjeta_id if grupo else transaccion_padre.tarjeta_id
+    if t_id:
+        tarjeta = db.get(TarjetaCredito, t_id)
+    dia_nominal = tarjeta.dia_vencimiento if tarjeta else primer_vencimiento.day
+
     # Empezamos desde la cuota_inicial hasta la total
     for i in range(cuota_inicial, cantidad_cuotas + 1):
-        # La primera cuota que creamos (que es la i) debe tener la fecha del primer_vencimiento
-        # El offset es i - cuota_inicial (si i=cuota_inicial, offset=0)
-        fecha_cuota = primer_vencimiento + relativedelta(months=i - cuota_inicial)
+        if i == cuota_inicial:
+            fecha_cuota = primer_vencimiento
+        else:
+            # Derivar mes ancla estrictamente desde el calendario, nunca de una fecha ya ajustada
+            mes_anchor = date(primer_vencimiento.year, primer_vencimiento.month, 1) + relativedelta(months=i - cuota_inicial)
+            ultimo_dia = monthrange(mes_anchor.year, mes_anchor.month)[1]
+            f_nom = date(mes_anchor.year, mes_anchor.month, min(dia_nominal, ultimo_dia))
+            fecha_cuota = ajustar_fecha_habil_sync(f_nom, direccion="posterior")
         
         # Determinar el monto de esta cuota
         if i == cantidad_cuotas:

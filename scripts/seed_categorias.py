@@ -94,7 +94,13 @@ CATEGORIAS_SEED = [
         "tipo": "egreso",
         "icono": "banco",
         "color": "#64748B",
-        "subcategorias": ["Comisiones y gastos bancarios", "Impuesto al cheque / movimientos", "Préstamos", "Intereses pagados"]
+        "subcategorias": [
+            "Comisiones y gastos bancarios",
+            "Impuesto al cheque / movimientos",
+            "Préstamos",
+            "Intereses pagados",
+            "Tarjeta de crédito"
+        ]
     },
     # ── INGRESOS (4) ─────────────────────────────────────
     {
@@ -143,7 +149,7 @@ CATEGORIAS_SEED = [
 
 def seed_categorias(db: Session):
     """
-    Seed idempotente de las 16 categorías canónicas y sus 57 subcategorías oficiales.
+    Seed idempotente de las 16 categorías canónicas y sus 58 subcategorías oficiales.
     - Idempotencia estricta en categorías: busca por (nombre, tipo).
     - Idempotencia estricta en subcategorías: busca por (categoria_id, nombre).
     - Actualiza icono y color si ya existían, y actualiza el campo orden según la lista canónica.

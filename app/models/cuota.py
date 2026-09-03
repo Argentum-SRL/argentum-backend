@@ -22,6 +22,7 @@ class Cuota(Base):
         Index("ix_cuotas_grupo_id", "grupo_id"),
         Index("ix_cuotas_pagada_vencimiento", "pagada", "fecha_vencimiento"),
         Index("ix_cuotas_grupo_vencimiento", "grupo_id", "fecha_vencimiento", postgresql_where=text("pagada = false")),
+        Index("ix_cuotas_transaccion_pago_id", "transaccion_pago_id", postgresql_where=text("transaccion_pago_id IS NOT NULL")),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -38,8 +39,13 @@ class Cuota(Base):
     ajustada_manual: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     pagada: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # Vínculo exacto de trazabilidad: qué transacción de pago saldó esta cuota (Bug 1 - Etapa 3A)
+    transaccion_pago_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("transacciones.id", ondelete="SET NULL"), nullable=True
+    )
+
     grupo: Mapped[GrupoCuotas] = relationship("GrupoCuotas", back_populates="cuotas")
-    transaccion: Mapped[Transaccion] = relationship("Transaccion")
+    transaccion: Mapped[Transaccion] = relationship("Transaccion", foreign_keys=[transaccion_id])
 
     def __repr__(self) -> str:
         return (
