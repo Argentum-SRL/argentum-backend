@@ -15,8 +15,14 @@ class TransferenciaInternaCreate(BaseModel):
     """Schema para crear una transferencia interna. No incluye usuario_id (se obtiene del token de autenticación)."""
     billetera_origen_id: UUID
     billetera_destino_id: UUID
-    monto: Decimal = Field(..., gt=0, decimal_places=2, max_digits=15, description="Monto mayor a 0 con hasta 2 decimales")
-    moneda: Moneda
+    monto: Decimal = Field(..., gt=0, decimal_places=2, max_digits=15, description="Monto mayor a 0 con hasta 2 decimales (monto que sale de origen)")
+    moneda: Moneda = Field(..., description="Moneda de origen")
+    monto_origen: Decimal | None = Field(default=None, gt=0, decimal_places=2, max_digits=15)
+    monto_destino: Decimal | None = Field(default=None, gt=0, decimal_places=2, max_digits=15, description="Monto que entra a la billetera de destino")
+    moneda_origen: Moneda | None = None
+    moneda_destino: Moneda | None = None
+    monto_comision: Decimal | None = Field(default=None, gt=0, decimal_places=2, max_digits=15, description="Comisión opcional de la operación")
+    moneda_comision: Moneda | None = None
     fecha: date
     notas: str | None = Field(default=None, max_length=300)
 
@@ -51,6 +57,13 @@ class TransferenciaInternaCreate(BaseModel):
             raise ValueError("La billetera de origen y destino no pueden ser la misma.")
         return self
 
+    @model_validator(mode="after")
+    def validar_comision_moneda(self) -> TransferenciaInternaCreate:
+        """Si se especifica monto_comision, valida que sea mayor a 0."""
+        if self.monto_comision is not None and self.monto_comision <= 0:
+            raise ValueError("El monto de la comisión debe ser mayor a 0.")
+        return self
+
 
 class TransferenciaInternaRead(BaseModel):
     """Schema para leer una transferencia interna. No incluye usuario_id (el usuario autenticado ya lo sabe)."""
@@ -59,6 +72,14 @@ class TransferenciaInternaRead(BaseModel):
     billetera_destino_id: UUID
     monto: Decimal
     moneda: Moneda
+    monto_origen: Decimal | None = None
+    monto_destino: Decimal | None = None
+    moneda_origen: Moneda | None = None
+    moneda_destino: Moneda | None = None
+    cotizacion: Decimal | None = None
+    transaccion_comision_id: UUID | None = None
+    monto_comision: Decimal | None = None
+    moneda_comision: Moneda | None = None
     fecha: date
     notas: str | None
     fecha_creacion: datetime
@@ -72,6 +93,13 @@ class TransferenciaInternaUpdate(BaseModel):
     billetera_destino_id: UUID | None = None
     monto: Decimal | None = Field(default=None, gt=0, decimal_places=2, max_digits=15)
     moneda: Moneda | None = None
+    monto_origen: Decimal | None = Field(default=None, gt=0, decimal_places=2, max_digits=15)
+    monto_destino: Decimal | None = Field(default=None, gt=0, decimal_places=2, max_digits=15)
+    moneda_origen: Moneda | None = None
+    moneda_destino: Moneda | None = None
+    cotizacion: Decimal | None = None
+    monto_comision: Decimal | None = Field(default=None, gt=0, decimal_places=2, max_digits=15)
+    moneda_comision: Moneda | None = None
     fecha: date | None = None
     notas: str | None = Field(default=None, max_length=300)
 
