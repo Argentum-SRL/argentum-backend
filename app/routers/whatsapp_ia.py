@@ -713,53 +713,232 @@ def _generar_menu_billeteras(billeteras: list[Billetera], tipo: str = "egreso") 
     return "\n".join(lineas)
 
 
+def _resolver_y_validar_fecha(fecha_val: str | None) -> tuple[date, str | None]:
+    """
+    Resuelve la fecha de la transacción y valida reglas de negocio:
+    - Fechas futuras: se avisa y se usa hoy.
+    - Fechas de más de 60 días atrás: se avisa y se usa hoy.
+    - Fechas válidas (hasta 60 días atrás y <= hoy): se usan tal cual.
+    - Si no se especifica fecha o es inválida: se usa hoy sin aviso.
+    Retorna (fecha_resuelta, aviso_o_none).
+    """
+    hoy = hoy_argentina()
+    if not fecha_val:
+        return hoy, None
+
+    try:
+        fecha_candidata = date.fromisoformat(str(fecha_val))
+    except Exception:
+        return hoy, None
+
+    limite_antiguedad = hoy - timedelta(days=60)
+    if fecha_candidata > hoy:
+        return hoy, "No puedo registrar movimientos con fecha futura porque todavía no ocurrieron. Va a quedar con fecha de hoy."
+    elif fecha_candidata < limite_antiguedad:
+        return hoy, "No puedo registrar movimientos de más de 60 días atrás. Va a quedar con fecha de hoy."
+    else:
+        return fecha_candidata, None
+
+
+_MESES_RIOPLATENSE = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
+]
+
+
+def _formatear_fecha_natural(fecha_obj: date) -> str | None:
+    """
+    Formatea una fecha de forma natural en rioplatense:
+    - Hoy: None (no se menciona)
+    - Ayer: 'ayer'
+    - Anteayer: 'anteayer'
+    - Otra fecha: 'el 31 de agosto' (o 'el 31 de agosto de 2025' si difiere el año)
+    """
+    hoy = hoy_argentina()
+    if fecha_obj == hoy:
+        return None
+    delta = (hoy - fecha_obj).days
+    if delta == 1:
+        return "ayer"
+    elif delta == 2:
+        return "anteayer"
+    else:
+        mes_nombre = _MESES_RIOPLATENSE[fecha_obj.month - 1]
+        if fecha_obj.year != hoy.year:
+            return f"el {fecha_obj.day} de {mes_nombre} de {fecha_obj.year}"
+        return f"el {fecha_obj.day} de {mes_nombre}"
+
+
+def _validar_item_movimiento(
+    datos: dict,
+    billetera_nombre: str,
+    billetera_moneda: Moneda | None,
+) -> tuple[dict | None, str | None]:
+    """
+    Valida un movimiento antes de incluirlo en la propuesta o registrarlo:
+    - Monto presente y numérico
+    - Monto > 0 y <= 1.000.000.000.000
+    - Coincidencia de moneda con la billetera
+    Retorna (item_limpio, motivo_descarte).
+    """
+    desc = datos.get("descripcion") or _nombre_corto_categoria(datos.get("categoria")) or "un movimiento"
+    monto_raw = datos.get("monto")
+    if monto_raw is None:
+        return None, f"No se pudo registrar {desc} porque no tiene un monto válido."
+    try:
+        monto_decimal = Decimal(str(monto_raw))
+    except Exception:
+        return None, f"No se pudo registrar {desc} porque el monto no es válido."
+
+    if monto_decimal <= Decimal("0"):
+        return None, f"No se pudo registrar {desc} porque el monto debe ser mayor a cero."
+    if monto_decimal > Decimal("1000000000000"):
+        return None, f"No se pudo registrar {desc} porque el monto supera el límite permitido."
+
+    moneda_solicitada_str = datos.get("moneda")
+    if moneda_solicitada_str:
+        moneda_solicitada = Moneda.USD if moneda_solicitada_str == "USD" else Moneda.ARS
+    else:
+        moneda_solicitada = Moneda.USD if "usd" in billetera_nombre.lower() else Moneda.ARS
+
+    if billetera_moneda and moneda_solicitada != billetera_moneda:
+        moneda_sol_str = "dólares" if moneda_solicitada == Moneda.USD else "pesos"
+        moneda_bill_str = "dólares" if billetera_moneda == Moneda.USD else "pesos"
+        monto_fmt = formatear_monto(monto_decimal, moneda_solicitada)
+        motivo = (
+            f"No se pudo registrar {desc} de {monto_fmt} porque es en {moneda_sol_str} "
+            f"y la billetera {billetera_nombre} es en {moneda_bill_str}."
+        )
+        return None, motivo
+
+    item_valido = dict(datos)
+    item_valido["monto"] = float(monto_decimal)
+    item_valido["moneda"] = moneda_solicitada.value
+    return item_valido, None
+
+
 def _construir_propuesta_transaccion(
     entidades: dict,
     billetera_nombre: str,
     se_asumio_principal: bool = False,
+    billetera_moneda: Moneda | None = None,
 ) -> str:
     """
     Construye el texto limpio de propuesta de confirmación siempre nombrando la billetera (8.1).
     Si se asumió la principal sin que el usuario la nombrara, agrega instrucción de corrección (8.2).
+    Muestra la fecha natural cuando no es hoy (ayer, anteayer o fecha concreta).
+    Si una fecha indicada no se puede usar (>60 días o futura), antepone aviso explicativo.
+    Valida anticipadamente moneda, montos válidos y límites antes de proponer el lote,
+    descartando los que no se van a poder registrar y avisando el motivo.
+    Si todos los movimientos son descartados, informa que no se puede registrar nada.
     Sin emojis, rioplatense (8.3).
     """
-    monto = entidades.get("monto")
+    if billetera_moneda is None:
+        billetera_moneda = Moneda.USD if "usd" in billetera_nombre.lower() else Moneda.ARS
+
+    avisos_descarte: list[str] = []
+    avisos_fechas: list[str] = []
+
+    # 1. Validar ítem principal
+    item_ppal = {
+        "monto": entidades.get("monto"),
+        "categoria": entidades.get("categoria"),
+        "descripcion": entidades.get("descripcion"),
+        "moneda": entidades.get("moneda"),
+        "tipo": entidades.get("tipo", "egreso"),
+        "fecha": entidades.get("fecha"),
+    }
+    item_ppal_limpio, motivo_ppal = _validar_item_movimiento(item_ppal, billetera_nombre, billetera_moneda)
+    if motivo_ppal:
+        avisos_descarte.append(motivo_ppal)
+
+    # 2. Validar ítems adicionales si existen
+    adicionales = entidades.get("transacciones_adicionales")
+    adicionales_validos: list[dict] = []
+    if adicionales and isinstance(adicionales, list):
+        for ad in adicionales:
+            if isinstance(ad, dict):
+                ad_limpio, motivo_ad = _validar_item_movimiento(ad, billetera_nombre, billetera_moneda)
+                if ad_limpio:
+                    adicionales_validos.append(ad_limpio)
+                if motivo_ad:
+                    avisos_descarte.append(motivo_ad)
+
+    # Reestructurar entidades según los ítems válidos
+    if item_ppal_limpio is None:
+        if adicionales_validos:
+            nuevo_ppal = adicionales_validos.pop(0)
+            entidades["monto"] = nuevo_ppal["monto"]
+            entidades["categoria"] = nuevo_ppal.get("categoria")
+            entidades["descripcion"] = nuevo_ppal.get("descripcion")
+            entidades["moneda"] = nuevo_ppal.get("moneda")
+            entidades["tipo"] = nuevo_ppal.get("tipo", "egreso")
+            entidades["fecha"] = nuevo_ppal.get("fecha")
+            entidades["transacciones_adicionales"] = adicionales_validos
+            item_ppal_limpio = nuevo_ppal
+        else:
+            entidades["transacciones_adicionales"] = []
+            lineas_error = list(avisos_descarte)
+            lineas_error.append("No se puede registrar ningún movimiento.")
+            return "\n".join(lineas_error)
+    else:
+        entidades["monto"] = item_ppal_limpio["monto"]
+        entidades["transacciones_adicionales"] = adicionales_validos
+
     tipo = entidades.get("tipo", "egreso")
     moneda_prop = Moneda.USD if entidades.get("moneda") == "USD" else Moneda.ARS
     cat_display = _nombre_corto_categoria(entidades.get("categoria"))
-    adicionales = entidades.get("transacciones_adicionales")
 
-    if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
-        total_movs = 1 + len(adicionales)
-        items_desc = [f"{formatear_monto(float(monto), moneda_prop)} en {cat_display}"]
-        for ad in adicionales:
-            if isinstance(ad, dict) and ad.get("monto") is not None:
-                moneda_ad = Moneda.USD if ad.get("moneda") == "USD" else Moneda.ARS
-                items_desc.append(
-                    f"{formatear_monto(float(ad['monto']), moneda_ad)} en {_nombre_corto_categoria(ad.get('categoria'))}"
-                )
+    fecha_p_obj, aviso_p = _resolver_y_validar_fecha(entidades.get("fecha"))
+    if aviso_p and aviso_p not in avisos_fechas:
+        avisos_fechas.append(aviso_p)
+    fecha_p_nat = _formatear_fecha_natural(fecha_p_obj)
+    fecha_p_disp = f" ({fecha_p_nat})" if fecha_p_nat else ""
+
+    if adicionales_validos:
+        total_movs = 1 + len(adicionales_validos)
+        items_desc = [f"{formatear_monto(float(entidades['monto']), moneda_prop)} en {cat_display}{fecha_p_disp}"]
+        for ad in adicionales_validos:
+            moneda_ad = Moneda.USD if ad.get("moneda") == "USD" else Moneda.ARS
+            fecha_ad_obj, aviso_ad = _resolver_y_validar_fecha(ad.get("fecha"))
+            if aviso_ad and aviso_ad not in avisos_fechas:
+                avisos_fechas.append(aviso_ad)
+            fecha_ad_nat = _formatear_fecha_natural(fecha_ad_obj)
+            fecha_ad_disp = f" ({fecha_ad_nat})" if fecha_ad_nat else ""
+            items_desc.append(
+                f"{formatear_monto(float(ad['monto']), moneda_ad)} en {_nombre_corto_categoria(ad.get('categoria'))}{fecha_ad_disp}"
+            )
         lista_str = ", ".join(items_desc)
         origen_str = f" a {billetera_nombre}" if tipo == "ingreso" else f" desde {billetera_nombre}"
         texto = f"Voy a anotar {total_movs} movimientos{origen_str}: {lista_str}. ¿Va?"
     else:
-        monto_str = formatear_monto(float(monto), moneda_prop)
+        monto_str = formatear_monto(float(entidades["monto"]), moneda_prop)
         if tipo == "ingreso":
             partes = [f"Voy a registrar un ingreso de {monto_str}"]
             if cat_display:
                 partes.append(f"en {cat_display}")
-            partes.append(f"a {billetera_nombre}.")
+            partes.append(f"a {billetera_nombre}{fecha_p_disp}.")
         else:
             partes = [f"Voy a anotar {monto_str}"]
             if cat_display:
                 partes.append(f"en {cat_display}")
-            partes.append(f"desde {billetera_nombre}.")
+            partes.append(f"desde {billetera_nombre}{fecha_p_disp}.")
         partes.append("¿Va?")
         texto = " ".join(partes)
 
-    if se_asumio_principal:
-        texto += "\nSi fue con otra, decime cuál."
+    lineas = []
+    if avisos_descarte:
+        lineas.extend(avisos_descarte)
+    if avisos_fechas:
+        lineas.extend(avisos_fechas)
+    lineas.append(texto)
 
-    return texto
+    texto_final = "\n".join(lineas)
+
+    if se_asumio_principal:
+        texto_final += "\nSi fue con otra, decime cuál."
+
+    return texto_final
 
 
 def _buscar_propuesta_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
@@ -945,21 +1124,32 @@ def _confirmar_propuesta_transaccion(
             subcat_nombre = subcat.nombre if subcat else None
         nombre_cat_disp = subcat_nombre or cat_nombre or "Otros"
 
+        fecha_nat = _formatear_fecha_natural(tx_pend.fecha)
+        fecha_disp = f" ({fecha_nat})" if fecha_nat else ""
+
         if tx_pend.tipo == TipoTransaccion.INGRESO:
             partes = [f"Listo. Ingreso de {monto_str}"]
             if nombre_cat_disp:
                 partes.append(f"en {nombre_cat_disp}")
             if bill_nombre:
-                partes.append(f"a {bill_nombre}")
+                partes.append(f"a {bill_nombre}{fecha_disp}")
             partes.append("— registrado.")
         else:
             partes = [f"Listo. {monto_str}"]
             if nombre_cat_disp:
                 partes.append(f"en {nombre_cat_disp}")
             if bill_nombre:
-                partes.append(f"desde {bill_nombre}")
+                partes.append(f"desde {bill_nombre}{fecha_disp}")
             partes.append("— registrado.")
-        return tx_pend, " ".join(partes), False
+        msg_resp = " ".join(partes)
+
+        if billetera:
+            # REGLA DE PRIVACIDAD: Los saldos no se muestran tras registrar un movimiento,
+            # salvo que el usuario los pida explícitamente (privacidad de pantalla).
+            if billetera.saldo_actual < 0:
+                msg_resp += "\nLa billetera quedó en negativo."
+
+        return tx_pend, msg_resp, False
 
     # 2. Buscar conversación previa con datos de transacción pendiente con BLOQUEO DE FILA ESTRICTO
     stmt_conv = (
@@ -1055,7 +1245,7 @@ def _confirmar_propuesta_transaccion(
     categoria_id, subcategoria_id = _resolver_categoria_y_subcategoria(
         entidades.get("categoria"), usuario.id, db, tipo=tipo_val
     )
-    fecha_obj = _resolver_fecha_transaccion(entidades.get("fecha"))
+    fecha_obj, _ = _resolver_y_validar_fecha(entidades.get("fecha"))
 
     transaccion = Transaccion(
         usuario_id=usuario.id,
@@ -1083,10 +1273,13 @@ def _confirmar_propuesta_transaccion(
 
     adicionales = entidades.get("transacciones_adicionales")
     descartadas = []
+    adicionales_registradas = []
     if adicionales and isinstance(adicionales, list):
         for adic in adicionales:
             if isinstance(adic, dict):
-                _, motivo = _crear_transaccion_adicional(adic, usuario.id, billetera, db)
+                tx_ad, motivo = _crear_transaccion_adicional(adic, usuario.id, billetera, db)
+                if tx_ad:
+                    adicionales_registradas.append(tx_ad)
                 if motivo:
                     descartadas.append(motivo)
 
@@ -1100,16 +1293,17 @@ def _confirmar_propuesta_transaccion(
     bill_nombre = billetera.nombre
 
     if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
-        total_registrados = 1 + len(adicionales) - len(descartadas)
+        total_registrados = 1 + len(adicionales_registradas)
         cat_display = _nombre_corto_categoria(entidades.get("categoria"))
-        items_str = [f"{monto_str} en {cat_display}"]
-        for ad in adicionales:
-            if isinstance(ad, dict) and ad.get("monto") is not None:
-                ad_moneda = Moneda.USD if ad.get("moneda") == "USD" else Moneda.ARS
-                if ad_moneda == transaccion.moneda:
-                    items_str.append(
-                        f"{formatear_monto(float(ad['monto']), ad_moneda)} en {_nombre_corto_categoria(ad.get('categoria'))}"
-                    )
+        fecha_p_nat = _formatear_fecha_natural(transaccion.fecha)
+        fecha_p_disp = f" ({fecha_p_nat})" if fecha_p_nat else ""
+        items_str = [f"{monto_str} en {cat_display}{fecha_p_disp}"]
+        for tx_ad in adicionales_registradas:
+            fecha_ad_nat = _formatear_fecha_natural(tx_ad.fecha)
+            fecha_ad_disp = f" ({fecha_ad_nat})" if fecha_ad_nat else ""
+            items_str.append(
+                f"{formatear_monto(float(tx_ad.monto), tx_ad.moneda)} en {_nombre_corto_categoria(tx_ad.descripcion)}{fecha_ad_disp}"
+            )
         origen_str = f" desde {bill_nombre}" if bill_nombre else (f" a {bill_nombre}" if transaccion.tipo == TipoTransaccion.INGRESO else "")
         mov_palabra = "movimientos" if total_registrados != 1 else "movimiento"
         reg_palabra = "registrados" if total_registrados != 1 else "registrado"
@@ -1125,24 +1319,32 @@ def _confirmar_propuesta_transaccion(
             subcat_nombre = subcat.nombre if subcat else None
         nombre_categoria_display = subcat_nombre or cat_nombre or "Otros"
 
+        fecha_nat = _formatear_fecha_natural(transaccion.fecha)
+        fecha_disp = f" ({fecha_nat})" if fecha_nat else ""
+
         if transaccion.tipo == TipoTransaccion.INGRESO:
             partes = [f"Listo. Ingreso de {monto_str}"]
             if nombre_categoria_display:
                 partes.append(f"en {nombre_categoria_display}")
             if bill_nombre:
-                partes.append(f"a {bill_nombre}")
+                partes.append(f"a {bill_nombre}{fecha_disp}")
             partes.append("— registrado.")
         else:
             partes = [f"Listo. {monto_str}"]
             if nombre_categoria_display:
                 partes.append(f"en {nombre_categoria_display}")
             if bill_nombre:
-                partes.append(f"desde {bill_nombre}")
+                partes.append(f"desde {bill_nombre}{fecha_disp}")
             partes.append("— registrado.")
         msg_resp = " ".join(partes)
 
     if descartadas:
         msg_resp += "\n" + "\n".join(descartadas)
+
+    # REGLA DE PRIVACIDAD: Los saldos no se muestran tras registrar un movimiento,
+    # salvo que el usuario los pida explícitamente (privacidad de pantalla).
+    if billetera.saldo_actual < 0:
+        msg_resp += "\nLa billetera quedó en negativo."
 
     return transaccion, msg_resp, False
 
@@ -1215,10 +1417,13 @@ def _registrar_movimiento_directo(
 
     adicionales = entidades.get("transacciones_adicionales") if registrar_adicionales else None
     descartadas = []
+    adicionales_registradas = []
     if adicionales and isinstance(adicionales, list):
         for adic in adicionales:
             if isinstance(adic, dict):
-                _, motivo = _crear_transaccion_adicional(adic, usuario.id, billetera, db)
+                tx_ad, motivo = _crear_transaccion_adicional(adic, usuario.id, billetera, db)
+                if tx_ad:
+                    adicionales_registradas.append(tx_ad)
                 if motivo:
                     descartadas.append(motivo)
 
@@ -1230,16 +1435,17 @@ def _registrar_movimiento_directo(
     bill_nombre = billetera.nombre
 
     if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
-        total_registrados = 1 + len(adicionales) - len(descartadas)
+        total_registrados = 1 + len(adicionales_registradas)
         cat_display = _nombre_corto_categoria(entidades.get("categoria"))
-        items_str = [f"{monto_str} en {cat_display}"]
-        for ad in adicionales:
-            if isinstance(ad, dict) and ad.get("monto") is not None:
-                ad_moneda = Moneda.USD if ad.get("moneda") == "USD" else Moneda.ARS
-                if ad_moneda == tx.moneda:
-                    items_str.append(
-                        f"{formatear_monto(float(ad['monto']), ad_moneda)} en {_nombre_corto_categoria(ad.get('categoria'))}"
-                    )
+        fecha_p_nat = _formatear_fecha_natural(tx.fecha)
+        fecha_p_disp = f" ({fecha_p_nat})" if fecha_p_nat else ""
+        items_str = [f"{monto_str} en {cat_display}{fecha_p_disp}"]
+        for tx_ad in adicionales_registradas:
+            fecha_ad_nat = _formatear_fecha_natural(tx_ad.fecha)
+            fecha_ad_disp = f" ({fecha_ad_nat})" if fecha_ad_nat else ""
+            items_str.append(
+                f"{formatear_monto(float(tx_ad.monto), tx_ad.moneda)} en {_nombre_corto_categoria(tx_ad.descripcion)}{fecha_ad_disp}"
+            )
         origen_str = f" desde {bill_nombre}" if bill_nombre else (f" a {bill_nombre}" if tx.tipo == TipoTransaccion.INGRESO else "")
         mov_palabra = "movimientos" if total_registrados != 1 else "movimiento"
         reg_palabra = "registrados" if total_registrados != 1 else "registrado"
@@ -1255,24 +1461,32 @@ def _registrar_movimiento_directo(
             subcat_nombre = subcat.nombre if subcat else None
         nombre_categoria_display = subcat_nombre or cat_nombre or "Otros"
 
+        fecha_nat = _formatear_fecha_natural(tx.fecha)
+        fecha_disp = f" ({fecha_nat})" if fecha_nat else ""
+
         if tx.tipo == TipoTransaccion.INGRESO:
             partes = [f"Listo. Ingreso de {monto_str}"]
             if nombre_categoria_display:
                 partes.append(f"en {nombre_categoria_display}")
             if bill_nombre:
-                partes.append(f"a {bill_nombre}")
+                partes.append(f"a {bill_nombre}{fecha_disp}")
             partes.append("— registrado.")
         else:
             partes = [f"Listo. {monto_str}"]
             if nombre_categoria_display:
                 partes.append(f"en {nombre_categoria_display}")
             if bill_nombre:
-                partes.append(f"desde {bill_nombre}")
+                partes.append(f"desde {bill_nombre}{fecha_disp}")
             partes.append("— registrado.")
         msg_resp = " ".join(partes)
 
     if descartadas:
         msg_resp += "\n" + "\n".join(descartadas)
+
+    # REGLA DE PRIVACIDAD: Los saldos no se muestran tras registrar un movimiento,
+    # salvo que el usuario los pida explícitamente (privacidad de pantalla).
+    if billetera.saldo_actual < 0:
+        msg_resp += "\nLa billetera quedó en negativo."
 
     return tx, msg_resp
 
@@ -1439,18 +1653,7 @@ def _obtener_historial_reciente(usuario_id: UUID, db: Session, n: int = 6) -> li
 
 
 def _resolver_fecha_transaccion(fecha_val: str | None) -> date:
-    fecha_obj = hoy_argentina()
-    if fecha_val:
-        try:
-            fecha_candidata = date.fromisoformat(str(fecha_val))
-            # No permitir fechas futuras ni con más de 60 días de antigüedad
-            limite_antiguedad = hoy_argentina() - timedelta(days=60)
-            if limite_antiguedad <= fecha_candidata <= hoy_argentina():
-                fecha_obj = fecha_candidata
-            else:
-                fecha_obj = hoy_argentina()
-        except Exception:
-            fecha_obj = hoy_argentina()
+    fecha_obj, _ = _resolver_y_validar_fecha(fecha_val)
     return fecha_obj
 
 
@@ -1460,17 +1663,20 @@ def _crear_transaccion_adicional(
     billetera: Billetera,
     db: Session,
 ) -> tuple[Transaccion | None, str | None]:
+    desc = datos.get("descripcion") or _nombre_corto_categoria(datos.get("categoria")) or "un movimiento"
     monto_raw = datos.get("monto")
     if monto_raw is None:
-        return None, None
+        return None, f"No se pudo registrar {desc} porque no tiene un monto válido."
     try:
         monto_decimal = Decimal(str(monto_raw))
     except Exception:
-        return None, None
+        return None, f"No se pudo registrar {desc} porque el monto no es válido."
 
     # Validación de monto: estrictamente positivo y dentro de límites reales
-    if monto_decimal <= Decimal("0") or monto_decimal > Decimal("1000000000000"):
-        return None, None
+    if monto_decimal <= Decimal("0"):
+        return None, f"No se pudo registrar {desc} porque el monto debe ser mayor a cero."
+    if monto_decimal > Decimal("1000000000000"):
+        return None, f"No se pudo registrar {desc} porque el monto supera el límite permitido."
 
     # Validación de moneda: si el ítem adicional especifica una moneda que no coincide con la billetera resuelta, no descartar en silencio
     moneda_solicitada_str = datos.get("moneda")
@@ -1482,18 +1688,19 @@ def _crear_transaccion_adicional(
                 moneda_solicitada.value,
                 billetera.moneda.value,
             )
-            desc = datos.get("descripcion") or _nombre_corto_categoria(datos.get("categoria"))
             moneda_sol_str = "dólares" if moneda_solicitada == Moneda.USD else "pesos"
             moneda_bill_str = "dólares" if billetera.moneda == Moneda.USD else "pesos"
             monto_fmt = formatear_monto(monto_decimal, moneda_solicitada)
-            motivo = f"No pudimos registrar {desc} de {monto_fmt} porque es en {moneda_sol_str} y la billetera {billetera.nombre} es en {moneda_bill_str}."
+            motivo = f"No se pudo registrar {desc} de {monto_fmt} porque es en {moneda_sol_str} y la billetera {billetera.nombre} es en {moneda_bill_str}."
             return None, motivo
+    else:
+        moneda_solicitada = billetera.moneda
 
     tipo_item = datos.get("tipo") or "egreso"
     categoria_id, subcategoria_id = _resolver_categoria_y_subcategoria(
         datos.get("categoria"), usuario_id, db, tipo=tipo_item
     )
-    fecha_obj = _resolver_fecha_transaccion(datos.get("fecha"))
+    fecha_obj, _ = _resolver_y_validar_fecha(datos.get("fecha"))
 
     tx = Transaccion(
         usuario_id=usuario_id,
@@ -1501,7 +1708,7 @@ def _crear_transaccion_adicional(
         monto=monto_decimal,
         moneda=billetera.moneda,
         fecha=fecha_obj,
-        descripcion=datos.get("descripcion") or _nombre_corto_categoria(datos.get("categoria")),
+        descripcion=desc,
         metodo_pago=deducir_metodo_pago(billetera, tarjeta_id=None),
         billetera_id=billetera.id,
         categoria_id=categoria_id,
@@ -1957,7 +2164,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
             if not mensaje_texto:
                 enviar_whatsapp(
                     from_number,
-                    "No entendí bien lo que quisiste decir. Podés contarme qué gastaste, por ejemplo: *Almuerzo $1500*",
+                    "No entendí bien lo que quisiste decir. Podés contarme qué gastaste, por ejemplo: *Almuerzo $1.500*",
                 )
                 return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
@@ -2041,7 +2248,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         entidades_nuevas.pop(clave_otra, None)
 
                         nuevo_msg = _construir_propuesta_transaccion(
-                            entidades_nuevas, b_nueva.nombre, se_asumio_principal=False
+                            entidades_nuevas, b_nueva.nombre, se_asumio_principal=False, billetera_moneda=b_nueva.moneda
                         )
 
                         propuesta_pendiente.entidades = entidades_nuevas
@@ -2397,7 +2604,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         }
                     else:
                         propuesta_msg = _construir_propuesta_transaccion(
-                            estado_previo_bill, billetera_elegida.nombre, se_asumio_principal=False
+                            estado_previo_bill, billetera_elegida.nombre, se_asumio_principal=False, billetera_moneda=billetera_elegida.moneda
                         )
                         intent_val = "registrar_transaccion"
                         slot_activo_val = False
@@ -2646,7 +2853,11 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                                     entidades_actuales,
                                     billetera_final.nombre,
                                     se_asumio_principal=se_asumio_principal,
+                                    billetera_moneda=billetera_final.moneda,
                                 )
+                                if "No se puede registrar ningún movimiento." in resultado_ia["respuesta_usuario"]:
+                                    resultado_ia["intent"] = "desconocido"
+                                    resultado_ia["slot_filling"] = False
 
             # Enriquecer respuesta con datos reales para intents de consulta
             intent_detectado = resultado_ia.get("intent")
@@ -2685,9 +2896,9 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         if confianza_usd == "bajo":
                             msg += " Aún no tenés historial suficiente para una proyección en dólares."
                         elif balance_usd >= 0:
-                            msg += f" En dólares, terminarías con aproximadamente US$ {balance_usd:,.2f}."
+                            msg += f" En dólares, terminarías con aproximadamente {_fmt(balance_usd, Moneda.USD)}."
                         else:
-                            msg += f" Ojo: en dólares terminarías con US$ {abs(balance_usd):,.2f} en rojo."
+                            msg += f" Ojo: en dólares terminarías con {_fmt(abs(balance_usd), Moneda.USD)} en rojo."
 
                         if advertencias_usd:
                             msg += f" {advertencias_usd[0]}"
@@ -2707,7 +2918,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
 
                     msg = f"Tenés {_fmt(ars_total)} en tus billeteras en pesos. Disponible real (descontando cuotas): {_fmt(ars_disp)}."
                     if usd_total > 0 or usd_disp > 0:
-                        msg += f" Y tenés US$ {usd_total:,.2f} en tus billeteras en dólares. Disponible real: US$ {usd_disp:,.2f}."
+                        msg += f" Y tenés {_fmt(usd_total, Moneda.USD)} en tus billeteras en dólares. Disponible real: {_fmt(usd_disp, Moneda.USD)}."
                     resultado_ia["respuesta_usuario"] = msg
                 except Exception:
                     logger.exception("Error al calcular saldo para WhatsApp")
@@ -2729,8 +2940,8 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     egr_usd = b_usd.get("egresos", 0.0)
                     bal_usd = b_usd.get("balance", 0.0)
                     if ing_usd > 0 or egr_usd > 0:
-                        signo_usd = "+" if bal_usd >= 0 else ""
-                        msg += f" En dólares: ingresos US$ {ing_usd:,.2f}, gastos US$ {egr_usd:,.2f} (balance: {signo_usd}US$ {bal_usd:,.2f})."
+                        signo_usd = "+" if bal_usd > 0 else ""
+                        msg += f" En dólares: ingresos {_fmt(ing_usd, Moneda.USD)}, gastos {_fmt(egr_usd, Moneda.USD)} (balance: {signo_usd}{_fmt(bal_usd, Moneda.USD)})."
 
                     resultado_ia["respuesta_usuario"] = msg
                 except Exception:
@@ -2802,13 +3013,18 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                             cat_display = _nombre_corto_categoria(
                                 conv_ejecutada.entidades.get("categoria")
                             )
-                            items_str = [f"{monto_str} en {cat_display}"]
+                            fecha_p_nat = _formatear_fecha_natural(tx.fecha)
+                            fecha_p_disp = f" ({fecha_p_nat})" if fecha_p_nat else ""
+                            items_str = [f"{monto_str} en {cat_display}{fecha_p_disp}"]
                             for ad in adicionales:
                                 if isinstance(ad, dict) and ad.get("monto") is not None:
                                     ad_moneda = Moneda.USD if ad.get("moneda") == "USD" else Moneda.ARS
                                     if ad_moneda == tx.moneda:
+                                        fecha_ad_obj, _ = _resolver_y_validar_fecha(ad.get("fecha"))
+                                        fecha_ad_nat = _formatear_fecha_natural(fecha_ad_obj)
+                                        fecha_ad_disp = f" ({fecha_ad_nat})" if fecha_ad_nat else ""
                                         items_str.append(
-                                            f"{formatear_monto(float(ad['monto']), ad_moneda)} en {_nombre_corto_categoria(ad.get('categoria'))}"
+                                            f"{formatear_monto(float(ad['monto']), ad_moneda)} en {_nombre_corto_categoria(ad.get('categoria'))}{fecha_ad_disp}"
                                         )
                             origen_str = f" desde {bill_nombre}" if bill_nombre else (f" a {bill_nombre}" if tx.tipo == TipoTransaccion.INGRESO else "")
                             mov_palabra = "movimientos" if total_registrados != 1 else "movimiento"
@@ -2835,24 +3051,33 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
 
                             nombre_categoria_display = subcat_nombre or cat_nombre or "Otros"
 
+                            fecha_nat = _formatear_fecha_natural(tx.fecha)
+                            fecha_disp = f" ({fecha_nat})" if fecha_nat else ""
+
                             if tx.tipo == TipoTransaccion.INGRESO:
                                 partes = [f"Listo. Ingreso de {monto_str}"]
                                 if nombre_categoria_display:
                                     partes.append(f"en {nombre_categoria_display}")
                                 if bill_nombre:
-                                    partes.append(f"a {bill_nombre}")
+                                    partes.append(f"a {bill_nombre}{fecha_disp}")
                                 partes.append("— registrado.")
                             else:
                                 partes = [f"Listo. {monto_str}"]
                                 if nombre_categoria_display:
                                     partes.append(f"en {nombre_categoria_display}")
                                 if bill_nombre:
-                                    partes.append(f"desde {bill_nombre}")
+                                    partes.append(f"desde {bill_nombre}{fecha_disp}")
                                 partes.append("— registrado.")
 
                             resultado_ia["respuesta_usuario"] = " ".join(partes)
                             if descartadas:
                                 resultado_ia["respuesta_usuario"] += "\n" + "\n".join(descartadas)
+
+                        if bill:
+                            # REGLA DE PRIVACIDAD: Los saldos no se muestran tras registrar un movimiento,
+                            # salvo que el usuario los pida explícitamente (privacidad de pantalla).
+                            if bill.saldo_actual < 0:
+                                resultado_ia["respuesta_usuario"] += "\nLa billetera quedó en negativo."
                 except Exception:
                     logger.exception("Error al construir mensaje de confirmación")
 
