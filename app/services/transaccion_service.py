@@ -18,6 +18,7 @@ from app.schemas.transaccion import TransaccionCreate, TransaccionUpdate
 from app.services.tarjeta_service import calcular_primer_vencimiento, _tabla_saldo_arrastrado_existe
 from app.services import cuotas_service, presupuesto_service
 from app.utils.fecha import hoy_argentina
+from app.utils.formato import formatear_monto
 
 logger = logging.getLogger(__name__)
 
@@ -916,7 +917,9 @@ def evaluar_gasto_inusual(db: Session, usuario_id: UUID, transaccion: Transaccio
             dispara = z_modificado > 3.5
 
         if dispara:
-            mensaje = f"Registramos un gasto inusual: gastaste {simbolo}{monto_actual:,.0f} en {categoria_nombre}, pero tu gasto habitual en esa categoría es de {simbolo}{mediana:,.0f}."
+            monto_fmt = formatear_monto(monto_actual, transaccion.moneda)
+            mediana_fmt = formatear_monto(mediana, transaccion.moneda)
+            mensaje = f"Registramos un gasto inusual: gastaste {monto_fmt} en {categoria_nombre}, pero tu gasto habitual en esa categoría es de {mediana_fmt}."
             from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion
             config = obtener_configuracion(db, usuario_id)
             canales = resolver_canales_notificacion(config, TipoNotificacion.GASTO_INUSUAL)

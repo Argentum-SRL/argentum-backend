@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 logger = logging.getLogger(__name__)
 
 from app.utils.fecha import hoy_argentina
+from app.utils.formato import formatear_monto
 from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
 from app.models.billetera import Billetera
 from app.models.transaccion import Transaccion
@@ -813,7 +814,7 @@ def pagar_resumen_tarjeta(
         if monto > total_a_pagar:
             raise HTTPException(
                 status_code=400,
-                detail=f"El monto a pagar (${monto:,.2f}) no puede superar el total a pagar del resumen (${total_a_pagar:,.2f})."
+                detail=f"El monto a pagar ({formatear_monto(monto, moneda_a_pagar)}) no puede superar el total a pagar del resumen ({formatear_monto(total_a_pagar, moneda_a_pagar)})."
             )
         monto_pago = monto
     else:

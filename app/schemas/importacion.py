@@ -77,4 +77,5 @@ class ConfirmarImportacionResponse(BaseModel):
     importadas: int
     duplicadas: int
     sin_billetera_usd: int
+    descartadas_manual: int = 0
     total_procesadas: int

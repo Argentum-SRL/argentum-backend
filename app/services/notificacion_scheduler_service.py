@@ -5,10 +5,11 @@ from sqlalchemy import func, or_
 import structlog
 from app.models.notificacion import TipoNotificacion, NivelNotificacion, Notificacion
 from app.models.configuracion_notificacion import ConfiguracionNotificacion
-from app.models.usuario import Usuario
+from app.models.usuario import Usuario, Moneda
 from app.services.notificacion_service import crear_notificacion
 from app.services import notificacion_whatsapp_service as wpp_svc
 from app.utils.fecha import ahora_argentina, hoy_argentina
+from app.utils.formato import formatear_monto
 from app.core.job_lock import intentar_tomar_lock_job, liberar_lock_job
 
 logger = logging.getLogger(__name__)
@@ -119,8 +120,10 @@ def _job_notificaciones_cuotas(db_session_factory):
                 numero = getattr(cuota, 'numero_cuota', '?')
                 monto = float(getattr(cuota, 'monto_proyectado', 0) or getattr(cuota, 'monto_real', 0))
 
+                moneda_cuota = getattr(grupo, 'moneda', None) or getattr(cuota, 'moneda', None) or "ARS"
+                monto_fmt = formatear_monto(monto, moneda_cuota)
                 mensaje = (
-                    f"Tu cuota {numero}/{cantidad} de '{descripcion}' vence el {fecha_objetivo.strftime('%d/%m/%Y')} (${monto:,.0f}). "
+                    f"Tu cuota {numero}/{cantidad} de '{descripcion}' vence el {fecha_objetivo.strftime('%d/%m/%Y')} ({monto_fmt}). "
                     f"Acordate de tener el saldo disponible."
                 )
 
@@ -205,7 +208,9 @@ def _job_notificaciones_presupuestos(db_session_factory):
 
                 # Alertas del umbral 1 (configurable, ej: 80%)
                 if config.presupuesto_umbral_1_activo and porcentaje >= config.presupuesto_umbral_1 and porcentaje < 100:
-                    mensaje = f"Llevás gastado el {porcentaje}% de tu presupuesto '{nombre_pres}' (${gastado:,.0f} de ${limite:,.0f})"
+                    gastado_fmt = formatear_monto(gastado, pres.moneda)
+                    limite_fmt = formatear_monto(limite, pres.moneda)
+                    mensaje = f"Llevás gastado el {porcentaje}% de tu presupuesto '{nombre_pres}' ({gastado_fmt} de {limite_fmt})"
                     crear_notificacion(
                         db=db,
                         usuario_id=usuario_id,
@@ -221,7 +226,9 @@ def _job_notificaciones_presupuestos(db_session_factory):
 
                 # Alertas del umbral 2 (100% agotado)
                 if porcentaje >= 100:
-                    mensaje = f"Gastaste ${gastado:,.0f} de ${limite:,.0f} en {nombre_pres}. Superaste el límite que te pusiste."
+                    gastado_fmt = formatear_monto(gastado, pres.moneda)
+                    limite_fmt = formatear_monto(limite, pres.moneda)
+                    mensaje = f"Gastaste {gastado_fmt} de {limite_fmt} en {nombre_pres}. Superaste el límite que te pusiste."
                     crear_notificacion(
                         db=db,
                         usuario_id=usuario_id,
@@ -284,7 +291,8 @@ def _job_notificaciones_suscripciones(db_session_factory):
                     precio = obtener_precio_vigente(db, s.id, hoy)
                     monto = float(precio.monto) if precio else 0.0
                     moneda = precio.moneda if precio else "ARS"
-                    mensaje = f"Hoy se cobra la suscripción '{s.nombre}' por ${monto:,.0f} {moneda}"
+                    monto_fmt = formatear_monto(monto, moneda)
+                    mensaje = f"Hoy se cobra la suscripción '{s.nombre}' por {monto_fmt}"
 
                     crear_notificacion(
                         db=db,
@@ -306,7 +314,8 @@ def _job_notificaciones_suscripciones(db_session_factory):
                         precio = obtener_precio_vigente(db, s.id, s.proximo_cobro)
                         monto = float(precio.monto) if precio else 0.0
                         moneda = precio.moneda if precio else "ARS"
-                        mensaje = f"La suscripción '{s.nombre}' se cobrará en {anticipacion} días (${monto:,.0f} {moneda})"
+                        monto_fmt = formatear_monto(monto, moneda)
+                        mensaje = f"La suscripción '{s.nombre}' se cobrará en {anticipacion} días ({monto_fmt})"
 
                         crear_notificacion(
                             db=db,
@@ -535,35 +544,62 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                 if ya_enviado:
                     continue
 
-                # Calcular totales del ciclo cerrado
-                ingresos = db.query(func.sum(Transaccion.monto)).filter(
+                # Calcular totales del ciclo cerrado separados por moneda
+                ingresos_ars = float(db.query(func.sum(Transaccion.monto)).filter(
                     Transaccion.usuario_id == usuario.id,
                     Transaccion.tipo == TipoTransaccion.INGRESO,
+                    Transaccion.moneda == Moneda.ARS,
                     Transaccion.fecha >= fecha_inicio,
                     Transaccion.fecha <= fecha_fin,
                     Transaccion.es_padre_cuotas == False,
-                ).scalar() or 0
+                ).scalar() or 0)
 
-                egresos = db.query(func.sum(Transaccion.monto)).filter(
+                egresos_ars = float(db.query(func.sum(Transaccion.monto)).filter(
                     Transaccion.usuario_id == usuario.id,
                     Transaccion.tipo == TipoTransaccion.EGRESO,
+                    Transaccion.moneda == Moneda.ARS,
                     Transaccion.fecha >= fecha_inicio,
                     Transaccion.fecha <= fecha_fin,
                     Transaccion.es_padre_cuotas == False,
-                ).scalar() or 0
+                ).scalar() or 0)
 
-                if float(ingresos) == 0 and float(egresos) == 0:
+                ingresos_usd = float(db.query(func.sum(Transaccion.monto)).filter(
+                    Transaccion.usuario_id == usuario.id,
+                    Transaccion.tipo == TipoTransaccion.INGRESO,
+                    Transaccion.moneda == Moneda.USD,
+                    Transaccion.fecha >= fecha_inicio,
+                    Transaccion.fecha <= fecha_fin,
+                    Transaccion.es_padre_cuotas == False,
+                ).scalar() or 0)
+
+                egresos_usd = float(db.query(func.sum(Transaccion.monto)).filter(
+                    Transaccion.usuario_id == usuario.id,
+                    Transaccion.tipo == TipoTransaccion.EGRESO,
+                    Transaccion.moneda == Moneda.USD,
+                    Transaccion.fecha >= fecha_inicio,
+                    Transaccion.fecha <= fecha_fin,
+                    Transaccion.es_padre_cuotas == False,
+                ).scalar() or 0)
+
+                hay_ars = (ingresos_ars > 0 or egresos_ars > 0)
+                hay_usd = (ingresos_usd > 0 or egresos_usd > 0)
+
+                if not hay_ars and not hay_usd:
                     continue
 
-                balance = float(ingresos) - float(egresos)
+                balance_ars = ingresos_ars - egresos_ars
+                balance_usd = ingresos_usd - egresos_usd
 
-                # Categoría con más gasto
+                moneda_top = Moneda.USD if (hay_usd and not hay_ars) else Moneda.ARS
+
+                # Categoría con más gasto en la moneda correspondiente
                 cat_top = db.query(
                     Categoria.nombre,
                     func.sum(Transaccion.monto).label("total")
                 ).join(Transaccion, Transaccion.categoria_id == Categoria.id).filter(
                     Transaccion.usuario_id == usuario.id,
                     Transaccion.tipo == TipoTransaccion.EGRESO,
+                    Transaccion.moneda == moneda_top,
                     Transaccion.fecha >= fecha_inicio,
                     Transaccion.fecha <= fecha_fin,
                     Transaccion.es_padre_cuotas == False,
@@ -578,6 +614,7 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                 ).join(Transaccion, Transaccion.categoria_id == Categoria.id).filter(
                     Transaccion.usuario_id == usuario.id,
                     Transaccion.tipo == TipoTransaccion.EGRESO,
+                    Transaccion.moneda == moneda_top,
                     Transaccion.fecha >= fecha_inicio,
                     Transaccion.fecha <= fecha_fin,
                     Transaccion.es_padre_cuotas == False,
@@ -590,14 +627,44 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                     for r in gastos_hormiga_raw
                 ] if gastos_hormiga_raw else None
 
-                mensaje = wpp_svc.formatear_resumen_ciclo(
-                    total_ingresos=float(ingresos),
-                    total_egresos=float(egresos),
-                    balance=balance,
-                    categoria_top=cat_top.nombre if cat_top else None,
-                    monto_categoria_top=float(cat_top.total) if cat_top else None,
-                    gastos_hormiga=gastos_hormiga,
-                )
+                if hay_ars and not hay_usd:
+                    mensaje = wpp_svc.formatear_resumen_ciclo(
+                        total_ingresos=ingresos_ars,
+                        total_egresos=egresos_ars,
+                        balance=balance_ars,
+                        categoria_top=cat_top.nombre if cat_top else None,
+                        monto_categoria_top=float(cat_top.total) if cat_top else None,
+                        gastos_hormiga=gastos_hormiga,
+                        moneda=Moneda.ARS,
+                    )
+                elif hay_usd and not hay_ars:
+                    mensaje = wpp_svc.formatear_resumen_ciclo(
+                        total_ingresos=ingresos_usd,
+                        total_egresos=egresos_usd,
+                        balance=balance_usd,
+                        categoria_top=cat_top.nombre if cat_top else None,
+                        monto_categoria_top=float(cat_top.total) if cat_top else None,
+                        gastos_hormiga=gastos_hormiga,
+                        moneda=Moneda.USD,
+                    )
+                else:
+                    signo_ars = "+" if balance_ars >= 0 else ""
+                    str_bal_ars = f"{signo_ars}{formatear_monto(balance_ars, Moneda.ARS, con_decimales=False)}"
+                    signo_usd = "+" if balance_usd >= 0 else ""
+                    str_bal_usd = f"{signo_usd}{formatear_monto(balance_usd, Moneda.USD)}"
+
+                    lineas = [
+                        f"*Cerraste el ciclo*\n",
+                        f"Ingresos: {formatear_monto(ingresos_ars, Moneda.ARS, con_decimales=False)} + {formatear_monto(ingresos_usd, Moneda.USD)}",
+                        f"Egresos: {formatear_monto(egresos_ars, Moneda.ARS, con_decimales=False)} + {formatear_monto(egresos_usd, Moneda.USD)}",
+                        f"Balance: {str_bal_ars} y {str_bal_usd}",
+                    ]
+                    if cat_top and cat_top.total:
+                        lineas.append(f"\nMás gastaste en *{cat_top.nombre}*: {formatear_monto(float(cat_top.total), moneda_top)}")
+                    if gastos_hormiga:
+                        for g in gastos_hormiga[:2]:
+                            lineas.append(f"• {g['categoria']}: {formatear_monto(g['total'], moneda_top)} en {g['cantidad']} compras")
+                    mensaje = "\n".join(lineas)
 
                 from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion
                 config = obtener_configuracion(db, usuario.id)
@@ -668,41 +735,68 @@ def _job_resumen_semanal(db_session_factory):
                 if config and getattr(config, 'resumen_semanal_activo', True) is False:
                     continue  # si el usuario desactivó el resumen, saltar
                 
-                # Calcular egresos e ingresos de la semana anterior (excluyendo padre de cuotas para evitar duplicar)
-                egresos_result = db.execute(
+                # Calcular egresos e ingresos de la semana anterior separados por moneda
+                egresos_ars = float(db.execute(
                     select(sa_func.sum(Transaccion.monto)).where(
                         Transaccion.usuario_id == usuario.id,
                         Transaccion.tipo == TipoTransaccion.EGRESO,
+                        Transaccion.moneda == Moneda.ARS,
                         Transaccion.fecha >= lunes_pasado,
                         Transaccion.fecha <= domingo_pasado,
                         Transaccion.es_padre_cuotas == False,
                     )
-                ).scalar()
+                ).scalar() or 0)
 
-                ingresos_result = db.execute(
+                ingresos_ars = float(db.execute(
                     select(sa_func.sum(Transaccion.monto)).where(
                         Transaccion.usuario_id == usuario.id,
                         Transaccion.tipo == TipoTransaccion.INGRESO,
+                        Transaccion.moneda == Moneda.ARS,
                         Transaccion.fecha >= lunes_pasado,
                         Transaccion.fecha <= domingo_pasado,
                         Transaccion.es_padre_cuotas == False,
                     )
-                ).scalar()
+                ).scalar() or 0)
 
-                egresos = float(egresos_result or 0)
-                ingresos = float(ingresos_result or 0)
+                egresos_usd = float(db.execute(
+                    select(sa_func.sum(Transaccion.monto)).where(
+                        Transaccion.usuario_id == usuario.id,
+                        Transaccion.tipo == TipoTransaccion.EGRESO,
+                        Transaccion.moneda == Moneda.USD,
+                        Transaccion.fecha >= lunes_pasado,
+                        Transaccion.fecha <= domingo_pasado,
+                        Transaccion.es_padre_cuotas == False,
+                    )
+                ).scalar() or 0)
+
+                ingresos_usd = float(db.execute(
+                    select(sa_func.sum(Transaccion.monto)).where(
+                        Transaccion.usuario_id == usuario.id,
+                        Transaccion.tipo == TipoTransaccion.INGRESO,
+                        Transaccion.moneda == Moneda.USD,
+                        Transaccion.fecha >= lunes_pasado,
+                        Transaccion.fecha <= domingo_pasado,
+                        Transaccion.es_padre_cuotas == False,
+                    )
+                ).scalar() or 0)
+
+                hay_ars = (egresos_ars > 0 or ingresos_ars > 0)
+                hay_usd = (egresos_usd > 0 or ingresos_usd > 0)
 
                 # Si no hubo ningún movimiento en la semana, no notificar
-                if egresos == 0 and ingresos == 0:
+                if not hay_ars and not hay_usd:
                     continue
 
-                # Top categoría de la semana por egresos (excluyendo padre de cuotas)
+                moneda_top = Moneda.USD if (hay_usd and not hay_ars) else Moneda.ARS
+
+                # Top categoría de la semana por egresos en la moneda correspondiente
                 top_categoria_result = db.execute(
                     select(Categoria.nombre, sa_func.sum(Transaccion.monto).label("total"))
                     .join(Categoria, Transaccion.categoria_id == Categoria.id)
                     .where(
                         Transaccion.usuario_id == usuario.id,
                         Transaccion.tipo == TipoTransaccion.EGRESO,
+                        Transaccion.moneda == moneda_top,
                         Transaccion.fecha >= lunes_pasado,
                         Transaccion.fecha <= domingo_pasado,
                         Transaccion.categoria_id.isnot(None),
@@ -715,18 +809,37 @@ def _job_resumen_semanal(db_session_factory):
 
                 top_categoria = top_categoria_result[0] if top_categoria_result else None
 
-                balance = ingresos - egresos
-                signo = "+" if balance >= 0 else ""
+                balance_ars = ingresos_ars - egresos_ars
+                balance_usd = ingresos_usd - egresos_usd
+
+                if hay_ars and not hay_usd:
+                    signo_ars = "+" if balance_ars >= 0 else ""
+                    str_ingresos = formatear_monto(ingresos_ars, Moneda.ARS, con_decimales=False)
+                    str_egresos = formatear_monto(egresos_ars, Moneda.ARS, con_decimales=False)
+                    str_balance = f"{signo_ars}{formatear_monto(balance_ars, Moneda.ARS, con_decimales=False)}"
+                elif hay_usd and not hay_ars:
+                    signo_usd = "+" if balance_usd >= 0 else ""
+                    str_ingresos = formatear_monto(ingresos_usd, Moneda.USD)
+                    str_egresos = formatear_monto(egresos_usd, Moneda.USD)
+                    str_balance = f"{signo_usd}{formatear_monto(balance_usd, Moneda.USD)}"
+                else:
+                    signo_ars = "+" if balance_ars >= 0 else ""
+                    str_bal_ars = f"{signo_ars}{formatear_monto(balance_ars, Moneda.ARS, con_decimales=False)}"
+                    signo_usd = "+" if balance_usd >= 0 else ""
+                    str_bal_usd = f"{signo_usd}{formatear_monto(balance_usd, Moneda.USD)}"
+                    str_ingresos = f"{formatear_monto(ingresos_ars, Moneda.ARS, con_decimales=False)} + {formatear_monto(ingresos_usd, Moneda.USD)}"
+                    str_egresos = f"{formatear_monto(egresos_ars, Moneda.ARS, con_decimales=False)} + {formatear_monto(egresos_usd, Moneda.USD)}"
+                    str_balance = f"{str_bal_ars} y {str_bal_usd}"
 
                 if top_categoria:
                     mensaje = (
-                        f"Tu semana financiera: ingresaste ${ingresos:,.0f} y gastaste ${egresos:,.0f} "
-                        f"(balance {signo}${balance:,.0f}). Tu mayor gasto fue en {top_categoria}."
+                        f"Tu semana financiera: ingresaste {str_ingresos} y gastaste {str_egresos} "
+                        f"(balance {str_balance}). Tu mayor gasto fue en {top_categoria}."
                     )
                 else:
                     mensaje = (
-                        f"Tu semana financiera: ingresaste ${ingresos:,.0f} y gastaste ${egresos:,.0f} "
-                        f"(balance {signo}${balance:,.0f})."
+                        f"Tu semana financiera: ingresaste {str_ingresos} y gastaste {str_egresos} "
+                        f"(balance {str_balance})."
                     )
 
                 # Usar los canales configurados por el usuario si config existe
