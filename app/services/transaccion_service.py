@@ -13,8 +13,9 @@ from app.models.billetera import Billetera
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.cuota import Cuota
 from app.models.tarjeta_credito import TarjetaCredito
+from app.models.saldo_arrastrado import SaldoArrastradoTarjeta, PagoSaldoArrastrado, EstadoSaldoArrastrado
 from app.schemas.transaccion import TransaccionCreate, TransaccionUpdate
-from app.services.tarjeta_service import calcular_primer_vencimiento
+from app.services.tarjeta_service import calcular_primer_vencimiento, _tabla_saldo_arrastrado_existe
 from app.services import cuotas_service, presupuesto_service
 from app.utils.fecha import hoy_argentina
 
@@ -631,7 +632,33 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID):
                     
                 db.delete(movimiento)
 
-    # Reversión de pago de resumen de tarjeta: revertir ÚNICAMENTE las cuotas saldadas por esta transacción
+    # Reversión de pago de resumen de tarjeta (Etapa 3A y 3B):
+    if _tabla_saldo_arrastrado_existe(db):
+        # 1. Si esta transacción redujo un saldo arrastrado, se devuelve el saldo a su monto anterior
+        #    y si estaba saldado, vuelve a estado activo (Tarea 5.4)
+        reducciones_saldo = (
+            db.query(PagoSaldoArrastrado)
+            .filter(PagoSaldoArrastrado.transaccion_pago_id == transaccion.id)
+            .all()
+        )
+        for red in reducciones_saldo:
+            saldo = db.get(SaldoArrastradoTarjeta, red.saldo_arrastrado_id)
+            if saldo:
+                saldo.monto_restante += red.monto_aplicado
+                if saldo.monto_restante > Decimal("0") and saldo.estado == EstadoSaldoArrastrado.SALDADO:
+                    saldo.estado = EstadoSaldoArrastrado.ACTIVO
+            db.delete(red)
+
+        # 2. Si se elimina el pago que generó un saldo arrastrado, ese saldo desaparece (Tarea 5.3)
+        saldos_originados = (
+            db.query(SaldoArrastradoTarjeta)
+            .filter(SaldoArrastradoTarjeta.transaccion_origen_id == transaccion.id)
+            .all()
+        )
+        for s_orig in saldos_originados:
+            db.delete(s_orig)
+
+    # 3. Revertir ÚNICAMENTE las cuotas saldadas por esta transacción (Etapa 3A)
     cuotas_revertir = (
         db.query(Cuota)
         .filter(Cuota.transaccion_pago_id == transaccion.id)
@@ -715,10 +742,8 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
                 except Exception:
                     pass
 
-    # Si esta transacción es un pago de resumen de tarjeta (creada por job o manual),
-    # marcar como pagadas las cuotas del período de dicho resumen y vincularlas
-    # Si esta transacción es un pago de resumen de tarjeta (creada por job o manual),
-    # marcar como pagadas las cuotas de dicho resumen (incluye atrasadas que arrastre el resumen) y vincularlas
+    # Si esta transacción es un pago de resumen de tarjeta (creada por job o manual):
+    # 1. Marcar como pagadas las cuotas de dicho resumen (incluye atrasadas que arrastre el resumen) y vincularlas
     if transaccion.pago_resumen_vencimiento and transaccion.tarjeta_id:
         cuotas_a_pagar = (
             db.query(Cuota)
@@ -733,6 +758,28 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
         for c in cuotas_a_pagar:
             c.pagada = True
             c.transaccion_pago_id = transaccion.id
+
+        # 2. Cancelar cualquier saldo arrastrado activo para esta tarjeta hasta este vencimiento (Tarea 6.2)
+        if _tabla_saldo_arrastrado_existe(db):
+            saldos_activos = (
+                db.query(SaldoArrastradoTarjeta)
+                .filter(
+                    SaldoArrastradoTarjeta.tarjeta_id == transaccion.tarjeta_id,
+                    SaldoArrastradoTarjeta.estado == EstadoSaldoArrastrado.ACTIVO,
+                    SaldoArrastradoTarjeta.fecha_vencimiento_resumen <= transaccion.pago_resumen_vencimiento
+                )
+                .all()
+            )
+            for s in saldos_activos:
+                if s.monto_restante > Decimal("0"):
+                    monto_ap = s.monto_restante
+                    s.monto_restante = Decimal("0")
+                    s.estado = EstadoSaldoArrastrado.SALDADO
+                    db.add(PagoSaldoArrastrado(
+                        saldo_arrastrado_id=s.id,
+                        transaccion_pago_id=transaccion.id,
+                        monto_aplicado=monto_ap
+                    ))
             
     # Impacto en presupuestos
     presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=False)

@@ -75,6 +75,18 @@ class ResumenFuturo(BaseModel):
     cantidad_cuotas: int
     cuotas: list[CuotaResumen] = []
 
+class ItemSaldoArrastrado(BaseModel):
+    id: UUID
+    fecha_vencimiento_origen: date
+    monto_inicial: Decimal
+    monto_restante: Decimal
+    moneda: str
+    descripcion: str
+
+    class Config:
+        from_attributes = True
+
+
 class ResumenTarjeta(BaseModel):
     fecha_cierre_proximo: date
     fecha_vencimiento_proximo: date
@@ -83,7 +95,12 @@ class ResumenTarjeta(BaseModel):
     total_original_resumen_actual: Decimal = Decimal("0")
     total_original_resumen_siguiente: Decimal = Decimal("0")
     total_deuda_vencida_anterior: Decimal = Decimal("0")
+    saldo_arrastrado_impago: Decimal = Decimal("0")
+    items_saldo_arrastrado: list[ItemSaldoArrastrado] = []
     total_a_pagar_resumen_actual: Decimal = Decimal("0")
+    pago_minimo_estimado: Decimal = Decimal("0")
+    pago_minimo_es_estimado: bool = True
+    pago_minimo_aclaracion: str = "Monto de referencia orientativo. El valor definitivo lo establece la entidad bancaria en el resumen de cuenta."
     total_actual_ars: Decimal = Decimal("0")
     total_actual_usd: Decimal = Decimal("0")
     total_siguiente_ars: Decimal = Decimal("0")
@@ -125,6 +142,8 @@ class ResultadoPagoTarjeta(BaseModel):
     cuotas_pagadas_count: int = 0
     moneda_pagada: str = ""
     monto_pagado: Decimal = Decimal("0")
+    saldo_arrastrado_generado: Decimal | None = None
+    saldo_arrastrado_restante: Decimal | None = None
     cuotas_pendientes_otra_moneda: list[CuotaPendienteOtraMoneda] = []
     mensaje_advertencia: str | None = None
 
@@ -145,6 +164,7 @@ class TarjetaCreditoResponse(TarjetaCreditoBase):
 
 
 class PagarTarjetaBody(BaseModel):
+    monto: Decimal | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
     fecha_pago: date | None = None
     fecha_resumen: date | None = None
 
