@@ -80,6 +80,10 @@ class ResumenTarjeta(BaseModel):
     fecha_vencimiento_proximo: date
     total_comprometido_resumen_actual: Decimal
     total_comprometido_resumen_siguiente: Decimal
+    total_original_resumen_actual: Decimal = Decimal("0")
+    total_original_resumen_siguiente: Decimal = Decimal("0")
+    total_deuda_vencida_anterior: Decimal = Decimal("0")
+    total_a_pagar_resumen_actual: Decimal = Decimal("0")
     total_actual_ars: Decimal = Decimal("0")
     total_actual_usd: Decimal = Decimal("0")
     total_siguiente_ars: Decimal = Decimal("0")
@@ -134,6 +138,7 @@ class TarjetaCreditoResponse(TarjetaCreditoBase):
     estado: EstadoTarjeta
     fecha_creacion: datetime
     resumen_actual: ResumenTarjeta | None = None
+    cuotas_recalculadas: int = 0
 
     class Config:
         from_attributes = True

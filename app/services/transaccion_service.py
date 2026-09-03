@@ -226,6 +226,21 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, co
             raise HTTPException(status_code=400, detail="La subcategoría no pertenece a la categoría seleccionada.")
     
     # 4. Manejo de Cuotas
+    # DECISIÓN DE PRODUCTO: Todo consumo con tarjeta de crédito genera siempre un grupo de cuotas,
+    # aunque sea de un solo pago. Se unifica el modelo de datos.
+    if data.metodo_pago == MetodoPago.CREDITO and data.tarjeta_id and not data.es_cuota_hija and not data.es_padre_cuotas:
+        from app.schemas.transaccion import InfoCuotas
+        data.es_padre_cuotas = True
+        if not data.info_cuotas:
+            data.info_cuotas = InfoCuotas(
+                cantidad_cuotas=1,
+                cuota_inicial=1,
+                tiene_interes=False,
+                tasa_interes=None,
+                monto_total=data.monto,
+                proximo_resumen=False
+            )
+
     if data.es_padre_cuotas:
         if not data.info_cuotas:
             raise HTTPException(status_code=400, detail="Para registrar una compra en cuotas, completá los datos de las cuotas.")
@@ -616,6 +631,16 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID):
                     
                 db.delete(movimiento)
 
+    # Reversión de pago de resumen de tarjeta: revertir ÚNICAMENTE las cuotas saldadas por esta transacción
+    cuotas_revertir = (
+        db.query(Cuota)
+        .filter(Cuota.transaccion_pago_id == transaccion.id)
+        .all()
+    )
+    for c in cuotas_revertir:
+        c.pagada = False
+        c.transaccion_pago_id = None
+
     # Transaccion normal
     if _afecta_saldo(transaccion):
         billetera = db.get(Billetera, transaccion.billetera_id)
@@ -646,9 +671,10 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
         
     transaccion.estado_verificacion = EstadoVerificacionTransaccion.CONFIRMADA
     
-    # Al confirmar, RECIEN impacta el saldo si la fecha es hoy o pasada
+    # Al confirmar, impacta el saldo si es fecha presente/pasada o si es un pago de resumen confirmado por el usuario
     hoy = hoy_argentina()
-    if transaccion.fecha <= hoy and transaccion.metodo_pago != MetodoPago.CREDITO:
+    debe_impactar_saldo = (transaccion.fecha <= hoy or transaccion.pago_resumen_vencimiento is not None)
+    if debe_impactar_saldo and transaccion.metodo_pago != MetodoPago.CREDITO:
         billetera = db.get(Billetera, transaccion.billetera_id)
         if not billetera:
             raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
@@ -688,6 +714,25 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
                     evaluar_gasto_inusual(db, usuario_id, transaccion)
                 except Exception:
                     pass
+
+    # Si esta transacción es un pago de resumen de tarjeta (creada por job o manual),
+    # marcar como pagadas las cuotas del período de dicho resumen y vincularlas
+    # Si esta transacción es un pago de resumen de tarjeta (creada por job o manual),
+    # marcar como pagadas las cuotas de dicho resumen (incluye atrasadas que arrastre el resumen) y vincularlas
+    if transaccion.pago_resumen_vencimiento and transaccion.tarjeta_id:
+        cuotas_a_pagar = (
+            db.query(Cuota)
+            .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
+            .filter(
+                GrupoCuotas.tarjeta_id == transaccion.tarjeta_id,
+                Cuota.pagada == False,
+                Cuota.fecha_vencimiento <= transaccion.pago_resumen_vencimiento
+            )
+            .all()
+        )
+        for c in cuotas_a_pagar:
+            c.pagada = True
+            c.transaccion_pago_id = transaccion.id
             
     # Impacto en presupuestos
     presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=False)

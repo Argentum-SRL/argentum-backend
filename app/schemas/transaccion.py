@@ -54,6 +54,7 @@ class TransaccionBase(BaseModel):
     grupo_cuotas_id: UUID | None = None
     origen: OrigenTransaccion = OrigenTransaccion.MANUAL
     estado_verificacion: EstadoVerificacionTransaccion | None = None
+    pago_resumen_vencimiento: date | None = None
 
 
 class TransaccionCreate(TransaccionBase):
@@ -79,6 +80,7 @@ class TransaccionUpdate(BaseModel):
     primer_vencimiento_manual: date | None = None
     es_recurrente: bool | None = None
     estado_verificacion: EstadoVerificacionTransaccion | None = None
+    pago_resumen_vencimiento: date | None = None
 
     @field_validator("descripcion")
     @classmethod

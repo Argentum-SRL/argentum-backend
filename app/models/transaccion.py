@@ -76,6 +76,7 @@ class Transaccion(Base):
         Index("ix_transacciones_importacion_id", "importacion_id"),
         Index("idx_transacciones_import_hash", "usuario_id", "import_hash", unique=True, postgresql_where=text("import_hash IS NOT NULL")),
         Index("ix_transacciones_recurrente_fecha", "recurrente_id", "fecha", postgresql_where=text("recurrente_id IS NOT NULL")),
+        Index("ix_transacciones_pago_resumen_vencimiento", "tarjeta_id", "pago_resumen_vencimiento", postgresql_where=text("pago_resumen_vencimiento IS NOT NULL")),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -125,6 +126,9 @@ class Transaccion(Base):
     import_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     importacion_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("importaciones_resumen.id"), nullable=True)
     titular_pdf: Mapped[str | None] = mapped_column(String(150), nullable=True)
+
+    # Vínculo exacto de pago de resumen de tarjeta de crédito (Etapa 3A - Anti doble débito y Reversión)
+    pago_resumen_vencimiento: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # Campos de trazabilidad de conversión multimoneda (Etapa 2 - Infraestructura)
     monto_original: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)

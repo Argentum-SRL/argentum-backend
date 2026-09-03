@@ -43,6 +43,11 @@ def calcular_primer_vencimiento(
     Si la compra es antes o el mismo día del cierre, entra en el cierre de ese mes.
     Si es después del cierre, entra en el cierre del mes siguiente.
     La fecha de vencimiento dependerá de si el vencimiento es en el mismo mes del cierre o al siguiente.
+
+    DECISIÓN DE PRODUCTO:
+    - El vencimiento de una tarjeta se ajusta al primer día hábil SIGUIENTE (posterior) cuando
+      cae sábado, domingo o feriado bancario en Argentina.
+    - El cierre NO se ajusta por día hábil: los bancos comerciales cierran sus ciclos en fecha fija.
     """
     # 1. Determinar el mes de cierre correspondiente a la compra
     if fecha_compra.day <= dia_cierre:
@@ -62,22 +67,29 @@ def calcular_primer_vencimiento(
 
     ultimo_dia = monthrange(mes_vencimiento.year, mes_vencimiento.month)[1]
     dia_real = min(dia_vencimiento, ultimo_dia)
+    fecha_nominal = mes_vencimiento.replace(day=dia_real)
 
-    return mes_vencimiento.replace(day=dia_real)
+    from app.services.dias_habiles_service import ajustar_fecha_habil_sync
+    return ajustar_fecha_habil_sync(fecha_nominal, direccion="posterior")
 
 
 def calcular_fecha_vencimiento_proximo(tarjeta: TarjetaCredito, hoy: date | None = None) -> date:
-    """Devuelve la fecha del próximo vencimiento de la tarjeta a partir de hoy."""
+    """Devuelve la fecha del próximo vencimiento de la tarjeta a partir de hoy (ajustada a día hábil posterior)."""
     if hoy is None:
         hoy = hoy_argentina()
+    from app.services.dias_habiles_service import ajustar_fecha_habil_sync
+
     ultimo_dia_mes = monthrange(hoy.year, hoy.month)[1]
     dia_venc = min(tarjeta.dia_vencimiento, ultimo_dia_mes)
-    venc = date(hoy.year, hoy.month, dia_venc)
+    venc_nominal = date(hoy.year, hoy.month, dia_venc)
+    venc = ajustar_fecha_habil_sync(venc_nominal, direccion="posterior")
+
     if hoy > venc:
         proximo_mes = hoy + relativedelta(months=1)
         ultimo_dia_proximo = monthrange(proximo_mes.year, proximo_mes.month)[1]
         dia_venc_proximo = min(tarjeta.dia_vencimiento, ultimo_dia_proximo)
-        venc = date(proximo_mes.year, proximo_mes.month, dia_venc_proximo)
+        venc_nominal_prox = date(proximo_mes.year, proximo_mes.month, dia_venc_proximo)
+        venc = ajustar_fecha_habil_sync(venc_nominal_prox, direccion="posterior")
     return venc
 
 
@@ -162,11 +174,47 @@ def actualizar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID, data: Ta
                 detail="No podés cambiar la moneda de una tarjeta que ya tiene transacciones registradas."
             )
 
+    cierre_cambio = "dia_cierre" in update_data and update_data["dia_cierre"] != tarjeta.dia_cierre
+    venc_cambio = "dia_vencimiento" in update_data and update_data["dia_vencimiento"] != tarjeta.dia_vencimiento
+
+    nuevo_dia_vencimiento = update_data.get("dia_vencimiento", tarjeta.dia_vencimiento)
+
     for key, value in update_data.items():
         setattr(tarjeta, key, value)
     
+    cuotas_recalculadas = 0
+    if cierre_cambio or venc_cambio:
+        hoy = hoy_argentina()
+        # Recalcular cuotas NO pagadas cuyo vencimiento sea posterior a hoy
+        cuotas_futuras = (
+            db.query(Cuota)
+            .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
+            .options(joinedload(Cuota.transaccion))
+            .filter(
+                GrupoCuotas.tarjeta_id == tarjeta.id,
+                Cuota.pagada == False,
+                Cuota.fecha_vencimiento > hoy
+            )
+            .all()
+        )
+        from app.services.dias_habiles_service import ajustar_fecha_habil_sync
+        for c in cuotas_futuras:
+            anio_c = c.fecha_vencimiento.year
+            mes_c = c.fecha_vencimiento.month
+            ultimo_dia_mes = monthrange(anio_c, mes_c)[1]
+            dia_real = min(nuevo_dia_vencimiento, ultimo_dia_mes)
+            f_nom = date(anio_c, mes_c, dia_real)
+            nueva_fecha = ajustar_fecha_habil_sync(f_nom, direccion="posterior")
+
+            if c.fecha_vencimiento != nueva_fecha:
+                c.fecha_vencimiento = nueva_fecha
+                if c.transaccion:
+                    c.transaccion.fecha = nueva_fecha
+                cuotas_recalculadas += 1
+
     db.commit()
     db.refresh(tarjeta)
+    setattr(tarjeta, "cuotas_recalculadas", cuotas_recalculadas)
     return tarjeta
 
 
@@ -257,23 +305,11 @@ def get_info_transaccion(cuota: Cuota) -> tuple[str, str | None]:
 def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preloaded: list[Cuota] = None) -> ResumenTarjeta:
     hoy = hoy_argentina()
 
-    # ── Calcular fecha de vencimiento próximo ─────────────
-    # Usar el último día del mes si dia_vencimiento es mayor
-    ultimo_dia_mes = monthrange(hoy.year, hoy.month)[1]
-    dia_venc = min(tarjeta.dia_vencimiento, ultimo_dia_mes)
-    
-    venc = date(hoy.year, hoy.month, dia_venc)
-    if hoy > venc:
-        # Si ya pasó el vencimiento de este mes, ir al siguiente
-        proximo_mes = hoy + relativedelta(months=1)
-        ultimo_dia_proximo = monthrange(proximo_mes.year, proximo_mes.month)[1]
-        dia_venc_proximo = min(tarjeta.dia_vencimiento, ultimo_dia_proximo)
-        venc = date(proximo_mes.year, proximo_mes.month, dia_venc_proximo)
-    
-    fecha_vencimiento_proximo = venc
+    # ── Calcular fecha de vencimiento próximo (ajustada a día hábil) ─────────────
+    fecha_vencimiento_proximo = calcular_fecha_vencimiento_proximo(tarjeta, hoy)
 
     # ── Calcular fecha de cierre próximo ──────────────────
-    # El cierre debe corresponder al período de vencimiento próximo
+    # El cierre debe corresponder al período de vencimiento próximo (sin ajuste hábil)
     fecha_cierre_proximo = calcular_fecha_cierre_de_vencimiento(
         fecha_vencimiento_proximo, tarjeta.dia_cierre, tarjeta.dia_vencimiento
     )
@@ -299,11 +335,20 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
             .all()
         )
 
-    # ── Agrupar cuotas por resumen ─────────────────────────
-    venc_siguiente = fecha_vencimiento_proximo + relativedelta(months=1)
-    # Ajustar dia de vencimiento del mes siguiente
-    ultimo_dia_siguiente = monthrange(venc_siguiente.year, venc_siguiente.month)[1]
-    venc_siguiente = venc_siguiente.replace(day=min(tarjeta.dia_vencimiento, ultimo_dia_siguiente))
+    # ── Agrupar cuotas por período de resumen ─────────────────────────
+    from app.services.dias_habiles_service import ajustar_fecha_habil_sync
+
+    # Período del Resumen Actual: (venc_anterior, fecha_vencimiento_proximo]
+    proximo_mes_ant = date(fecha_vencimiento_proximo.year, fecha_vencimiento_proximo.month, 1) - relativedelta(months=1)
+    ultimo_dia_anterior = monthrange(proximo_mes_ant.year, proximo_mes_ant.month)[1]
+    venc_ant_nom = date(proximo_mes_ant.year, proximo_mes_ant.month, min(tarjeta.dia_vencimiento, ultimo_dia_anterior))
+    venc_anterior = ajustar_fecha_habil_sync(venc_ant_nom, direccion="posterior")
+
+    # Período del Próximo Resumen: (fecha_vencimiento_proximo, venc_siguiente]
+    proximo_mes_sig = date(fecha_vencimiento_proximo.year, fecha_vencimiento_proximo.month, 1) + relativedelta(months=1)
+    ultimo_dia_siguiente = monthrange(proximo_mes_sig.year, proximo_mes_sig.month)[1]
+    venc_sig_nom = date(proximo_mes_sig.year, proximo_mes_sig.month, min(tarjeta.dia_vencimiento, ultimo_dia_siguiente))
+    venc_siguiente = ajustar_fecha_habil_sync(venc_sig_nom, direccion="posterior")
 
     cuotas_actual = []
     cuotas_siguiente = []
@@ -334,20 +379,42 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
             pagada=cuota.pagada
         )
 
-        if cuota.fecha_vencimiento < fecha_vencimiento_proximo:
-            # Resumen anterior
-            venc_key = cuota.fecha_vencimiento.strftime("%Y-%m")
-            nombre_mes_en = cuota.fecha_vencimiento.strftime("%B")
-            nombre_mes_es = MESES_ES.get(nombre_mes_en, nombre_mes_en)
-            mes_label = f"{nombre_mes_es} {cuota.fecha_vencimiento.year}"
+        f_cuota = cuota.fecha_vencimiento
+
+        if venc_anterior < f_cuota <= fecha_vencimiento_proximo:
+            # Resumen actual: cae en el período propio del resumen actual
+            cuotas_actual.append(cuota_data)
+        elif fecha_vencimiento_proximo < f_cuota <= venc_siguiente:
+            # Resumen siguiente: cae en el período propio del próximo resumen
+            cuotas_siguiente.append(cuota_data)
+        elif f_cuota <= venc_anterior:
+            # Resumen anterior: identificar el período mensual de cierre/vencimiento que lo contiene
+            base_m = date(f_cuota.year, f_cuota.month, 1)
+            p_year, p_month, p_venc = base_m.year, base_m.month, None
+            for offset in [0, -1, 1, 2, -2]:
+                m_curr = base_m + relativedelta(months=offset)
+                m_prev = m_curr - relativedelta(months=1)
+                u_p = monthrange(m_prev.year, m_prev.month)[1]
+                v_p = ajustar_fecha_habil_sync(date(m_prev.year, m_prev.month, min(tarjeta.dia_vencimiento, u_p)), direccion="posterior")
+                u_c = monthrange(m_curr.year, m_curr.month)[1]
+                v_c = ajustar_fecha_habil_sync(date(m_curr.year, m_curr.month, min(tarjeta.dia_vencimiento, u_c)), direccion="posterior")
+                if v_p < f_cuota <= v_c:
+                    p_year, p_month, p_venc = m_curr.year, m_curr.month, v_c
+                    break
+            if p_venc is None:
+                p_venc = f_cuota
+
+            venc_key = f"{p_year}-{p_month:02d}"
+            nombre_mes_es = MESES_ES.get(p_venc.strftime("%B"), p_venc.strftime("%B"))
+            mes_label = f"{nombre_mes_es} {p_year}"
             
             if venc_key not in anteriores_dict:
                 cierre_date = calcular_fecha_cierre_de_vencimiento(
-                    cuota.fecha_vencimiento, tarjeta.dia_cierre, tarjeta.dia_vencimiento
+                    p_venc, tarjeta.dia_cierre, tarjeta.dia_vencimiento
                 )
                 anteriores_dict[venc_key] = {
                     "mes": mes_label,
-                    "fecha_vencimiento": cuota.fecha_vencimiento,
+                    "fecha_vencimiento": p_venc,
                     "fecha_cierre": cierre_date,
                     "total": Decimal(0),
                     "moneda": tarjeta.moneda.value,
@@ -359,24 +426,31 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
             if not cuota.pagada:
                 anteriores_dict[venc_key]["pagado"] = False
             anteriores_dict[venc_key]["cuotas"].append(cuota_data)
-
-        elif cuota.fecha_vencimiento == fecha_vencimiento_proximo:
-            cuotas_actual.append(cuota_data)
-        elif fecha_vencimiento_proximo < cuota.fecha_vencimiento <= venc_siguiente:
-            cuotas_siguiente.append(cuota_data)
         else:
-            # Agrupar por mes futuro
-            mes_key = cuota.fecha_vencimiento.strftime("%Y-%m")
-            # Traducir mes a español
-            nombre_mes_en = cuota.fecha_vencimiento.strftime("%B")
-            nombre_mes_es = MESES_ES.get(nombre_mes_en, nombre_mes_en)
-            mes_label = f"{nombre_mes_es} {cuota.fecha_vencimiento.year}"
+            # Resumen futuro: identificar el período mensual que lo contiene
+            base_m = date(f_cuota.year, f_cuota.month, 1)
+            p_year, p_month, p_venc = base_m.year, base_m.month, None
+            for offset in [0, 1, -1, 2, -2]:
+                m_curr = base_m + relativedelta(months=offset)
+                m_prev = m_curr - relativedelta(months=1)
+                u_p = monthrange(m_prev.year, m_prev.month)[1]
+                v_p = ajustar_fecha_habil_sync(date(m_prev.year, m_prev.month, min(tarjeta.dia_vencimiento, u_p)), direccion="posterior")
+                u_c = monthrange(m_curr.year, m_curr.month)[1]
+                v_c = ajustar_fecha_habil_sync(date(m_curr.year, m_curr.month, min(tarjeta.dia_vencimiento, u_c)), direccion="posterior")
+                if v_p < f_cuota <= v_c:
+                    p_year, p_month, p_venc = m_curr.year, m_curr.month, v_c
+                    break
+            if p_venc is None:
+                p_venc = f_cuota
+
+            mes_key = f"{p_year}-{p_month:02d}"
+            nombre_mes_es = MESES_ES.get(p_venc.strftime("%B"), p_venc.strftime("%B"))
+            mes_label = f"{nombre_mes_es} {p_year}"
             
             if mes_key not in futuros_dict:
                 futuros_dict[mes_key] = {
                     "mes": mes_label,
-                    "mes_fecha": date(cuota.fecha_vencimiento.year,
-                                      cuota.fecha_vencimiento.month, 1),
+                    "mes_fecha": date(p_year, p_month, 1),
                     "total": Decimal(0),
                     "moneda": tarjeta.moneda.value,
                     "cantidad_cuotas": 0,
@@ -397,18 +471,36 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
     ]
 
     tarjeta_moneda_str = tarjeta.moneda.value if hasattr(tarjeta.moneda, "value") else str(tarjeta.moneda)
-    total_actual_tarjeta = sum(c.monto for c in cuotas_actual if c.moneda == tarjeta_moneda_str)
-    total_sig_tarjeta = sum(c.monto for c in cuotas_siguiente if c.moneda == tarjeta_moneda_str)
-    total_actual_ars = sum(c.monto for c in cuotas_actual if c.moneda == "ARS")
-    total_actual_usd = sum(c.monto for c in cuotas_actual if c.moneda == "USD")
-    total_sig_ars = sum(c.monto for c in cuotas_siguiente if c.moneda == "ARS")
-    total_sig_usd = sum(c.monto for c in cuotas_siguiente if c.moneda == "USD")
+    # Excluir cuotas ya pagadas de los totales pendientes del resumen actual y siguiente
+    total_actual_tarjeta = sum(c.monto for c in cuotas_actual if c.moneda == tarjeta_moneda_str and not c.pagada)
+    total_sig_tarjeta = sum(c.monto for c in cuotas_siguiente if c.moneda == tarjeta_moneda_str and not c.pagada)
+    total_actual_ars = sum(c.monto for c in cuotas_actual if c.moneda == "ARS" and not c.pagada)
+    total_actual_usd = sum(c.monto for c in cuotas_actual if c.moneda == "USD" and not c.pagada)
+    total_sig_ars = sum(c.monto for c in cuotas_siguiente if c.moneda == "ARS" and not c.pagada)
+    total_sig_usd = sum(c.monto for c in cuotas_siguiente if c.moneda == "USD" and not c.pagada)
+
+    # Totales originales completos (incluyendo pagadas) para referencia en UI
+    total_orig_actual = sum(c.monto for c in cuotas_actual if c.moneda == tarjeta_moneda_str)
+    total_orig_sig = sum(c.monto for c in cuotas_siguiente if c.moneda == tarjeta_moneda_str)
+
+    # Deuda vencida impaga de resúmenes anteriores en la moneda de la tarjeta
+    total_deuda_vencida_anterior = sum(
+        c.monto
+        for ra in resumenes_anteriores
+        for c in ra.cuotas
+        if not c.pagada and c.moneda == tarjeta_moneda_str
+    )
+    total_a_pagar_resumen_actual = total_actual_tarjeta + total_deuda_vencida_anterior
 
     return ResumenTarjeta(
         fecha_cierre_proximo=fecha_cierre_proximo,
         fecha_vencimiento_proximo=fecha_vencimiento_proximo,
         total_comprometido_resumen_actual=total_actual_tarjeta,
         total_comprometido_resumen_siguiente=total_sig_tarjeta,
+        total_original_resumen_actual=total_orig_actual,
+        total_original_resumen_siguiente=total_orig_sig,
+        total_deuda_vencida_anterior=total_deuda_vencida_anterior,
+        total_a_pagar_resumen_actual=total_a_pagar_resumen_actual,
         total_actual_ars=total_actual_ars,
         total_actual_usd=total_actual_usd,
         total_siguiente_ars=total_sig_ars,
@@ -444,7 +536,19 @@ def pagar_resumen_tarjeta(
         hoy = hoy_argentina()
         limite_vencimiento = calcular_fecha_vencimiento_proximo(tarjeta, hoy)
 
+    # 2.1 Detectar si ya existe una transacción de pago para este resumen y vencimiento
+    from app.models.transaccion import TipoTransaccion, MetodoPago, OrigenTransaccion, EstadoVerificacionTransaccion
+    tx_existente = db.query(Transaccion).filter(
+        Transaccion.tarjeta_id == tarjeta.id,
+        Transaccion.pago_resumen_vencimiento == limite_vencimiento,
+        Transaccion.tipo == TipoTransaccion.EGRESO
+    ).first()
+
+    if tx_existente and tx_existente.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA:
+        raise HTTPException(status_code=400, detail="Este resumen ya fue pagado.")
+
     # 3. Obtener todas las cuotas de esta tarjeta que no estén pagadas y venzan en o antes del límite
+    # (incluye deuda vencida impaga de períodos anteriores que arrastra el resumen)
     cuotas_a_pagar = (
         db.query(Cuota)
         .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
@@ -509,41 +613,54 @@ def pagar_resumen_tarjeta(
             Subcategoria.nombre.ilike("Tarjeta%de%crédito") | Subcategoria.nombre.ilike("Tarjetas%de%crédito")
         ).first()
 
-    # 6. Crear la transacción de egreso
     from app.schemas.transaccion import TransaccionCreate
     from app.services import transaccion_service
-    from app.models.transaccion import TipoTransaccion, MetodoPago, OrigenTransaccion, EstadoVerificacionTransaccion
 
     ultimos_4 = tarjeta.nombre[-4:] if len(tarjeta.nombre) >= 4 else tarjeta.nombre
     descripcion_pago = f"Pago resumen {ultimos_4}"
-
     fecha_transaccion = fecha_pago or transaccion_service._hoy_argentina()
 
-    tx_data = TransaccionCreate(
-        tipo=TipoTransaccion.EGRESO,
-        monto=monto_total,
-        moneda=tarjeta.moneda,
-        fecha=fecha_transaccion,
-        descripcion=descripcion_pago,
-        categoria_id=categoria.id if categoria else None,
-        subcategoria_id=subcategoria.id if subcategoria else None,
-        metodo_pago=MetodoPago.DEBITO,
-        billetera_id=tarjeta.billetera_id,
-        tarjeta_id=tarjeta.id,
-        es_recurrente=False,
-        es_cuota_hija=False,
-        es_padre_cuotas=False,
-        origen=OrigenTransaccion.MANUAL,
-        estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA
-    )
-
-    # 7. Registrar la transacción de forma atómica
+    # 6. Registrar la transacción de forma atómica o reutilizar la existente si estaba pendiente
     try:
-        tx = transaccion_service.crear_transaccion(db, usuario_id, tx_data, commit=False)
+        if tx_existente and tx_existente.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE:
+            tx = tx_existente
+            tx.monto = monto_total
+            tx.fecha = fecha_transaccion
+            if categoria:
+                tx.categoria_id = categoria.id
+            if subcategoria:
+                tx.subcategoria_id = subcategoria.id
+            tx.estado_verificacion = EstadoVerificacionTransaccion.CONFIRMADA
+            
+            # Debitar saldo de billetera
+            billetera = db.get(Billetera, tx.billetera_id)
+            if billetera:
+                billetera.saldo_actual -= monto_total
+        else:
+            tx_data = TransaccionCreate(
+                tipo=TipoTransaccion.EGRESO,
+                monto=monto_total,
+                moneda=tarjeta.moneda,
+                fecha=fecha_transaccion,
+                descripcion=descripcion_pago,
+                categoria_id=categoria.id if categoria else None,
+                subcategoria_id=subcategoria.id if subcategoria else None,
+                metodo_pago=MetodoPago.DEBITO,
+                billetera_id=tarjeta.billetera_id,
+                tarjeta_id=tarjeta.id,
+                es_recurrente=False,
+                es_cuota_hija=False,
+                es_padre_cuotas=False,
+                origen=OrigenTransaccion.MANUAL,
+                estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+                pago_resumen_vencimiento=limite_vencimiento
+            )
+            tx = transaccion_service.crear_transaccion(db, usuario_id, tx_data, commit=False)
 
-        # 8. Marcar ÚNICAMENTE las cuotas coincidentes como pagadas
+        # 7. Marcar ÚNICAMENTE las cuotas coincidentes como pagadas y vincularlas a la transacción de pago
         for cuota in cuotas_coincidentes:
             cuota.pagada = True
+            cuota.transaccion_pago_id = tx.id
 
         db.commit()
         db.refresh(tx)

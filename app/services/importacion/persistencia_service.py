@@ -310,28 +310,96 @@ def importar_transacciones_resumen(
                 
                 # Caso A: Transacción simple sin cuotas
                 if cruda.cuota_actual is None:
-                    tx = Transaccion(
-                        usuario_id=u_id,
-                        tipo=tipo_tx,
-                        monto=monto_round,
-                        moneda=cruda.moneda,
-                        fecha=cruda.fecha,
-                        descripcion=cruda.descripcion,
-                        metodo_pago=MetodoPago.CREDITO if t_id else MetodoPago.DEBITO,
-                        billetera_id=billetera_actual_id,
-                        tarjeta_id=t_id,
-                        categoria_id=cruda.categoria_id,
-                        es_cuota_hija=False,
-                        es_padre_cuotas=False,
-                        origen=OrigenTransaccion.IA_PDF,
-                        estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-                        import_hash=hash_val,
-                        importacion_id=imp_id,
-                        titular_pdf=cruda.titular_seccion
-                    )
-                    db.add(tx)
-                    db.flush()
-                    importadas_count += 1
+                    if t_id:
+                        # Consumo con tarjeta de crédito en 1 pago: unificar modelo creando grupo de 1 cuota
+                        tx_padre = Transaccion(
+                            usuario_id=u_id,
+                            tipo=tipo_tx,
+                            monto=monto_round,
+                            moneda=cruda.moneda,
+                            fecha=cruda.fecha,
+                            descripcion=cruda.descripcion,
+                            categoria_id=cruda.categoria_id,
+                            metodo_pago=MetodoPago.CREDITO,
+                            billetera_id=billetera_actual_id,
+                            tarjeta_id=t_id,
+                            es_cuota_hija=False,
+                            es_padre_cuotas=True,
+                            origen=OrigenTransaccion.IA_PDF,
+                            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+                            import_hash=hash_val,
+                            importacion_id=imp_id,
+                            titular_pdf=cruda.titular_seccion
+                        )
+                        db.add(tx_padre)
+                        db.flush()
+
+                        grupo = GrupoCuotas(
+                            usuario_id=u_id,
+                            transaccion_padre_id=tx_padre.id,
+                            tarjeta_id=t_id,
+                            descripcion=normalizar_descripcion(cruda.descripcion),
+                            monto_total=monto_round,
+                            cantidad_cuotas=1,
+                            tiene_interes=False,
+                            tasa_interes=None,
+                            total_financiado=monto_round,
+                            moneda=cruda.moneda,
+                            estado=EstadoGrupoCuotas.ACTIVO,
+                            primer_vencimiento=primer_venc_calc
+                        )
+                        db.add(grupo)
+                        db.flush()
+                        tx_padre.grupo_cuotas_id = grupo.id
+
+                        cuotas_service.crear_cuotas(
+                            db=db,
+                            transaccion_padre=tx_padre,
+                            grupo=grupo,
+                            cantidad_cuotas=1,
+                            primer_vencimiento=primer_venc_calc,
+                            monto_cuota=monto_round,
+                            usuario_id=u_id,
+                            cuota_inicial=1
+                        )
+
+                        for cuota in grupo.cuotas:
+                            if cuota.numero_cuota == 1:
+                                cuota.monto_real = monto_round
+                                tx_hija = cuota.transaccion
+                                if tx_hija:
+                                    tx_hija.categoria_id = cruda.categoria_id
+                                    tx_hija.estado_verificacion = EstadoVerificacionTransaccion.CONFIRMADA
+                                    tx_hija.import_hash = hash_val
+                                    tx_hija.importacion_id = imp_id
+                                    tx_hija.origen = OrigenTransaccion.IA_PDF
+                                    tx_hija.titular_pdf = cruda.titular_seccion
+                                break
+
+                        importadas_count += 1
+                    else:
+                        tx = Transaccion(
+                            usuario_id=u_id,
+                            tipo=tipo_tx,
+                            monto=monto_round,
+                            moneda=cruda.moneda,
+                            fecha=cruda.fecha,
+                            descripcion=cruda.descripcion,
+                            metodo_pago=MetodoPago.DEBITO,
+                            billetera_id=billetera_actual_id,
+                            tarjeta_id=None,
+                            categoria_id=cruda.categoria_id,
+                            es_cuota_hija=False,
+                            es_padre_cuotas=False,
+                            origen=OrigenTransaccion.IA_PDF,
+                            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+                            import_hash=hash_val,
+                            importacion_id=imp_id,
+                            titular_pdf=cruda.titular_seccion
+                        )
+                        db.add(tx)
+                        db.flush()
+                        importadas_count += 1
                 
                 # Caso B: Transacción de cuota inicial (cuota 1)
                 elif cruda.cuota_actual == 1:
