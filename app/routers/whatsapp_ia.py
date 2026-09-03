@@ -7,6 +7,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import tempfile
 import time
@@ -77,6 +78,48 @@ def _nombre_corto_categoria(nombre: str | None) -> str:
 
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp-ia"])
+
+EXPIRACION_PREGUNTA_BILLETERA_MINUTOS = 30
+
+ALIAS_BILLETERAS = {
+    "mp": "mercado pago",
+    "merca": "mercado pago",
+    "mercadopago": "mercado pago",
+    "bru": "brubank",
+    "gali": "galicia",
+    "santander": "santander",
+    "rio": "santander",
+    "bbva": "bbva",
+    "frances": "bbva",
+    "lemon": "lemon",
+    "uala": "ualá",
+    "efectivo": "efectivo",
+    "cash": "efectivo",
+}
+
+PREFIJOS_CORRECCION = [
+    r"^no,?\s+fue\s+en\s+",
+    r"^no,?\s+fue\s+con\s+",
+    r"^no,?\s+era\s+en\s+",
+    r"^no,?\s+era\s+con\s+",
+    r"^no,?\s+en\s+",
+    r"^no,?\s+con\s+",
+    r"^no,?\s+",
+    r"^fue\s+en\s+",
+    r"^fue\s+con\s+",
+    r"^era\s+en\s+",
+    r"^era\s+con\s+",
+    r"^cambia\s+a\s+",
+    r"^cambiala\s+a\s+",
+    r"^pasalo\s+a\s+",
+    r"^ponele\s+",
+    r"^pone\s+",
+    r"^mejor\s+",
+    r"^en\s+",
+    r"^con\s+",
+    r"^desde\s+",
+    r"^a\s+",
+]
 
 _cooldown_no_registrados: dict[str, datetime] = {}
 COOLDOWN_MINUTOS_NO_REGISTRADO = 15
@@ -180,9 +223,17 @@ def _buscar_slot_filling_activo(usuario_id: UUID, db: Session) -> ConversacionWp
     conv = db.execute(
         select(ConversacionWpp)
         .where(ConversacionWpp.usuario_id == usuario_id, ConversacionWpp.slot_filling_activo == True)
-        .order_by(ConversacionWpp.fecha.desc())
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
     ).scalars().first()
     return conv
+
+
+def _es_pregunta_billetera(conv: ConversacionWpp | None) -> bool:
+    if not conv or not conv.slot_filling_activo:
+        return False
+    estado = conv.slot_filling_estado or {}
+    datos_faltantes = estado.get("datos_faltantes", [])
+    return any(d in datos_faltantes for d in ("billetera_origen", "billetera_destino", "billetera"))
 
 
 def _merge_entidades(estado_previo: dict | None, entidades_nuevas: dict | None) -> dict:
@@ -207,55 +258,76 @@ def _merge_entidades(estado_previo: dict | None, entidades_nuevas: dict | None) 
     return merged
 
 
-def _resolver_billetera(nombre: str | None, usuario_id: UUID, db: Session, moneda: Moneda | None = None) -> UUID | None:
+def resolver_billetera_cascada(
+    nombre: str | None,
+    billeteras: list[Billetera],
+) -> tuple[Billetera | None, list[Billetera]]:
+    """
+    Resuelve determinísticamente una billetera por nombre aplicando cascada estricta (3.1, 3.2, 3.3):
+    1. Coincidencia exacta normalizada.
+    2. Coincidencia por alias argentinos.
+    3. Coincidencia por contención (substring bidireccional) SOLO si produce exactamente una candidata (mínimo 3 caracteres).
+
+    Retorna:
+    - (billetera, [billetera]) si se resolvió de forma unívoca.
+    - (None, [candidatas]) si hay 2 o más candidatas ambiguas.
+    - (None, []) si no hubo coincidencias o el nombre es vacío.
+    """
+    if not nombre or not billeteras:
+        return None, []
+
+    nombre_norm = normalizar_texto(nombre)
+    if not nombre_norm:
+        return None, []
+
+    # 1. Coincidencia exacta normalizada
+    exactas = [b for b in billeteras if normalizar_texto(b.nombre) == nombre_norm]
+    if len(exactas) == 1:
+        return exactas[0], exactas
+    elif len(exactas) > 1:
+        return None, exactas
+
+    # 2. Coincidencia por alias argentinos
+    alias_target = ALIAS_BILLETERAS.get(nombre_norm)
+    if alias_target:
+        alias_target_norm = normalizar_texto(alias_target)
+        coincidencias_alias = [
+            b for b in billeteras if normalizar_texto(b.nombre) == alias_target_norm
+        ]
+        if not coincidencias_alias:
+            coincidencias_alias = [
+                b for b in billeteras if alias_target_norm in normalizar_texto(b.nombre)
+            ]
+        if len(coincidencias_alias) == 1:
+            return coincidencias_alias[0], coincidencias_alias
+        elif len(coincidencias_alias) > 1:
+            return None, coincidencias_alias
+
+    # 3. Coincidencia por contención SOLO si produce una única candidata (mínimo 3 caracteres)
+    if len(nombre_norm) >= 3:
+        candidatas_contencion = [
+            b for b in billeteras
+            if nombre_norm in normalizar_texto(b.nombre) or normalizar_texto(b.nombre) in nombre_norm
+        ]
+        if len(candidatas_contencion) == 1:
+            return candidatas_contencion[0], candidatas_contencion
+        elif len(candidatas_contencion) > 1:
+            return None, candidatas_contencion
+
+    return None, []
+
+
+def _resolver_billetera(
+    nombre: str | None,
+    usuario_id: UUID,
+    db: Session,
+    moneda: Moneda | None = None,
+) -> UUID | None:
     if not nombre:
         return None
-
-    query = select(Billetera).where(
-        Billetera.usuario_id == usuario_id,
-        Billetera.estado == EstadoBilletera.ACTIVA,
-    )
-    if moneda:
-        query = query.where(Billetera.moneda == moneda)
-    billeteras = db.execute(query).scalars().all()
-
-    if not billeteras:
-        return None
-
-    nombre_norm = _normalizar_texto(nombre)
-
-    # 1. Match exacto o normalizado
-    for b in billeteras:
-        if _normalizar_texto(b.nombre) == nombre_norm:
-            return b.id
-
-    # 2. Match de alias comunes argentinos
-    alias_map = {
-        "mp": "mercado pago",
-        "merca": "mercado pago",
-        "mercadopago": "mercado pago",
-        "bru": "brubank",
-        "gali": "galicia",
-        "santander": "santander",
-        "rio": "santander",
-        "bbva": "bbva",
-        "frances": "bbva",
-        "lemon": "lemon",
-        "uala": "ualá",
-        "efectivo": "efectivo",
-        "cash": "efectivo",
-    }
-    alias_target = alias_map.get(nombre_norm)
-
-    # 3. Substring match
-    for b in billeteras:
-        b_norm = _normalizar_texto(b.nombre)
-        if nombre_norm in b_norm or b_norm in nombre_norm:
-            return b.id
-        if alias_target and (alias_target in b_norm or b_norm in alias_target):
-            return b.id
-
-    return None
+    billeteras = _obtener_billeteras_activas(usuario_id, db, moneda=moneda)
+    b_match, _ = resolver_billetera_cascada(nombre, billeteras)
+    return b_match.id if b_match else None
 
 
 def _obtener_fallback_otros(
@@ -455,16 +527,173 @@ def _obtener_billeteras_activas(usuario_id: UUID, db: Session, moneda: Moneda | 
     if moneda:
         query = query.where(Billetera.moneda == moneda)
     return db.execute(
-        query.order_by(Billetera.es_principal.desc(), Billetera.nombre)
+        query.order_by(Billetera.es_principal.desc(), Billetera.nombre.asc(), Billetera.id.asc())
     ).scalars().all()
 
 
-def _generar_menu_billeteras(billeteras: list[Billetera]) -> str:
-    lineas = ["¿Desde qué billetera?\n"]
-    for i, b in enumerate(billeteras, 1):
-        saldo_str = formatear_monto(b.saldo_actual, b.moneda)
-        lineas.append(f"{i}. {b.nombre} — {saldo_str}")
+def _generar_menu_billeteras(billeteras: list[Billetera], tipo: str = "egreso") -> str:
+    """
+    Genera el menú de selección de billeteras sin mostrar saldos (4.1).
+    Pregunta según el tipo: egreso (de cuál salió) o ingreso (a cuál entró) (4.2).
+    Si hay más de 8 opciones, muestra las primeras 8 y avisa que puede escribir el nombre (4.4).
+    """
+    if tipo == "ingreso":
+        encabezado = "¿A qué billetera entró la plata?"
+    else:
+        encabezado = "¿Desde qué billetera salió la plata?"
+
+    total = len(billeteras)
+    limite = 8
+    mostradas = billeteras[:limite]
+
+    lineas = [f"{encabezado}\n"]
+    for i, b in enumerate(mostradas, 1):
+        lineas.append(f"{i}. {b.nombre}")
+
+    if total > limite:
+        lineas.append("\nPodés responder con el número o escribir el nombre de la billetera.")
+
     return "\n".join(lineas)
+
+
+def _construir_propuesta_transaccion(
+    entidades: dict,
+    billetera_nombre: str,
+    se_asumio_principal: bool = False,
+) -> str:
+    """
+    Construye el texto limpio de propuesta de confirmación siempre nombrando la billetera (8.1).
+    Si se asumió la principal sin que el usuario la nombrara, agrega instrucción de corrección (8.2).
+    Sin emojis, rioplatense (8.3).
+    """
+    monto = entidades.get("monto")
+    tipo = entidades.get("tipo", "egreso")
+    moneda_prop = Moneda.USD if entidades.get("moneda") == "USD" else Moneda.ARS
+    cat_display = _nombre_corto_categoria(entidades.get("categoria"))
+    adicionales = entidades.get("transacciones_adicionales")
+
+    if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
+        total_movs = 1 + len(adicionales)
+        items_desc = [f"{formatear_monto(float(monto), moneda_prop)} en {cat_display}"]
+        for ad in adicionales:
+            if isinstance(ad, dict) and ad.get("monto") is not None:
+                moneda_ad = Moneda.USD if ad.get("moneda") == "USD" else Moneda.ARS
+                items_desc.append(
+                    f"{formatear_monto(float(ad['monto']), moneda_ad)} en {_nombre_corto_categoria(ad.get('categoria'))}"
+                )
+        lista_str = ", ".join(items_desc)
+        origen_str = f" a {billetera_nombre}" if tipo == "ingreso" else f" desde {billetera_nombre}"
+        texto = f"Voy a anotar {total_movs} movimientos{origen_str}: {lista_str}. ¿Va?"
+    else:
+        monto_str = formatear_monto(float(monto), moneda_prop)
+        if tipo == "ingreso":
+            partes = [f"Voy a registrar un ingreso de {monto_str}"]
+            if cat_display:
+                partes.append(f"en {cat_display}")
+            partes.append(f"a {billetera_nombre}.")
+        else:
+            partes = [f"Voy a anotar {monto_str}"]
+            if cat_display:
+                partes.append(f"en {cat_display}")
+            partes.append(f"desde {billetera_nombre}.")
+        partes.append("¿Va?")
+        texto = " ".join(partes)
+
+    if se_asumio_principal:
+        texto += "\nSi fue con otra, decime cuál."
+
+    return texto
+
+
+def _buscar_propuesta_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=15)
+    return db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.intent_detectado == "registrar_transaccion",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.confianza >= Decimal("0.85"),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+
+def _evaluar_correccion_billetera(
+    mensaje: str,
+    usuario_id: UUID,
+    propuesta: ConversacionWpp,
+    db: Session,
+) -> tuple[bool, Billetera | None, list[Billetera], str | None]:
+    """
+    Detecta determinísticamente si el mensaje del usuario busca corregir la billetera
+    de una propuesta pendiente (Tarea 7). No llama a IA (7.3).
+    Retorna: (es_correccion, billetera_resuelta, candidatas_ambiguas, mensaje_error_moneda).
+    """
+    if not mensaje or not propuesta or not propuesta.entidades:
+        return False, None, [], None
+
+    norm_msg = normalizar_texto(mensaje)
+    if not norm_msg:
+        return False, None, [], None
+
+    # Excluir confirmaciones o cancelaciones directas
+    if norm_msg in ("si", "dale", "ok", "confirmo", "confirmar", "va", "listo", "de una", "correcto", "perfecto", "seh", "sip", "yes"):
+        return False, None, [], None
+    if norm_msg in ("cancelar", "cancela", "cancelalo", "no", "no importa", "deja", "olvidalo", "borrar"):
+        return False, None, [], None
+
+    entidades = propuesta.entidades
+    tipo = entidades.get("tipo", "egreso")
+    moneda_prop = Moneda.USD if entidades.get("moneda") == "USD" else Moneda.ARS
+    todas_billeteras = _obtener_billeteras_activas(usuario_id, db)
+
+    # 1. Probar limpiando prefijos de conversación común ("no, fue en...", "con...", etc.)
+    texto_limpio = mensaje.strip()
+    for p in PREFIJOS_CORRECCION:
+        texto_limpio = re.sub(p, "", texto_limpio, flags=re.IGNORECASE).strip()
+
+    b_match, cands = resolver_billetera_cascada(texto_limpio, todas_billeteras)
+
+    # 2. Si no hubo match por prefijo, buscar si alguna billetera o alias aparece en el texto
+    if not b_match and not cands:
+        for b in todas_billeteras:
+            b_norm = normalizar_texto(b.nombre)
+            if b_norm in norm_msg:
+                cands.append(b)
+            else:
+                for alias_k, alias_v in ALIAS_BILLETERAS.items():
+                    if alias_k in norm_msg.split() and (alias_v in b_norm or b_norm in alias_v):
+                        if b not in cands:
+                            cands.append(b)
+
+    if b_match:
+        cands = [b_match]
+
+    if not cands:
+        return False, None, [], None
+
+    # Verificar monedas
+    cands_moneda = [b for b in cands if b.moneda == moneda_prop]
+    cands_otra_moneda = [b for b in cands if b.moneda != moneda_prop]
+
+    if not cands_moneda and cands_otra_moneda:
+        b_otra = cands_otra_moneda[0]
+        nom_otra = "dólares" if b_otra.moneda == Moneda.USD else "pesos"
+        nom_prop = "pesos" if moneda_prop == Moneda.ARS else "dólares"
+        billeteras_validas = _obtener_billeteras_activas(usuario_id, db, moneda=moneda_prop)
+        menu_validas = _generar_menu_billeteras(billeteras_validas, tipo=tipo)
+        msg_error = f"No podés usar una billetera en {nom_otra} para un movimiento en {nom_prop}.\n{menu_validas}"
+        return True, None, [], msg_error
+
+    if len(cands_moneda) == 1:
+        return True, cands_moneda[0], [], None
+    elif len(cands_moneda) > 1:
+        return True, None, cands_moneda, None
+
+    return False, None, [], None
 
 
 def _resolver_seleccion_numerica(
@@ -489,7 +718,7 @@ def _resolver_seleccion_numerica(
     
     estado = conv_activa.slot_filling_estado or {}
     datos_faltantes = estado.get("datos_faltantes", [])
-    if "billetera_origen" not in datos_faltantes and "billetera" not in datos_faltantes:
+    if "billetera_origen" not in datos_faltantes and "billetera" not in datos_faltantes and "billetera_destino" not in datos_faltantes:
         return False, None
     
     moneda_sel = None
@@ -498,7 +727,8 @@ def _resolver_seleccion_numerica(
         moneda_sel = Moneda.USD if moneda_str == "USD" else Moneda.ARS
     
     billeteras = _obtener_billeteras_activas(usuario_id, db, moneda=moneda_sel)
-    if numero < 1 or numero > len(billeteras):
+    max_opc = min(len(billeteras), 8)
+    if numero < 1 or numero > max_opc:
         return True, None
     
     billetera_seleccionada = billeteras[numero - 1]
@@ -530,15 +760,16 @@ def _obtener_historial_reciente(usuario_id: UUID, db: Session, n: int = 6) -> li
     resultado = []
     for c in convs:
         # Excluir mensajes generados por el backend (menús, errores)
-        if c.mensaje_bot.startswith("¿Desde qué billetera?"):
-            continue
-        if c.mensaje_bot.startswith("No pude procesar"):
-            continue
-        if c.mensaje_bot.startswith("No pude leer"):
-            continue
-        if c.mensaje_bot.startswith("No entendí"):
-            continue
-        if c.mensaje_bot.startswith("Opción inválida"):
+        if (
+            c.mensaje_bot.startswith("¿Desde qué billetera")
+            or c.mensaje_bot.startswith("¿A qué billetera")
+            or c.mensaje_bot.startswith("¿A cuál te referís")
+            or c.mensaje_bot.startswith("Esa operación ya venció")
+            or c.mensaje_bot.startswith("Opción inválida")
+            or c.mensaje_bot.startswith("No pude procesar")
+            or c.mensaje_bot.startswith("No pude leer")
+            or c.mensaje_bot.startswith("No entendí")
+        ):
             continue
         if c.intent_detectado is None:
             continue
@@ -710,33 +941,31 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                     tipo_val = entidades.get("tipo") or "egreso"
                     moneda_solicitada = Moneda.USD if entidades.get("moneda") == "USD" else Moneda.ARS
 
-                    # Para ingresos usar billetera_destino, para egresos billetera_origen
+                    # Para ingresos usar billetera_destino, para egresos billetera_origen (5.1, 5.2)
                     nombre_billetera = (
                         entidades.get("billetera_destino")
                         if tipo_val == "ingreso"
                         else entidades.get("billetera_origen")
-                    ) or entidades.get("billetera_origen") or entidades.get("billetera_destino")
+                    )
 
                     billetera_id = _resolver_billetera(nombre_billetera, usuario.id, db, moneda=moneda_solicitada)
 
                     if not billetera_id:
-                        # Buscar billetera principal o activa exclusivamente para la moneda solicitada
+                        # Buscar si tiene principal para la moneda solicitada (2.2)
                         billetera_id = db.execute(
                             select(Billetera.id).where(
                                 Billetera.usuario_id == usuario.id,
                                 Billetera.estado == EstadoBilletera.ACTIVA,
                                 Billetera.moneda == moneda_solicitada,
                                 Billetera.es_principal == True
-                            )
-                        ).scalar_one_or_none()
-                        if not billetera_id:
-                            billetera_id = db.execute(
-                                select(Billetera.id).where(
-                                    Billetera.usuario_id == usuario.id,
-                                    Billetera.estado == EstadoBilletera.ACTIVA,
-                                    Billetera.moneda == moneda_solicitada
-                                ).order_by(Billetera.es_principal.desc(), Billetera.fecha_creacion.asc())
-                            ).scalars().first()
+                            ).order_by(Billetera.nombre.asc(), Billetera.id.asc())
+                        ).scalars().first()
+
+                    if not billetera_id:
+                        # Si hay exactamente una billetera activa en esa moneda, usar esa (2.3)
+                        billeteras_moneda = _obtener_billeteras_activas(usuario.id, db, moneda=moneda_solicitada)
+                        if len(billeteras_moneda) == 1:
+                            billetera_id = billeteras_moneda[0].id
 
                     if not billetera_id:
                         return None
@@ -1219,50 +1448,197 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 else None
             )
 
-            # Detectar selección numérica de billetera
-            es_seleccion, nombre_billetera = _resolver_seleccion_numerica(
-                mensaje_texto, usuario.id, db, conv_activa
-            )
-            if es_seleccion:
-                if nombre_billetera is None:
-                    # Número fuera de rango
-                    billeteras = _obtener_billeteras_activas(usuario.id, db)
-                    enviar_whatsapp(
-                        from_number, f"Opción inválida. Elegí un número del 1 al {len(billeteras)}."
-                    )
+            # 1. Chequeo de expiración de pregunta de billetera (Tarea 6)
+            if _es_pregunta_billetera(conv_activa):
+                ahora = datetime.now(timezone.utc)
+                fecha_conv = conv_activa.fecha
+                if fecha_conv.tzinfo is None:
+                    fecha_conv = fecha_conv.replace(tzinfo=timezone.utc)
+                if (ahora - fecha_conv) >= timedelta(minutes=EXPIRACION_PREGUNTA_BILLETERA_MINUTOS):
+                    conv_activa.slot_filling_activo = False
+                    db.commit()
+                    enviar_whatsapp(from_number, "Esa operación ya venció. Podés volver a mandarla.")
                     return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
-                if estado_previo is None:
-                    estado_previo = {}
-                estado_previo["billetera_origen"] = nombre_billetera
-                if "datos_faltantes" in estado_previo:
-                    estado_previo["datos_faltantes"] = [
-                        d for d in estado_previo["datos_faltantes"]
-                        if d not in ("billetera_origen", "billetera")
-                    ]
+            # 2. Si hay pregunta de billetera pendiente, resolver selección numérica o por nombre (Tarea 5)
+            if _es_pregunta_billetera(conv_activa):
+                estado_previo_bill = dict(conv_activa.slot_filling_estado) if conv_activa.slot_filling_estado else {}
+                tipo_mov = estado_previo_bill.get("tipo", "egreso")
+                moneda_str = estado_previo_bill.get("moneda", "ARS")
+                moneda_sel = Moneda.USD if moneda_str == "USD" else Moneda.ARS
+                billeteras_activas = _obtener_billeteras_activas(usuario.id, db, moneda=moneda_sel)
+                max_opciones = min(len(billeteras_activas), 8)
 
-                resultado_ia = {
-                    "intent": "registrar_transaccion",
-                    "entidades": {
-                        k: v for k, v in estado_previo.items() if k != "datos_faltantes"
-                    },
-                    "confianza": 1.0,
-                    "slot_filling": False,
-                    "datos_faltantes": [],
-                    "respuesta_usuario": "",
-                }
-                logger.info("[SELECCION_NUMERICA] Billetera '%s' resuelta en memoria sin llamada a IA", nombre_billetera)
-            else:
-                t_ia_start = time.perf_counter()
-                resultado_ia = ai_service.procesar_mensaje(
-                    mensaje=mensaje_texto,
-                    usuario=usuario,
-                    db=db,
-                    historial=_obtener_historial_reciente(usuario.id, db),
-                    estado_previo=estado_previo,
+                mensaje_limpio = mensaje_texto.strip()
+                billetera_elegida = None
+                es_seleccion = False
+
+                if mensaje_limpio.isdigit():
+                    numero = int(mensaje_limpio)
+                    if 1 <= numero <= max_opciones:
+                        billetera_elegida = billeteras_activas[numero - 1]
+                        es_seleccion = True
+                    else:
+                        # Número fuera de rango (5.4): responder sin tocar el estado
+                        enviar_whatsapp(
+                            from_number, f"Opción inválida. Elegí un número del 1 al {max_opciones}."
+                        )
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                else:
+                    # Probar si el texto es el nombre de una billetera (5.3)
+                    b_match, cands = resolver_billetera_cascada(mensaje_limpio, billeteras_activas)
+                    if b_match:
+                        billetera_elegida = b_match
+                        es_seleccion = True
+                    elif len(cands) > 1:
+                        menu_acotado = _generar_menu_billeteras(cands, tipo=tipo_mov)
+                        enviar_whatsapp(from_number, f"¿A cuál te referís?\n{menu_acotado}")
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    else:
+                        # Verificar si nombró billetera de otra moneda (7.4)
+                        todas = _obtener_billeteras_activas(usuario.id, db)
+                        b_otra, _ = resolver_billetera_cascada(mensaje_limpio, todas)
+                        if b_otra and b_otra.moneda != moneda_sel:
+                            nom_otra = "dólares" if b_otra.moneda == Moneda.USD else "pesos"
+                            nom_mov = "pesos" if moneda_sel == Moneda.ARS else "dólares"
+                            menu = _generar_menu_billeteras(billeteras_activas, tipo=tipo_mov)
+                            enviar_whatsapp(
+                                from_number,
+                                f"No podés usar una billetera en {nom_otra} para un movimiento en {nom_mov}.\n{menu}"
+                            )
+                            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                if es_seleccion and billetera_elegida:
+                    clave_bill = "billetera_destino" if tipo_mov == "ingreso" else "billetera_origen"
+                    clave_otra = "billetera_origen" if tipo_mov == "ingreso" else "billetera_destino"
+                    estado_previo_bill[clave_bill] = billetera_elegida.nombre
+                    estado_previo_bill.pop(clave_otra, None)
+                    if "datos_faltantes" in estado_previo_bill:
+                        estado_previo_bill["datos_faltantes"] = [
+                            d for d in estado_previo_bill["datos_faltantes"]
+                            if d not in ("billetera_origen", "billetera_destino", "billetera")
+                        ]
+
+                    conv_activa.slot_filling_activo = False
+                    db.flush()
+
+                    propuesta_msg = _construir_propuesta_transaccion(
+                        estado_previo_bill, billetera_elegida.nombre, se_asumio_principal=False
+                    )
+
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=propuesta_msg,
+                        intent_detectado="registrar_transaccion",
+                        entidades=estado_previo_bill,
+                        accion_ejecutada=None,
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, propuesta_msg)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            # 3. Si hay una propuesta pendiente y el usuario menciona una billetera, corregirla determinísticamente (Tarea 7)
+            propuesta_pendiente = _buscar_propuesta_pendiente(usuario.id, db)
+            if propuesta_pendiente and not conv_activa:
+                es_corr, b_nueva, cands, err_moneda = _evaluar_correccion_billetera(
+                    mensaje_texto, usuario.id, propuesta_pendiente, db
                 )
-                t_ia_end = time.perf_counter()
-                logger.info("[LATENCIA][IA] Procesamiento: %.2fs", t_ia_end - t_ia_start)
+                if es_corr:
+                    if err_moneda:
+                        enviar_whatsapp(from_number, err_moneda)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    if len(cands) > 1:
+                        tipo_prop = propuesta_pendiente.entidades.get("tipo", "egreso")
+                        menu = _generar_menu_billeteras(cands, tipo=tipo_prop)
+                        propuesta_pendiente.slot_filling_activo = True
+                        clave_bill = "billetera_destino" if tipo_prop == "ingreso" else "billetera_origen"
+                        propuesta_pendiente.slot_filling_estado = {
+                            **propuesta_pendiente.entidades,
+                            "datos_faltantes": [clave_bill],
+                        }
+                        db.commit()
+                        enviar_whatsapp(from_number, f"¿A cuál te referís?\n{menu}")
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    if b_nueva:
+                        tipo_prop = propuesta_pendiente.entidades.get("tipo", "egreso")
+                        clave_bill = "billetera_destino" if tipo_prop == "ingreso" else "billetera_origen"
+                        clave_otra = "billetera_origen" if tipo_prop == "ingreso" else "billetera_destino"
+
+                        entidades_nuevas = dict(propuesta_pendiente.entidades)
+                        entidades_nuevas[clave_bill] = b_nueva.nombre
+                        entidades_nuevas.pop(clave_otra, None)
+
+                        nuevo_msg = _construir_propuesta_transaccion(
+                            entidades_nuevas, b_nueva.nombre, se_asumio_principal=False
+                        )
+
+                        propuesta_pendiente.entidades = entidades_nuevas
+                        propuesta_pendiente.mensaje_bot = nuevo_msg
+                        propuesta_pendiente.fecha = datetime.now(timezone.utc)
+
+                        nueva_conv = ConversacionWpp(
+                            usuario_id=usuario.id,
+                            wamid=wamid,
+                            mensaje_usuario=mensaje_texto,
+                            tipo_mensaje=TipoMensajeWpp.TEXTO,
+                            transcripcion=None,
+                            mensaje_bot=nuevo_msg,
+                            intent_detectado="registrar_transaccion",
+                            entidades=entidades_nuevas,
+                            accion_ejecutada=None,
+                            confianza=Decimal("1.000"),
+                            slot_filling_activo=False,
+                            slot_filling_estado=None,
+                        )
+                        db.add(nueva_conv)
+                        db.commit()
+                        enviar_whatsapp(from_number, nuevo_msg)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            # 3.5. Si el mensaje es únicamente un número sin pregunta pendiente (Punto 2.3)
+            if mensaje_texto.strip().isdigit():
+                msg_numero_suelto = (
+                    "Mandaste solo un número. Si querés registrar un movimiento, "
+                    "escribí el monto y el concepto (por ejemplo: 'gasté 5000 en el kiosco')."
+                )
+                enviar_whatsapp(from_number, msg_numero_suelto)
+                nueva_conv = ConversacionWpp(
+                    usuario_id=usuario.id,
+                    wamid=wamid,
+                    mensaje_usuario=mensaje_texto,
+                    tipo_mensaje=TipoMensajeWpp.TEXTO,
+                    transcripcion=None,
+                    mensaje_bot=msg_numero_suelto,
+                    intent_detectado="desconocido",
+                    entidades={},
+                    accion_ejecutada=None,
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=False,
+                    slot_filling_estado=None,
+                )
+                db.add(nueva_conv)
+                db.commit()
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            # 4. Procesamiento normal de IA
+            t_ia_start = time.perf_counter()
+            resultado_ia = ai_service.procesar_mensaje(
+                mensaje=mensaje_texto,
+                usuario=usuario,
+                db=db,
+                historial=_obtener_historial_reciente(usuario.id, db),
+                estado_previo=estado_previo,
+            )
+            t_ia_end = time.perf_counter()
+            logger.info("[LATENCIA][IA] Procesamiento: %.2fs", t_ia_end - t_ia_start)
 
             # Mergear determinísticamente entidades para no perder campos de turnos previos
             if estado_previo:
@@ -1270,10 +1646,15 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
 
             entidades_actuales = resultado_ia.get("entidades", {})
 
-            # 2.2, 2.3, 2.4: Validar existencia de billetera para la moneda solicitada
+            # 5. Resolución determinística de billetera para movimientos (Tareas 2, 3, 4, 8)
+            tipo_act = entidades_actuales.get("tipo") or "egreso"
+            clave_bill = "billetera_destino" if tipo_act == "ingreso" else "billetera_origen"
+            clave_otra = "billetera_origen" if tipo_act == "ingreso" else "billetera_destino"
+
             if resultado_ia.get("intent") in ("registrar_transaccion", "slot_filling") or entidades_actuales.get("monto") is not None:
                 moneda_sol_str = entidades_actuales.get("moneda")
                 moneda_sol = Moneda.USD if moneda_sol_str == "USD" else Moneda.ARS
+
                 billeteras_moneda = _obtener_billeteras_activas(usuario.id, db, moneda=moneda_sol)
                 if not billeteras_moneda:
                     nom_moneda = "dólares" if moneda_sol == Moneda.USD else "pesos"
@@ -1281,19 +1662,86 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     resultado_ia["intent"] = "sin_billetera_moneda"
                     resultado_ia["slot_filling"] = False
                     resultado_ia["datos_faltantes"] = []
+                elif entidades_actuales.get("monto") is not None:
+                    billetera_raw = entidades_actuales.get(clave_bill) or entidades_actuales.get(clave_otra)
+                    billetera_final = None
+                    se_asumio_principal = False
 
-            # Si tenemos las entidades mínimas (monto + billetera), asegurar transición a registrar_transaccion
-            tiene_monto = entidades_actuales.get("monto") is not None
-            tipo_act = entidades_actuales.get("tipo") or "egreso"
-            tiene_billetera = bool(
-                entidades_actuales.get("billetera_origen")
-                if tipo_act == "egreso"
-                else (entidades_actuales.get("billetera_destino") or entidades_actuales.get("billetera_origen"))
-            )
-            if tiene_monto and tiene_billetera and resultado_ia.get("intent") in ("slot_filling", "registrar_transaccion"):
-                resultado_ia["intent"] = "registrar_transaccion"
-                resultado_ia["slot_filling"] = False
-                resultado_ia["confianza"] = max(float(resultado_ia.get("confianza", 0.0)), 0.85)
+                    if billetera_raw:
+                        b_match, cands = resolver_billetera_cascada(billetera_raw, billeteras_moneda)
+                        if b_match:
+                            billetera_final = b_match
+                        elif len(cands) > 1:
+                            resultado_ia["intent"] = "slot_filling"
+                            resultado_ia["slot_filling"] = True
+                            resultado_ia["datos_faltantes"] = [clave_bill]
+                            entidades_actuales["datos_faltantes"] = [clave_bill]
+                            entidades_actuales["moneda"] = "USD" if moneda_sol == Moneda.USD else "ARS"
+                            entidades_actuales[clave_bill] = None
+                            resultado_ia["respuesta_usuario"] = f"¿A cuál te referís?\n{_generar_menu_billeteras(cands, tipo=tipo_act)}"
+                        else:
+                            # Verificar si nombró billetera de otra moneda
+                            todas = _obtener_billeteras_activas(usuario.id, db)
+                            b_otra, _ = resolver_billetera_cascada(billetera_raw, todas)
+                            if b_otra and b_otra.moneda != moneda_sol:
+                                nom_otra = "dólares" if b_otra.moneda == Moneda.USD else "pesos"
+                                nom_mov = "pesos" if moneda_sol == Moneda.ARS else "dólares"
+                                resultado_ia["intent"] = "slot_filling"
+                                resultado_ia["slot_filling"] = True
+                                resultado_ia["datos_faltantes"] = [clave_bill]
+                                entidades_actuales["datos_faltantes"] = [clave_bill]
+                                entidades_actuales["moneda"] = "USD" if moneda_sol == Moneda.USD else "ARS"
+                                entidades_actuales[clave_bill] = None
+                                menu = _generar_menu_billeteras(billeteras_moneda, tipo=tipo_act)
+                                resultado_ia["respuesta_usuario"] = f"No podés usar una billetera en {nom_otra} para un movimiento en {nom_mov}.\n{menu}"
+                            else:
+                                resultado_ia["intent"] = "slot_filling"
+                                resultado_ia["slot_filling"] = True
+                                resultado_ia["datos_faltantes"] = [clave_bill]
+                                entidades_actuales["datos_faltantes"] = [clave_bill]
+                                entidades_actuales["moneda"] = "USD" if moneda_sol == Moneda.USD else "ARS"
+                                entidades_actuales[clave_bill] = None
+                                menu = _generar_menu_billeteras(billeteras_moneda, tipo=tipo_act)
+                                resultado_ia["respuesta_usuario"] = f"No encontré esa billetera entre las tuyas.\n\n{menu}"
+                    else:
+                        # Usuario NO nombró billetera
+                        if len(billeteras_moneda) == 1:
+                            # Exactamente una activa en esa moneda: usarla sin preguntar (2.3)
+                            billetera_final = billeteras_moneda[0]
+                            se_asumio_principal = False
+                        else:
+                            # Buscar principal en esa moneda (2.2)
+                            b_ppal = next((b for b in billeteras_moneda if b.es_principal), None)
+                            if b_ppal:
+                                billetera_final = b_ppal
+                                se_asumio_principal = True
+                            else:
+                                # NUNCA ELEGIR POR DESCARTE: mostrar menú (2.1, 2.2)
+                                resultado_ia["intent"] = "slot_filling"
+                                resultado_ia["slot_filling"] = True
+                                resultado_ia["datos_faltantes"] = [clave_bill]
+                                entidades_actuales["datos_faltantes"] = [clave_bill]
+                                entidades_actuales["moneda"] = "USD" if moneda_sol == Moneda.USD else "ARS"
+                                entidades_actuales[clave_bill] = None
+                                resultado_ia["respuesta_usuario"] = _generar_menu_billeteras(billeteras_moneda, tipo=tipo_act)
+
+                    if billetera_final:
+                        entidades_actuales[clave_bill] = billetera_final.nombre
+                        entidades_actuales.pop(clave_otra, None)
+                        if "datos_faltantes" in entidades_actuales:
+                            entidades_actuales["datos_faltantes"] = [
+                                d for d in entidades_actuales["datos_faltantes"]
+                                if d not in ("billetera_origen", "billetera_destino", "billetera")
+                            ]
+                        resultado_ia["intent"] = "registrar_transaccion"
+                        resultado_ia["slot_filling"] = False
+                        resultado_ia["confianza"] = max(float(resultado_ia.get("confianza", 0.0)), 0.85)
+                        resultado_ia["_asumio_principal"] = se_asumio_principal
+                        resultado_ia["respuesta_usuario"] = _construir_propuesta_transaccion(
+                            entidades_actuales,
+                            billetera_final.nombre,
+                            se_asumio_principal=se_asumio_principal,
+                        )
 
             # Enriquecer respuesta con datos reales para intents de consulta
             intent_detectado = resultado_ia.get("intent")
@@ -1404,101 +1852,6 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         resultado_ia["respuesta_usuario"] = "Cotizaciones del dólar: " + " | ".join(msg_parts)
                 except Exception:
                     logger.exception("Error al consultar cotizaciones para WhatsApp")
-
-            # Sobreescribir propuesta de transacción con mensaje limpio generado por backend
-            if (
-                intent_detectado == "registrar_transaccion"
-                and resultado_ia.get("confianza", 0) >= 0.85
-                and not resultado_ia.get("slot_filling", False)
-            ):
-                try:
-                    entidades = resultado_ia.get("entidades", {})
-                    monto = entidades.get("monto")
-                    categoria_raw = entidades.get("categoria")
-                    tipo = entidades.get("tipo", "egreso")
-                    billetera_raw = (
-                        entidades.get("billetera_destino")
-                        if tipo == "ingreso"
-                        else entidades.get("billetera_origen")
-                    ) or entidades.get("billetera_origen") or entidades.get("billetera_destino")
-
-                    adicionales = entidades.get("transacciones_adicionales")
-
-                    if monto is not None:
-                        # 2.6: Moneda solicitada para la propuesta
-                        moneda_propuesta = Moneda.USD if entidades.get("moneda") == "USD" else Moneda.ARS
-
-                        # Nombre de billetera
-                        bill_display = None
-                        if billetera_raw:
-                            bill = db.execute(
-                                select(Billetera).where(
-                                    Billetera.usuario_id == usuario.id,
-                                    Billetera.estado == EstadoBilletera.ACTIVA,
-                                    Billetera.moneda == moneda_propuesta,
-                                    Billetera.nombre.ilike(f"%{billetera_raw}%")
-                                )
-                            ).scalars().first()
-                            bill_display = bill.nombre if bill else billetera_raw
-
-                        if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
-                            total_movs = 1 + len(adicionales)
-                            items_desc = [f"{formatear_monto(float(monto), moneda_propuesta)} en {_nombre_corto_categoria(categoria_raw)}"]
-                            for ad in adicionales:
-                                if isinstance(ad, dict) and ad.get("monto") is not None:
-                                    moneda_ad = Moneda.USD if ad.get("moneda") == "USD" else Moneda.ARS
-                                    items_desc.append(
-                                        f"{formatear_monto(float(ad['monto']), moneda_ad)} en {_nombre_corto_categoria(ad.get('categoria'))}"
-                                    )
-                            lista_str = ", ".join(items_desc)
-                            origen_str = f" desde {bill_display}" if bill_display else (f" a {bill_display}" if tipo == "ingreso" else "")
-                            resultado_ia["respuesta_usuario"] = f"Voy a anotar {total_movs} movimientos{origen_str}: {lista_str}. ¿Va?"
-                        else:
-                            monto_str = formatear_monto(float(monto), moneda_propuesta)
-                            cat_display = _nombre_corto_categoria(categoria_raw)
-
-                            if tipo == "ingreso":
-                                partes = [f"Voy a registrar un ingreso de {monto_str}"]
-                                if cat_display:
-                                    partes.append(f"en {cat_display}")
-                                if bill_display:
-                                    partes.append(f"a {bill_display}")
-                            else:
-                                partes = [f"Voy a anotar {monto_str}"]
-                                if cat_display:
-                                    partes.append(f"en {cat_display}")
-                                if bill_display:
-                                    partes.append(f"desde {bill_display}")
-                            partes.append("¿Va?")
-
-                            resultado_ia["respuesta_usuario"] = " ".join(partes)
-                except Exception:
-                    logger.exception("Error al construir propuesta de transacción")
-
-            # Si la IA pide que el usuario elija billetera, mostrar menú numerado filtrado por moneda
-            if resultado_ia.get("slot_filling") and resultado_ia.get("entidades", {}).get("billetera_origen") is None:
-                datos_faltantes = resultado_ia.get("datos_faltantes", [])
-                entidades = resultado_ia.get("entidades", {})
-                necesita_billetera = (
-                    "billetera_origen" in datos_faltantes
-                    or "billetera" in datos_faltantes
-                    or (
-                        resultado_ia.get("intent") == "registrar_transaccion"
-                        and entidades.get("monto") is not None
-                        and entidades.get("billetera_origen") is None
-                    )
-                )
-                if necesita_billetera:
-                    moneda_sol_str = entidades.get("moneda")
-                    moneda_sol = Moneda.USD if moneda_sol_str == "USD" else Moneda.ARS
-                    billeteras = _obtener_billeteras_activas(usuario.id, db, moneda=moneda_sol)
-                    if len(billeteras) > 1:
-                        resultado_ia["respuesta_usuario"] = _generar_menu_billeteras(billeteras)
-                        # Guardar datos_faltantes en slot_filling_estado para que _resolver_seleccion_numerica lo detecte
-                        if resultado_ia.get("entidades") is None:
-                            resultado_ia["entidades"] = {}
-                        resultado_ia["entidades"]["datos_faltantes"] = ["billetera_origen"]
-                        resultado_ia["entidades"]["moneda"] = "USD" if moneda_sol == Moneda.USD else "ARS"
 
             transaccion_id = _ejecutar_intent(resultado_ia, usuario, db)
 
