@@ -29,11 +29,15 @@ from app.models.tools import IPCCache
 from app.models.feriado import FeriadoAR
 from app.models.evento_actualizacion import EventoActualizacion
 from app.models.cotizacion_dolar import CotizacionDolar
+from app.models.saldo_arrastrado import SaldoArrastradoTarjeta, PagoSaldoArrastrado, EstadoSaldoArrastrado
 
 __all__ = [
     "Usuario",
     "Billetera",
     "TarjetaCredito",
+    "SaldoArrastradoTarjeta",
+    "PagoSaldoArrastrado",
+    "EstadoSaldoArrastrado",
     "Categoria",
     "Subcategoria",
     "CategoriaExcluida",
@@ -53,7 +57,6 @@ __all__ = [
     "HistorialPerfilFinanciero",
     "Presupuesto",
     "PresupuestoCategoria",
-
     "RefreshToken",
     "Suscripcion",
     "Transaccion",

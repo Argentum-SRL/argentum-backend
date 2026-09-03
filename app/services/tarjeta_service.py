@@ -15,13 +15,15 @@ from app.models.billetera import Billetera
 from app.models.transaccion import Transaccion
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.cuota import Cuota
+from app.models.saldo_arrastrado import SaldoArrastradoTarjeta, PagoSaldoArrastrado, EstadoSaldoArrastrado
 from app.schemas.tarjeta_credito import (
     TarjetaCreditoCreate, 
     TarjetaCreditoUpdate,
     ResumenTarjeta,
     CuotaResumen,
     ResumenFuturo,
-    ResumenAnterior
+    ResumenAnterior,
+    ItemSaldoArrastrado
 )
 
 MESES_ES = {
@@ -302,6 +304,15 @@ def get_info_transaccion(cuota: Cuota) -> tuple[str, str | None]:
     return final_desc, sub_nombre
 
 
+def _tabla_saldo_arrastrado_existe(db: Session) -> bool:
+    try:
+        from sqlalchemy import inspect
+        bind = db.get_bind()
+        return inspect(bind).has_table("saldos_arrastrados_tarjeta")
+    except Exception:
+        return False
+
+
 def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preloaded: list[Cuota] = None) -> ResumenTarjeta:
     hoy = hoy_argentina()
 
@@ -483,14 +494,70 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
     total_orig_actual = sum(c.monto for c in cuotas_actual if c.moneda == tarjeta_moneda_str)
     total_orig_sig = sum(c.monto for c in cuotas_siguiente if c.moneda == tarjeta_moneda_str)
 
-    # Deuda vencida impaga de resúmenes anteriores en la moneda de la tarjeta
+    # Deuda vencida impaga de resúmenes anteriores en la moneda de la tarjeta (cuotas impagas)
     total_deuda_vencida_anterior = sum(
         c.monto
         for ra in resumenes_anteriores
         for c in ra.cuotas
         if not c.pagada and c.moneda == tarjeta_moneda_str
     )
-    total_a_pagar_resumen_actual = total_actual_tarjeta + total_deuda_vencida_anterior
+
+    # Saldos arrastrados (financiados) activos de resúmenes anteriores o del actual
+    if _tabla_saldo_arrastrado_existe(db):
+        saldos_activos = (
+            db.query(SaldoArrastradoTarjeta)
+            .filter(
+                SaldoArrastradoTarjeta.tarjeta_id == tarjeta.id,
+                SaldoArrastradoTarjeta.estado == EstadoSaldoArrastrado.ACTIVO,
+                SaldoArrastradoTarjeta.fecha_vencimiento_resumen <= fecha_vencimiento_proximo
+            )
+            .order_by(SaldoArrastradoTarjeta.fecha_vencimiento_resumen.asc())
+            .all()
+        )
+    else:
+        saldos_activos = []
+
+    items_saldo: list[ItemSaldoArrastrado] = []
+    total_saldo_arrastrado = Decimal("0")
+    for s in saldos_activos:
+        s_moneda = s.moneda.value if hasattr(s.moneda, "value") else str(s.moneda)
+        if s_moneda == tarjeta_moneda_str:
+            total_saldo_arrastrado += s.monto_restante
+            f_orig = s.fecha_vencimiento_resumen
+            nombre_mes = MESES_ES.get(f_orig.strftime("%B"), f_orig.strftime("%B"))
+            items_saldo.append(ItemSaldoArrastrado(
+                id=s.id,
+                fecha_vencimiento_origen=f_orig,
+                monto_inicial=s.monto_inicial,
+                monto_restante=s.monto_restante,
+                moneda=s_moneda,
+                descripcion=f"Saldo financiado resumen {nombre_mes} {f_orig.year}"
+            ))
+
+    # Total a pagar del resumen actual: cuotas del período + deuda vencida anterior + saldo arrastrado impago
+    total_a_pagar_resumen_actual = total_actual_tarjeta + total_deuda_vencida_anterior + total_saldo_arrastrado
+
+    # Fórmula estándar de pago mínimo estimado (Tarea 4.1):
+    # 10% consumos de un pago y del saldo financiado, 60% cuotas que vencen en el período,
+    # y 100% de cargos, comisiones, intereses y deuda vencida impaga.
+    minimo_calculado = Decimal("0")
+    for c in cuotas_actual:
+        if c.moneda == tarjeta_moneda_str and not c.pagada:
+            sub_nom = (c.subcategoria_nombre or "").lower()
+            desc_nom = (c.descripcion or "").lower()
+            es_cargo_interes = any(k in sub_nom or k in desc_nom for k in ["interes", "comision", "cargo", "impuesto"])
+            if es_cargo_interes:
+                minimo_calculado += c.monto
+            elif c.total_cuotas == 1:
+                minimo_calculado += c.monto * Decimal("0.10")
+            else:
+                minimo_calculado += c.monto * Decimal("0.60")
+
+    minimo_calculado += total_saldo_arrastrado * Decimal("0.10")
+    minimo_calculado += total_deuda_vencida_anterior
+
+    pago_minimo_estimado = min(minimo_calculado, total_a_pagar_resumen_actual)
+    pago_minimo_estimado = max(Decimal("0"), pago_minimo_estimado).quantize(Decimal("0.01"))
 
     return ResumenTarjeta(
         fecha_cierre_proximo=fecha_cierre_proximo,
@@ -500,7 +567,12 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
         total_original_resumen_actual=total_orig_actual,
         total_original_resumen_siguiente=total_orig_sig,
         total_deuda_vencida_anterior=total_deuda_vencida_anterior,
+        saldo_arrastrado_impago=total_saldo_arrastrado,
+        items_saldo_arrastrado=items_saldo,
         total_a_pagar_resumen_actual=total_a_pagar_resumen_actual,
+        pago_minimo_estimado=pago_minimo_estimado,
+        pago_minimo_es_estimado=True,
+        pago_minimo_aclaracion="Monto de referencia orientativo. El valor definitivo lo establece la entidad bancaria en el resumen de cuenta.",
         total_actual_ars=total_actual_ars,
         total_actual_usd=total_actual_usd,
         total_siguiente_ars=total_sig_ars,
@@ -519,7 +591,8 @@ def pagar_resumen_tarjeta(
     usuario_id: UUID,
     tarjeta_id: UUID,
     fecha_pago: date | None = None,
-    fecha_resumen: date | None = None
+    fecha_resumen: date | None = None,
+    monto: Decimal | None = None
 ) -> Transaccion:
     # 1. Obtener la tarjeta
     tarjeta = db.query(TarjetaCredito).filter(
@@ -529,6 +602,8 @@ def pagar_resumen_tarjeta(
     if not tarjeta:
         raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
 
+    tarjeta_moneda_str = tarjeta.moneda.value if hasattr(tarjeta.moneda, "value") else str(tarjeta.moneda)
+
     # 2. Calcular la fecha de vencimiento límite a pagar
     if fecha_resumen is not None:
         limite_vencimiento = fecha_resumen
@@ -536,19 +611,25 @@ def pagar_resumen_tarjeta(
         hoy = hoy_argentina()
         limite_vencimiento = calcular_fecha_vencimiento_proximo(tarjeta, hoy)
 
-    # 2.1 Detectar si ya existe una transacción de pago para este resumen y vencimiento
-    from app.models.transaccion import TipoTransaccion, MetodoPago, OrigenTransaccion, EstadoVerificacionTransaccion
-    tx_existente = db.query(Transaccion).filter(
-        Transaccion.tarjeta_id == tarjeta.id,
-        Transaccion.pago_resumen_vencimiento == limite_vencimiento,
-        Transaccion.tipo == TipoTransaccion.EGRESO
-    ).first()
+    # 2.1 Buscar saldos arrastrados activos de la tarjeta hasta este vencimiento
+    if _tabla_saldo_arrastrado_existe(db):
+        saldos_activos = (
+            db.query(SaldoArrastradoTarjeta)
+            .filter(
+                SaldoArrastradoTarjeta.tarjeta_id == tarjeta.id,
+                SaldoArrastradoTarjeta.estado == EstadoSaldoArrastrado.ACTIVO,
+                SaldoArrastradoTarjeta.fecha_vencimiento_resumen <= limite_vencimiento
+            )
+            .order_by(SaldoArrastradoTarjeta.fecha_vencimiento_resumen.asc())
+            .all()
+        )
+    else:
+        saldos_activos = []
 
-    if tx_existente and tx_existente.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA:
-        raise HTTPException(status_code=400, detail="Este resumen ya fue pagado.")
+    saldo_actual_activo = next((s for s in saldos_activos if s.fecha_vencimiento_resumen == limite_vencimiento), None)
+    saldos_anteriores_activos = [s for s in saldos_activos if s.fecha_vencimiento_resumen < limite_vencimiento]
 
-    # 3. Obtener todas las cuotas de esta tarjeta que no estén pagadas y venzan en o antes del límite
-    # (incluye deuda vencida impaga de períodos anteriores que arrastra el resumen)
+    # 3. Obtener cuotas impagas hasta el límite de vencimiento
     cuotas_a_pagar = (
         db.query(Cuota)
         .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
@@ -564,14 +645,8 @@ def pagar_resumen_tarjeta(
         .all()
     )
 
-    if not cuotas_a_pagar:
-        raise HTTPException(status_code=400, detail="No hay saldo o cuotas pendientes de pago en el resumen actual.")
-
-    # 3.1 Agrupar por moneda: prohibido sumar monedas distintas
-    tarjeta_moneda_str = tarjeta.moneda.value if hasattr(tarjeta.moneda, "value") else str(tarjeta.moneda)
     cuotas_coincidentes = []
     cuotas_otra_moneda = []
-
     for c in cuotas_a_pagar:
         c_moneda = (
             c.grupo.moneda.value if hasattr(c.grupo.moneda, "value") else str(c.grupo.moneda)
@@ -581,31 +656,54 @@ def pagar_resumen_tarjeta(
         else:
             cuotas_otra_moneda.append(c)
 
-    if not cuotas_coincidentes:
+    monto_cuotas = sum(
+        (c.monto_real if c.monto_real is not None else c.monto_proyectado)
+        for c in cuotas_coincidentes
+    )
+    monto_saldos_anteriores = sum(s.monto_restante for s in saldos_anteriores_activos)
+    monto_saldo_actual = saldo_actual_activo.monto_restante if saldo_actual_activo else Decimal("0")
+
+    # Si ya existe un saldo arrastrado activo para este mismo vencimiento (segundo pago parcial sobre el mismo resumen):
+    # El total a pagar es el saldo restante de este resumen más cualquier saldo anterior.
+    if saldo_actual_activo:
+        total_a_pagar = monto_saldo_actual + monto_saldos_anteriores
+    else:
+        total_a_pagar = monto_cuotas + monto_saldos_anteriores
+
+    if total_a_pagar <= Decimal("0"):
         if cuotas_otra_moneda:
             raise HTTPException(
                 status_code=400,
                 detail=f"No hay cuotas pendientes en la moneda de la tarjeta ({tarjeta_moneda_str}). Quedan {len(cuotas_otra_moneda)} cuota(s) en otra moneda que no pueden pagarse con esta tarjeta/billetera."
             )
-        raise HTTPException(status_code=400, detail="No hay saldo o cuotas pendientes de pago en el resumen actual.")
+        raise HTTPException(status_code=400, detail="Este resumen ya está completamente saldado.")
 
-    # 4. Calcular el monto total a pagar ÚNICAMENTE de las cuotas en la moneda de la tarjeta
-    monto_total = sum(
-        (c.monto_real if c.monto_real is not None else c.monto_proyectado)
-        for c in cuotas_coincidentes
-    )
+    # 4. Validar monto si se proporcionó
+    if monto is not None:
+        if monto <= Decimal("0"):
+            raise HTTPException(status_code=400, detail="El monto a pagar tiene que ser mayor a cero.")
+        if monto > total_a_pagar:
+            raise HTTPException(
+                status_code=400,
+                detail=f"El monto a pagar (${monto:,.2f}) no puede superar el total a pagar del resumen (${total_a_pagar:,.2f})."
+            )
+        monto_pago = monto
+    else:
+        monto_pago = total_a_pagar
 
-    if monto_total <= 0:
-        raise HTTPException(status_code=400, detail="El monto del resumen a pagar debe ser mayor a cero.")
+    # 5. Detectar si ya existe una transacción de pago para este resumen y vencimiento
+    from app.models.transaccion import TipoTransaccion, MetodoPago, OrigenTransaccion, EstadoVerificacionTransaccion
+    tx_existente = db.query(Transaccion).filter(
+        Transaccion.tarjeta_id == tarjeta.id,
+        Transaccion.pago_resumen_vencimiento == limite_vencimiento,
+        Transaccion.tipo == TipoTransaccion.EGRESO
+    ).first()
 
-    # 5. Buscar la categoría "Banco" y subcategoría "Tarjeta de crédito"
+    # 6. Buscar la categoría "Banco" y subcategoría "Tarjeta de crédito"
     from app.models.categoria import Categoria
     from app.models.subcategoria import Subcategoria
 
-    categoria = db.query(Categoria).filter(
-        Categoria.nombre.ilike("Banco")
-    ).first()
-
+    categoria = db.query(Categoria).filter(Categoria.nombre.ilike("Banco")).first()
     subcategoria = None
     if categoria:
         subcategoria = db.query(Subcategoria).filter(
@@ -620,26 +718,25 @@ def pagar_resumen_tarjeta(
     descripcion_pago = f"Pago resumen {ultimos_4}"
     fecha_transaccion = fecha_pago or transaccion_service._hoy_argentina()
 
-    # 6. Registrar la transacción de forma atómica o reutilizar la existente si estaba pendiente
     try:
+        # Reutilizar transacción pendiente si existe
         if tx_existente and tx_existente.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE:
             tx = tx_existente
-            tx.monto = monto_total
+            tx.monto = monto_pago
             tx.fecha = fecha_transaccion
             if categoria:
                 tx.categoria_id = categoria.id
             if subcategoria:
                 tx.subcategoria_id = subcategoria.id
             tx.estado_verificacion = EstadoVerificacionTransaccion.CONFIRMADA
-            
-            # Debitar saldo de billetera
+
             billetera = db.get(Billetera, tx.billetera_id)
             if billetera:
-                billetera.saldo_actual -= monto_total
+                billetera.saldo_actual -= monto_pago
         else:
             tx_data = TransaccionCreate(
                 tipo=TipoTransaccion.EGRESO,
-                monto=monto_total,
+                monto=monto_pago,
                 moneda=tarjeta.moneda,
                 fecha=fecha_transaccion,
                 descripcion=descripcion_pago,
@@ -657,15 +754,71 @@ def pagar_resumen_tarjeta(
             )
             tx = transaccion_service.crear_transaccion(db, usuario_id, tx_data, commit=False)
 
-        # 7. Marcar ÚNICAMENTE las cuotas coincidentes como pagadas y vincularlas a la transacción de pago
-        for cuota in cuotas_coincidentes:
-            cuota.pagada = True
-            cuota.transaccion_pago_id = tx.id
+        # 7. Aplicación del pago
+        monto_disponible = monto_pago
+
+        # 7.1 Orden bancario (Tarea 3.4): El saldo arrastrado anterior se cancela primero
+        for s_ant in saldos_anteriores_activos:
+            if monto_disponible <= Decimal("0"):
+                break
+            aplicar = min(monto_disponible, s_ant.monto_restante)
+            s_ant.monto_restante -= aplicar
+            if s_ant.monto_restante <= Decimal("0"):
+                s_ant.monto_restante = Decimal("0")
+                s_ant.estado = EstadoSaldoArrastrado.SALDADO
+            pago_red = PagoSaldoArrastrado(
+                saldo_arrastrado_id=s_ant.id,
+                transaccion_pago_id=tx.id,
+                monto_aplicado=aplicar
+            )
+            db.add(pago_red)
+            monto_disponible -= aplicar
+
+        saldo_generado = None
+        saldo_restante_final = None
+
+        if saldo_actual_activo:
+            # Tarea 2.6: Segundo pago parcial sobre el mismo resumen
+            # Reduce el saldo arrastrado actual en vez de volver a marcar cuotas
+            if monto_disponible > Decimal("0"):
+                aplicar = min(monto_disponible, saldo_actual_activo.monto_restante)
+                saldo_actual_activo.monto_restante -= aplicar
+                if saldo_actual_activo.monto_restante <= Decimal("0"):
+                    saldo_actual_activo.monto_restante = Decimal("0")
+                    saldo_actual_activo.estado = EstadoSaldoArrastrado.SALDADO
+                pago_red = PagoSaldoArrastrado(
+                    saldo_arrastrado_id=saldo_actual_activo.id,
+                    transaccion_pago_id=tx.id,
+                    monto_aplicado=aplicar
+                )
+                db.add(pago_red)
+                monto_disponible -= aplicar
+            saldo_restante_final = saldo_actual_activo.monto_restante
+        else:
+            # Primer pago sobre este resumen:
+            # Todas las cuotas del período se marcan como saldadas y se vinculan a la transacción
+            for cuota in cuotas_coincidentes:
+                cuota.pagada = True
+                cuota.transaccion_pago_id = tx.id
+
+            # Si el pago no cubrió el total a pagar, lo que queda impago se registra como saldo arrastrado
+            if monto_pago < total_a_pagar:
+                saldo_generado = total_a_pagar - monto_pago
+                saldo_restante_final = saldo_generado
+                nuevo_saldo = SaldoArrastradoTarjeta(
+                    tarjeta_id=tarjeta.id,
+                    fecha_vencimiento_resumen=limite_vencimiento,
+                    monto_inicial=saldo_generado,
+                    monto_restante=saldo_generado,
+                    moneda=tarjeta.moneda,
+                    estado=EstadoSaldoArrastrado.ACTIVO,
+                    transaccion_origen_id=tx.id
+                )
+                db.add(nuevo_saldo)
 
         db.commit()
         db.refresh(tx)
 
-        # 3.3 Construir información de cuotas en otra moneda no pagadas
         from app.schemas.tarjeta_credito import CuotaPendienteOtraMoneda
         pendientes = []
         for c in cuotas_otra_moneda:
@@ -690,7 +843,9 @@ def pagar_resumen_tarjeta(
 
         setattr(tx, "cuotas_pagadas_count", len(cuotas_coincidentes))
         setattr(tx, "moneda_pagada", tarjeta_moneda_str)
-        setattr(tx, "monto_pagado", monto_total)
+        setattr(tx, "monto_pagado", monto_pago)
+        setattr(tx, "saldo_arrastrado_generado", saldo_generado)
+        setattr(tx, "saldo_arrastrado_restante", saldo_restante_final)
         setattr(tx, "cuotas_pendientes_otra_moneda", pendientes)
         setattr(tx, "mensaje_advertencia", mensaje_adv)
         return tx
@@ -698,6 +853,72 @@ def pagar_resumen_tarjeta(
         db.rollback()
         logger.exception("Error al pagar resumen de tarjeta %s", tarjeta_id)
         raise
+
+
+def obtener_detalle_resumen_vencimiento(
+    db: Session,
+    tarjeta_id: UUID,
+    fecha_vencimiento: date
+) -> dict:
+    """
+    Responde para cualquier resumen (Tarea 1.5):
+    - cuánto se facturó
+    - cuánto se pagó
+    - cuánto quedó debiendo
+    - qué transacciones lo pagaron
+    """
+    tarjeta = db.query(TarjetaCredito).filter(TarjetaCredito.id == tarjeta_id).first()
+    if not tarjeta:
+        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+
+    from app.models.transaccion import TipoTransaccion
+    transacciones_pago = db.query(Transaccion).filter(
+        Transaccion.tarjeta_id == tarjeta_id,
+        Transaccion.pago_resumen_vencimiento == fecha_vencimiento,
+        Transaccion.tipo == TipoTransaccion.EGRESO
+    ).all()
+
+    monto_pagado = sum(t.monto for t in transacciones_pago)
+
+    saldo_arrastrado = None
+    if _tabla_saldo_arrastrado_existe(db):
+        saldo_arrastrado = db.query(SaldoArrastradoTarjeta).filter(
+            SaldoArrastradoTarjeta.tarjeta_id == tarjeta_id,
+            SaldoArrastradoTarjeta.fecha_vencimiento_resumen == fecha_vencimiento
+        ).first()
+
+    cuotas = (
+        db.query(Cuota)
+        .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
+        .filter(
+            GrupoCuotas.tarjeta_id == tarjeta_id,
+            Cuota.fecha_vencimiento == fecha_vencimiento
+        )
+        .all()
+    )
+    monto_cuotas = sum(
+        (c.monto_real if c.monto_real is not None else c.monto_proyectado)
+        for c in cuotas
+    )
+
+    if saldo_arrastrado:
+        monto_facturado = monto_pagado + saldo_arrastrado.monto_restante
+        monto_deuda_restante = saldo_arrastrado.monto_restante if saldo_arrastrado.estado == EstadoSaldoArrastrado.ACTIVO else Decimal("0")
+    else:
+        monto_facturado = monto_cuotas
+        cuotas_impagas = sum(
+            (c.monto_real if c.monto_real is not None else c.monto_proyectado)
+            for c in cuotas if not c.pagada
+        )
+        monto_deuda_restante = cuotas_impagas
+
+    return {
+        "monto_facturado": monto_facturado,
+        "monto_pagado": monto_pagado,
+        "monto_deuda_restante": monto_deuda_restante,
+        "transacciones_pago": transacciones_pago,
+        "saldo_arrastrado": saldo_arrastrado
+    }
 
 
 def calcular_presion_futura(
