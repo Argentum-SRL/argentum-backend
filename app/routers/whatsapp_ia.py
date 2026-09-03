@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_admin_user
 from app.core.database import SessionLocal, get_db
 from app.core.config import settings
-from app.utils.fecha import hoy_argentina
+from app.utils.fecha import hoy_argentina, TZ_ARGENTINA, ahora_argentina
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria, EstadoCategoria, TipoCategoria
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
@@ -778,6 +778,505 @@ def _buscar_propuesta_pendiente(usuario_id: UUID, db: Session) -> ConversacionWp
     ).scalars().first()
 
 
+def _buscar_transaccion_duplicada_reciente(
+    usuario_id: UUID,
+    monto: Decimal,
+    moneda: Moneda,
+    categoria_id: UUID | None,
+    db: Session,
+) -> Transaccion | None:
+    """
+    Busca una transacción confirmada del mismo usuario con el mismo monto, moneda y categoría,
+    creada en la última hora (Tarea 3.1).
+    Excluye movimientos generados de forma automática o diferida:
+    - Cuotas hijas y padres de cuotas (planes de tarjeta de crédito)
+    - Pagos automáticos de resúmenes de tarjeta
+    - Débitos automáticos de suscripciones / recurrentes
+    """
+    limite = datetime.now(timezone.utc) - timedelta(hours=1)
+    query = (
+        select(Transaccion)
+        .where(
+            Transaccion.usuario_id == usuario_id,
+            Transaccion.monto == monto,
+            Transaccion.moneda == moneda,
+            Transaccion.fecha_creacion >= limite,
+            Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
+            Transaccion.es_cuota_hija == False,
+            Transaccion.es_padre_cuotas == False,
+            Transaccion.es_recurrente == False,
+            Transaccion.recurrente_id.is_(None),
+            Transaccion.pago_origen_id.is_(None),
+            Transaccion.pago_resumen_vencimiento.is_(None),
+        )
+    )
+    if categoria_id is not None:
+        query = query.where(Transaccion.categoria_id == categoria_id)
+    else:
+        query = query.where(Transaccion.categoria_id.is_(None))
+    return db.execute(query.order_by(Transaccion.fecha_creacion.desc(), Transaccion.id.desc())).scalars().first()
+
+
+def _detectar_duplicados_en_lote(entidades: dict) -> tuple[bool, Decimal | None, str | None, str | None]:
+    """
+    Verifica si dentro del mismo mensaje hay dos o más movimientos idénticos
+    (mismo monto, moneda y categoría) (Tarea 4.1).
+    Retorna: (hay_duplicados, monto, moneda, categoria_display).
+    """
+    monto_p = entidades.get("monto")
+    if monto_p is None:
+        return False, None, None, None
+    adicionales = entidades.get("transacciones_adicionales")
+    if not adicionales or not isinstance(adicionales, list) or len(adicionales) == 0:
+        return False, None, None, None
+
+    moneda_p = entidades.get("moneda") or "ARS"
+    cat_p = normalizar_texto(_nombre_corto_categoria(entidades.get("categoria")))
+
+    movimientos = [(Decimal(str(monto_p)), str(moneda_p), cat_p, _nombre_corto_categoria(entidades.get("categoria")))]
+    for ad in adicionales:
+        if isinstance(ad, dict) and ad.get("monto") is not None:
+            m_ad = Decimal(str(ad.get("monto")))
+            mon_ad = str(ad.get("moneda") or "ARS")
+            c_ad = normalizar_texto(_nombre_corto_categoria(ad.get("categoria")))
+            c_disp = _nombre_corto_categoria(ad.get("categoria"))
+            movimientos.append((m_ad, mon_ad, c_ad, c_disp))
+
+    vistos = set()
+    for m, mon, cat, c_disp in movimientos:
+        clave = (m, mon, cat)
+        if clave in vistos:
+            return True, m, mon, c_disp
+        vistos.add(clave)
+
+    return False, None, None, None
+
+
+def _es_confirmacion_nuevo_movimiento(mensaje: str) -> bool:
+    """Verifica si el usuario confirma que el movimiento repetido es nuevo."""
+    norm = normalizar_texto(mensaje)
+    if not norm:
+        return False
+    if any(k in norm for k in ("es nuevo", "nuevo", "es otro", "otro", "son dos", "son distintos", "gasto nuevo", "movimiento nuevo", "es otra cosa")):
+        return True
+    if norm in PALABRAS_CONFIRMACION:
+        return True
+    return False
+
+
+def _es_descarte_duplicado(mensaje: str) -> bool:
+    """Verifica si el usuario indica que el movimiento repetido es un error o duplicado."""
+    norm = normalizar_texto(mensaje)
+    if not norm:
+        return False
+    if any(k in norm for k in ("error", "repitio", "repetido", "equivoque", "equivoqué", "no anotes", "no registres", "deja", "dejalo")):
+        return True
+    if _es_cancelacion(mensaje):
+        return True
+    return False
+
+
+def _es_confirmacion_lote_ambos(mensaje: str) -> bool:
+    norm = normalizar_texto(mensaje)
+    if not norm:
+        return False
+    if any(k in norm for k in ("son dos", "dos", "los dos", "ambos", "son distintos", "distintos", "anota los dos", "anota ambos")):
+        return True
+    if norm in PALABRAS_CONFIRMACION:
+        return True
+    return False
+
+
+def _es_confirmacion_lote_uno_solo(mensaje: str) -> bool:
+    norm = normalizar_texto(mensaje)
+    if not norm:
+        return False
+    return any(k in norm for k in ("es uno solo", "uno solo", "solo uno", "uno", "es uno", "fue uno solo", "fue uno", "anota uno", "anota solo uno"))
+
+
+def _confirmar_propuesta_transaccion(
+    usuario: Usuario,
+    db: Session,
+    propuesta_id: UUID | None = None,
+) -> tuple[Transaccion | None, str, bool]:
+    """
+    Ejecuta la confirmación de una propuesta pendiente con bloqueo de fila estricto (with_for_update).
+    Garantiza que dos ejecuciones concurrentes NO creen transacciones duplicadas (Tarea 2).
+    Retorna: (transaccion_creada_o_none, mensaje_respuesta, fue_ya_confirmada).
+    """
+    limite_tiempo = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+
+    # 1. Primero verificar si hay una transacción pendiente de IA
+    tx_pend = db.execute(
+        select(Transaccion)
+        .where(
+            Transaccion.usuario_id == usuario.id,
+            Transaccion.origen == OrigenTransaccion.IA_WPP,
+            Transaccion.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE,
+            Transaccion.fecha_creacion >= limite_tiempo,
+        )
+        .order_by(Transaccion.fecha_creacion.desc(), Transaccion.id.desc())
+        .with_for_update()
+    ).scalars().first()
+
+    if tx_pend:
+        tx_pend.estado_verificacion = EstadoVerificacionTransaccion.CONFIRMADA
+        billetera = db.execute(
+            select(Billetera).where(Billetera.id == tx_pend.billetera_id).with_for_update()
+        ).scalars().first()
+        if billetera:
+            if tx_pend.tipo == TipoTransaccion.INGRESO:
+                billetera.saldo_actual += tx_pend.monto
+            else:
+                billetera.saldo_actual -= tx_pend.monto
+        emitir_evento_actualizacion(db, usuario.id, "transacciones")
+        emitir_evento_actualizacion(db, usuario.id, "billeteras")
+        db.flush()
+
+        monto_str = formatear_monto(float(tx_pend.monto), tx_pend.moneda)
+        bill_nombre = billetera.nombre if billetera else None
+        cat_nombre = None
+        if tx_pend.categoria_id:
+            cat = db.execute(select(Categoria).where(Categoria.id == tx_pend.categoria_id)).scalars().first()
+            cat_nombre = cat.nombre if cat else None
+        subcat_nombre = None
+        if tx_pend.subcategoria_id:
+            subcat = db.execute(select(Subcategoria).where(Subcategoria.id == tx_pend.subcategoria_id)).scalars().first()
+            subcat_nombre = subcat.nombre if subcat else None
+        nombre_cat_disp = subcat_nombre or cat_nombre or "Otros"
+
+        if tx_pend.tipo == TipoTransaccion.INGRESO:
+            partes = [f"Listo. Ingreso de {monto_str}"]
+            if nombre_cat_disp:
+                partes.append(f"en {nombre_cat_disp}")
+            if bill_nombre:
+                partes.append(f"a {bill_nombre}")
+            partes.append("— registrado.")
+        else:
+            partes = [f"Listo. {monto_str}"]
+            if nombre_cat_disp:
+                partes.append(f"en {nombre_cat_disp}")
+            if bill_nombre:
+                partes.append(f"desde {bill_nombre}")
+            partes.append("— registrado.")
+        return tx_pend, " ".join(partes), False
+
+    # 2. Buscar conversación previa con datos de transacción pendiente con BLOQUEO DE FILA ESTRICTO
+    stmt_conv = (
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario.id,
+            ConversacionWpp.intent_detectado == "registrar_transaccion",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.confianza >= Decimal("0.85"),
+            ConversacionWpp.fecha >= limite_tiempo,
+        )
+    )
+    if propuesta_id:
+        stmt_conv = stmt_conv.where(ConversacionWpp.id == propuesta_id)
+
+    conv_previa = db.execute(
+        stmt_conv.order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc()).with_for_update()
+    ).scalars().first()
+
+    if not conv_previa:
+        # Verificar si la propuesta acaba de ser ejecutada por otra llamada concurrente
+        limite_reciente = datetime.now(timezone.utc) - timedelta(minutes=10)
+        candidatas = db.execute(
+            select(ConversacionWpp)
+            .where(
+                ConversacionWpp.usuario_id == usuario.id,
+                ConversacionWpp.intent_detectado == "registrar_transaccion",
+                ConversacionWpp.accion_ejecutada.is_not(None),
+                ConversacionWpp.fecha >= limite_reciente,
+            )
+            .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+        ).scalars().all()
+
+        recien_ejecutada = None
+        for c in candidatas:
+            if c.accion_ejecutada not in ("cancelada", "vencida", "descartado_por_duplicado", "descartada_por_nueva_operacion", "test", "test_setup", "test_reset"):
+                try:
+                    uuid_val = UUID(str(c.accion_ejecutada))
+                    tx_ok = db.execute(select(Transaccion.id).where(Transaccion.id == uuid_val)).scalar()
+                    if tx_ok:
+                        recien_ejecutada = c
+                        break
+                except ValueError:
+                    pass
+
+        if recien_ejecutada:
+            return None, "Esa operación ya fue confirmada.", True
+        else:
+            return None, "No tenés ninguna operación pendiente para confirmar.", False
+
+    entidades = conv_previa.entidades or {}
+    monto = entidades.get("monto")
+    if monto is None:
+        return None, "No pude procesar la operación.", False
+
+    monto_decimal = Decimal(str(monto))
+    tipo_val = entidades.get("tipo") or "egreso"
+    moneda_solicitada = Moneda.USD if entidades.get("moneda") == "USD" else Moneda.ARS
+
+    nombre_billetera = (
+        entidades.get("billetera_destino")
+        if tipo_val == "ingreso"
+        else entidades.get("billetera_origen")
+    )
+
+    billetera_id = _resolver_billetera(nombre_billetera, usuario.id, db, moneda=moneda_solicitada)
+    if not billetera_id:
+        billetera_id = db.execute(
+            select(Billetera.id).where(
+                Billetera.usuario_id == usuario.id,
+                Billetera.estado == EstadoBilletera.ACTIVA,
+                Billetera.moneda == moneda_solicitada,
+                Billetera.es_principal == True,
+            ).order_by(Billetera.nombre.asc(), Billetera.id.asc())
+        ).scalars().first()
+
+    if not billetera_id:
+        billeteras_moneda = _obtener_billeteras_activas(usuario.id, db, moneda=moneda_solicitada)
+        if len(billeteras_moneda) == 1:
+            billetera_id = billeteras_moneda[0].id
+
+    if not billetera_id:
+        return None, "No pude resolver la billetera.", False
+
+    billetera = db.execute(
+        select(Billetera).where(Billetera.id == billetera_id).with_for_update()
+    ).scalars().first()
+
+    if not billetera or billetera.moneda != moneda_solicitada:
+        return None, "La moneda de la billetera no coincide.", False
+
+    categoria_id, subcategoria_id = _resolver_categoria_y_subcategoria(
+        entidades.get("categoria"), usuario.id, db, tipo=tipo_val
+    )
+    fecha_obj = _resolver_fecha_transaccion(entidades.get("fecha"))
+
+    transaccion = Transaccion(
+        usuario_id=usuario.id,
+        tipo=TipoTransaccion.INGRESO if tipo_val == "ingreso" else TipoTransaccion.EGRESO,
+        monto=monto_decimal,
+        moneda=moneda_solicitada,
+        fecha=fecha_obj,
+        descripcion=entidades.get("descripcion") or _nombre_corto_categoria(entidades.get("categoria")),
+        metodo_pago=deducir_metodo_pago(billetera, tarjeta_id=None),
+        billetera_id=billetera_id,
+        categoria_id=categoria_id,
+        subcategoria_id=subcategoria_id,
+        origen=OrigenTransaccion.IA_WPP,
+        estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+        es_recurrente=False,
+        es_cuota_hija=False,
+        es_padre_cuotas=False,
+    )
+    db.add(transaccion)
+
+    if transaccion.tipo == TipoTransaccion.INGRESO:
+        billetera.saldo_actual += monto_decimal
+    else:
+        billetera.saldo_actual -= monto_decimal
+
+    adicionales = entidades.get("transacciones_adicionales")
+    descartadas = []
+    if adicionales and isinstance(adicionales, list):
+        for adic in adicionales:
+            if isinstance(adic, dict):
+                _, motivo = _crear_transaccion_adicional(adic, usuario.id, billetera, db)
+                if motivo:
+                    descartadas.append(motivo)
+
+    # Marcar la conversación previa como ejecutada
+    conv_previa.accion_ejecutada = str(transaccion.id)
+    emitir_evento_actualizacion(db, usuario.id, "transacciones")
+    emitir_evento_actualizacion(db, usuario.id, "billeteras")
+    db.flush()
+
+    monto_str = formatear_monto(float(transaccion.monto), transaccion.moneda)
+    bill_nombre = billetera.nombre
+
+    if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
+        total_registrados = 1 + len(adicionales) - len(descartadas)
+        cat_display = _nombre_corto_categoria(entidades.get("categoria"))
+        items_str = [f"{monto_str} en {cat_display}"]
+        for ad in adicionales:
+            if isinstance(ad, dict) and ad.get("monto") is not None:
+                ad_moneda = Moneda.USD if ad.get("moneda") == "USD" else Moneda.ARS
+                if ad_moneda == transaccion.moneda:
+                    items_str.append(
+                        f"{formatear_monto(float(ad['monto']), ad_moneda)} en {_nombre_corto_categoria(ad.get('categoria'))}"
+                    )
+        origen_str = f" desde {bill_nombre}" if bill_nombre else (f" a {bill_nombre}" if transaccion.tipo == TipoTransaccion.INGRESO else "")
+        mov_palabra = "movimientos" if total_registrados != 1 else "movimiento"
+        reg_palabra = "registrados" if total_registrados != 1 else "registrado"
+        msg_resp = f"Listo. {total_registrados} {mov_palabra}{origen_str}: {', '.join(items_str)} — {reg_palabra}."
+    else:
+        cat_nombre = None
+        if transaccion.categoria_id:
+            cat = db.execute(select(Categoria).where(Categoria.id == transaccion.categoria_id)).scalars().first()
+            cat_nombre = cat.nombre if cat else None
+        subcat_nombre = None
+        if transaccion.subcategoria_id:
+            subcat = db.execute(select(Subcategoria).where(Subcategoria.id == transaccion.subcategoria_id)).scalars().first()
+            subcat_nombre = subcat.nombre if subcat else None
+        nombre_categoria_display = subcat_nombre or cat_nombre or "Otros"
+
+        if transaccion.tipo == TipoTransaccion.INGRESO:
+            partes = [f"Listo. Ingreso de {monto_str}"]
+            if nombre_categoria_display:
+                partes.append(f"en {nombre_categoria_display}")
+            if bill_nombre:
+                partes.append(f"a {bill_nombre}")
+            partes.append("— registrado.")
+        else:
+            partes = [f"Listo. {monto_str}"]
+            if nombre_categoria_display:
+                partes.append(f"en {nombre_categoria_display}")
+            if bill_nombre:
+                partes.append(f"desde {bill_nombre}")
+            partes.append("— registrado.")
+        msg_resp = " ".join(partes)
+
+    if descartadas:
+        msg_resp += "\n" + "\n".join(descartadas)
+
+    return transaccion, msg_resp, False
+
+
+def _registrar_movimiento_directo(
+    usuario: Usuario,
+    entidades: dict,
+    db: Session,
+    registrar_adicionales: bool = True,
+) -> tuple[Transaccion | None, str]:
+    """Registra directamente un movimiento confirmado como nuevo o lote (Tareas 3.3 y 4.1)."""
+    monto = entidades.get("monto")
+    if monto is None:
+        return None, "No pude procesar la operación."
+    monto_decimal = Decimal(str(monto))
+    tipo_val = entidades.get("tipo") or "egreso"
+    moneda_sol = Moneda.USD if entidades.get("moneda") == "USD" else Moneda.ARS
+
+    nombre_billetera = entidades.get("billetera_resuelta_nombre") or (
+        entidades.get("billetera_destino") if tipo_val == "ingreso" else entidades.get("billetera_origen")
+    )
+    billetera_id = _resolver_billetera(nombre_billetera, usuario.id, db, moneda=moneda_sol)
+    if not billetera_id:
+        billetera_id = db.execute(
+            select(Billetera.id).where(
+                Billetera.usuario_id == usuario.id,
+                Billetera.estado == EstadoBilletera.ACTIVA,
+                Billetera.moneda == moneda_sol,
+                Billetera.es_principal == True,
+            ).order_by(Billetera.nombre.asc(), Billetera.id.asc())
+        ).scalars().first()
+    if not billetera_id:
+        billeteras_moneda = _obtener_billeteras_activas(usuario.id, db, moneda=moneda_sol)
+        if len(billeteras_moneda) == 1:
+            billetera_id = billeteras_moneda[0].id
+
+    if not billetera_id:
+        return None, "No pude resolver la billetera."
+
+    billetera = db.execute(select(Billetera).where(Billetera.id == billetera_id).with_for_update()).scalars().first()
+    if not billetera:
+        return None, "Billetera no encontrada."
+
+    cat_id, subcat_id = _resolver_categoria_y_subcategoria(entidades.get("categoria"), usuario.id, db, tipo=tipo_val)
+    fecha_obj = _resolver_fecha_transaccion(entidades.get("fecha"))
+
+    tx = Transaccion(
+        usuario_id=usuario.id,
+        tipo=TipoTransaccion.INGRESO if tipo_val == "ingreso" else TipoTransaccion.EGRESO,
+        monto=monto_decimal,
+        moneda=moneda_sol,
+        fecha=fecha_obj,
+        descripcion=entidades.get("descripcion") or _nombre_corto_categoria(entidades.get("categoria")),
+        metodo_pago=deducir_metodo_pago(billetera, tarjeta_id=None),
+        billetera_id=billetera.id,
+        categoria_id=cat_id,
+        subcategoria_id=subcat_id,
+        origen=OrigenTransaccion.IA_WPP,
+        estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+        es_recurrente=False,
+        es_cuota_hija=False,
+        es_padre_cuotas=False,
+    )
+    db.add(tx)
+
+    if tx.tipo == TipoTransaccion.INGRESO:
+        billetera.saldo_actual += monto_decimal
+    else:
+        billetera.saldo_actual -= monto_decimal
+
+    adicionales = entidades.get("transacciones_adicionales") if registrar_adicionales else None
+    descartadas = []
+    if adicionales and isinstance(adicionales, list):
+        for adic in adicionales:
+            if isinstance(adic, dict):
+                _, motivo = _crear_transaccion_adicional(adic, usuario.id, billetera, db)
+                if motivo:
+                    descartadas.append(motivo)
+
+    emitir_evento_actualizacion(db, usuario.id, "transacciones")
+    emitir_evento_actualizacion(db, usuario.id, "billeteras")
+    db.flush()
+
+    monto_str = formatear_monto(float(tx.monto), tx.moneda)
+    bill_nombre = billetera.nombre
+
+    if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
+        total_registrados = 1 + len(adicionales) - len(descartadas)
+        cat_display = _nombre_corto_categoria(entidades.get("categoria"))
+        items_str = [f"{monto_str} en {cat_display}"]
+        for ad in adicionales:
+            if isinstance(ad, dict) and ad.get("monto") is not None:
+                ad_moneda = Moneda.USD if ad.get("moneda") == "USD" else Moneda.ARS
+                if ad_moneda == tx.moneda:
+                    items_str.append(
+                        f"{formatear_monto(float(ad['monto']), ad_moneda)} en {_nombre_corto_categoria(ad.get('categoria'))}"
+                    )
+        origen_str = f" desde {bill_nombre}" if bill_nombre else (f" a {bill_nombre}" if tx.tipo == TipoTransaccion.INGRESO else "")
+        mov_palabra = "movimientos" if total_registrados != 1 else "movimiento"
+        reg_palabra = "registrados" if total_registrados != 1 else "registrado"
+        msg_resp = f"Listo. {total_registrados} {mov_palabra}{origen_str}: {', '.join(items_str)} — {reg_palabra}."
+    else:
+        cat_nombre = None
+        if tx.categoria_id:
+            cat = db.execute(select(Categoria).where(Categoria.id == tx.categoria_id)).scalars().first()
+            cat_nombre = cat.nombre if cat else None
+        subcat_nombre = None
+        if tx.subcategoria_id:
+            subcat = db.execute(select(Subcategoria).where(Subcategoria.id == tx.subcategoria_id)).scalars().first()
+            subcat_nombre = subcat.nombre if subcat else None
+        nombre_categoria_display = subcat_nombre or cat_nombre or "Otros"
+
+        if tx.tipo == TipoTransaccion.INGRESO:
+            partes = [f"Listo. Ingreso de {monto_str}"]
+            if nombre_categoria_display:
+                partes.append(f"en {nombre_categoria_display}")
+            if bill_nombre:
+                partes.append(f"a {bill_nombre}")
+            partes.append("— registrado.")
+        else:
+            partes = [f"Listo. {monto_str}"]
+            if nombre_categoria_display:
+                partes.append(f"en {nombre_categoria_display}")
+            if bill_nombre:
+                partes.append(f"desde {bill_nombre}")
+            partes.append("— registrado.")
+        msg_resp = " ".join(partes)
+
+    if descartadas:
+        msg_resp += "\n" + "\n".join(descartadas)
+
+    return tx, msg_resp
+
+
 def _evaluar_correccion_billetera(
     mensaje: str,
     usuario_id: UUID,
@@ -1035,153 +1534,10 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
             return None
 
         elif intent == "confirmar":
-            limite_tiempo = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
-            # Buscar transacción pendiente existente de IA dentro del plazo de expiración
-            tx = db.execute(
-                select(Transaccion)
-                .where(
-                    Transaccion.usuario_id == usuario.id,
-                    Transaccion.origen == OrigenTransaccion.IA_WPP,
-                    Transaccion.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE,
-                    Transaccion.fecha_creacion >= limite_tiempo,
-                )
-                .order_by(Transaccion.fecha_creacion.desc(), Transaccion.id.desc())
-            ).scalars().first()
-
+            tx, msg_resp, ya_conf = _confirmar_propuesta_transaccion(usuario, db)
+            resultado_ia["_mensaje_confirmacion_directo"] = msg_resp
             if tx:
-                # Confirmar transacción existente y actualizar saldo de billetera
-                tx.estado_verificacion = EstadoVerificacionTransaccion.CONFIRMADA
-                billetera = db.get(Billetera, tx.billetera_id)
-                if billetera:
-                    if tx.tipo == TipoTransaccion.INGRESO:
-                        billetera.saldo_actual += tx.monto
-                    else:
-                        billetera.saldo_actual -= tx.monto
-                emitir_evento_actualizacion(db, usuario.id, "transacciones")
-                emitir_evento_actualizacion(db, usuario.id, "billeteras")
-                db.flush()
                 return str(tx.id)
-            else:
-                # Buscar conversación previa con datos de transacción pendiente de confirmar dentro del plazo
-                conv_previa = db.execute(
-                    select(ConversacionWpp)
-                    .where(
-                        ConversacionWpp.usuario_id == usuario.id,
-                        ConversacionWpp.intent_detectado == "registrar_transaccion",
-                        ConversacionWpp.slot_filling_activo == False,
-                        ConversacionWpp.accion_ejecutada.is_(None),
-                        ConversacionWpp.confianza >= Decimal("0.85"),
-                        ConversacionWpp.fecha >= limite_tiempo,
-                    )
-                    .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
-                ).scalars().first()
-
-                if conv_previa and conv_previa.entidades:
-                    entidades = conv_previa.entidades
-                    monto = entidades.get("monto")
-                    if monto is None:
-                        return None
-
-                    try:
-                        monto_decimal = Decimal(str(monto))
-                    except Exception:
-                        return None
-
-                    # Validación de monto: estrictamente positivo y dentro de límites reales
-                    if monto_decimal <= Decimal("0") or monto_decimal > Decimal("1000000000000"):
-                        return None
-
-                    tipo_val = entidades.get("tipo") or "egreso"
-                    moneda_solicitada = Moneda.USD if entidades.get("moneda") == "USD" else Moneda.ARS
-
-                    # Para ingresos usar billetera_destino, para egresos billetera_origen (5.1, 5.2)
-                    nombre_billetera = (
-                        entidades.get("billetera_destino")
-                        if tipo_val == "ingreso"
-                        else entidades.get("billetera_origen")
-                    )
-
-                    billetera_id = _resolver_billetera(nombre_billetera, usuario.id, db, moneda=moneda_solicitada)
-
-                    if not billetera_id:
-                        # Buscar si tiene principal para la moneda solicitada (2.2)
-                        billetera_id = db.execute(
-                            select(Billetera.id).where(
-                                Billetera.usuario_id == usuario.id,
-                                Billetera.estado == EstadoBilletera.ACTIVA,
-                                Billetera.moneda == moneda_solicitada,
-                                Billetera.es_principal == True
-                            ).order_by(Billetera.nombre.asc(), Billetera.id.asc())
-                        ).scalars().first()
-
-                    if not billetera_id:
-                        # Si hay exactamente una billetera activa en esa moneda, usar esa (2.3)
-                        billeteras_moneda = _obtener_billeteras_activas(usuario.id, db, moneda=moneda_solicitada)
-                        if len(billeteras_moneda) == 1:
-                            billetera_id = billeteras_moneda[0].id
-
-                    if not billetera_id:
-                        return None
-
-                    billetera = db.get(Billetera, billetera_id)
-                    if not billetera or billetera.moneda != moneda_solicitada:
-                        return None
-
-                    # 2.1: Usar la moneda solicitada por el usuario (no pisarla con billetera.moneda)
-                    moneda_val = moneda_solicitada
-                    from app.services.transaccion_service import _validar_moneda_coincide
-                    _validar_moneda_coincide(moneda_val, billetera)
-
-                    categoria_id, subcategoria_id = _resolver_categoria_y_subcategoria(
-                        entidades.get("categoria"), usuario.id, db, tipo=tipo_val
-                    )
-
-                    fecha_obj = _resolver_fecha_transaccion(entidades.get("fecha"))
-
-                    transaccion = Transaccion(
-                        usuario_id=usuario.id,
-                        tipo=TipoTransaccion.INGRESO if tipo_val == "ingreso" else TipoTransaccion.EGRESO,
-                        monto=monto_decimal,
-                        moneda=moneda_val,
-                        fecha=fecha_obj,
-                        descripcion=entidades.get("descripcion") or _nombre_corto_categoria(entidades.get("categoria")),
-                        metodo_pago=deducir_metodo_pago(billetera, tarjeta_id=None),
-                        billetera_id=billetera_id,
-                        categoria_id=categoria_id,
-                        subcategoria_id=subcategoria_id,
-                        origen=OrigenTransaccion.IA_WPP,
-                        estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-                        es_recurrente=False,
-                        es_cuota_hija=False,
-                        es_padre_cuotas=False
-                    )
-                    db.add(transaccion)
-
-                    # Actualizar saldo de la billetera
-                    if transaccion.tipo == TipoTransaccion.INGRESO:
-                        billetera.saldo_actual += monto_decimal
-                    else:
-                        billetera.saldo_actual -= monto_decimal
-
-                    # Crear transacciones adicionales si existen
-                    adicionales = entidades.get("transacciones_adicionales")
-                    descartadas = []
-                    if adicionales and isinstance(adicionales, list):
-                        for adic in adicionales:
-                            if isinstance(adic, dict):
-                                _, motivo = _crear_transaccion_adicional(adic, usuario.id, billetera, db)
-                                if motivo:
-                                    descartadas.append(motivo)
-                    if descartadas:
-                        resultado_ia["operaciones_descartadas"] = descartadas
-
-                    # Marcar la conversación previa como ejecutada
-                    conv_previa.accion_ejecutada = str(transaccion.id)
-                    emitir_evento_actualizacion(db, usuario.id, "transacciones")
-                    emitir_evento_actualizacion(db, usuario.id, "billeteras")
-                    db.flush()
-                    return str(transaccion.id)
-
             return None
 
         elif intent == "cancelar":
@@ -1768,40 +2124,152 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 enviar_whatsapp(from_number, msg_cancel)
                 return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
-            # 3. Chequeo determinístico de confirmación sin propuesta pendiente (Tarea 5.2 / 7.3)
-            if _es_confirmacion(mensaje_texto):
-                propuesta_existente = _buscar_propuesta_pendiente(usuario.id, db)
-                limite_tiempo_tx = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
-                tx_existente = db.execute(
-                    select(Transaccion.id)
-                    .where(
-                        Transaccion.usuario_id == usuario.id,
-                        Transaccion.origen == OrigenTransaccion.IA_WPP,
-                        Transaccion.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE,
-                        Transaccion.fecha_creacion >= limite_tiempo_tx,
-                    )
-                ).scalars().first()
+            # 3. Chequeo de respuesta a verificación de duplicado o lote pendiente
+            conv_activa_dup = _buscar_slot_filling_activo(usuario.id, db)
+            if conv_activa_dup and conv_activa_dup.slot_filling_estado:
+                tipo_flujo = conv_activa_dup.slot_filling_estado.get("tipo_flujo")
+                if tipo_flujo == "verificacion_duplicado":
+                    if _es_confirmacion_nuevo_movimiento(mensaje_texto):
+                        entidades_pend = conv_activa_dup.slot_filling_estado
+                        tx_creada, msg_confirm = _registrar_movimiento_directo(usuario, entidades_pend, db)
+                        conv_activa_dup.slot_filling_activo = False
+                        conv_activa_dup.accion_ejecutada = str(tx_creada.id) if tx_creada else "error"
+                        nueva_conv = ConversacionWpp(
+                            usuario_id=usuario.id,
+                            wamid=wamid,
+                            mensaje_usuario=mensaje_texto,
+                            tipo_mensaje=TipoMensajeWpp.TEXTO,
+                            transcripcion=None,
+                            mensaje_bot=msg_confirm,
+                            intent_detectado="confirmar_duplicado",
+                            entidades=entidades_pend,
+                            accion_ejecutada=str(tx_creada.id) if tx_creada else None,
+                            confianza=Decimal("1.000"),
+                            slot_filling_activo=False,
+                            slot_filling_estado=None,
+                        )
+                        db.add(nueva_conv)
+                        db.commit()
+                        enviar_whatsapp(from_number, msg_confirm)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
-                if not propuesta_existente and not tx_existente:
-                    msg_sin_pend = "No tenés ninguna operación pendiente para confirmar."
-                    nueva_conv = ConversacionWpp(
-                        usuario_id=usuario.id,
-                        wamid=wamid,
-                        mensaje_usuario=mensaje_texto,
-                        tipo_mensaje=TipoMensajeWpp.TEXTO,
-                        transcripcion=None,
-                        mensaje_bot=msg_sin_pend,
-                        intent_detectado="confirmar",
-                        entidades={},
-                        accion_ejecutada=None,
-                        confianza=Decimal("1.000"),
-                        slot_filling_activo=False,
-                        slot_filling_estado=None,
-                    )
-                    db.add(nueva_conv)
-                    db.commit()
-                    enviar_whatsapp(from_number, msg_sin_pend)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    elif _es_descarte_duplicado(mensaje_texto):
+                        conv_activa_dup.slot_filling_activo = False
+                        conv_activa_dup.accion_ejecutada = "descartado_por_duplicado"
+                        msg_desc = "Listo, no anoto nada."
+                        nueva_conv = ConversacionWpp(
+                            usuario_id=usuario.id,
+                            wamid=wamid,
+                            mensaje_usuario=mensaje_texto,
+                            tipo_mensaje=TipoMensajeWpp.TEXTO,
+                            transcripcion=None,
+                            mensaje_bot=msg_desc,
+                            intent_detectado="cancelar",
+                            entidades={},
+                            accion_ejecutada="descartado_por_duplicado",
+                            confianza=Decimal("1.000"),
+                            slot_filling_activo=False,
+                            slot_filling_estado=None,
+                        )
+                        db.add(nueva_conv)
+                        db.commit()
+                        enviar_whatsapp(from_number, msg_desc)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                elif tipo_flujo == "verificacion_lote_duplicado":
+                    if _es_confirmacion_lote_ambos(mensaje_texto):
+                        entidades_pend = conv_activa_dup.slot_filling_estado
+                        tx_creada, msg_confirm = _registrar_movimiento_directo(usuario, entidades_pend, db, registrar_adicionales=True)
+                        conv_activa_dup.slot_filling_activo = False
+                        conv_activa_dup.accion_ejecutada = str(tx_creada.id) if tx_creada else "error"
+                        nueva_conv = ConversacionWpp(
+                            usuario_id=usuario.id,
+                            wamid=wamid,
+                            mensaje_usuario=mensaje_texto,
+                            tipo_mensaje=TipoMensajeWpp.TEXTO,
+                            transcripcion=None,
+                            mensaje_bot=msg_confirm,
+                            intent_detectado="confirmar_lote",
+                            entidades=entidades_pend,
+                            accion_ejecutada=str(tx_creada.id) if tx_creada else None,
+                            confianza=Decimal("1.000"),
+                            slot_filling_activo=False,
+                            slot_filling_estado=None,
+                        )
+                        db.add(nueva_conv)
+                        db.commit()
+                        enviar_whatsapp(from_number, msg_confirm)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                    elif _es_confirmacion_lote_uno_solo(mensaje_texto):
+                        entidades_pend = dict(conv_activa_dup.slot_filling_estado)
+                        entidades_pend["transacciones_adicionales"] = []
+                        tx_creada, msg_confirm = _registrar_movimiento_directo(usuario, entidades_pend, db, registrar_adicionales=False)
+                        conv_activa_dup.slot_filling_activo = False
+                        conv_activa_dup.accion_ejecutada = str(tx_creada.id) if tx_creada else "error"
+                        nueva_conv = ConversacionWpp(
+                            usuario_id=usuario.id,
+                            wamid=wamid,
+                            mensaje_usuario=mensaje_texto,
+                            tipo_mensaje=TipoMensajeWpp.TEXTO,
+                            transcripcion=None,
+                            mensaje_bot=msg_confirm,
+                            intent_detectado="confirmar_lote_uno",
+                            entidades=entidades_pend,
+                            accion_ejecutada=str(tx_creada.id) if tx_creada else None,
+                            confianza=Decimal("1.000"),
+                            slot_filling_activo=False,
+                            slot_filling_estado=None,
+                        )
+                        db.add(nueva_conv)
+                        db.commit()
+                        enviar_whatsapp(from_number, msg_confirm)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                    elif _es_descarte_duplicado(mensaje_texto):
+                        conv_activa_dup.slot_filling_activo = False
+                        conv_activa_dup.accion_ejecutada = "descartado_por_duplicado"
+                        msg_desc = "Listo, no anoto nada."
+                        nueva_conv = ConversacionWpp(
+                            usuario_id=usuario.id,
+                            wamid=wamid,
+                            mensaje_usuario=mensaje_texto,
+                            tipo_mensaje=TipoMensajeWpp.TEXTO,
+                            transcripcion=None,
+                            mensaje_bot=msg_desc,
+                            intent_detectado="cancelar",
+                            entidades={},
+                            accion_ejecutada="descartado_por_duplicado",
+                            confianza=Decimal("1.000"),
+                            slot_filling_activo=False,
+                            slot_filling_estado=None,
+                        )
+                        db.add(nueva_conv)
+                        db.commit()
+                        enviar_whatsapp(from_number, msg_desc)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            # 4. Chequeo determinístico de confirmación con bloqueo de concurrencia (Tarea 2)
+            if _es_confirmacion(mensaje_texto):
+                tx_creada, msg_confirm, ya_conf = _confirmar_propuesta_transaccion(usuario, db)
+                nueva_conv = ConversacionWpp(
+                    usuario_id=usuario.id,
+                    wamid=wamid,
+                    mensaje_usuario=mensaje_texto,
+                    tipo_mensaje=TipoMensajeWpp.TEXTO,
+                    transcripcion=None,
+                    mensaje_bot=msg_confirm,
+                    intent_detectado="confirmar",
+                    entidades={},
+                    accion_ejecutada=str(tx_creada.id) if tx_creada else ("ya_confirmada" if ya_conf else None),
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=False,
+                    slot_filling_estado=None,
+                )
+                db.add(nueva_conv)
+                db.commit()
+                enviar_whatsapp(from_number, msg_confirm)
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
             # 4. Buscar conversación activa previa con slot_filling dentro del plazo (Tarea 2)
             conv_activa = _buscar_slot_filling_activo(usuario.id, db)
@@ -1902,9 +2370,38 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     conv_activa.slot_filling_activo = False
                     db.flush()
 
-                    propuesta_msg = _construir_propuesta_transaccion(
-                        estado_previo_bill, billetera_elegida.nombre, se_asumio_principal=False
+                    # Chequeo de duplicados antes de construir propuesta
+                    cat_id_chk, _ = _resolver_categoria_y_subcategoria(
+                        estado_previo_bill.get("categoria"), usuario.id, db, tipo=tipo_mov
                     )
+                    tx_dup = _buscar_transaccion_duplicada_reciente(
+                        usuario.id,
+                        Decimal(str(estado_previo_bill["monto"])),
+                        moneda_sel,
+                        cat_id_chk,
+                        db,
+                    )
+                    if tx_dup:
+                        hora_dup = tx_dup.fecha_creacion.astimezone(TZ_ARGENTINA).strftime("%H:%M")
+                        cat_disp = _nombre_corto_categoria(estado_previo_bill.get("categoria"))
+                        m_fmt = formatear_monto(float(estado_previo_bill["monto"]), moneda_sel)
+                        propuesta_msg = f"A las {hora_dup} ya registraste {m_fmt} en {cat_disp}. ¿Es un movimiento nuevo o se te repitió?"
+                        intent_val = "verificar_duplicado"
+                        slot_activo_val = True
+                        slot_estado_val = {
+                            **estado_previo_bill,
+                            "tipo_flujo": "verificacion_duplicado",
+                            "billetera_resuelta_nombre": billetera_elegida.nombre,
+                            "hora_anterior": hora_dup,
+                            "datos_faltantes": ["confirmar_duplicado"],
+                        }
+                    else:
+                        propuesta_msg = _construir_propuesta_transaccion(
+                            estado_previo_bill, billetera_elegida.nombre, se_asumio_principal=False
+                        )
+                        intent_val = "registrar_transaccion"
+                        slot_activo_val = False
+                        slot_estado_val = None
 
                     nueva_conv = ConversacionWpp(
                         usuario_id=usuario.id,
@@ -1913,12 +2410,12 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         tipo_mensaje=TipoMensajeWpp.TEXTO,
                         transcripcion=None,
                         mensaje_bot=propuesta_msg,
-                        intent_detectado="registrar_transaccion",
+                        intent_detectado=intent_val,
                         entidades=estado_previo_bill,
                         accion_ejecutada=None,
                         confianza=Decimal("1.000"),
-                        slot_filling_activo=False,
-                        slot_filling_estado=None,
+                        slot_filling_activo=slot_activo_val,
+                        slot_filling_estado=slot_estado_val,
                     )
                     db.add(nueva_conv)
                     db.commit()
@@ -2104,15 +2601,52 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                                 d for d in entidades_actuales["datos_faltantes"]
                                 if d not in ("billetera_origen", "billetera_destino", "billetera")
                             ]
-                        resultado_ia["intent"] = "registrar_transaccion"
-                        resultado_ia["slot_filling"] = False
-                        resultado_ia["confianza"] = max(float(resultado_ia.get("confianza", 0.0)), 0.85)
-                        resultado_ia["_asumio_principal"] = se_asumio_principal
-                        resultado_ia["respuesta_usuario"] = _construir_propuesta_transaccion(
-                            entidades_actuales,
-                            billetera_final.nombre,
-                            se_asumio_principal=se_asumio_principal,
-                        )
+
+                        # Chequeo 1: Lote con movimientos idénticos (Tarea 4)
+                        hay_lote_dup, m_dup, mon_dup, cat_dup = _detectar_duplicados_en_lote(entidades_actuales)
+                        if hay_lote_dup:
+                            m_dup_fmt = formatear_monto(float(m_dup), Moneda.USD if mon_dup == "USD" else Moneda.ARS)
+                            pregunta_lote = f"Mandaste 2 movimientos iguales de {m_dup_fmt} en {cat_dup} desde {billetera_final.nombre}. ¿Son dos gastos distintos o se te repitió?"
+                            resultado_ia["intent"] = "verificar_lote_duplicado"
+                            resultado_ia["slot_filling"] = True
+                            resultado_ia["datos_faltantes"] = ["confirmar_lote"]
+                            entidades_actuales["tipo_flujo"] = "verificacion_lote_duplicado"
+                            entidades_actuales["billetera_resuelta_nombre"] = billetera_final.nombre
+                            resultado_ia["respuesta_usuario"] = pregunta_lote
+                        else:
+                            # Chequeo 2: Transacción previa en la última hora (Tarea 3)
+                            cat_id_chk, _ = _resolver_categoria_y_subcategoria(
+                                entidades_actuales.get("categoria"), usuario.id, db, tipo=tipo_act
+                            )
+                            tx_dup = _buscar_transaccion_duplicada_reciente(
+                                usuario_id=usuario.id,
+                                monto=Decimal(str(entidades_actuales["monto"])),
+                                moneda=moneda_sol,
+                                categoria_id=cat_id_chk,
+                                db=db,
+                            )
+                            if tx_dup:
+                                hora_dup = tx_dup.fecha_creacion.astimezone(TZ_ARGENTINA).strftime("%H:%M")
+                                cat_disp = _nombre_corto_categoria(entidades_actuales.get("categoria"))
+                                m_fmt = formatear_monto(float(entidades_actuales["monto"]), moneda_sol)
+                                pregunta_dup = f"A las {hora_dup} ya registraste {m_fmt} en {cat_disp}. ¿Es un movimiento nuevo o se te repitió?"
+                                resultado_ia["intent"] = "verificar_duplicado"
+                                resultado_ia["slot_filling"] = True
+                                resultado_ia["datos_faltantes"] = ["confirmar_duplicado"]
+                                entidades_actuales["tipo_flujo"] = "verificacion_duplicado"
+                                entidades_actuales["billetera_resuelta_nombre"] = billetera_final.nombre
+                                entidades_actuales["hora_anterior"] = hora_dup
+                                resultado_ia["respuesta_usuario"] = pregunta_dup
+                            else:
+                                resultado_ia["intent"] = "registrar_transaccion"
+                                resultado_ia["slot_filling"] = False
+                                resultado_ia["confianza"] = max(float(resultado_ia.get("confianza", 0.0)), 0.85)
+                                resultado_ia["_asumio_principal"] = se_asumio_principal
+                                resultado_ia["respuesta_usuario"] = _construir_propuesta_transaccion(
+                                    entidades_actuales,
+                                    billetera_final.nombre,
+                                    se_asumio_principal=se_asumio_principal,
+                                )
 
             # Enriquecer respuesta con datos reales para intents de consulta
             intent_detectado = resultado_ia.get("intent")
@@ -2226,8 +2760,10 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
 
             transaccion_id = _ejecutar_intent(resultado_ia, usuario, db)
 
-            # Si se confirmó o creó una transacción, sobreescribir la respuesta con confirmación real
-            if transaccion_id and intent_detectado == "confirmar":
+            # Si se confirmó o intentó confirmar, usar el mensaje del gestor de confirmación
+            if intent_detectado == "confirmar" and resultado_ia.get("_mensaje_confirmacion_directo"):
+                resultado_ia["respuesta_usuario"] = resultado_ia["_mensaje_confirmacion_directo"]
+            elif transaccion_id and intent_detectado == "confirmar":
                 try:
                     tx = db.execute(
                         select(Transaccion).where(Transaccion.id == UUID(transaccion_id))
