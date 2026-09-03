@@ -16,6 +16,7 @@ from app.models.transaccion import Transaccion
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.cuota import Cuota
 from app.models.saldo_arrastrado import SaldoArrastradoTarjeta, PagoSaldoArrastrado, EstadoSaldoArrastrado
+from app.models.usuario import Moneda
 from app.schemas.tarjeta_credito import (
     TarjetaCreditoCreate, 
     TarjetaCreditoUpdate,
@@ -23,7 +24,11 @@ from app.schemas.tarjeta_credito import (
     CuotaResumen,
     ResumenFuturo,
     ResumenAnterior,
-    ItemSaldoArrastrado
+    ItemSaldoArrastrado,
+    BloqueResumenMoneda,
+    SimularPesificacionResponse,
+    CuotaPendienteOtraMoneda,
+    ResultadoPagoTarjeta
 )
 
 MESES_ES = {
@@ -143,6 +148,7 @@ def crear_tarjeta(db: Session, usuario_id: UUID, data: TarjetaCreditoCreate) -> 
         dia_vencimiento=data.dia_vencimiento,
         limite_credito=data.limite_credito,
         moneda=data.moneda,
+        percepcion_moneda_extranjera=data.percepcion_moneda_extranjera,
         color=data.color
     )
     
@@ -430,10 +436,23 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
                     "total": Decimal(0),
                     "moneda": tarjeta.moneda.value,
                     "pagado": True,
-                    "cuotas": []
+                    "cuotas": [],
+                    "total_ars": Decimal(0),
+                    "total_usd": Decimal(0),
+                    "totales_por_moneda": {"ARS": Decimal(0), "USD": Decimal(0)}
                 }
             
-            anteriores_dict[venc_key]["total"] += cuota_data.monto
+            # Tarea 2.3: Separar por moneda en resúmenes anteriores (no mezclar ARS + USD)
+            if cuota_data.moneda == "ARS":
+                anteriores_dict[venc_key]["total_ars"] += cuota_data.monto
+                anteriores_dict[venc_key]["totales_por_moneda"]["ARS"] += cuota_data.monto
+            elif cuota_data.moneda == "USD":
+                anteriores_dict[venc_key]["total_usd"] += cuota_data.monto
+                anteriores_dict[venc_key]["totales_por_moneda"]["USD"] += cuota_data.monto
+
+            if cuota_data.moneda == tarjeta.moneda.value:
+                anteriores_dict[venc_key]["total"] += cuota_data.monto
+
             if not cuota.pagada:
                 anteriores_dict[venc_key]["pagado"] = False
             anteriores_dict[venc_key]["cuotas"].append(cuota_data)
@@ -465,9 +484,23 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
                     "total": Decimal(0),
                     "moneda": tarjeta.moneda.value,
                     "cantidad_cuotas": 0,
-                    "cuotas": []
+                    "cuotas": [],
+                    "total_ars": Decimal(0),
+                    "total_usd": Decimal(0),
+                    "totales_por_moneda": {"ARS": Decimal(0), "USD": Decimal(0)}
                 }
-            futuros_dict[mes_key]["total"] += cuota_data.monto
+
+            # Tarea 2.3: Separar por moneda en resúmenes futuros
+            if cuota_data.moneda == "ARS":
+                futuros_dict[mes_key]["total_ars"] += cuota_data.monto
+                futuros_dict[mes_key]["totales_por_moneda"]["ARS"] += cuota_data.monto
+            elif cuota_data.moneda == "USD":
+                futuros_dict[mes_key]["total_usd"] += cuota_data.monto
+                futuros_dict[mes_key]["totales_por_moneda"]["USD"] += cuota_data.monto
+
+            if cuota_data.moneda == tarjeta.moneda.value:
+                futuros_dict[mes_key]["total"] += cuota_data.monto
+
             futuros_dict[mes_key]["cantidad_cuotas"] += 1
             futuros_dict[mes_key]["cuotas"].append(cuota_data)
 
@@ -493,14 +526,23 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
     # Totales originales completos (incluyendo pagadas) para referencia en UI
     total_orig_actual = sum(c.monto for c in cuotas_actual if c.moneda == tarjeta_moneda_str)
     total_orig_sig = sum(c.monto for c in cuotas_siguiente if c.moneda == tarjeta_moneda_str)
+    total_orig_actual_ars = sum(c.monto for c in cuotas_actual if c.moneda == "ARS")
+    total_orig_actual_usd = sum(c.monto for c in cuotas_actual if c.moneda == "USD")
 
-    # Deuda vencida impaga de resúmenes anteriores en la moneda de la tarjeta (cuotas impagas)
-    total_deuda_vencida_anterior = sum(
+    # Deuda vencida impaga de resúmenes anteriores desglosada por moneda
+    total_deuda_vencida_ars = sum(
         c.monto
         for ra in resumenes_anteriores
         for c in ra.cuotas
-        if not c.pagada and c.moneda == tarjeta_moneda_str
+        if not c.pagada and c.moneda == "ARS"
     )
+    total_deuda_vencida_usd = sum(
+        c.monto
+        for ra in resumenes_anteriores
+        for c in ra.cuotas
+        if not c.pagada and c.moneda == "USD"
+    )
+    total_deuda_vencida_anterior = total_deuda_vencida_ars if tarjeta_moneda_str == "ARS" else total_deuda_vencida_usd
 
     # Saldos arrastrados (financiados) activos de resúmenes anteriores o del actual
     if _tabla_saldo_arrastrado_existe(db):
@@ -518,46 +560,122 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
         saldos_activos = []
 
     items_saldo: list[ItemSaldoArrastrado] = []
-    total_saldo_arrastrado = Decimal("0")
+    items_saldo_ars: list[ItemSaldoArrastrado] = []
+    items_saldo_usd: list[ItemSaldoArrastrado] = []
+    total_saldo_arrastrado_ars = Decimal("0")
+    total_saldo_arrastrado_usd = Decimal("0")
+
     for s in saldos_activos:
         s_moneda = s.moneda.value if hasattr(s.moneda, "value") else str(s.moneda)
-        if s_moneda == tarjeta_moneda_str:
-            total_saldo_arrastrado += s.monto_restante
-            f_orig = s.fecha_vencimiento_resumen
-            nombre_mes = MESES_ES.get(f_orig.strftime("%B"), f_orig.strftime("%B"))
-            items_saldo.append(ItemSaldoArrastrado(
-                id=s.id,
-                fecha_vencimiento_origen=f_orig,
-                monto_inicial=s.monto_inicial,
-                monto_restante=s.monto_restante,
-                moneda=s_moneda,
-                descripcion=f"Saldo financiado resumen {nombre_mes} {f_orig.year}"
-            ))
+        f_orig = s.fecha_vencimiento_resumen
+        nombre_mes = MESES_ES.get(f_orig.strftime("%B"), f_orig.strftime("%B"))
+        item = ItemSaldoArrastrado(
+            id=s.id,
+            fecha_vencimiento_origen=f_orig,
+            monto_inicial=s.monto_inicial,
+            monto_restante=s.monto_restante,
+            moneda=s_moneda,
+            descripcion=f"Saldo financiado resumen {nombre_mes} {f_orig.year}"
+        )
+        if s_moneda == "ARS":
+            total_saldo_arrastrado_ars += s.monto_restante
+            items_saldo_ars.append(item)
+        elif s_moneda == "USD":
+            total_saldo_arrastrado_usd += s.monto_restante
+            items_saldo_usd.append(item)
 
-    # Total a pagar del resumen actual: cuotas del período + deuda vencida anterior + saldo arrastrado impago
-    total_a_pagar_resumen_actual = total_actual_tarjeta + total_deuda_vencida_anterior + total_saldo_arrastrado
+        if s_moneda == tarjeta_moneda_str:
+            items_saldo.append(item)
+
+    total_saldo_arrastrado = total_saldo_arrastrado_ars if tarjeta_moneda_str == "ARS" else total_saldo_arrastrado_usd
+
+    # Total a pagar del resumen actual por moneda
+    total_a_pagar_ars = total_actual_ars + total_deuda_vencida_ars + total_saldo_arrastrado_ars
+    total_a_pagar_usd = total_actual_usd + total_deuda_vencida_usd + total_saldo_arrastrado_usd
+    total_a_pagar_resumen_actual = total_a_pagar_ars if tarjeta_moneda_str == "ARS" else total_a_pagar_usd
 
     # Fórmula estándar de pago mínimo estimado (Tarea 4.1):
     # 10% consumos de un pago y del saldo financiado, 60% cuotas que vencen en el período,
     # y 100% de cargos, comisiones, intereses y deuda vencida impaga.
-    minimo_calculado = Decimal("0")
+    minimo_ars = Decimal("0")
     for c in cuotas_actual:
-        if c.moneda == tarjeta_moneda_str and not c.pagada:
+        if c.moneda == "ARS" and not c.pagada:
             sub_nom = (c.subcategoria_nombre or "").lower()
             desc_nom = (c.descripcion or "").lower()
             es_cargo_interes = any(k in sub_nom or k in desc_nom for k in ["interes", "comision", "cargo", "impuesto"])
             if es_cargo_interes:
-                minimo_calculado += c.monto
+                minimo_ars += c.monto
             elif c.total_cuotas == 1:
-                minimo_calculado += c.monto * Decimal("0.10")
+                minimo_ars += c.monto * Decimal("0.10")
             else:
-                minimo_calculado += c.monto * Decimal("0.60")
+                minimo_ars += c.monto * Decimal("0.60")
+    minimo_ars += total_saldo_arrastrado_ars * Decimal("0.10")
+    minimo_ars += total_deuda_vencida_ars
+    minimo_ars = min(minimo_ars, total_a_pagar_ars)
+    minimo_ars = max(Decimal("0"), minimo_ars).quantize(Decimal("0.01"))
 
-    minimo_calculado += total_saldo_arrastrado * Decimal("0.10")
-    minimo_calculado += total_deuda_vencida_anterior
+    minimo_usd = Decimal("0")
+    for c in cuotas_actual:
+        if c.moneda == "USD" and not c.pagada:
+            sub_nom = (c.subcategoria_nombre or "").lower()
+            desc_nom = (c.descripcion or "").lower()
+            es_cargo_interes = any(k in sub_nom or k in desc_nom for k in ["interes", "comision", "cargo", "impuesto"])
+            if es_cargo_interes:
+                minimo_usd += c.monto
+            elif c.total_cuotas == 1:
+                minimo_usd += c.monto * Decimal("0.10")
+            else:
+                minimo_usd += c.monto * Decimal("0.60")
+    minimo_usd += total_saldo_arrastrado_usd * Decimal("0.10")
+    minimo_usd += total_deuda_vencida_usd
+    minimo_usd = min(minimo_usd, total_a_pagar_usd)
+    minimo_usd = max(Decimal("0"), minimo_usd).quantize(Decimal("0.01"))
 
-    pago_minimo_estimado = min(minimo_calculado, total_a_pagar_resumen_actual)
-    pago_minimo_estimado = max(Decimal("0"), pago_minimo_estimado).quantize(Decimal("0.01"))
+    pago_minimo_estimado = minimo_ars if tarjeta_moneda_str == "ARS" else minimo_usd
+
+    # Tarea 2.5: Cotización oficial y percepción para el total en dólares
+    from app.services.dolar_service import obtener_cotizacion_por_fecha
+    cot_oficial_obj = obtener_cotizacion_por_fecha(db, "oficial", fecha_cierre_proximo)
+    cot_oficial_val = None
+    if cot_oficial_obj:
+        cot_oficial_val = Decimal(str(cot_oficial_obj.promedio or cot_oficial_obj.venta))
+
+    porcentaje_percep = getattr(tarjeta, "percepcion_moneda_extranjera", Decimal("30.00"))
+    total_estimado_ars = None
+    if cot_oficial_val is not None and total_a_pagar_usd > Decimal("0"):
+        monto_conv = total_a_pagar_usd * cot_oficial_val
+        monto_percep = monto_conv * (porcentaje_percep / Decimal("100"))
+        total_estimado_ars = (monto_conv + monto_percep).quantize(Decimal("0.01"))
+
+    bloque_ars = BloqueResumenMoneda(
+        moneda="ARS",
+        total_cuotas_periodo=total_actual_ars,
+        total_original_periodo=total_orig_actual_ars,
+        total_deuda_vencida_anterior=total_deuda_vencida_ars,
+        saldo_arrastrado_impago=total_saldo_arrastrado_ars,
+        items_saldo_arrastrado=items_saldo_ars,
+        total_a_pagar=total_a_pagar_ars,
+        pago_minimo_estimado=minimo_ars
+    )
+
+    bloque_usd = BloqueResumenMoneda(
+        moneda="USD",
+        total_cuotas_periodo=total_actual_usd,
+        total_original_periodo=total_orig_actual_usd,
+        total_deuda_vencida_anterior=total_deuda_vencida_usd,
+        saldo_arrastrado_impago=total_saldo_arrastrado_usd,
+        items_saldo_arrastrado=items_saldo_usd,
+        total_a_pagar=total_a_pagar_usd,
+        pago_minimo_estimado=minimo_usd,
+        cotizacion_oficial_estimada=cot_oficial_val,
+        porcentaje_percepcion=porcentaje_percep,
+        total_estimado_ars=total_estimado_ars
+    )
+
+    totales_por_moneda = {
+        "ARS": bloque_ars,
+        "USD": bloque_usd
+    }
 
     return ResumenTarjeta(
         fecha_cierre_proximo=fecha_cierre_proximo,
@@ -579,6 +697,7 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
         total_siguiente_usd=total_sig_usd,
         totales_moneda_actual={"ARS": total_actual_ars, "USD": total_actual_usd},
         totales_moneda_siguiente={"ARS": total_sig_ars, "USD": total_sig_usd},
+        totales_por_moneda=totales_por_moneda,
         cuotas_resumen_actual=cuotas_actual,
         cuotas_resumen_siguiente=cuotas_siguiente,
         resumenes_futuros=resumenes_futuros,
@@ -592,7 +711,13 @@ def pagar_resumen_tarjeta(
     tarjeta_id: UUID,
     fecha_pago: date | None = None,
     fecha_resumen: date | None = None,
-    monto: Decimal | None = None
+    monto: Decimal | None = None,
+    moneda: Moneda | None = None,
+    billetera_id: UUID | None = None,
+    pesificar: bool = False,
+    cotizacion_personalizada: Decimal | None = None,
+    monto_pesos_personalizado: Decimal | None = None,
+    monto_percepcion_personalizado: Decimal | None = None
 ) -> Transaccion:
     # 1. Obtener la tarjeta
     tarjeta = db.query(TarjetaCredito).filter(
@@ -602,6 +727,9 @@ def pagar_resumen_tarjeta(
     if not tarjeta:
         raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
 
+    # Tarea 3.1: Moneda a pagar (por defecto la moneda de la tarjeta si no viene)
+    moneda_a_pagar = moneda or tarjeta.moneda
+    moneda_str = moneda_a_pagar.value if hasattr(moneda_a_pagar, "value") else str(moneda_a_pagar)
     tarjeta_moneda_str = tarjeta.moneda.value if hasattr(tarjeta.moneda, "value") else str(tarjeta.moneda)
 
     # 2. Calcular la fecha de vencimiento límite a pagar
@@ -611,13 +739,14 @@ def pagar_resumen_tarjeta(
         hoy = hoy_argentina()
         limite_vencimiento = calcular_fecha_vencimiento_proximo(tarjeta, hoy)
 
-    # 2.1 Buscar saldos arrastrados activos de la tarjeta hasta este vencimiento
+    # 2.1 Buscar saldos arrastrados activos de la tarjeta de ESTA moneda hasta este vencimiento (Tarea 3.2 y 3.9)
     if _tabla_saldo_arrastrado_existe(db):
         saldos_activos = (
             db.query(SaldoArrastradoTarjeta)
             .filter(
                 SaldoArrastradoTarjeta.tarjeta_id == tarjeta.id,
                 SaldoArrastradoTarjeta.estado == EstadoSaldoArrastrado.ACTIVO,
+                SaldoArrastradoTarjeta.moneda == moneda_a_pagar,
                 SaldoArrastradoTarjeta.fecha_vencimiento_resumen <= limite_vencimiento
             )
             .order_by(SaldoArrastradoTarjeta.fecha_vencimiento_resumen.asc())
@@ -651,7 +780,7 @@ def pagar_resumen_tarjeta(
         c_moneda = (
             c.grupo.moneda.value if hasattr(c.grupo.moneda, "value") else str(c.grupo.moneda)
         ) if (c.grupo and c.grupo.moneda) else tarjeta_moneda_str
-        if c_moneda == tarjeta_moneda_str:
+        if c_moneda == moneda_str:
             cuotas_coincidentes.append(c)
         else:
             cuotas_otra_moneda.append(c)
@@ -663,8 +792,7 @@ def pagar_resumen_tarjeta(
     monto_saldos_anteriores = sum(s.monto_restante for s in saldos_anteriores_activos)
     monto_saldo_actual = saldo_actual_activo.monto_restante if saldo_actual_activo else Decimal("0")
 
-    # Si ya existe un saldo arrastrado activo para este mismo vencimiento (segundo pago parcial sobre el mismo resumen):
-    # El total a pagar es el saldo restante de este resumen más cualquier saldo anterior.
+    # Si ya existe un saldo arrastrado activo para este mismo vencimiento y moneda
     if saldo_actual_activo:
         total_a_pagar = monto_saldo_actual + monto_saldos_anteriores
     else:
@@ -674,7 +802,7 @@ def pagar_resumen_tarjeta(
         if cuotas_otra_moneda:
             raise HTTPException(
                 status_code=400,
-                detail=f"No hay cuotas pendientes en la moneda de la tarjeta ({tarjeta_moneda_str}). Quedan {len(cuotas_otra_moneda)} cuota(s) en otra moneda que no pueden pagarse con esta tarjeta/billetera."
+                detail=f"No hay deuda pendiente en {moneda_str}. Quedan {len(cuotas_otra_moneda)} cuota(s) en otra moneda pendientes de pago."
             )
         raise HTTPException(status_code=400, detail="Este resumen ya está completamente saldado.")
 
@@ -691,15 +819,105 @@ def pagar_resumen_tarjeta(
     else:
         monto_pago = total_a_pagar
 
-    # 5. Detectar si ya existe una transacción de pago para este resumen y vencimiento
+    # 5. Determinar billetera de débito, modo pesificación y cotización (Tareas 3.3, 3.4, 3.5, 3.6, 3.7)
+    es_pesificacion = False
+    monto_convertido = None
+    monto_percepcion = None
+    cotizacion = None
+    tipo_dolar = None
+
+    if moneda_a_pagar == Moneda.ARS:
+        billetera_pago_id = billetera_id or tarjeta.billetera_id
+        billetera_pago = db.get(Billetera, billetera_pago_id)
+        if not billetera_pago:
+            raise HTTPException(status_code=404, detail="No encontramos la billetera seleccionada.")
+        if billetera_pago.moneda != Moneda.ARS:
+            raise HTTPException(status_code=400, detail="Para pagar en pesos debés seleccionar una billetera en pesos.")
+        monto_debito = monto_pago
+        moneda_debito = Moneda.ARS
+    elif moneda_a_pagar == Moneda.USD:
+        if not pesificar:
+            # Opción a): Pagar en dólares desde billetera USD
+            if not billetera_id:
+                billeteras_usd = db.query(Billetera).filter(
+                    Billetera.usuario_id == usuario_id,
+                    Billetera.moneda == Moneda.USD,
+                    Billetera.estado == "activa"
+                ).all()
+                if not billeteras_usd:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No tenés ninguna billetera en dólares disponible para realizar este pago. Podés pesificar los consumos en dólares para pagarlos en pesos desde tu cuenta bancaria."
+                    )
+                billetera_pago = billeteras_usd[0]
+            else:
+                billetera_pago = db.query(Billetera).filter(
+                    Billetera.id == billetera_id,
+                    Billetera.usuario_id == usuario_id
+                ).first()
+                if not billetera_pago:
+                    raise HTTPException(status_code=404, detail="No encontramos la billetera seleccionada.")
+                if billetera_pago.moneda != Moneda.USD:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="La billetera seleccionada debe ser en dólares (USD). Si preferís pagar en pesos, elegí la opción de pesificar."
+                    )
+            billetera_pago_id = billetera_pago.id
+            monto_debito = monto_pago
+            moneda_debito = Moneda.USD
+        else:
+            # Opción b): Pesificar consumos en USD
+            es_pesificacion = True
+            billetera_pago_id = billetera_id or tarjeta.billetera_id
+            billetera_pago = db.get(Billetera, billetera_pago_id)
+            if not billetera_pago:
+                raise HTTPException(status_code=404, detail="No encontramos la billetera seleccionada.")
+            if billetera_pago.moneda != Moneda.ARS:
+                raise HTTPException(status_code=400, detail="Para pesificar consumos en dólares debés usar una billetera en pesos.")
+
+            # Cotización dólar oficial de la fecha de cierre (Tarea 3.5 y 3.6)
+            from app.services.dolar_service import obtener_cotizacion_por_fecha
+            fecha_cierre = calcular_fecha_cierre_de_vencimiento(
+                limite_vencimiento, tarjeta.dia_cierre, tarjeta.dia_vencimiento
+            )
+
+            if cotizacion_personalizada is not None and cotizacion_personalizada > Decimal("0"):
+                cotizacion = cotizacion_personalizada
+            else:
+                cot_obj = obtener_cotizacion_por_fecha(db, "oficial", fecha_cierre)
+                if not cot_obj:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"No hay cotización oficial disponible para la fecha de cierre ({fecha_cierre}). Por favor, ingresá la cotización manualmente."
+                    )
+                cotizacion = Decimal(str(cot_obj.promedio or cot_obj.venta))
+
+            tipo_dolar = "oficial"
+            if monto_pesos_personalizado is not None and monto_pesos_personalizado > Decimal("0"):
+                monto_convertido = monto_pesos_personalizado
+            else:
+                monto_convertido = (monto_pago * cotizacion).quantize(Decimal("0.01"))
+
+            porcentaje_percep = getattr(tarjeta, "percepcion_moneda_extranjera", Decimal("30.00"))
+            if monto_percepcion_personalizado is not None and monto_percepcion_personalizado >= Decimal("0"):
+                monto_percepcion = monto_percepcion_personalizado
+            else:
+                monto_percepcion = (monto_convertido * (porcentaje_percep / Decimal("100"))).quantize(Decimal("0.01"))
+
+            monto_debito = monto_convertido
+            moneda_debito = Moneda.ARS
+
+    # 6. Detectar si ya existe una transacción de pago PENDIENTE para este resumen, vencimiento y moneda
     from app.models.transaccion import TipoTransaccion, MetodoPago, OrigenTransaccion, EstadoVerificacionTransaccion
     tx_existente = db.query(Transaccion).filter(
         Transaccion.tarjeta_id == tarjeta.id,
         Transaccion.pago_resumen_vencimiento == limite_vencimiento,
-        Transaccion.tipo == TipoTransaccion.EGRESO
+        Transaccion.tipo == TipoTransaccion.EGRESO,
+        Transaccion.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE,
+        Transaccion.moneda == moneda_debito
     ).first()
 
-    # 6. Buscar la categoría "Banco" y subcategoría "Tarjeta de crédito"
+    # 7. Buscar categoría "Banco" y subcategorías
     from app.models.categoria import Categoria
     from app.models.subcategoria import Subcategoria
 
@@ -715,15 +933,27 @@ def pagar_resumen_tarjeta(
     from app.services import transaccion_service
 
     ultimos_4 = tarjeta.nombre[-4:] if len(tarjeta.nombre) >= 4 else tarjeta.nombre
-    descripcion_pago = f"Pago resumen {ultimos_4}"
+    if es_pesificacion:
+        descripcion_pago = f"Pago resumen {ultimos_4} (USD {monto_pago:,.2f})"
+    elif moneda_a_pagar == Moneda.USD:
+        descripcion_pago = f"Pago resumen {ultimos_4} (USD)"
+    else:
+        descripcion_pago = f"Pago resumen {ultimos_4}"
+
     fecha_transaccion = fecha_pago or transaccion_service._hoy_argentina()
 
     try:
         # Reutilizar transacción pendiente si existe
-        if tx_existente and tx_existente.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE:
+        if tx_existente:
             tx = tx_existente
-            tx.monto = monto_pago
+            tx.monto = monto_debito
             tx.fecha = fecha_transaccion
+            tx.descripcion = descripcion_pago
+            if es_pesificacion:
+                tx.monto_original = monto_pago
+                tx.moneda_original = Moneda.USD
+                tx.cotizacion_aplicada = cotizacion
+                tx.tipo_dolar_usado = tipo_dolar
             if categoria:
                 tx.categoria_id = categoria.id
             if subcategoria:
@@ -732,32 +962,73 @@ def pagar_resumen_tarjeta(
 
             billetera = db.get(Billetera, tx.billetera_id)
             if billetera:
-                billetera.saldo_actual -= monto_pago
+                billetera.saldo_actual -= monto_debito
         else:
             tx_data = TransaccionCreate(
                 tipo=TipoTransaccion.EGRESO,
-                monto=monto_pago,
-                moneda=tarjeta.moneda,
+                monto=monto_debito,
+                moneda=moneda_debito,
                 fecha=fecha_transaccion,
                 descripcion=descripcion_pago,
                 categoria_id=categoria.id if categoria else None,
                 subcategoria_id=subcategoria.id if subcategoria else None,
                 metodo_pago=MetodoPago.DEBITO,
-                billetera_id=tarjeta.billetera_id,
+                billetera_id=billetera_pago_id,
                 tarjeta_id=tarjeta.id,
                 es_recurrente=False,
                 es_cuota_hija=False,
                 es_padre_cuotas=False,
                 origen=OrigenTransaccion.MANUAL,
                 estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-                pago_resumen_vencimiento=limite_vencimiento
+                pago_resumen_vencimiento=limite_vencimiento,
+                monto_original=monto_pago if es_pesificacion else None,
+                moneda_original=Moneda.USD if es_pesificacion else None,
+                cotizacion_aplicada=cotizacion if es_pesificacion else None,
+                tipo_dolar_usado=tipo_dolar if es_pesificacion else None
             )
             tx = transaccion_service.crear_transaccion(db, usuario_id, tx_data, commit=False)
 
-        # 7. Aplicación del pago
+        # Tarea 4: Registrar percepción impositiva como gasto propio si hubo pesificación
+        tx_percepcion = None
+        if es_pesificacion and monto_percepcion is not None and monto_percepcion > Decimal("0"):
+            subcat_impuestos = db.query(Subcategoria).filter(
+                Subcategoria.categoria_id == categoria.id,
+                Subcategoria.nombre.ilike("Impuestos")
+            ).first() if categoria else None
+
+            if not subcat_impuestos and categoria:
+                subcat_impuestos = Subcategoria(
+                    categoria_id=categoria.id,
+                    nombre="Impuestos",
+                    orden=10
+                )
+                db.add(subcat_impuestos)
+                db.flush()
+
+            tx_percepcion_data = TransaccionCreate(
+                tipo=TipoTransaccion.EGRESO,
+                monto=monto_percepcion,
+                moneda=Moneda.ARS,
+                fecha=fecha_transaccion,
+                descripcion=f"Percepción compras exterior ({porcentaje_percep:.0f}%) - Pago resumen {ultimos_4}",
+                categoria_id=categoria.id if categoria else None,
+                subcategoria_id=subcat_impuestos.id if subcat_impuestos else (subcategoria.id if subcategoria else None),
+                metodo_pago=MetodoPago.DEBITO,
+                billetera_id=billetera_pago_id,
+                tarjeta_id=tarjeta.id,
+                es_recurrente=False,
+                es_cuota_hija=False,
+                es_padre_cuotas=False,
+                origen=OrigenTransaccion.MANUAL,
+                estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+                pago_origen_id=tx.id
+            )
+            tx_percepcion = transaccion_service.crear_transaccion(db, usuario_id, tx_percepcion_data, commit=False)
+
+        # 8. Aplicación del pago sobre cuotas y saldos de la moneda pagada (en monto_pago original)
         monto_disponible = monto_pago
 
-        # 7.1 Orden bancario (Tarea 3.4): El saldo arrastrado anterior se cancela primero
+        # 8.1 Orden bancario: El saldo arrastrado anterior de esta moneda se cancela primero
         for s_ant in saldos_anteriores_activos:
             if monto_disponible <= Decimal("0"):
                 break
@@ -778,8 +1049,7 @@ def pagar_resumen_tarjeta(
         saldo_restante_final = None
 
         if saldo_actual_activo:
-            # Tarea 2.6: Segundo pago parcial sobre el mismo resumen
-            # Reduce el saldo arrastrado actual en vez de volver a marcar cuotas
+            # Segundo pago parcial sobre el mismo resumen
             if monto_disponible > Decimal("0"):
                 aplicar = min(monto_disponible, saldo_actual_activo.monto_restante)
                 saldo_actual_activo.monto_restante -= aplicar
@@ -795,13 +1065,13 @@ def pagar_resumen_tarjeta(
                 monto_disponible -= aplicar
             saldo_restante_final = saldo_actual_activo.monto_restante
         else:
-            # Primer pago sobre este resumen:
-            # Todas las cuotas del período se marcan como saldadas y se vinculan a la transacción
+            # Primer pago sobre este resumen para esta moneda:
             for cuota in cuotas_coincidentes:
                 cuota.pagada = True
                 cuota.transaccion_pago_id = tx.id
 
-            # Si el pago no cubrió el total a pagar, lo que queda impago se registra como saldo arrastrado
+            # Tarea 3.8 y 3.9: Si el pago no cubrió el total a pagar, lo que queda impago se registra
+            # como saldo arrastrado conservando la moneda del resumen (un saldo en dólares se arrastra en dólares).
             if monto_pago < total_a_pagar:
                 saldo_generado = total_a_pagar - monto_pago
                 saldo_restante_final = saldo_generado
@@ -810,7 +1080,7 @@ def pagar_resumen_tarjeta(
                     fecha_vencimiento_resumen=limite_vencimiento,
                     monto_inicial=saldo_generado,
                     monto_restante=saldo_generado,
-                    moneda=tarjeta.moneda,
+                    moneda=moneda_a_pagar,
                     estado=EstadoSaldoArrastrado.ACTIVO,
                     transaccion_origen_id=tx.id
                 )
@@ -819,7 +1089,6 @@ def pagar_resumen_tarjeta(
         db.commit()
         db.refresh(tx)
 
-        from app.schemas.tarjeta_credito import CuotaPendienteOtraMoneda
         pendientes = []
         for c in cuotas_otra_moneda:
             c_moneda = (
@@ -839,20 +1108,97 @@ def pagar_resumen_tarjeta(
 
         mensaje_adv = None
         if cuotas_otra_moneda:
-            mensaje_adv = f"Se pagaron {len(cuotas_coincidentes)} cuota(s) en {tarjeta_moneda_str}. Quedaron {len(cuotas_otra_moneda)} cuota(s) en otra moneda pendientes de pago porque la tarjeta es en {tarjeta_moneda_str}."
+            otra_m_nombre = "dólares" if moneda_str == "ARS" else "pesos"
+            mensaje_adv = f"Se pagaron {len(cuotas_coincidentes)} cuota(s) en {moneda_str}. Quedaron {len(cuotas_otra_moneda)} cuota(s) en {otra_m_nombre} pendientes de pago."
 
         setattr(tx, "cuotas_pagadas_count", len(cuotas_coincidentes))
-        setattr(tx, "moneda_pagada", tarjeta_moneda_str)
+        setattr(tx, "moneda_pagada", moneda_str)
         setattr(tx, "monto_pagado", monto_pago)
         setattr(tx, "saldo_arrastrado_generado", saldo_generado)
         setattr(tx, "saldo_arrastrado_restante", saldo_restante_final)
         setattr(tx, "cuotas_pendientes_otra_moneda", pendientes)
         setattr(tx, "mensaje_advertencia", mensaje_adv)
+
+        if es_pesificacion:
+            setattr(tx, "transaccion_percepcion_id", tx_percepcion.id if tx_percepcion else None)
+            setattr(tx, "monto_percepcion", monto_percepcion)
+            setattr(tx, "monto_convertido_pesos", monto_convertido)
+            setattr(tx, "monto_pesos_total", (monto_convertido + monto_percepcion) if monto_percepcion else monto_convertido)
+            setattr(tx, "monto_original", monto_pago)
+            setattr(tx, "moneda_original", moneda_str)
+            setattr(tx, "cotizacion_aplicada", cotizacion)
+            setattr(tx, "tipo_dolar_usado", tipo_dolar)
+
         return tx
     except Exception:
         db.rollback()
         logger.exception("Error al pagar resumen de tarjeta %s", tarjeta_id)
         raise
+
+
+def simular_pesificacion(
+    db: Session,
+    usuario_id: UUID,
+    tarjeta_id: UUID,
+    fecha_resumen: date | None = None,
+    monto_usd: Decimal | None = None
+) -> SimularPesificacionResponse:
+    """
+    Simula la pesificación del saldo en dólares de un resumen de tarjeta.
+    Propone la cotización oficial de cierre, calcula monto convertido, percepción y total en pesos.
+    """
+    tarjeta = db.query(TarjetaCredito).filter(
+        TarjetaCredito.id == tarjeta_id,
+        TarjetaCredito.usuario_id == usuario_id
+    ).first()
+    if not tarjeta:
+        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
+
+    if fecha_resumen is not None:
+        limite_vencimiento = fecha_resumen
+    else:
+        hoy = hoy_argentina()
+        limite_vencimiento = calcular_fecha_vencimiento_proximo(tarjeta, hoy)
+
+    fecha_cierre = calcular_fecha_cierre_de_vencimiento(
+        limite_vencimiento, tarjeta.dia_cierre, tarjeta.dia_vencimiento
+    )
+
+    if monto_usd is None or monto_usd <= Decimal("0"):
+        res = calcular_resumen_actual(db, tarjeta)
+        bloque_usd = res.totales_por_moneda.get("USD")
+        monto_usd = bloque_usd.total_a_pagar if bloque_usd else Decimal("0")
+
+    porcentaje_percep = getattr(tarjeta, "percepcion_moneda_extranjera", Decimal("30.00"))
+
+    from app.services.dolar_service import obtener_cotizacion_por_fecha
+    cot_obj = obtener_cotizacion_por_fecha(db, "oficial", fecha_cierre)
+    if cot_obj is not None:
+        cot_val = Decimal(str(cot_obj.promedio or cot_obj.venta))
+        monto_conv = (monto_usd * cot_val).quantize(Decimal("0.01"))
+        monto_percep = (monto_conv * (porcentaje_percep / Decimal("100"))).quantize(Decimal("0.01"))
+        total_ars = monto_conv + monto_percep
+        return SimularPesificacionResponse(
+            fecha_cierre=fecha_cierre,
+            monto_usd=monto_usd,
+            cotizacion_oficial=cot_val,
+            cotizacion_disponible=True,
+            porcentaje_percepcion=porcentaje_percep,
+            monto_convertido_ars=monto_conv,
+            monto_percepcion_ars=monto_percep,
+            total_estimado_ars=total_ars
+        )
+    else:
+        return SimularPesificacionResponse(
+            fecha_cierre=fecha_cierre,
+            monto_usd=monto_usd,
+            cotizacion_oficial=None,
+            cotizacion_disponible=False,
+            porcentaje_percepcion=porcentaje_percep,
+            monto_convertido_ars=None,
+            monto_percepcion_ars=None,
+            total_estimado_ars=None
+        )
 
 
 def obtener_detalle_resumen_vencimiento(

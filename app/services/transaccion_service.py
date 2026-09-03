@@ -197,7 +197,11 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, co
     if not billetera:
         raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
 
-    _validar_moneda_coincide(data.moneda, billetera)
+    # Tarea 1.4: La validación de moneda contra la billetera sigue vigente para todo lo que
+    # NO sea un consumo con tarjeta de crédito (en crédito la plata no sale de la billetera en el momento).
+    es_consumo_credito = bool(data.tarjeta_id is not None and (data.metodo_pago == MetodoPago.CREDITO or data.metodo_pago is None))
+    if not es_consumo_credito:
+        _validar_moneda_coincide(data.moneda, billetera)
 
     # 2. Validar categoría obligatoria
     if not data.categoria_id:
@@ -667,6 +671,20 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID):
     for c in cuotas_revertir:
         c.pagada = False
         c.transaccion_pago_id = None
+
+    # 4. Reversión de percepción impositiva vinculada a este pago (Etapa 3C - Tarea 4.2 y 4.3)
+    percepciones_vinculadas = (
+        db.query(Transaccion)
+        .filter(Transaccion.pago_origen_id == transaccion.id)
+        .all()
+    )
+    for p in percepciones_vinculadas:
+        if _afecta_saldo(p):
+            b_p = db.get(Billetera, p.billetera_id)
+            if b_p:
+                b_p.saldo_actual += p.monto
+        presupuesto_service.registrar_impacto_presupuesto(db, p, revertir=True)
+        db.delete(p)
 
     # Transaccion normal
     if _afecta_saldo(transaccion):

@@ -55,6 +55,12 @@ class TransaccionBase(BaseModel):
     origen: OrigenTransaccion = OrigenTransaccion.MANUAL
     estado_verificacion: EstadoVerificacionTransaccion | None = None
     pago_resumen_vencimiento: date | None = None
+    # Campos de trazabilidad de conversión multimoneda (Etapa 2 y 3C)
+    monto_original: Decimal | None = None
+    moneda_original: Moneda | None = None
+    cotizacion_aplicada: Decimal | None = None
+    tipo_dolar_usado: str | None = None
+    pago_origen_id: UUID | None = None
 
 
 class TransaccionCreate(TransaccionBase):
@@ -81,6 +87,7 @@ class TransaccionUpdate(BaseModel):
     es_recurrente: bool | None = None
     estado_verificacion: EstadoVerificacionTransaccion | None = None
     pago_resumen_vencimiento: date | None = None
+    pago_origen_id: UUID | None = None
 
     @field_validator("descripcion")
     @classmethod

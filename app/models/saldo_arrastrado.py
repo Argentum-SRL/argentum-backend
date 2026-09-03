@@ -57,9 +57,10 @@ class SaldoArrastradoTarjeta(Base):
     __tablename__ = "saldos_arrastrados_tarjeta"
     __table_args__ = (
         Index(
-            "uq_saldos_arrastrados_tarjeta_resumen_activo",
+            "uq_saldos_arrastrados_tarjeta_resumen_moneda_activo",
             "tarjeta_id",
             "fecha_vencimiento_resumen",
+            "moneda",
             unique=True,
             postgresql_where=text("estado = 'activo'")
         ),

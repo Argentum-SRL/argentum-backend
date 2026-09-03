@@ -291,6 +291,10 @@ def importar_transacciones_resumen(
                 if cruda.moneda == "USD":
                     if b_usd_id:
                         billetera_actual_id = b_usd_id
+                    elif t_id:
+                        # Etapa 3C (Tarea 5.1): La tarjeta acepta consumos en dólares independientemente
+                        # de si el usuario posee billetera en dólares. Se vincula a la billetera de la tarjeta.
+                        billetera_actual_id = tarjeta.billetera_id if (tarjeta and tarjeta.billetera_id) else b_id
                     else:
                         sin_billetera_usd_count += 1
                         continue
