@@ -164,7 +164,47 @@ def obtener_cotizacion_por_fecha(
         tipo_normalizado,
         fecha_consulta,
     )
-    return None
+def obtener_cotizaciones_por_fechas(
+    db: Session,
+    tipo: str,
+    fechas: set[date] | list[date],
+) -> dict[date, CotizacionDolar | None]:
+    """
+    Devuelve las cotizaciones del dólar para un tipo y múltiples fechas en una sola consulta SQL.
+
+    Para cada fecha solicitada:
+    1. Si existe cotización exacta para la fecha, se usa esa.
+    2. Si no existe cotización exacta, se utiliza la anterior más cercana.
+    3. Si no existe ninguna anterior, el valor mapeado es None.
+    """
+    if not fechas:
+        return {}
+
+    tipo_normalizado = _normalizar_nombre(tipo)
+    max_fecha = max(fechas)
+
+    stmt = (
+        select(CotizacionDolar)
+        .where(
+            CotizacionDolar.tipo == tipo_normalizado,
+            CotizacionDolar.fecha <= max_fecha,
+        )
+        .order_by(desc(CotizacionDolar.fecha))
+    )
+    cotizaciones = db.execute(stmt).scalars().all()
+
+    resultado: dict[date, CotizacionDolar | None] = {}
+    for f in fechas:
+        match = next((c for c in cotizaciones if c.fecha <= f), None)
+        resultado[f] = match
+        if match is None:
+            logger.warning(
+                "No se encontró cotización histórica para tipo '%s' en fecha %s ni anteriores en la tabla.",
+                tipo_normalizado,
+                f,
+            )
+
+    return resultado
 
 
 def guardar_cotizaciones_del_dia(db: Session) -> list[CotizacionDolar]:

@@ -135,6 +135,24 @@ class PeriodoPresupuestoResponse(BaseModel):
     superado: bool
     porcentaje_usado: float
     dias_restantes: int
+    monto_propio: Decimal = Decimal("0")
+    monto_convertido: Decimal = Decimal("0")
+    monto_sin_cotizacion: Decimal = Decimal("0")
+    moneda_sin_cotizacion: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def extract_breakdown(cls, data):
+        if isinstance(data, dict):
+            mu = data.get("monto_usado")
+            if hasattr(mu, "monto_propio"):
+                data.setdefault("monto_propio", mu.monto_propio)
+                data.setdefault("monto_convertido", mu.monto_convertido)
+                data.setdefault("monto_sin_cotizacion", mu.monto_sin_cotizacion)
+                data.setdefault("moneda_sin_cotizacion", mu.moneda_sin_cotizacion)
+            elif "monto_propio" not in data and mu is not None:
+                data.setdefault("monto_propio", mu)
+        return data
 
 
 class PresupuestoResponse(BaseModel):

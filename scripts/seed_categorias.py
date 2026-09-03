@@ -99,7 +99,8 @@ CATEGORIAS_SEED = [
             "Impuesto al cheque / movimientos",
             "Préstamos",
             "Intereses pagados",
-            "Tarjeta de crédito"
+            "Tarjeta de crédito",
+            "Impuestos"
         ]
     },
     # ── INGRESOS (4) ─────────────────────────────────────
@@ -149,7 +150,7 @@ CATEGORIAS_SEED = [
 
 def seed_categorias(db: Session):
     """
-    Seed idempotente de las 16 categorías canónicas y sus 58 subcategorías oficiales.
+    Seed idempotente de las 16 categorías canónicas y sus 59 subcategorías oficiales.
     - Idempotencia estricta en categorías: busca por (nombre, tipo).
     - Idempotencia estricta en subcategorías: busca por (categoria_id, nombre).
     - Actualiza icono y color si ya existían, y actualiza el campo orden según la lista canónica.
