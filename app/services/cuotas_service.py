@@ -73,6 +73,8 @@ def crear_cuotas(
             billetera_id=transaccion_padre.billetera_id,
             tarjeta_id=transaccion_padre.tarjeta_id, # Link a la tarjeta si existe
             es_cuota_hija=True,
+            es_recurrente=transaccion_padre.es_recurrente,
+            suscripcion_id=transaccion_padre.suscripcion_id,
             grupo_cuotas_id=grupo.id,
             origen=transaccion_padre.origen,
             estado_verificacion=EstadoVerificacionTransaccion.PENDIENTE

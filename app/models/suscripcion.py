@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from app.models.billetera import Billetera
     from app.models.tarjeta_credito import TarjetaCredito
     from app.models.historial_suscripcion import HistorialSuscripcion
+    from app.models.transaccion import Transaccion
 
 from app.core.database import Base
 
@@ -77,6 +78,7 @@ class Suscripcion(Base):
     subcategoria: Mapped[Subcategoria | None] = relationship("Subcategoria")
     billetera: Mapped[Billetera | None] = relationship("Billetera")
     tarjeta: Mapped[TarjetaCredito | None] = relationship("TarjetaCredito")
+    transacciones: Mapped[list["Transaccion"]] = relationship("Transaccion", back_populates="suscripcion")
 
     def __repr__(self) -> str:
         return (
