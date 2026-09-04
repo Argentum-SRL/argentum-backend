@@ -4,8 +4,11 @@ app/services/ai_service.py — Servicio central de IA para Argentum.
 """
 import json
 import logging
+import re
+import time
 from datetime import date
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from openai import OpenAI
@@ -31,6 +34,62 @@ _openai_client: OpenAI | None = None
 
 def _get_client() -> OpenAI:
     return get_openai_client()
+
+
+def extraer_concepto_mensaje(mensaje: str | None, tipo: str = "egreso") -> str:
+    """Extrae el concepto limpio del mensaje del usuario cuando no hay descripción provista."""
+    if not mensaje:
+        return "Ingreso" if tipo == "ingreso" else "Gasto"
+
+    texto = mensaje.strip()
+    # Quitar signos monetarios y números
+    texto = re.sub(r"[\$€£]\s*[\d\.,]+", "", texto)
+    texto = re.sub(r"\b\d+[\.,]?\d*\b", "", texto)
+    texto = re.sub(r"\b(k|lucas?|palos?)\b", "", texto, flags=re.IGNORECASE)
+
+    # Quitar menciones de billeteras y métodos de pago
+    billeteras_regex = (
+        r"\b(mercado\s*pago|mercadopago|mp|merca|galicia|gali|santander|rio|"
+        r"bbva|frances|lemon|ual[aá]|efectivo|cash|brubank|bru|tarjeta|d[eé]bito|cr[eé]dito)\b"
+    )
+    texto = re.sub(billeteras_regex, "", texto, flags=re.IGNORECASE)
+
+    # Quitar frases y verbos iniciales de gasto / ingreso
+    verbos_regex = (
+        r"^\s*(gast[eé]|pagu[eé]|compr[eé]|anot[aá]|anotar|met[ií]|pus[eé]|"
+        r"transfer[ií]|cobr[eé]|ingres[eé]|se\s+me\s+fue|me\s+entraron|me\s+entr[oó]|me\s+depositaron)\b"
+    )
+    texto = re.sub(verbos_regex, "", texto, flags=re.IGNORECASE)
+
+    # Quitar conectores iniciales comunes
+    conectores_regex = r"^\s*(en|de|con|el|la|los|las|un|una|unos|unas|por|para|desde|a)\s+"
+    while re.search(conectores_regex, texto, flags=re.IGNORECASE):
+        texto = re.sub(conectores_regex, "", texto, flags=re.IGNORECASE)
+
+    # Limpiar signos de puntuación sobrantes
+    texto = re.sub(r"[^\w\s\.,áéíóúñÁÉÍÓÚÑ-]", "", texto).strip(" ,.-")
+    texto = re.sub(r"\s+", " ", texto).strip()
+
+    if len(texto) >= 2:
+        return texto[:60].strip().capitalize()
+    return "Ingreso" if tipo == "ingreso" else "Gasto"
+
+
+def sanitizar_descripcion(desc: str | None, mensaje_original: str | None = None, tipo: str = "egreso") -> str:
+    """Sanitiza la descripción limitando longitud y evitando nombres genéricos de categoría."""
+    if desc and isinstance(desc, str):
+        limpio = desc.strip(" \"'.,")
+        # Quitar montos tipo $5000 o 5000 que se hayan colado
+        limpio = re.sub(r"[\$€£]\s*[\d\.,]+", "", limpio)
+        limpio = re.sub(r"\b\d+[\.,]?\d*\b", "", limpio)
+        limpio = re.sub(r"\s+", " ", limpio).strip(" ,.-")
+        if len(limpio) >= 2:
+            return limpio[:60].strip().capitalize()
+
+    if mensaje_original:
+        return extraer_concepto_mensaje(mensaje_original, tipo=tipo)
+
+    return ""
 
 
 SYSTEM_PROMPT = """Sos el asistente financiero de Argentum, una app de finanzas personales para Argentina.
@@ -65,16 +124,119 @@ TONO — ejemplos de lo que NUNCA decís:
 
 JERGA ARGENTINA QUE DEBÉS ENTENDER:
 - 5k / 10k = 5.000 / 10.000
-- 1 luca = 1.000
-- 1 palo = 1.000.000
+- 1 luca = 1.000, lucas = miles
+- 1 palo = 1.000.000, palos = millones
 - mp / mercadopago / merca = Mercado Pago
 - bru = Brubank
 - gali / galicia = Banco Galicia
+- santander / rio = Santander
+- bbva / frances = BBVA
+- lemon = Lemon
+- uala / ualá = Ualá
 - verdes / usd / dólares / dolar = USD
 - me entró / me depositaron / cobré = ingreso
-- me cobraron / saqué / pagué / gasté / puse = egreso
+- me cobraron / saqué / pagué / gasté / puse / gatillé / garpé = egreso
 - cuotas / en X cuotas = compra en cuotas
 - efectivo / cash / plata física = Efectivo ARS
+
+MAPEO DE JERGA ARGENTINA A CATEGORÍAS Y SUBCATEGORÍAS REALES (OBLIGATORIO):
+Al categorizar, debés mapear la jerga rioplatense al nombre exacto de la categoría o subcategoría más específica del listado (sin prefijo "Categoría > "):
+- Kiosco y golosinas -> Kiosco:
+  kiosco, maxikiosco, golosinas, caramelos, alfajor, alfajores, chocolates, chicles, galletitas, pastillas, puchos, cigarrillos, tabaco, kiosquero.
+- Verdulería -> Verdulería:
+  verdulería, verduleria, verduras, verdura, frutas, fruta, papas, tomate, cebolla, palta, lechuga, bananas, manzanas, verdulero.
+- Carnicería -> Carnicería:
+  carnicería, carniceria, carne, asado, asadito, vacío, vacio, colita de cuadril, entraña, matambre, milanesas, milas, picada (de carne), pollo, granja, achuras, chorizo, choris, mollejas, carnicero.
+- Supermercado, almacén, chino -> Supermercado:
+  supermercado, súper, super, coto, carrefour, dia, jumbo, changomas, vea, almacén, almacen, chino, súper chino, despensa, fiambrería, fiambreria, fiambre, quesos, embutidos, minimarket, compras del mes.
+- Panadería y facturas -> Panadería:
+  panadería, panaderia, pan, facturas, medialunas, chipá, panadero.
+- Delivery y pedidos de comida -> Delivery:
+  delivery, pedidos ya, pedidosya, peya, rappi, pedir comida, pedí pizza, empanadas, sushi, hamburguesa, hamburguesas, lomito, lomo.
+- Restaurantes y comer afuera -> Restaurantes:
+  restaurante, resto, bodegón, bodegon, pizzería, pizzeria, parrilla, cenar afuera, cena, almuerzo en restaurante, tenedor libre.
+- Café y cafeterías -> Cafetería:
+  café, cafe, cafecito, cafetería, cafeteria, starbucks, cortado, merienda, desayunar afuera, café con leche, tostadas, cafetín.
+- Bar, boliche y birra -> Salidas:
+  bar, boliche, birra, birras, cerveza, cervecería, cerveceria, trago, tragos, previas, joda, joda bailable, entradas al cine, cine, recital, teatro, show, fiesta, after, after office.
+- Gimnasio y deportes -> Deportes y gimnasio:
+  gimnasio, gym, crossfit, pilates, yoga, natación, natacion, fútbol, futbol 5, pádel, padel, tenis, cancha, entrenamiento, cuota del club.
+- Streaming, videojuegos y hobbies -> Hobbies y juegos:
+  streaming, netflix, spotify, hbo, disney, prime video, crunchyroll, youtube premium, videojuegos, playstation, steam, juegos, hobby.
+- Viajes y turismo -> Viajes:
+  viaje, pasajes, vuelo, hotel, hostel, excursión, vacaciones, escapada.
+- Remis, taxi y apps de viaje -> Taxi / Apps:
+  remis, remís, taxi, tacho, uber, cabify, didi, viajecito en app.
+- Colectivo, subte, tren y bondi -> Transporte público (NUNCA "Transporte"):
+  bondi, bondis, colectivo, colectivos, micro, micros, cole, subte, tren, sube, carga de sube, tarjeta sube, boleto.
+- Nafta, combustible y carga -> Combustible:
+  nafta, combustible, cargar nafta, nafta súper, infinia, premium, v-power, gasoil, diesel, gnc, tanque lleno, cargar gas, ypf, shell, axion, puma.
+- Peaje -> Peajes:
+  peaje, peajes, telepase, pase.
+- Estacionamiento -> Estacionamiento:
+  estacionamiento, cochera, parquímetro, parquimetro, garaje, trapito, cuidar el auto, parking.
+- Mantenimiento y seguro del auto -> Mantenimiento y seguro del auto:
+  mecánico, mecanico, taller, service, cambio de aceite, cubiertas, gomería, gomeria, repuestos del auto, vtv, seguro del auto.
+- Farmacia y remedios -> Farmacia:
+  farmacia, remedios, medicamentos, pastillas, aspirinas, ibuprofeno, farmacity, protector solar, curitas, gasas, botiquín.
+- Obra social y prepaga -> Obra social / Prepaga (NUNCA "Salud"):
+  prepaga, obra social, osde, swiss medical, galeno, sancor salud, ioma, osecac, medifé, cuota médica, cuota de la prepaga.
+- Médico y consultas -> Médico / Consulta:
+  médico, medico, doctor, consulta médica, pediatra, clínico, especialista, copago.
+- Dentista -> Odontología:
+  dentista, odontólogo, odontologo, muela, brackets, ortodoncia.
+- Peluquería y cuidado personal -> Cuidado personal:
+  peluquería, peluqueria, corte de pelo, me corté el pelo, me corte el pelo, corté el pelo, corte el pelo, pelo, peluquero, barbero, barbería, barberia, depilación, depilacion, uñas, manicura, pedicura, spa, perfume, cosméticos, cremas, shampoo, estética, estetica, pelu.
+- Mascotas y veterinaria -> Mascotas:
+  veterinaria, vet, alimento de perro, alimento de gato, piedras sanitarias, pipeta, vacunas de la mascota, paseador de perros.
+- Regalos -> Regalos:
+  regalo, obsequio, presente, regalo de cumpleaños.
+- Alquiler y expensas -> Alquiler / Expensas:
+  alquiler, pago de alquiler, pagar el alquiler, expensas, expensas del depto, administración.
+- Luz, gas y agua -> Luz / Gas / Agua:
+  luz, edenor, edesur, epec, boleta de luz, metrogas, naturgy, camuzzi, boleta de gas, aysa, aguas cordobesas.
+- Impuestos -> Impuestos:
+  abl, rentas, municipalidad, arba, agip, monotributo.
+- Celular -> Celular:
+  celular, abono celular, recarga celular, personal, claro, movistar, pack de datos, línea telefónica.
+- Internet y cable -> Internet y cable:
+  internet, wifi, cable, fibertel, telecentro, flow, claro fibra, movistar fibra, iplan.
+- Ropa e indumentaria -> Ropa:
+  ropa, remera, remeras, pantalón, pantalon, jean, jeans, campera, buzo, buzos, camisa, medias, ropa interior, pilcha, pilchas, sweater.
+- Calzado y zapatillas -> Calzado:
+  calzado, zapatillas, zapas, zapatos, botas, sandalias, ojotas, pantuflas, crocs.
+- Útiles y librería -> Materiales y libros:
+  útiles, utiles, librería, libreria, fotocopias, cuadernos, hojas, biromes, lapiceras, carpetas, libros escolares.
+- Cuotas educativas -> Cuotas:
+  cuota del colegio, cuota de la facultad, cuota de la universidad, mensualidad escolar.
+- Tarjeta de crédito -> Tarjeta de crédito:
+  tarjeta, resumen de la tarjeta, pago de tarjeta, visa, mastercard, amex, resumen mensual, cuotas de la tarjeta.
+- Sueldo -> Sueldo (NUNCA "Empleo"):
+  sueldo, quincena, cobré el mes, cobré el sueldo, cobré sueldo, salario, recibo de haberes. Toda mención de sueldo o cobrar sueldo SIEMPRE tiene categoria "Sueldo", jamás la categoría padre "Empleo".
+- Aguinaldo -> Aguinaldo:
+  aguinaldo, sac, medio aguinaldo.
+- Bono y horas extras -> Bonos y horas extras:
+  bono, premio, gratificación, horas extras, plus, comisión.
+- Freelance y changas -> Honorarios:
+  changa, changas, laburo particular, trabajo freelance, honorarios, facturé un trabajo, cliente particular.
+
+CONCEPTOS RAROS O DESCONOCIDOS:
+Si el usuario menciona un gasto o ingreso con un concepto que no conocés, no existe o no tiene sentido financiero conocido (ej: 'un coso cuántico intergaláctico', 'la mar en coche', 'sarasa', etc.), clasificalo SIEMPRE como "Otros". NUNCA inventes categorías o subcategorías inexistentes.
+
+DESCRIPCIÓN DE LA TRANSACCIÓN:
+- El campo 'descripcion' debe ser SIEMPRE lo que dijo el usuario, limpio y en pocas palabras, sin el monto ni la billetera.
+- Ejemplos:
+  * Si el usuario dice 'gasté 5000 en golosinas' -> descripcion: 'Golosinas'
+  * Si dice 'gasté 8000 en la verdulería' -> descripcion: 'Verdulería'
+  * Si dice 'cargué 30000 de nafta' -> descripcion: 'Nafta'
+  * Si dice 'pagué 12000 de la prepaga' -> descripcion: 'Prepaga'
+  * Si dice 'gasté 4000 en el bondi' -> descripcion: 'Bondi'
+  * Si dice 'me corté el pelo, 15000' -> descripcion: 'Corte de pelo'
+  * Si dice 'almuerzo 4500' -> descripcion: 'Almuerzo'
+  * Si dice 'pizza con amigos 8000' -> descripcion: 'Pizza con amigos'
+  * Si dice 'cobré 800000 de sueldo' -> categoria: 'Sueldo' (NUNCA 'Empleo'), tipo: 'ingreso', descripcion: 'Sueldo'
+- NUNCA pongas el nombre genérico de la categoría si el usuario especificó otra cosa (ej: si dijo 'peluquería', poné 'Peluquería' o 'Corte de pelo', NUNCA 'Otros').
+- Si el usuario mandó un monto sin ningún concepto (ej: 'gasté 5000' o 'pagué 10000'), poné 'Gasto' o 'Ingreso' según corresponda, NUNCA el nombre de la categoría.
 
 ERRORES ORTOGRÁFICOS: ignoralos completamente y procesá el mensaje igual. El usuario puede escribir muy mal.
 
@@ -109,7 +271,7 @@ REGLAS DE CLASIFICACIÓN DE INTENTS:
 FLUJO DE REGISTRO DE TRANSACCIÓN — MUY IMPORTANTE:
 Cuando tenés todos los datos para registrar una transacción (monto + tipo + billetera):
 1. NO registres todavía
-2. Respondé con un resumen y pedí confirmación. En el mensaje al usuario, mostrá solo el nombre corto: si la categoría es "Salud > Farmacia", mostrá solo "Farmacia". Si no hay subcategoría, mostrá la categoría principal. Ejemplo: "Voy a anotar $5.000 en Farmacia desde Mercado Pago. ¿Va?"
+2. Respondé con un resumen y pedí confirmación. En el mensaje al usuario, mostrá solo el nombre corto: si la categoría es "Farmacia", mostrá "Farmacia". Ejemplo: "Voy a anotar $5.000 en Farmacia desde Mercado Pago. ¿Va?"
 3. Esperá que el usuario confirme con "sí", "dale", "ok", etc.
 4. Recién entonces el intent es "confirmar" y el backend ejecuta
 
@@ -124,9 +286,10 @@ MÚLTIPLES OPERACIONES EN UN SOLO MENSAJE:
 FLUJO DE SLOT FILLING Y CATEGORIZACIÓN AUTOMÁTICA:
 1. CATEGORIZACIÓN SIEMPRE AUTOMÁTICA (NUNCA PREGUNTAR CATEGORÍA):
    - La categoría NUNCA se pregunta al usuario bajo ninguna circunstancia.
-   - Si conocés la categoría y la subcategoría, devolvé "Categoría > Subcategoría" (ej: "Alimentación > Verdulería", "Transporte > Taxi / Apps", "Salud > Farmacia").
-   - Si conocés la categoría pero no la subcategoría, devolvé solo "Categoría" (ej: "Alimentación", "Transporte", "Restaurantes y delivery").
-   - Si el mensaje NO contiene ninguna pista (ej: monto pelado como "gasté 500", "pagué 2000", "me entraron 10000"), devolvé SIEMPRE: "Otros".
+   - REGLA DE ESPECIFICIDAD ESTRICTA: Debés devolver SIEMPRE la subcategoría más específica (ej: "Kiosco", "Verdulería", "Combustible", "Obra social / Prepaga", "Transporte público", "Cuidado personal", "Farmacia", "Supermercado", "Sueldo"). NUNCA elijas la categoría padre general ("Alimentación", "Salud", "Transporte", "Servicios", "Empleo", etc.) cuando exista una subcategoría aplicable al concepto (por ejemplo, para bondi/colectivo usá SIEMPRE "Transporte público", NUNCA "Transporte"; para sueldo usá SIEMPRE "Sueldo", NUNCA "Empleo"; para prepaga u obra social usá SIEMPRE "Obra social / Prepaga", NUNCA "Salud").
+   - NUNCA uses el formato "Categoría > Subcategoría", devolvé únicamente el nombre exacto de la subcategoría o categoría seleccionada (ej: "Verdulería", "Obra social / Prepaga", "Kiosco").
+   - Si no hay ninguna subcategoría aplicable pero sí una categoría general que aplique, usá la categoría general.
+   - Si el mensaje NO contiene ninguna pista (ej: monto pelado como "gasté 500", "pagué 2000", "me entraron 10000"), o si es un concepto desconocido o raro (ej: "un coso cuántico intergaláctico"), devolvé SIEMPRE: "Otros".
    - Nunca inventes nombres de categorías o subcategorías que no estén en la lista provista.
    - No generes NUNCA preguntas tipo "¿En qué categoría?".
 2. BILLETERA (NO ASUMIR SI HAY VARIAS):
@@ -359,6 +522,163 @@ def construir_contexto_proyeccion(usuario: Usuario, db: Session) -> dict:
         return {}
 
 
+_SCHEMA_CACHE: dict[str, Any] | None = None
+_SCHEMA_CACHE_EXPIRY: float = 0.0
+_SCHEMA_CACHE_TTL: float = 300.0  # 5 minutos
+
+
+def invalidar_cache_schema() -> None:
+    """Invalida la cache en memoria del esquema JSON estricto."""
+    global _SCHEMA_CACHE, _SCHEMA_CACHE_EXPIRY
+    _SCHEMA_CACHE = None
+    _SCHEMA_CACHE_EXPIRY = 0.0
+
+
+def obtener_categorias_permitidas(db: Session) -> list[str]:
+    """Obtiene la lista deduplicada y ordenada de categorías y subcategorías globales permitidas."""
+    from app.core.constants import CATEGORIAS_SISTEMA
+    cats_globales, subs_globales = categoria_service.obtener_categorias_globales(db)
+    permitidas: set[str] = set()
+    for cg in cats_globales:
+        nombre = cg.get("nombre")
+        if nombre and nombre not in CATEGORIAS_SISTEMA:
+            permitidas.add(nombre)
+    for sg in subs_globales:
+        nombre = sg.get("nombre")
+        if nombre:
+            permitidas.add(nombre)
+    return sorted(list(permitidas))
+
+
+def _construir_schema_estricto(db: Session) -> dict[str, Any]:
+    """
+    Construye y cachea en memoria el esquema JSON Schema estricto (strict: true)
+    para Structured Outputs de OpenAI, conteniendo el enum cerrado de categorías.
+    """
+    global _SCHEMA_CACHE, _SCHEMA_CACHE_EXPIRY
+    ahora = time.time()
+    if _SCHEMA_CACHE is not None and ahora < _SCHEMA_CACHE_EXPIRY:
+        return _SCHEMA_CACHE
+
+    categorias_enum: list[str | None] = sorted(obtener_categorias_permitidas(db))
+    categorias_enum.append(None)
+
+    intents_enum = [
+        "registrar_transaccion",
+        "consultar_saldo",
+        "consultar_resumen",
+        "consultar_presupuesto",
+        "consultar_meta",
+        "consultar_proyeccion",
+        "consultar_deuda",
+        "consultar_ahorro",
+        "transferir_fondos",
+        "deshacer",
+        "cancelar",
+        "confirmar",
+        "saludo",
+        "ayuda",
+        "desconocido",
+    ]
+
+    schema_dict = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "whatsapp_response",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "intent": {
+                        "type": "string",
+                        "enum": intents_enum,
+                    },
+                    "entidades": {
+                        "type": "object",
+                        "properties": {
+                            "monto": {"type": ["number", "null"]},
+                            "moneda": {"type": ["string", "null"], "enum": ["ARS", "USD", None]},
+                            "tipo": {"type": ["string", "null"], "enum": ["egreso", "ingreso", "transferencia", None]},
+                            "categoria": {"type": ["string", "null"], "enum": categorias_enum},
+                            "descripcion": {"type": ["string", "null"]},
+                            "billetera": {"type": ["string", "null"]},
+                            "billetera_origen": {"type": ["string", "null"]},
+                            "billetera_destino": {"type": ["string", "null"]},
+                            "cantidad_cuotas": {"type": ["integer", "null"]},
+                            "fecha": {"type": ["string", "null"]},
+                            "destinatario": {"type": ["string", "null"]},
+                            "persona": {"type": ["string", "null"]},
+                            "tasa_cambio": {"type": ["number", "null"]},
+                            "confirmado": {"type": ["boolean", "null"]},
+                            "transacciones_adicionales": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "monto": {"type": "number"},
+                                        "moneda": {"type": ["string", "null"], "enum": ["ARS", "USD", None]},
+                                        "tipo": {"type": "string", "enum": ["egreso", "ingreso"]},
+                                        "categoria": {"type": ["string", "null"], "enum": categorias_enum},
+                                        "descripcion": {"type": ["string", "null"]},
+                                        "fecha": {"type": ["string", "null"]},
+                                    },
+                                    "required": [
+                                        "monto",
+                                        "moneda",
+                                        "tipo",
+                                        "categoria",
+                                        "descripcion",
+                                        "fecha",
+                                    ],
+                                    "additionalProperties": False,
+                                },
+                            },
+                        },
+                        "required": [
+                            "monto",
+                            "moneda",
+                            "tipo",
+                            "categoria",
+                            "descripcion",
+                            "billetera",
+                            "billetera_origen",
+                            "billetera_destino",
+                            "cantidad_cuotas",
+                            "fecha",
+                            "destinatario",
+                            "persona",
+                            "tasa_cambio",
+                            "confirmado",
+                            "transacciones_adicionales",
+                        ],
+                        "additionalProperties": False,
+                    },
+                    "confianza": {"type": "number"},
+                    "slot_filling": {"type": "boolean"},
+                    "datos_faltantes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "respuesta_usuario": {"type": "string"},
+                },
+                "required": [
+                    "intent",
+                    "entidades",
+                    "confianza",
+                    "slot_filling",
+                    "datos_faltantes",
+                    "respuesta_usuario",
+                ],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+    _SCHEMA_CACHE = schema_dict
+    _SCHEMA_CACHE_EXPIRY = ahora + _SCHEMA_CACHE_TTL
+    return _SCHEMA_CACHE
+
+
 def procesar_mensaje(
     mensaje: str,
     usuario: Usuario,
@@ -429,13 +749,30 @@ def procesar_mensaje(
             logger.info(f"Enviando {len(messages_openai)} mensajes a OpenAI. Último mensaje: {messages_openai[-1]['content'][:100]}")
 
         client = _get_client()
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages_openai,
-            temperature=0.1,
-            max_tokens=800,
-            response_format={"type": "json_object"},
-        )
+        model_name = getattr(settings, "OPENAI_MODEL", "gpt-4o-mini-2024-07-18")
+        schema_format = _construir_schema_estricto(db)
+
+        # 1. Intento primario con Structured Outputs (strict: true)
+        try:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=messages_openai,
+                temperature=0.1,
+                max_tokens=800,
+                response_format=schema_format,
+            )
+        except Exception as e_strict:
+            logger.warning(
+                "Fallo en Structured Outputs OpenAI (%s). Reintentando con json_object como fallback.",
+                e_strict,
+            )
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=messages_openai,
+                temperature=0.1,
+                max_tokens=800,
+                response_format={"type": "json_object"},
+            )
 
         content = response.choices[0].message.content
         if settings.ENVIRONMENT == "production":
@@ -454,6 +791,27 @@ def procesar_mensaje(
             if field not in parsed:
                 logger.error(f"Falta el campo obligatorio '{field}' en la respuesta de OpenAI")
                 return fallback_res
+
+        # Sanitizar descripción preservando lo que el usuario expresó
+        if isinstance(parsed.get("entidades"), dict):
+            entidades_dict = parsed["entidades"]
+            desc_actual = entidades_dict.get("descripcion")
+            tipo_ent = entidades_dict.get("tipo") or "egreso"
+            if desc_actual or (parsed.get("intent") == "registrar_transaccion" and (entidades_dict.get("monto") is not None or entidades_dict.get("categoria") is not None)):
+                entidades_dict["descripcion"] = sanitizar_descripcion(
+                    desc_actual,
+                    mensaje_original=mensaje,
+                    tipo=tipo_ent,
+                )
+
+            # Sanitizar descripciones en transacciones adicionales si existen
+            if isinstance(entidades_dict.get("transacciones_adicionales"), list):
+                for tx_ad in entidades_dict["transacciones_adicionales"]:
+                    if isinstance(tx_ad, dict) and tx_ad.get("descripcion"):
+                        tx_ad["descripcion"] = sanitizar_descripcion(
+                            tx_ad["descripcion"],
+                            tipo=tx_ad.get("tipo") or "egreso",
+                        )
 
         logger.info(f"Mensaje procesado con éxito. Intent: {parsed['intent']}, Confianza: {parsed['confianza']}")
         return parsed

@@ -781,7 +781,7 @@ def _validar_item_movimiento(
     - Coincidencia de moneda con la billetera
     Retorna (item_limpio, motivo_descarte).
     """
-    desc = datos.get("descripcion") or _nombre_corto_categoria(datos.get("categoria")) or "un movimiento"
+    desc = ai_service.sanitizar_descripcion(datos.get("descripcion"), tipo="egreso") or _nombre_corto_categoria(datos.get("categoria")) or "un movimiento"
     monto_raw = datos.get("monto")
     if monto_raw is None:
         return None, f"No se pudo registrar {desc} porque no tiene un monto válido."
@@ -1247,13 +1247,20 @@ def _confirmar_propuesta_transaccion(
     )
     fecha_obj, _ = _resolver_y_validar_fecha(entidades.get("fecha"))
 
+    desc_candidata = entidades.get("descripcion")
+    desc_final = ai_service.sanitizar_descripcion(
+        desc_candidata,
+        mensaje_original=conv_previa.mensaje_usuario if conv_previa else None,
+        tipo=tipo_val,
+    )
+
     transaccion = Transaccion(
         usuario_id=usuario.id,
         tipo=TipoTransaccion.INGRESO if tipo_val == "ingreso" else TipoTransaccion.EGRESO,
         monto=monto_decimal,
         moneda=moneda_solicitada,
         fecha=fecha_obj,
-        descripcion=entidades.get("descripcion") or _nombre_corto_categoria(entidades.get("categoria")),
+        descripcion=desc_final or _nombre_corto_categoria(entidades.get("categoria")),
         metodo_pago=deducir_metodo_pago(billetera, tarjeta_id=None),
         billetera_id=billetera_id,
         categoria_id=categoria_id,
@@ -1391,13 +1398,19 @@ def _registrar_movimiento_directo(
     cat_id, subcat_id = _resolver_categoria_y_subcategoria(entidades.get("categoria"), usuario.id, db, tipo=tipo_val)
     fecha_obj = _resolver_fecha_transaccion(entidades.get("fecha"))
 
+    desc_candidata = entidades.get("descripcion")
+    desc_final = ai_service.sanitizar_descripcion(
+        desc_candidata,
+        tipo=tipo_val,
+    )
+
     tx = Transaccion(
         usuario_id=usuario.id,
         tipo=TipoTransaccion.INGRESO if tipo_val == "ingreso" else TipoTransaccion.EGRESO,
         monto=monto_decimal,
         moneda=moneda_sol,
         fecha=fecha_obj,
-        descripcion=entidades.get("descripcion") or _nombre_corto_categoria(entidades.get("categoria")),
+        descripcion=desc_final or _nombre_corto_categoria(entidades.get("categoria")),
         metodo_pago=deducir_metodo_pago(billetera, tarjeta_id=None),
         billetera_id=billetera.id,
         categoria_id=cat_id,
@@ -1663,7 +1676,7 @@ def _crear_transaccion_adicional(
     billetera: Billetera,
     db: Session,
 ) -> tuple[Transaccion | None, str | None]:
-    desc = datos.get("descripcion") or _nombre_corto_categoria(datos.get("categoria")) or "un movimiento"
+    desc = ai_service.sanitizar_descripcion(datos.get("descripcion"), tipo="egreso") or _nombre_corto_categoria(datos.get("categoria")) or "un movimiento"
     monto_raw = datos.get("monto")
     if monto_raw is None:
         return None, f"No se pudo registrar {desc} porque no tiene un monto válido."
