@@ -61,6 +61,7 @@ class TransaccionBase(BaseModel):
     cotizacion_aplicada: Decimal | None = None
     tipo_dolar_usado: str | None = None
     pago_origen_id: UUID | None = None
+    suscripcion_id: UUID | None = None
 
 
 class TransaccionCreate(TransaccionBase):
@@ -88,6 +89,7 @@ class TransaccionUpdate(BaseModel):
     estado_verificacion: EstadoVerificacionTransaccion | None = None
     pago_resumen_vencimiento: date | None = None
     pago_origen_id: UUID | None = None
+    suscripcion_id: UUID | None = None
 
     @field_validator("descripcion")
     @classmethod

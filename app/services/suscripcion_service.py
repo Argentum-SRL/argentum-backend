@@ -81,19 +81,11 @@ def crear_suscripcion(db: Session, usuario_id: UUID, data: SuscripcionCreate) ->
         bill = db.query(Billetera).filter(Billetera.id == data.billetera_id, Billetera.usuario_id == usuario_id).first()
         if not bill:
             raise HTTPException(status_code=404, detail="Billetera no encontrada")
-        bill_moneda = bill.moneda.value if hasattr(bill.moneda, "value") else str(bill.moneda)
-        op_moneda = data.moneda.value if hasattr(data.moneda, "value") else str(data.moneda)
-        if op_moneda != bill_moneda:
-            raise HTTPException(status_code=400, detail=f"La moneda de la suscripción ({op_moneda}) no coincide con la moneda de la billetera ({bill_moneda}).")
     
     if data.tarjeta_id:
         tarjeta = db.query(TarjetaCredito).filter(TarjetaCredito.id == data.tarjeta_id, TarjetaCredito.usuario_id == usuario_id).first()
         if not tarjeta:
             raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
-        tarjeta_moneda = tarjeta.moneda.value if hasattr(tarjeta.moneda, "value") else str(tarjeta.moneda)
-        op_moneda = data.moneda.value if hasattr(data.moneda, "value") else str(data.moneda)
-        if op_moneda != tarjeta_moneda:
-            raise HTTPException(status_code=400, detail=f"La moneda de la suscripción ({op_moneda}) no coincide con la de la tarjeta ({tarjeta_moneda}).")
 
     # 4. Validar subcategoría (si fue enviada)
     if data.subcategoria_id:
@@ -289,16 +281,6 @@ def actualizar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID, 
         precio_actual = obtener_precio_vigente(db, suscripcion.id)
         nueva_moneda = update_data.get('moneda') or (precio_actual.moneda if precio_actual else 'ARS')
 
-        # Validar coincidencia de moneda con medio de pago activo
-        if billetera_obj:
-            bill_moneda = billetera_obj.moneda.value if hasattr(billetera_obj.moneda, "value") else str(billetera_obj.moneda)
-            if str(nueva_moneda) != bill_moneda:
-                raise HTTPException(status_code=400, detail=f"La moneda de la suscripción ({nueva_moneda}) no coincide con la moneda de la billetera ({bill_moneda}).")
-        elif tarjeta_obj:
-            tarjeta_moneda = tarjeta_obj.moneda.value if hasattr(tarjeta_obj.moneda, "value") else str(tarjeta_obj.moneda)
-            if str(nueva_moneda) != tarjeta_moneda:
-                raise HTTPException(status_code=400, detail=f"La moneda de la suscripción ({nueva_moneda}) no coincide con la de la tarjeta ({tarjeta_moneda}).")
-
         vigencia = update_data.get('vigente_desde') or hoy_argentina()
         if not precio_actual or precio_actual.monto != nuevo_monto or str(precio_actual.moneda) != str(nueva_moneda) or vigencia != precio_actual.vigente_desde:
             nuevo_precio = HistorialSuscripcion(
@@ -320,19 +302,6 @@ def actualizar_precio(db: Session, usuario_id: UUID, suscripcion_id: UUID, data:
 
     if data.monto <= 0:
         raise HTTPException(status_code=400, detail="El monto debe ser mayor a cero.")
-
-    if suscripcion.billetera_id:
-        bill = db.query(Billetera).filter(Billetera.id == suscripcion.billetera_id).first()
-        if bill:
-            bill_moneda = bill.moneda.value if hasattr(bill.moneda, "value") else str(bill.moneda)
-            if str(data.moneda) != bill_moneda:
-                raise HTTPException(status_code=400, detail=f"La moneda del precio ({data.moneda}) no coincide con la de la billetera asociada ({bill_moneda}).")
-    elif suscripcion.tarjeta_id:
-        tarjeta = db.query(TarjetaCredito).filter(TarjetaCredito.id == suscripcion.tarjeta_id).first()
-        if tarjeta:
-            tarjeta_moneda = tarjeta.moneda.value if hasattr(tarjeta.moneda, "value") else str(tarjeta.moneda)
-            if str(data.moneda) != tarjeta_moneda:
-                raise HTTPException(status_code=400, detail=f"La moneda del precio ({data.moneda}) no coincide con la de la tarjeta asociada ({tarjeta_moneda}).")
 
     nuevo_precio = HistorialSuscripcion(
         suscripcion_id=suscripcion_id,
