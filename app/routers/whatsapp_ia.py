@@ -43,7 +43,12 @@ from app.models.usuario import EstadoUsuario, Moneda, Usuario
 from app.services import ai_service
 from app.services.evento_service import emitir_evento_actualizacion
 from app.services.openai_client import get_openai_client
-from app.services.transaccion_service import deducir_metodo_pago
+from app.services.transaccion_service import (
+    deducir_metodo_pago,
+    eliminar_transaccion,
+    actualizar_transaccion,
+)
+from app.schemas.transaccion import TransaccionUpdate
 from app.services.whatsapp_service import enviar_whatsapp
 from app.utils.telefono import normalizar_telefono_ar
 import structlog
@@ -81,6 +86,7 @@ router = APIRouter(prefix="/whatsapp", tags=["whatsapp-ia"])
 
 PLAZO_EXPIRACION_ESTADO_MINUTOS = 30
 EXPIRACION_PREGUNTA_BILLETERA_MINUTOS = PLAZO_EXPIRACION_ESTADO_MINUTOS
+PLAZO_DESHACER_CORREGIR_MINUTOS = 30
 
 SALUDOS_RIOPLATENSE = {
     "hola",
@@ -176,6 +182,56 @@ def _es_cancelacion(mensaje: str) -> bool:
 def _es_confirmacion(mensaje: str) -> bool:
     norm = normalizar_texto(mensaje)
     return bool(norm and norm in PALABRAS_CONFIRMACION)
+
+
+FRASES_DESHACER = {
+    "borra eso",
+    "borrala",
+    "borralo",
+    "borrar eso",
+    "borrar el ultimo",
+    "borra el ultimo",
+    "borralo por favor",
+    "elimina eso",
+    "eliminalo",
+    "eliminala",
+    "eliminar eso",
+    "eliminar el ultimo",
+    "elimina el ultimo",
+    "me equivoque",
+    "me equivoqué",
+    "eso estaba mal",
+    "estaba mal",
+    "anula eso",
+    "anular eso",
+    "anulalo",
+    "anula el ultimo",
+    "anular el ultimo",
+    "cancela el ultimo",
+    "cancelar el ultimo",
+    "cancelalo el ultimo",
+    "cancelar el ultimo movimiento",
+    "cancela el ultimo movimiento",
+    "cancelar el gasto",
+    "cancela el gasto",
+    "deshacer",
+    "deshace eso",
+    "deshacer el ultimo",
+    "deshace el ultimo",
+}
+
+
+def _es_pedido_deshacer(mensaje: str) -> bool:
+    norm = normalizar_texto(mensaje)
+    if not norm:
+        return False
+    if norm in FRASES_DESHACER:
+        return True
+    if re.match(r"^(?:por favor\s+)?(?:borra|elimina|anula|cancela|deshace)(?:r)?\s+(?:eso|el\s+ultimo|lo\s+ultimo|el\s+ultimo\s+movimiento|el\s+ultimo\s+gasto)(?:\s+por\s+favor)?$", norm):
+        return True
+    if re.match(r"^me\s+equivoque(?:\s+en\s+eso)?$", norm):
+        return True
+    return False
 
 ALIAS_BILLETERAS = {
     "mp": "mercado pago",
@@ -1618,6 +1674,498 @@ def _resolver_seleccion_numerica(
     return True, billetera_seleccionada.nombre
 
 
+def _parsear_monto_argentino(texto: str) -> Decimal | None:
+    if not texto:
+        return None
+    limpio = texto.strip().lower()
+    limpio = limpio.replace("$", "").replace("ars", "").replace("usd", "").strip()
+    multiplicador = Decimal("1")
+    if limpio.endswith("k"):
+        multiplicador = Decimal("1000")
+        limpio = limpio[:-1].strip()
+    elif "luca" in limpio:
+        multiplicador = Decimal("1000")
+        limpio = re.sub(r"lucas?", "", limpio).strip()
+    elif "palo" in limpio:
+        multiplicador = Decimal("1000000")
+        limpio = re.sub(r"palos?", "", limpio).strip()
+
+    if "." in limpio and "," in limpio:
+        limpio = limpio.replace(".", "").replace(",", ".")
+    elif "." in limpio:
+        partes = limpio.split(".")
+        if len(partes) == 2 and len(partes[1]) == 3:
+            limpio = partes[0] + partes[1]
+        elif len(partes) > 2:
+            limpio = "".join(partes)
+        else:
+            if len(partes[1]) == 3:
+                limpio = partes[0] + partes[1]
+            else:
+                limpio = partes[0] + "." + partes[1]
+    elif "," in limpio:
+        limpio = limpio.replace(",", ".")
+
+    try:
+        val = Decimal(limpio) * multiplicador
+        if val > 0:
+            return val
+    except Exception:
+        pass
+    return None
+
+
+def _buscar_ultimo_movimiento_whatsapp(usuario_id: UUID, db: Session) -> tuple[Transaccion | None, str | None]:
+    """
+    Identifica el último movimiento registrado por WhatsApp por el usuario dentro del plazo permitido.
+    Retorna (transaccion, motivo_error_o_none).
+    """
+    conv_reciente = db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.accion_ejecutada.is_not(None),
+            ConversacionWpp.accion_ejecutada.not_in((
+                "cancelada", "vencida", "descartado_por_duplicado",
+                "descartada_por_nueva_operacion", "interrumpida_por_saludo",
+                "test", "test_setup", "test_reset"
+            )),
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+    tx_target_id = None
+    if conv_reciente:
+        accion = str(conv_reciente.accion_ejecutada)
+        if accion.startswith("deshecho:"):
+            return None, "YA_DESHECHO"
+        try:
+            tx_target_id = UUID(accion.replace("corregido:", ""))
+        except ValueError:
+            pass
+
+    if tx_target_id:
+        tx = db.execute(
+            select(Transaccion).where(Transaccion.id == tx_target_id, Transaccion.usuario_id == usuario_id)
+        ).scalar_one_or_none()
+        if not tx:
+            return None, "YA_BORRADO"
+    else:
+        tx = db.execute(
+            select(Transaccion)
+            .where(
+                Transaccion.usuario_id == usuario_id,
+                Transaccion.origen == OrigenTransaccion.IA_WPP,
+            )
+            .order_by(Transaccion.fecha_creacion.desc(), Transaccion.id.desc())
+        ).scalars().first()
+        if not tx:
+            return None, "SIN_MOVIMIENTOS"
+
+    # Verificar plazo temporal
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_DESHACER_CORREGIR_MINUTOS)
+    if tx.fecha_creacion < limite:
+        return None, "PLAZO_VENCIDO"
+
+    # Restricciones (2.8 y Decisiones de Producto)
+    if tx.origen != OrigenTransaccion.IA_WPP:
+        return None, "ORIGEN_INVALIDO"
+    if tx.es_cuota_hija or tx.es_padre_cuotas or tx.grupo_cuotas_id is not None or tx.tarjeta_id is not None:
+        return None, "ES_CUOTA"
+    if tx.pago_resumen_vencimiento is not None or tx.pago_origen_id is not None:
+        return None, "ES_RESUMEN"
+    if tx.descripcion.startswith("Aporte a la meta:") or tx.descripcion.startswith("Retiro de la meta:"):
+        return None, "ES_META"
+    if tx.es_recurrente or tx.recurrente_id is not None:
+        return None, "ES_RECURRENTE"
+
+    return tx, None
+
+
+def _buscar_propuesta_deshacer_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_DESHACER_CORREGIR_MINUTOS)
+    return db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.intent_detectado == "deshacer",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+
+def _confirmar_propuesta_deshacer(
+    usuario: Usuario,
+    db: Session,
+) -> tuple[Transaccion | None, str, bool]:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_DESHACER_CORREGIR_MINUTOS)
+    conv_undo = db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario.id,
+            ConversacionWpp.intent_detectado == "deshacer",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+        .with_for_update()
+    ).scalars().first()
+
+    if not conv_undo:
+        conv_ya = db.execute(
+            select(ConversacionWpp)
+            .where(
+                ConversacionWpp.usuario_id == usuario.id,
+                ConversacionWpp.intent_detectado == "deshacer",
+                ConversacionWpp.accion_ejecutada.is_not(None),
+                ConversacionWpp.fecha >= limite,
+            )
+            .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+        ).scalars().first()
+        if conv_ya and conv_ya.accion_ejecutada and str(conv_ya.accion_ejecutada).startswith("deshecho:"):
+            return None, "Esa operación ya fue deshecha.", True
+        return None, "No tenés ninguna anulación pendiente para confirmar.", False
+
+    entidades = conv_undo.entidades or {}
+    tx_id_str = entidades.get("transaccion_id")
+    if not tx_id_str:
+        return None, "No pude procesar la anulación.", False
+
+    tx_id = UUID(str(tx_id_str))
+    tx = db.execute(
+        select(Transaccion)
+        .where(Transaccion.id == tx_id, Transaccion.usuario_id == usuario.id)
+        .with_for_update()
+    ).scalars().first()
+
+    if not tx:
+        conv_undo.accion_ejecutada = f"deshecho:{tx_id}"
+        db.commit()
+        return None, "El movimiento ya fue eliminado.", False
+
+    eliminar_transaccion(db, usuario.id, tx.id)
+
+    conv_undo.accion_ejecutada = f"deshecho:{tx_id}"
+    emitir_evento_actualizacion(db, usuario.id, "transacciones")
+    emitir_evento_actualizacion(db, usuario.id, "billeteras")
+    db.commit()
+
+    return tx, "Listo, movimiento eliminado.", False
+
+
+def _buscar_propuesta_corregir_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_DESHACER_CORREGIR_MINUTOS)
+    return db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.intent_detectado == "corregir",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+
+def _confirmar_propuesta_corregir(
+    usuario: Usuario,
+    db: Session,
+) -> tuple[Transaccion | None, str, bool]:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_DESHACER_CORREGIR_MINUTOS)
+    conv_corr = db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario.id,
+            ConversacionWpp.intent_detectado == "corregir",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+        .with_for_update()
+    ).scalars().first()
+
+    if not conv_corr:
+        conv_ya = db.execute(
+            select(ConversacionWpp)
+            .where(
+                ConversacionWpp.usuario_id == usuario.id,
+                ConversacionWpp.intent_detectado == "corregir",
+                ConversacionWpp.accion_ejecutada.is_not(None),
+                ConversacionWpp.fecha >= limite,
+            )
+            .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+        ).scalars().first()
+        if conv_ya and conv_ya.accion_ejecutada and str(conv_ya.accion_ejecutada).startswith("corregido:"):
+            return None, "Esa operación ya fue corregida.", True
+        return None, "No tenés ninguna corrección pendiente para confirmar.", False
+
+    entidades = conv_corr.entidades or {}
+    tx_id_str = entidades.get("transaccion_id")
+    cambios = entidades.get("cambios") or {}
+    if not tx_id_str or not cambios:
+        return None, "No pude procesar la corrección.", False
+
+    tx_id = UUID(str(tx_id_str))
+    tx = db.execute(
+        select(Transaccion)
+        .where(Transaccion.id == tx_id, Transaccion.usuario_id == usuario.id)
+        .with_for_update()
+    ).scalars().first()
+
+    if not tx:
+        conv_corr.accion_ejecutada = f"corregido:{tx_id}"
+        db.commit()
+        return None, "El movimiento ya fue eliminado. No hay nada para corregir.", False
+
+    kwargs_update = {}
+    if "monto" in cambios and cambios["monto"] is not None:
+        kwargs_update["monto"] = Decimal(str(cambios["monto"]))
+    if "categoria_id" in cambios and cambios["categoria_id"] is not None:
+        kwargs_update["categoria_id"] = UUID(str(cambios["categoria_id"]))
+    if "subcategoria_id" in cambios and cambios["subcategoria_id"] is not None:
+        kwargs_update["subcategoria_id"] = UUID(str(cambios["subcategoria_id"]))
+    if "billetera_id" in cambios and cambios["billetera_id"] is not None:
+        kwargs_update["billetera_id"] = UUID(str(cambios["billetera_id"]))
+    if "fecha" in cambios and cambios["fecha"] is not None:
+        kwargs_update["fecha"] = date.fromisoformat(str(cambios["fecha"]))
+
+    update_payload = TransaccionUpdate(**kwargs_update)
+
+    actualizar_transaccion(db, usuario.id, tx.id, update_payload)
+
+    conv_corr.accion_ejecutada = f"corregido:{tx_id}"
+    emitir_evento_actualizacion(db, usuario.id, "transacciones")
+    emitir_evento_actualizacion(db, usuario.id, "billeteras")
+    db.commit()
+
+    return tx, "Listo, movimiento corregido.", False
+
+
+def _parece_intento_correccion(mensaje: str) -> bool:
+    norm = normalizar_texto(mensaje)
+    if not norm:
+        return False
+    if re.search(r"(?:eran?|fue)?\s*\$?[\d\.,]+k?\s+no\s+\$?[\d\.,]+k?", norm):
+        return True
+    if re.search(r"^no,?\s+(?:eran?\s+)?\$?[\d\.,]+k?$", norm):
+        return True
+    if re.search(r"^(?:eso\s+era|era|en\s+realidad\s+era)\s+", norm):
+        return True
+    if re.search(r"^(?:fue\s+con|era\s+con|fue\s+en|era\s+en)\s+", norm):
+        return True
+    if re.search(r"^(?:fue\s+ayer|era\s+ayer|fue\s+anteayer|era\s+anteayer|fue\s+hoy)\b", norm):
+        return True
+    return False
+
+
+def _detectar_correccion_ultimo_movimiento(
+    mensaje: str,
+    usuario_id: UUID,
+    db: Session,
+    tx_actual: Transaccion,
+) -> tuple[bool, dict, str | None]:
+    norm = normalizar_texto(mensaje)
+    if not norm:
+        return False, {}, None
+
+    if _es_saludo(mensaje) or _es_confirmacion(mensaje) or _es_cancelacion(mensaje) or _es_pedido_deshacer(mensaje):
+        return False, {}, None
+
+    verbos_op_nueva = r"^(?:gaste|pague|compre|cargue|cobre|ingrese|transferi|meti|puse)\b"
+    if re.search(verbos_op_nueva, norm):
+        return False, {}, None
+
+    cambios: dict = {}
+    texto_restante = mensaje.strip()
+
+    # 1. Detectar monto: "eran 3.000 no 30.000", "no, 5000", "eran 3000", etc.
+    m_no = re.search(r"(?:eran?|fue)?\s*\$?([\d\.,]+k?)\s+no\s+\$?([\d\.,]+k?)", norm)
+    if m_no:
+        m_val = _parsear_monto_argentino(m_no.group(1))
+        if m_val:
+            cambios["monto"] = float(m_val)
+            texto_restante = re.sub(r"(?:eran?|fue)?\s*\$?[\d\.,]+k?\s+no\s+\$?[\d\.,]+k?", "", texto_restante, flags=re.IGNORECASE).strip()
+
+    if "monto" not in cambios:
+        m_num = re.search(r"^no,?\s+(?:eran?\s+)?\$?([\d\.,]+k?)$", norm)
+        if m_num:
+            m_val = _parsear_monto_argentino(m_num.group(1))
+            if m_val:
+                cambios["monto"] = float(m_val)
+                texto_restante = ""
+
+    if "monto" not in cambios:
+        m_era = re.search(r"(?:eran?|era)\s+\$?([\d\.,]+k?)", norm)
+        if m_era:
+            m_val = _parsear_monto_argentino(m_era.group(1))
+            if m_val:
+                cambios["monto"] = float(m_val)
+                texto_restante = re.sub(r"(?:eran?|era)\s+\$?[\d\.,]+k?", "", texto_restante, flags=re.IGNORECASE).strip()
+
+    # 2. Detectar billetera: "fue con Santander", "con Santander", "era Santander", etc.
+    billeteras_activas = _obtener_billeteras_activas(usuario_id, db)
+    b_encontrada = None
+    m_bill = re.search(r"(?:fue\s+con|era\s+con|fue\s+en|era\s+en|con|en)\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)", texto_restante, flags=re.IGNORECASE)
+    if m_bill:
+        candidato_bill = m_bill.group(1).strip()
+        b_match, _ = resolver_billetera_cascada(candidato_bill, billeteras_activas)
+        if b_match:
+            b_encontrada = b_match
+            texto_restante = texto_restante.replace(m_bill.group(0), "").strip()
+
+    if not b_encontrada:
+        for b in billeteras_activas:
+            b_n = normalizar_texto(b.nombre)
+            if b_n in norm.split() or b_n in norm:
+                b_encontrada = b
+                break
+            for ak, av in ALIAS_BILLETERAS.items():
+                if ak in norm.split() and (av in b_n or b_n in av):
+                    b_encontrada = b
+                    break
+            if b_encontrada:
+                break
+
+    if b_encontrada:
+        if b_encontrada.moneda != tx_actual.moneda:
+            nom_otra = "dólares" if b_encontrada.moneda == Moneda.USD else "pesos"
+            nom_act = "pesos" if tx_actual.moneda == Moneda.ARS else "dólares"
+            return True, {}, f"No podés usar una billetera en {nom_otra} para un movimiento en {nom_act}."
+        if b_encontrada.id != tx_actual.billetera_id:
+            cambios["billetera_id"] = str(b_encontrada.id)
+            cambios["billetera_nombre"] = b_encontrada.nombre
+
+    # 3. Detectar fecha: "fue ayer", "era ayer", "ayer", "fue anteayer", etc.
+    m_fecha = re.search(r"\b(ayer|anteayer|hoy|el\s+\d+\s+de\s+[a-z]+(?:\s+de\s+\d+)?)\b", norm)
+    if m_fecha:
+        f_str = m_fecha.group(1)
+        hoy = hoy_argentina()
+        if f_str == "ayer":
+            f_res = hoy - timedelta(days=1)
+        elif f_str == "anteayer":
+            f_res = hoy - timedelta(days=2)
+        elif f_str == "hoy":
+            f_res = hoy
+        else:
+            f_res, _ = _resolver_y_validar_fecha(f_str)
+        if f_res != tx_actual.fecha:
+            cambios["fecha"] = f_res.isoformat()
+            texto_restante = re.sub(r"\b(ayer|anteayer|hoy|el\s+\d+\s+de\s+[a-z]+(?:\s+de\s+\d+)?)\b", "", texto_restante, flags=re.IGNORECASE).strip()
+
+    # 4. Detectar categoría: "eso era supermercado", "era supermercado", "era en supermercado"
+    m_cat = re.search(r"(?:eso\s+era|era|en\s+realidad\s+era)\s+(?:en\s+)?([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)", texto_restante, flags=re.IGNORECASE)
+    cat_texto = None
+    if m_cat:
+        cat_texto = m_cat.group(1).strip()
+    elif not cambios and norm.startswith("eso era "):
+        cat_texto = norm.replace("eso era ", "").strip()
+    elif not cambios and norm.startswith("era "):
+        cat_texto = norm.replace("era ", "").strip()
+
+    if cat_texto:
+        c_id, s_id = _resolver_categoria_y_subcategoria(cat_texto, usuario_id, db, tipo=tx_actual.tipo.value)
+        if c_id:
+            if normalizar_texto(cat_texto) != "otros":
+                cat_db = db.get(Categoria, c_id)
+                if cat_db and normalizar_texto(cat_db.nombre) == "otros":
+                    c_id = None
+            if c_id:
+                cambios["categoria_id"] = str(c_id)
+                cambios["subcategoria_id"] = str(s_id) if s_id else None
+                cat_db = db.get(Categoria, c_id)
+                sub_db = db.get(Subcategoria, s_id) if s_id else None
+                cambios["categoria_nombre"] = sub_db.nombre if sub_db else (cat_db.nombre if cat_db else "Otros")
+
+    if cambios:
+        return True, cambios, None
+
+    return False, {}, None
+
+
+def _construir_propuesta_deshacer(tx_actual: Transaccion, db: Session) -> str:
+    monto_fmt = formatear_monto(float(tx_actual.monto), tx_actual.moneda)
+    billetera = db.get(Billetera, tx_actual.billetera_id) if tx_actual.billetera_id else None
+    bill_nom = billetera.nombre if billetera else "tu billetera"
+    cat_nom = None
+    if tx_actual.categoria_id:
+        c = db.get(Categoria, tx_actual.categoria_id)
+        cat_nom = c.nombre if c else None
+    if tx_actual.subcategoria_id:
+        s = db.get(Subcategoria, tx_actual.subcategoria_id)
+        cat_nom = s.nombre if s else cat_nom
+    cat_disp = cat_nom or "Otros"
+    fecha_nat = _formatear_fecha_natural(tx_actual.fecha)
+    fecha_disp = f" ({fecha_nat})" if fecha_nat else ""
+
+    if tx_actual.tipo == TipoTransaccion.INGRESO:
+        return f"¿Querés eliminar el último ingreso de {monto_fmt} en {cat_disp} a {bill_nom}{fecha_disp}? ¿Confirmás?"
+    else:
+        return f"¿Querés eliminar el último movimiento de {monto_fmt} en {cat_disp} desde {bill_nom}{fecha_disp}? ¿Confirmás?"
+
+
+def _construir_propuesta_corregir(
+    tx_actual: Transaccion,
+    cambios: dict,
+    db: Session,
+) -> str:
+    b_vieja = db.get(Billetera, tx_actual.billetera_id)
+    cat_vieja = db.get(Categoria, tx_actual.categoria_id) if tx_actual.categoria_id else None
+    sub_vieja = db.get(Subcategoria, tx_actual.subcategoria_id) if tx_actual.subcategoria_id else None
+    cat_vieja_disp = sub_vieja.nombre if sub_vieja else (cat_vieja.nombre if cat_vieja else "Otros")
+    b_vieja_nom = b_vieja.nombre if b_vieja else "tu billetera"
+    f_vieja_nat = _formatear_fecha_natural(tx_actual.fecha)
+    f_vieja_disp = f" ({f_vieja_nat})" if f_vieja_nat else ""
+    m_viejo_fmt = formatear_monto(float(tx_actual.monto), tx_actual.moneda)
+
+    if "monto" in cambios:
+        m_nuevo_fmt = formatear_monto(float(cambios["monto"]), tx_actual.moneda)
+    else:
+        m_nuevo_fmt = m_viejo_fmt
+
+    if "categoria_nombre" in cambios:
+        cat_nueva_disp = cambios["categoria_nombre"]
+    elif "categoria_id" in cambios:
+        c_n = db.get(Categoria, UUID(cambios["categoria_id"]))
+        s_n = db.get(Subcategoria, UUID(cambios["subcategoria_id"])) if cambios.get("subcategoria_id") else None
+        cat_nueva_disp = s_n.nombre if s_n else (c_n.nombre if c_n else cat_vieja_disp)
+    else:
+        cat_nueva_disp = cat_vieja_disp
+
+    if "billetera_nombre" in cambios:
+        b_nueva_nom = cambios["billetera_nombre"]
+    elif "billetera_id" in cambios:
+        b_n = db.get(Billetera, UUID(cambios["billetera_id"]))
+        b_nueva_nom = b_n.nombre if b_n else b_vieja_nom
+    else:
+        b_nueva_nom = b_vieja_nom
+
+    if "fecha" in cambios and cambios["fecha"]:
+        f_nueva_nat = _formatear_fecha_natural(date.fromisoformat(str(cambios["fecha"])))
+        f_nueva_disp = f" ({f_nueva_nat})" if f_nueva_nat else ""
+    else:
+        f_nueva_disp = f_vieja_disp
+
+    if tx_actual.tipo == TipoTransaccion.INGRESO:
+        linea_antes = f"{m_viejo_fmt} en {cat_vieja_disp} a {b_vieja_nom}{f_vieja_disp}"
+        linea_ahora = f"{m_nuevo_fmt} en {cat_nueva_disp} a {b_nueva_nom}{f_nueva_disp}"
+    else:
+        linea_antes = f"{m_viejo_fmt} en {cat_vieja_disp} desde {b_vieja_nom}{f_vieja_disp}"
+        linea_ahora = f"{m_nuevo_fmt} en {cat_nueva_disp} desde {b_nueva_nom}{f_nueva_disp}"
+
+    return (
+        f"Voy a corregir el último movimiento:\n"
+        f"Antes: {linea_antes}\n"
+        f"Ahora: {linea_ahora}\n"
+        f"¿Confirmás?"
+    )
+
+
 def _obtener_historial_reciente(usuario_id: UUID, db: Session, n: int = 6) -> list[dict]:
     """
     Obtiene los últimos N turnos de conversación del usuario (por defecto 6).
@@ -1754,6 +2302,22 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
             return None
 
         elif intent == "confirmar":
+            prop_undo = _buscar_propuesta_deshacer_pendiente(usuario.id, db)
+            if prop_undo:
+                tx, msg_resp, ya_conf = _confirmar_propuesta_deshacer(usuario, db)
+                resultado_ia["_mensaje_confirmacion_directo"] = msg_resp
+                if tx:
+                    return str(tx.id)
+                return None
+
+            prop_corr = _buscar_propuesta_corregir_pendiente(usuario.id, db)
+            if prop_corr:
+                tx, msg_resp, ya_conf = _confirmar_propuesta_corregir(usuario, db)
+                resultado_ia["_mensaje_confirmacion_directo"] = msg_resp
+                if tx:
+                    return str(tx.id)
+                return None
+
             tx, msg_resp, ya_conf = _confirmar_propuesta_transaccion(usuario, db)
             resultado_ia["_mensaje_confirmacion_directo"] = msg_resp
             if tx:
@@ -2317,7 +2881,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     select(ConversacionWpp)
                     .where(
                         ConversacionWpp.usuario_id == usuario.id,
-                        ConversacionWpp.intent_detectado == "registrar_transaccion",
+                        ConversacionWpp.intent_detectado.in_(["registrar_transaccion", "deshacer", "corregir"]),
                         ConversacionWpp.accion_ejecutada.is_(None),
                     )
                 ).scalars().all()
@@ -2471,6 +3035,53 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
 
             # 4. Chequeo determinístico de confirmación con bloqueo de concurrencia (Tarea 2)
             if _es_confirmacion(mensaje_texto):
+                # Prioridad 1: propuesta de deshacer pendiente
+                prop_deshacer = _buscar_propuesta_deshacer_pendiente(usuario.id, db)
+                if prop_deshacer:
+                    tx_deshecha, msg_confirm, ya_conf = _confirmar_propuesta_deshacer(usuario, db)
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=msg_confirm,
+                        intent_detectado="confirmar_deshacer",
+                        entidades={},
+                        accion_ejecutada=f"deshecho:{tx_deshecha.id}" if tx_deshecha else ("ya_deshecho" if ya_conf else None),
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, msg_confirm)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                # Prioridad 2: propuesta de corregir pendiente
+                prop_corregir = _buscar_propuesta_corregir_pendiente(usuario.id, db)
+                if prop_corregir:
+                    tx_corregida, msg_confirm, ya_conf = _confirmar_propuesta_corregir(usuario, db)
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=msg_confirm,
+                        intent_detectado="confirmar_corregir",
+                        entidades={},
+                        accion_ejecutada=f"corregido:{tx_corregida.id}" if tx_corregida else ("ya_corregido" if ya_conf else None),
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, msg_confirm)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                # Prioridad 3: propuesta de registrar movimiento
                 tx_creada, msg_confirm, ya_conf = _confirmar_propuesta_transaccion(usuario, db)
                 nueva_conv = ConversacionWpp(
                     usuario_id=usuario.id,
@@ -2667,6 +3278,140 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 db.commit()
                 return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
+            # 7.5 Detección determinística de deshacer (Tarea 2)
+            if _es_pedido_deshacer(mensaje_texto):
+                tx_last, motivo_err = _buscar_ultimo_movimiento_whatsapp(usuario.id, db)
+                if not tx_last:
+                    if motivo_err in ("YA_DESHECHO", "YA_BORRADO"):
+                        msg_undo_resp = "No hay nada para deshacer."
+                    elif motivo_err == "PLAZO_VENCIDO":
+                        msg_undo_resp = "El último movimiento fue hace más de 30 minutos. Para eliminarlo, ingresá a la web de Argentum."
+                    elif motivo_err == "ES_CUOTA":
+                        msg_undo_resp = "Ese movimiento corresponde a una cuota de tarjeta y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
+                    elif motivo_err == "ES_RESUMEN":
+                        msg_undo_resp = "Ese movimiento corresponde al pago de un resumen y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
+                    elif motivo_err == "ES_META":
+                        msg_undo_resp = "Ese movimiento corresponde a una meta de ahorro y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
+                    elif motivo_err == "ES_RECURRENTE":
+                        msg_undo_resp = "Ese movimiento fue generado automáticamente y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
+                    else:
+                        msg_undo_resp = "No tenés ningún movimiento reciente registrado por WhatsApp para deshacer. Podés gestionarlo desde la web de Argentum."
+
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=msg_undo_resp,
+                        intent_detectado="deshacer",
+                        entidades={},
+                        accion_ejecutada="sin_efecto",
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, msg_undo_resp)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                # Hay movimiento para deshacer: armar propuesta de confirmación
+                msg_propuesta_undo = _construir_propuesta_deshacer(tx_last, db)
+                nueva_conv = ConversacionWpp(
+                    usuario_id=usuario.id,
+                    wamid=wamid,
+                    mensaje_usuario=mensaje_texto,
+                    tipo_mensaje=TipoMensajeWpp.TEXTO,
+                    transcripcion=None,
+                    mensaje_bot=msg_propuesta_undo,
+                    intent_detectado="deshacer",
+                    entidades={"transaccion_id": str(tx_last.id)},
+                    accion_ejecutada=None,
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=False,
+                    slot_filling_estado=None,
+                )
+                db.add(nueva_conv)
+                db.commit()
+                enviar_whatsapp(from_number, msg_propuesta_undo)
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            # 7.6 Detección determinística de corregir (Tarea 3)
+            tx_last_corr, motivo_corr = _buscar_ultimo_movimiento_whatsapp(usuario.id, db)
+            if tx_last_corr:
+                es_corr, cambios, err_corr = _detectar_correccion_ultimo_movimiento(
+                    mensaje_texto, usuario.id, db, tx_last_corr
+                )
+                if es_corr:
+                    if err_corr:
+                        nueva_conv = ConversacionWpp(
+                            usuario_id=usuario.id,
+                            wamid=wamid,
+                            mensaje_usuario=mensaje_texto,
+                            tipo_mensaje=TipoMensajeWpp.TEXTO,
+                            transcripcion=None,
+                            mensaje_bot=err_corr,
+                            intent_detectado="corregir",
+                            entidades={},
+                            accion_ejecutada="error_moneda",
+                            confianza=Decimal("1.000"),
+                            slot_filling_activo=False,
+                            slot_filling_estado=None,
+                        )
+                        db.add(nueva_conv)
+                        db.commit()
+                        enviar_whatsapp(from_number, err_corr)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                    if cambios:
+                        msg_propuesta_corr = _construir_propuesta_corregir(tx_last_corr, cambios, db)
+                        nueva_conv = ConversacionWpp(
+                            usuario_id=usuario.id,
+                            wamid=wamid,
+                            mensaje_usuario=mensaje_texto,
+                            tipo_mensaje=TipoMensajeWpp.TEXTO,
+                            transcripcion=None,
+                            mensaje_bot=msg_propuesta_corr,
+                            intent_detectado="corregir",
+                            entidades={"transaccion_id": str(tx_last_corr.id), "cambios": cambios},
+                            accion_ejecutada=None,
+                            confianza=Decimal("1.000"),
+                            slot_filling_activo=False,
+                            slot_filling_estado=None,
+                        )
+                        db.add(nueva_conv)
+                        db.commit()
+                        enviar_whatsapp(from_number, msg_propuesta_corr)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+            else:
+                if _parece_intento_correccion(mensaje_texto):
+                    if motivo_corr == "PLAZO_VENCIDO":
+                        msg_resp = "El último movimiento fue hace más de 30 minutos. Para modificarlo, ingresá a la web de Argentum."
+                    elif motivo_corr == "ES_CUOTA":
+                        msg_resp = "Ese movimiento corresponde a una cuota de tarjeta y no se puede modificar por WhatsApp. Podés gestionarlo desde la web de Argentum."
+                    else:
+                        msg_resp = "No tenés ningún movimiento reciente registrado por WhatsApp para corregir. Podés gestionarlo desde la web de Argentum."
+
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=msg_resp,
+                        intent_detectado="corregir",
+                        entidades={},
+                        accion_ejecutada="sin_efecto",
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, msg_resp)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
             # 8. Procesamiento normal de IA
             t_ia_start = time.perf_counter()
             resultado_ia = ai_service.procesar_mensaje(
@@ -2682,6 +3427,12 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
             # Si el intent es desconocido o la confianza es baja (< 0.60), dar respuesta clara con ejemplo
             intent_ia_raw = resultado_ia.get("intent")
             confianza_ia_raw = float(resultado_ia.get("confianza", 1.0))
+
+            # Salvaguarda: si la IA clasifica como deshacer pero el mensaje contiene monto y no es frase de deshacer
+            if intent_ia_raw == "deshacer" and not _es_pedido_deshacer(mensaje_texto) and resultado_ia.get("entidades", {}).get("monto"):
+                resultado_ia["intent"] = "registrar_transaccion"
+                intent_ia_raw = "registrar_transaccion"
+
             if intent_ia_raw == "desconocido" or confianza_ia_raw < 0.60:
                 msg_desc = (
                     "No entendí ese mensaje. Por ahora puedo registrar gastos e ingresos, "
@@ -2981,6 +3732,80 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         resultado_ia["respuesta_usuario"] = "Cotizaciones del dólar: " + " | ".join(msg_parts)
                 except Exception:
                     logger.exception("Error al consultar cotizaciones para WhatsApp")
+
+            elif intent_detectado == "deshacer":
+                if not _es_pedido_deshacer(mensaje_texto) and resultado_ia.get("entidades", {}).get("monto"):
+                    resultado_ia["intent"] = "registrar_transaccion"
+                    intent_detectado = "registrar_transaccion"
+                else:
+                    tx_last, motivo_err = _buscar_ultimo_movimiento_whatsapp(usuario.id, db)
+                    if not tx_last:
+                        if motivo_err in ("YA_DESHECHO", "YA_BORRADO"):
+                            msg_undo_resp = "No hay nada para deshacer."
+                        elif motivo_err == "PLAZO_VENCIDO":
+                            msg_undo_resp = "El último movimiento fue hace más de 30 minutos. Para eliminarlo, ingresá a la web de Argentum."
+                        elif motivo_err == "ES_CUOTA":
+                            msg_undo_resp = "Ese movimiento corresponde a una cuota de tarjeta y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
+                        elif motivo_err == "ES_RESUMEN":
+                            msg_undo_resp = "Ese movimiento corresponde al pago de un resumen y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
+                        elif motivo_err == "ES_META":
+                            msg_undo_resp = "Ese movimiento corresponde a una meta de ahorro y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
+                        elif motivo_err == "ES_RECURRENTE":
+                            msg_undo_resp = "Ese movimiento fue generado automáticamente y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
+                        else:
+                            msg_undo_resp = "No tenés ningún movimiento reciente registrado por WhatsApp para deshacer. Podés gestionarlo desde la web de Argentum."
+                        resultado_ia["respuesta_usuario"] = msg_undo_resp
+                        resultado_ia["entidades"] = {}
+                    else:
+                        resultado_ia["respuesta_usuario"] = _construir_propuesta_deshacer(tx_last, db)
+                        resultado_ia["entidades"] = {"transaccion_id": str(tx_last.id)}
+
+            elif intent_detectado == "corregir":
+                tx_last_corr, motivo_corr = _buscar_ultimo_movimiento_whatsapp(usuario.id, db)
+                if not tx_last_corr:
+                    if motivo_corr == "PLAZO_VENCIDO":
+                        msg_resp = "El último movimiento fue hace más de 30 minutos. Para modificarlo, ingresá a la web de Argentum."
+                    elif motivo_corr == "ES_CUOTA":
+                        msg_resp = "Ese movimiento corresponde a una cuota de tarjeta y no se puede modificar por WhatsApp. Podés gestionarlo desde la web de Argentum."
+                    else:
+                        msg_resp = "No tenés ningún movimiento reciente registrado por WhatsApp para corregir. Podés gestionarlo desde la web de Argentum."
+                    resultado_ia["respuesta_usuario"] = msg_resp
+                    resultado_ia["entidades"] = {}
+                else:
+                    es_c, cambios, err_c = _detectar_correccion_ultimo_movimiento(
+                        mensaje_texto, usuario.id, db, tx_last_corr
+                    )
+                    if err_c:
+                        resultado_ia["respuesta_usuario"] = err_c
+                        resultado_ia["entidades"] = {}
+                    elif cambios:
+                        resultado_ia["respuesta_usuario"] = _construir_propuesta_corregir(tx_last_corr, cambios, db)
+                        resultado_ia["entidades"] = {"transaccion_id": str(tx_last_corr.id), "cambios": cambios}
+                    else:
+                        ent_ia = resultado_ia.get("entidades") or {}
+                        cambios_ia = {}
+                        if ent_ia.get("monto") is not None:
+                            cambios_ia["monto"] = float(ent_ia["monto"])
+                        if ent_ia.get("categoria"):
+                            c_id, s_id = _resolver_categoria_y_subcategoria(ent_ia["categoria"], usuario.id, db, tipo=tx_last_corr.tipo.value)
+                            if c_id:
+                                cambios_ia["categoria_id"] = str(c_id)
+                                cambios_ia["subcategoria_id"] = str(s_id) if s_id else None
+                        b_raw = ent_ia.get("billetera_origen") or ent_ia.get("billetera_destino") or ent_ia.get("billetera")
+                        if b_raw:
+                            b_m, _ = resolver_billetera_cascada(b_raw, _obtener_billeteras_activas(usuario.id, db))
+                            if b_m and b_m.moneda == tx_last_corr.moneda:
+                                cambios_ia["billetera_id"] = str(b_m.id)
+                                cambios_ia["billetera_nombre"] = b_m.nombre
+                        if ent_ia.get("fecha"):
+                            f_obj, _ = _resolver_y_validar_fecha(ent_ia["fecha"])
+                            cambios_ia["fecha"] = f_obj.isoformat()
+
+                        if cambios_ia:
+                            resultado_ia["respuesta_usuario"] = _construir_propuesta_corregir(tx_last_corr, cambios_ia, db)
+                            resultado_ia["entidades"] = {"transaccion_id": str(tx_last_corr.id), "cambios": cambios_ia}
+                        else:
+                            resultado_ia["respuesta_usuario"] = "No entendí qué dato querés corregir del último movimiento."
 
             transaccion_id = _ejecutar_intent(resultado_ia, usuario, db)
 
