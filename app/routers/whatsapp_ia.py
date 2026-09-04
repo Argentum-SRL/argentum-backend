@@ -44,6 +44,9 @@ from app.models.transaccion import (
     Transaccion,
 )
 from app.models.usuario import EstadoUsuario, Moneda, Usuario
+from app.models.transferencia_interna import TransferenciaInterna
+from app.schemas.transferencia_interna import TransferenciaInternaCreate
+from app.services import transferencia_service
 from app.services import ai_service
 from app.services.evento_service import emitir_evento_actualizacion
 from app.services.openai_client import get_openai_client
@@ -1863,6 +1866,439 @@ def _confirmar_propuesta_transaccion(
     return transaccion, msg_resp, False
 
 
+RANGO_MIN_COTIZACION_DOLAR = Decimal("500")
+RANGO_MAX_COTIZACION_DOLAR = Decimal("5000")
+
+
+def _buscar_propuesta_transferencia_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    return db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.intent_detectado == "transferir_fondos",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+
+def _confirmar_propuesta_transferencia(
+    usuario: Usuario,
+    db: Session,
+    propuesta_id: UUID | None = None,
+) -> tuple[TransferenciaInterna | None, str, bool]:
+    limite_tiempo = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+
+    stmt_conv = (
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario.id,
+            ConversacionWpp.intent_detectado == "transferir_fondos",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite_tiempo,
+        )
+    )
+    if propuesta_id:
+        stmt_conv = stmt_conv.where(ConversacionWpp.id == propuesta_id)
+
+    conv_previa = db.execute(
+        stmt_conv.order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc()).with_for_update()
+    ).scalars().first()
+
+    if not conv_previa:
+        limite_reciente = datetime.now(timezone.utc) - timedelta(minutes=10)
+        candidatas = db.execute(
+            select(ConversacionWpp)
+            .where(
+                ConversacionWpp.usuario_id == usuario.id,
+                ConversacionWpp.intent_detectado == "transferir_fondos",
+                ConversacionWpp.accion_ejecutada.is_not(None),
+                ConversacionWpp.fecha >= limite_reciente,
+            )
+            .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+        ).scalars().all()
+
+        for c in candidatas:
+            if c.accion_ejecutada and str(c.accion_ejecutada).startswith("transferencia:"):
+                return None, "Esa operación ya fue confirmada.", True
+        return None, "No tenés ninguna transferencia pendiente para confirmar.", False
+
+    entidades = conv_previa.entidades or {}
+    b_origen_id_str = entidades.get("billetera_origen_id")
+    b_destino_id_str = entidades.get("billetera_destino_id")
+    if not b_origen_id_str or not b_destino_id_str:
+        return None, "No pude procesar la transferencia.", False
+
+    b_orig_id = UUID(str(b_origen_id_str))
+    b_dest_id = UUID(str(b_destino_id_str))
+    monto = Decimal(str(entidades["monto"]))
+    monto_origen = Decimal(str(entidades.get("monto_origen", monto)))
+    monto_destino = Decimal(str(entidades.get("monto_destino", monto)))
+    moneda_origen = Moneda.USD if entidades.get("moneda_origen") == "USD" else Moneda.ARS
+    moneda_destino = Moneda.USD if entidades.get("moneda_destino") == "USD" else Moneda.ARS
+    monto_comision = Decimal(str(entidades["monto_comision"])) if entidades.get("monto_comision") else None
+
+    data_tr = TransferenciaInternaCreate(
+        billetera_origen_id=b_orig_id,
+        billetera_destino_id=b_dest_id,
+        monto=monto_origen,
+        moneda=moneda_origen,
+        monto_origen=monto_origen,
+        monto_destino=monto_destino,
+        moneda_origen=moneda_origen,
+        moneda_destino=moneda_destino,
+        monto_comision=monto_comision,
+        fecha=hoy_argentina(),
+        notas=entidades.get("notas", "Transferencia por WhatsApp"),
+    )
+
+    try:
+        tr = transferencia_service.crear_transferencia(db, usuario.id, data_tr)
+    except HTTPException as exc:
+        return None, str(exc.detail), False
+
+    conv_previa.accion_ejecutada = f"transferencia:{tr.id}"
+    db.commit()
+
+    b_origen = db.get(Billetera, b_orig_id)
+    b_destino = db.get(Billetera, b_dest_id)
+    nom_orig = b_origen.nombre if b_origen else "origen"
+    nom_dest = b_destino.nombre if b_destino else "destino"
+
+    tipo_op = entidades.get("tipo_operacion", "transferencia")
+    if tipo_op == "extraccion":
+        msg_resp = f"Listo. Extracción de {formatear_monto(float(monto_origen), moneda_origen)} de {nom_orig} a {nom_dest} registrada."
+    elif tipo_op == "compra_usd":
+        d_str = formatear_monto(float(monto_destino), Moneda.USD).replace("USD", "").replace("US$", "").strip()
+        msg_resp = f"Listo. Compra de USD {d_str} por {formatear_monto(float(monto_origen), Moneda.ARS)} registrada."
+    elif tipo_op == "venta_usd":
+        d_str = formatear_monto(float(monto_origen), Moneda.USD).replace("USD", "").replace("US$", "").strip()
+        msg_resp = f"Listo. Venta de USD {d_str} por {formatear_monto(float(monto_destino), Moneda.ARS)} registrada."
+    else:
+        msg_resp = f"Listo. Transferí {formatear_monto(float(monto_origen), moneda_origen)} de {nom_orig} a {nom_dest}."
+
+    return tr, msg_resp, False
+
+
+def _interpretar_transferencia(
+    mensaje_texto: str,
+    usuario: Usuario,
+    db: Session,
+    estado_previo: dict | None = None,
+) -> tuple[bool, str | None, dict | None, str | None]:
+    """
+    Interpreta determinísticamente transferencias entre cuentas propias, extracciones de cajero
+    y compra/venta de dólares (Punto 9B).
+    Retorna: (es_transferencia, tipo_o_estado, entidades, respuesta_o_pregunta)
+    """
+    billeteras_usuario = _obtener_billeteras_activas(usuario.id, db)
+    m_norm = normalizar_texto(mensaje_texto)
+
+    # Manejo de slot-filling previo para transferir_fondos
+    if estado_previo and (estado_previo.get("intent_origen") == "transferir_fondos" or estado_previo.get("tipo_operacion") in ("compra_usd", "venta_usd", "transferencia", "extraccion")):
+        tipo_op = estado_previo.get("tipo_operacion")
+
+        # 1. Cotización pendiente para compra/venta dólares
+        if tipo_op in ("compra_usd", "venta_usd") and "cotizacion" in estado_previo.get("datos_faltantes", []):
+            m_cot = _parsear_monto_argentino(mensaje_texto)
+            if not m_cot:
+                m_num = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\b", m_norm)
+                if m_num:
+                    m_cot = _parsear_monto_argentino(m_num.group(1))
+            if m_cot:
+                dolares = Decimal(str(estado_previo["monto_usd"]))
+                if m_cot > Decimal("10000"):
+                    cotiz = (m_cot / dolares).quantize(Decimal("0.01"))
+                    pesos = m_cot
+                else:
+                    cotiz = m_cot
+                    pesos = (dolares * cotiz).quantize(Decimal("0.01"))
+
+                if cotiz < RANGO_MIN_COTIZACION_DOLAR or cotiz > RANGO_MAX_COTIZACION_DOLAR:
+                    c_str = str(int(cotiz)) if cotiz == int(cotiz) else str(cotiz)
+                    return True, "absurda", {}, f"La cotización de ${c_str} por dólar no parece razonable. Por favor verificá el valor e intentá de nuevo."
+
+                usd_wallets = [w for w in billeteras_usuario if w.moneda == Moneda.USD and w.estado == EstadoBilletera.ACTIVA]
+                ars_wallets = [w for w in billeteras_usuario if w.moneda == Moneda.ARS and w.estado == EstadoBilletera.ACTIVA]
+                b_usd = usd_wallets[0] if usd_wallets else None
+                b_ars = next((w for w in ars_wallets if not w.es_efectivo and w.es_principal), (ars_wallets[0] if ars_wallets else None))
+
+                if not b_usd or not b_ars:
+                    return True, "error", {}, "No se encontraron las billeteras necesarias para operar en dólares."
+
+                cotiz_fmt = formatear_monto(float(cotiz), Moneda.ARS)
+                pesos_fmt = formatear_monto(float(pesos), Moneda.ARS)
+                dolares_str = f"{int(dolares)}" if dolares == int(dolares) else f"{dolares:g}"
+
+                if tipo_op == "compra_usd":
+                    prop = f"Voy a registrar una compra de USD {dolares_str} a {cotiz_fmt}: salen {pesos_fmt} de {b_ars.nombre} y entran USD {dolares_str} a {b_usd.nombre}. ¿Confirmás?"
+                    entidades = {
+                        "tipo_operacion": "compra_usd",
+                        "billetera_origen_id": str(b_ars.id),
+                        "billetera_destino_id": str(b_usd.id),
+                        "monto": float(pesos),
+                        "monto_origen": float(pesos),
+                        "monto_destino": float(dolares),
+                        "moneda_origen": "ARS",
+                        "moneda_destino": "USD",
+                        "cotizacion": float(cotiz),
+                    }
+                else:
+                    prop = f"Voy a registrar una venta de USD {dolares_str} a {cotiz_fmt}: salen USD {dolares_str} de {b_usd.nombre} y entran {pesos_fmt} a {b_ars.nombre}. ¿Confirmás?"
+                    entidades = {
+                        "tipo_operacion": "venta_usd",
+                        "billetera_origen_id": str(b_usd.id),
+                        "billetera_destino_id": str(b_ars.id),
+                        "monto": float(dolares),
+                        "monto_origen": float(dolares),
+                        "monto_destino": float(pesos),
+                        "moneda_origen": "USD",
+                        "moneda_destino": "ARS",
+                        "cotizacion": float(cotiz),
+                    }
+                return True, "propuesta", entidades, prop
+
+        # 2. Billetera origen pendiente para transferencias
+        if "billetera_origen" in estado_previo.get("datos_faltantes", []):
+            b_dest_id_str = estado_previo.get("billetera_destino_id")
+            b_dest = next((w for w in billeteras_usuario if str(w.id) == b_dest_id_str), None)
+            cands = [w for w in billeteras_usuario if w.moneda == (b_dest.moneda if b_dest else Moneda.ARS) and str(w.id) != b_dest_id_str and w.estado == EstadoBilletera.ACTIVA]
+            b_elegida = None
+            if mensaje_texto.strip().isdigit():
+                idx = int(mensaje_texto.strip()) - 1
+                if 0 <= idx < len(cands):
+                    b_elegida = cands[idx]
+            else:
+                b_match, _ = resolver_billetera_cascada(mensaje_texto.strip(), cands)
+                if b_match:
+                    b_elegida = b_match
+
+            if b_elegida and b_dest:
+                if b_elegida.id == b_dest.id:
+                    return True, "misma_billetera", {}, "La billetera de origen y destino no pueden ser la misma."
+                monto = Decimal(str(estado_previo["monto"]))
+                monto_fmt = formatear_monto(float(monto), b_elegida.moneda)
+                prop = f"Voy a transferir {monto_fmt} de {b_elegida.nombre} a {b_dest.nombre}. ¿Confirmás?"
+                entidades = {
+                    "tipo_operacion": "transferencia",
+                    "billetera_origen_id": str(b_elegida.id),
+                    "billetera_destino_id": str(b_dest.id),
+                    "billetera_origen": b_elegida.nombre,
+                    "billetera_destino": b_dest.nombre,
+                    "monto": float(monto),
+                    "monto_origen": float(monto),
+                    "monto_destino": float(monto),
+                    "moneda_origen": b_elegida.moneda.value,
+                    "moneda_destino": b_dest.moneda.value,
+                }
+                return True, "propuesta", entidades, prop
+
+    # 1. EXTRACCIÓN DE CAJERO
+    if (re.search(r"\b(?:saque|retire|extraje|fui\s+al)\b.*\b(?:cajero|banco)\b", m_norm) or
+        re.search(r"\bsaque\s+del\s+cajero\b", m_norm) or
+        re.search(r"\bsaque\s+(?:plata|dinero)\b", m_norm) or
+        re.search(r"\bextraccion(?:\s+de\s+cajero)?\b", m_norm)):
+
+        m_num = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?)\b", m_norm)
+        monto = _parsear_monto_argentino(m_num.group(1)) if m_num else None
+
+        comision = None
+        m_com = re.search(r"(?:con|mas)\s+(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\s+(?:de\s+)?comision", m_norm)
+        if m_com:
+            comision = _parsear_monto_argentino(m_com.group(1))
+
+        cash_wallets = [w for w in billeteras_usuario if w.moneda == Moneda.ARS and w.es_efectivo and w.estado == EstadoBilletera.ACTIVA]
+        if not cash_wallets:
+            return True, "no_cash", {}, "No tenés ninguna billetera de efectivo en pesos. Podés crearla desde la web de Argentum."
+
+        b_dest = cash_wallets[0] if len(cash_wallets) == 1 else None
+
+        non_cash = [w for w in billeteras_usuario if w.moneda == Moneda.ARS and not w.es_efectivo and w.estado == EstadoBilletera.ACTIVA]
+        b_orig = None
+        for w in non_cash:
+            if normalizar_texto(w.nombre) in m_norm:
+                b_orig = w
+                break
+        if not b_orig:
+            ppal = next((w for w in non_cash if w.es_principal), None)
+            if ppal:
+                b_orig = ppal
+            elif len(non_cash) == 1:
+                b_orig = non_cash[0]
+
+        if not b_orig or not b_dest or not monto:
+            cands_banco = [w for w in non_cash if w.estado == EstadoBilletera.ACTIVA]
+            menu = _generar_menu_billeteras(cands_banco, tipo="egreso")
+            return True, "slot_filling", {"intent_origen": "transferir_fondos", "tipo_operacion": "extraccion", "monto": float(monto) if monto else None, "datos_faltantes": ["billetera_origen"]}, f"¿De qué cuenta bancaria sale la plata?\n{menu}"
+
+        monto_fmt = formatear_monto(float(monto), Moneda.ARS)
+        if comision:
+            com_fmt = formatear_monto(float(comision), Moneda.ARS)
+            msg = f"Voy a registrar una extracción de {monto_fmt} de {b_orig.nombre} a {b_dest.nombre} (con {com_fmt} de comisión). ¿Confirmás?"
+        else:
+            msg = f"Voy a registrar una extracción de {monto_fmt} de {b_orig.nombre} a {b_dest.nombre}. ¿Confirmás?"
+
+        entidades = {
+            "tipo_operacion": "extraccion",
+            "billetera_origen_id": str(b_orig.id),
+            "billetera_destino_id": str(b_dest.id),
+            "billetera_origen": b_orig.nombre,
+            "billetera_destino": b_dest.nombre,
+            "monto": float(monto),
+            "monto_origen": float(monto),
+            "monto_destino": float(monto),
+            "moneda_origen": "ARS",
+            "moneda_destino": "ARS",
+            "monto_comision": float(comision) if comision else None,
+        }
+        return True, "propuesta", entidades, msg
+
+    # 2. COMPRA Y VENTA DE DÓLARES
+    if re.search(r"\b(?:d[oó]lares|verdes|usd|dolarice|cambie\s+pesos\s+a\s+d[oó]lares|cambie\s+d[oó]lares\s+a\s+pesos)\b", m_norm) and not any(w in m_norm for w in ["gaste", "pague", "compre una", "compre un"]):
+        es_venta = bool(re.search(r"\b(?:vendi|cambie\s+d[oó]lares\s+a\s+pesos|vender)\b", m_norm))
+        es_compra = not es_venta
+
+        usd_wallets = [w for w in billeteras_usuario if w.moneda == Moneda.USD and w.estado == EstadoBilletera.ACTIVA]
+        if not usd_wallets:
+            return True, "no_usd", {}, "No tenés ninguna billetera en dólares. Podés crearla desde la web de Argentum."
+        b_usd = usd_wallets[0]
+
+        ars_wallets = [w for w in billeteras_usuario if w.moneda == Moneda.ARS and w.estado == EstadoBilletera.ACTIVA]
+        if not ars_wallets:
+            return True, "error", {}, "No tenés ninguna billetera en pesos."
+        b_ars = next((w for w in ars_wallets if not w.es_efectivo and w.es_principal), ars_wallets[0])
+
+        m_cot = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\s*(?:d[oó]lares|verdes|usd)\s+a\s+(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)", m_norm)
+        if m_cot:
+            dolares = _parsear_monto_argentino(m_cot.group(1))
+            cotiz = _parsear_monto_argentino(m_cot.group(2))
+            if cotiz < RANGO_MIN_COTIZACION_DOLAR or cotiz > RANGO_MAX_COTIZACION_DOLAR:
+                c_str = str(int(cotiz)) if cotiz == int(cotiz) else str(cotiz)
+                return True, "absurda", {}, f"La cotización de ${c_str} por dólar no parece razonable. Por favor verificá el valor e intentá de nuevo."
+            pesos = (dolares * cotiz).quantize(Decimal("0.01"))
+
+            cotiz_fmt = formatear_monto(float(cotiz), Moneda.ARS)
+            pesos_fmt = formatear_monto(float(pesos), Moneda.ARS)
+            dolares_str = f"{int(dolares)}" if dolares == int(dolares) else f"{dolares:g}"
+
+            if es_compra:
+                prop = f"Voy a registrar una compra de USD {dolares_str} a {cotiz_fmt}: salen {pesos_fmt} de {b_ars.nombre} y entran USD {dolares_str} a {b_usd.nombre}. ¿Confirmás?"
+                entidades = {
+                    "tipo_operacion": "compra_usd",
+                    "billetera_origen_id": str(b_ars.id),
+                    "billetera_destino_id": str(b_usd.id),
+                    "monto": float(pesos),
+                    "monto_origen": float(pesos),
+                    "monto_destino": float(dolares),
+                    "moneda_origen": "ARS",
+                    "moneda_destino": "USD",
+                    "cotizacion": float(cotiz),
+                }
+            else:
+                prop = f"Voy a registrar una venta de USD {dolares_str} a {cotiz_fmt}: salen USD {dolares_str} de {b_usd.nombre} y entran {pesos_fmt} a {b_ars.nombre}. ¿Confirmás?"
+                entidades = {
+                    "tipo_operacion": "venta_usd",
+                    "billetera_origen_id": str(b_usd.id),
+                    "billetera_destino_id": str(b_ars.id),
+                    "monto": float(dolares),
+                    "monto_origen": float(dolares),
+                    "monto_destino": float(pesos),
+                    "moneda_origen": "USD",
+                    "moneda_destino": "ARS",
+                    "cotizacion": float(cotiz),
+                }
+            return True, "propuesta", entidades, prop
+        else:
+            m_d = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\s*(?:d[oó]lares|verdes|usd)", m_norm)
+            if m_d:
+                dolares = _parsear_monto_argentino(m_d.group(1))
+                pregunta = "¿A qué cotización compraste o cuántos pesos pagaste?" if es_compra else "¿A qué cotización vendiste o cuántos pesos recibiste?"
+                entidades = {
+                    "intent_origen": "transferir_fondos",
+                    "tipo_operacion": "compra_usd" if es_compra else "venta_usd",
+                    "monto_usd": float(dolares),
+                    "datos_faltantes": ["cotizacion"]
+                }
+                return True, "slot_filling", entidades, pregunta
+
+    # 3. TRANSFERENCIAS ENTRE CUENTAS PROPIAS
+    # Exclusión explícita de terceros: gastos a otra persona
+    if (re.search(r"\b(?:le\s+transfer[ií]|le\s+mand[eé]|le\s+pas[eé]|le\s+pagu[eé])\b", m_norm) or
+        re.search(r"\b(?:a\s+mi\s+hermano|a\s+mi\s+hermana|a\s+mi\s+mam[aá]|a\s+mi\s+pap[aá]|a\s+un\s+amigo|a\s+juan|a\s+pedro)\b", m_norm)):
+        return False, "gasto_tercero", {}, None
+
+    if re.search(r"\b(?:pas[eé]|transfer[ií]|me\s+transfer[ií]|mand[eé]|mov[ií]|cargu[eé]|mande\s+plata|pase\s+plata)\b", m_norm):
+        if "sube" in m_norm:
+            return False, "gasto_sube", {}, None
+
+        m_num = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?)\b", m_norm)
+        monto = _parsear_monto_argentino(m_num.group(1)) if m_num else None
+
+        # Patrón "de X a Y"
+        m_de_a = re.search(r"de\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+?)\s+a\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)", m_norm)
+        b_orig = None
+        b_dest = None
+        if m_de_a:
+            nom_orig = m_de_a.group(1).strip()
+            nom_dest = m_de_a.group(2).strip()
+            b_orig, _ = resolver_billetera_cascada(nom_orig, billeteras_usuario)
+            b_dest, _ = resolver_billetera_cascada(nom_dest, billeteras_usuario)
+        else:
+            # Patrón "a Y"
+            m_a = re.search(r"a\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)", m_norm)
+            if m_a:
+                nom_dest = m_a.group(1).strip()
+                b_dest, _ = resolver_billetera_cascada(nom_dest, billeteras_usuario)
+                if b_dest:
+                    ppal = next((w for w in billeteras_usuario if w.es_principal and w.moneda == b_dest.moneda and w.id != b_dest.id), None)
+                    if ppal:
+                        b_orig = ppal
+
+        # Si no hubo coincidencia con ninguna billetera del usuario, es un gasto hacia un tercero
+        if not b_dest and not m_de_a:
+            return False, "no_es_transferencia_propia", {}, None
+
+        if b_orig and b_dest and b_orig.id == b_dest.id:
+            return True, "misma_billetera", {}, "La billetera de origen y destino no pueden ser la misma."
+
+        if b_orig and b_dest and monto:
+            monto_fmt = formatear_monto(float(monto), b_orig.moneda)
+            prop = f"Voy a transferir {monto_fmt} de {b_orig.nombre} a {b_dest.nombre}. ¿Confirmás?"
+            entidades = {
+                "tipo_operacion": "transferencia",
+                "billetera_origen_id": str(b_orig.id),
+                "billetera_destino_id": str(b_dest.id),
+                "billetera_origen": b_orig.nombre,
+                "billetera_destino": b_dest.nombre,
+                "monto": float(monto),
+                "monto_origen": float(monto),
+                "monto_destino": float(monto),
+                "moneda_origen": b_orig.moneda.value,
+                "moneda_destino": b_dest.moneda.value,
+            }
+            return True, "propuesta", entidades, prop
+
+        if b_dest and monto and not b_orig:
+            entidades = {
+                "intent_origen": "transferir_fondos",
+                "tipo_operacion": "transferencia",
+                "billetera_destino_id": str(b_dest.id),
+                "billetera_destino": b_dest.nombre,
+                "monto": float(monto),
+                "datos_faltantes": ["billetera_origen"]
+            }
+            cands = [w for w in billeteras_usuario if w.moneda == b_dest.moneda and w.id != b_dest.id and w.estado == EstadoBilletera.ACTIVA]
+            menu = _generar_menu_billeteras(cands, tipo="egreso")
+            pregunta = f"¿De qué billetera sale la plata?\n{menu}"
+            return True, "slot_filling", entidades, pregunta
+
+    return False, "no_match", {}, None
+
+
 def _registrar_movimiento_directo(
     usuario: Usuario,
     entidades: dict,
@@ -2203,6 +2639,9 @@ def _parsear_monto_argentino(texto: str) -> Decimal | None:
     if limpio.endswith("k"):
         multiplicador = Decimal("1000")
         limpio = limpio[:-1].strip()
+    elif "mil" in limpio.split() or limpio.endswith("mil") or re.search(r"\bmil\b", limpio):
+        multiplicador = Decimal("1000")
+        limpio = re.sub(r"\bmil\b", "", limpio).strip()
     elif "luca" in limpio:
         multiplicador = Decimal("1000")
         limpio = re.sub(r"lucas?", "", limpio).strip()
@@ -2259,6 +2698,23 @@ def _buscar_ultimo_movimiento_whatsapp(usuario_id: UUID, db: Session) -> tuple[T
         accion = str(conv_reciente.accion_ejecutada)
         if accion.startswith("deshecho:"):
             return None, "YA_DESHECHO"
+        if accion.startswith("transferencia:"):
+            try:
+                tr_id = UUID(accion.replace("transferencia:", ""))
+                tr = db.execute(
+                    select(TransferenciaInterna).where(
+                        TransferenciaInterna.id == tr_id,
+                        TransferenciaInterna.usuario_id == usuario_id,
+                    )
+                ).scalar_one_or_none()
+                if not tr:
+                    return None, "YA_BORRADO"
+                limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_DESHACER_CORREGIR_MINUTOS)
+                if tr.fecha_creacion < limite:
+                    return None, "PLAZO_VENCIDO"
+                return tr, None
+            except ValueError:
+                pass
         try:
             tx_target_id = UUID(accion.replace("corregido:", ""))
         except ValueError:
@@ -2351,6 +2807,29 @@ def _confirmar_propuesta_deshacer(
         return None, "No tenés ninguna anulación pendiente para confirmar.", False
 
     entidades = conv_undo.entidades or {}
+    tr_id_str = entidades.get("transferencia_id")
+    if tr_id_str:
+        tr_id = UUID(str(tr_id_str))
+        tr = db.execute(
+            select(TransferenciaInterna)
+            .where(TransferenciaInterna.id == tr_id, TransferenciaInterna.usuario_id == usuario.id)
+            .with_for_update()
+        ).scalars().first()
+
+        if not tr:
+            conv_undo.accion_ejecutada = f"deshecho:{tr_id}"
+            db.commit()
+            return None, "El movimiento ya fue eliminado.", False
+
+        transferencia_service.eliminar_transferencia(db, usuario.id, tr.id)
+
+        conv_undo.accion_ejecutada = f"deshecho:{tr_id}"
+        emitir_evento_actualizacion(db, usuario.id, "transferencias")
+        emitir_evento_actualizacion(db, usuario.id, "billeteras")
+        db.commit()
+
+        return tr, "Listo, movimiento eliminado.", False
+
     tx_id_str = entidades.get("transaccion_id")
     if not tx_id_str:
         return None, "No pude procesar la anulación.", False
@@ -2608,7 +3087,15 @@ def _detectar_correccion_ultimo_movimiento(
     return False, {}, None
 
 
-def _construir_propuesta_deshacer(tx_actual: Transaccion, db: Session) -> str:
+def _construir_propuesta_deshacer(tx_actual: Transaccion | TransferenciaInterna, db: Session) -> str:
+    if isinstance(tx_actual, TransferenciaInterna):
+        billetera_orig = db.get(Billetera, tx_actual.billetera_origen_id) if tx_actual.billetera_origen_id else None
+        billetera_dest = db.get(Billetera, tx_actual.billetera_destino_id) if tx_actual.billetera_destino_id else None
+        bill_orig_nom = billetera_orig.nombre if billetera_orig else "origen"
+        bill_dest_nom = billetera_dest.nombre if billetera_dest else "destino"
+        monto_fmt = formatear_monto(float(tx_actual.monto_origen), tx_actual.moneda_origen)
+        return f"¿Querés anular la transferencia de {monto_fmt} de {bill_orig_nom} a {bill_dest_nom}? ¿Confirmás?"
+
     monto_fmt = formatear_monto(float(tx_actual.monto), tx_actual.moneda)
     billetera = db.get(Billetera, tx_actual.billetera_id) if tx_actual.billetera_id else None
     bill_nom = billetera.nombre if billetera else "tu billetera"
@@ -3632,6 +4119,29 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     enviar_whatsapp(from_number, msg_confirm)
                     return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
+                # Prioridad 2.5: propuesta de transferir fondos pendiente
+                prop_transfer = _buscar_propuesta_transferencia_pendiente(usuario.id, db)
+                if prop_transfer:
+                    tr_creada, msg_confirm, ya_conf = _confirmar_propuesta_transferencia(usuario, db)
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=msg_confirm,
+                        intent_detectado="confirmar_transferencia",
+                        entidades={},
+                        accion_ejecutada=f"transferencia:{tr_creada.id}" if tr_creada else ("ya_confirmada" if ya_conf else None),
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, msg_confirm)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
                 # Prioridad 3: propuesta de registrar movimiento
                 tx_creada, msg_confirm, ya_conf = _confirmar_propuesta_transaccion(usuario, db)
                 nueva_conv = ConversacionWpp(
@@ -3691,7 +4201,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
             )
 
             # 5. Si hay pregunta de billetera pendiente activa, resolver selección numérica o por nombre
-            if _es_pregunta_billetera(conv_activa):
+            if _es_pregunta_billetera(conv_activa) and conv_activa.intent_detectado != "transferir_fondos" and not (estado_previo and (estado_previo.get("intent_origen") == "transferir_fondos" or estado_previo.get("tipo_operacion") in ("transferencia", "extraccion", "compra_usd", "venta_usd"))):
                 estado_previo_bill = dict(conv_activa.slot_filling_estado) if conv_activa.slot_filling_estado else {}
                 tipo_mov = estado_previo_bill.get("tipo", "egreso")
                 moneda_str = estado_previo_bill.get("moneda", "ARS")
@@ -4020,6 +4530,11 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
 
                 # Hay movimiento para deshacer: armar propuesta de confirmación
                 msg_propuesta_undo = _construir_propuesta_deshacer(tx_last, db)
+                entidades_undo = (
+                    {"transferencia_id": str(tx_last.id)}
+                    if isinstance(tx_last, TransferenciaInterna)
+                    else {"transaccion_id": str(tx_last.id)}
+                )
                 nueva_conv = ConversacionWpp(
                     usuario_id=usuario.id,
                     wamid=wamid,
@@ -4028,7 +4543,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     transcripcion=None,
                     mensaje_bot=msg_propuesta_undo,
                     intent_detectado="deshacer",
-                    entidades={"transaccion_id": str(tx_last.id)},
+                    entidades=entidades_undo,
                     accion_ejecutada=None,
                     confianza=Decimal("1.000"),
                     slot_filling_activo=False,
@@ -4041,7 +4556,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
 
             # 7.6 Detección determinística de corregir (Tarea 3)
             tx_last_corr, motivo_corr = _buscar_ultimo_movimiento_whatsapp(usuario.id, db)
-            if tx_last_corr:
+            if tx_last_corr and isinstance(tx_last_corr, Transaccion):
                 es_corr, cambios, err_corr = _detectar_correccion_ultimo_movimiento(
                     mensaje_texto, usuario.id, db, tx_last_corr
                 )
@@ -4112,6 +4627,76 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, msg_resp)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+            # 7.7 Detección determinística de transferencias / cajero / dólares (Punto 9B)
+            es_tr, estado_tr, ents_tr, resp_tr = _interpretar_transferencia(
+                mensaje_texto, usuario, db, estado_previo=estado_previo
+            )
+            if es_tr:
+                if estado_tr in ("no_cash", "no_usd", "absurda", "misma_billetera"):
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=resp_tr,
+                        intent_detectado="transferir_fondos",
+                        entidades={},
+                        accion_ejecutada="sin_efecto",
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, resp_tr)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                elif estado_tr == "slot_filling":
+                    if conv_activa:
+                        conv_activa.slot_filling_activo = False
+                        db.flush()
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=resp_tr,
+                        intent_detectado="transferir_fondos",
+                        entidades=ents_tr,
+                        accion_ejecutada=None,
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=True,
+                        slot_filling_estado=ents_tr,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, resp_tr)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                elif estado_tr == "propuesta":
+                    if conv_activa:
+                        conv_activa.slot_filling_activo = False
+                        db.flush()
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=resp_tr,
+                        intent_detectado="transferir_fondos",
+                        entidades=ents_tr,
+                        accion_ejecutada=None,
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, resp_tr)
                     return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
             # 8. Procesamiento normal de IA
