@@ -458,13 +458,17 @@ def _merge_entidades(
     monto_prev = estado_previo.get("monto")
     cat_prev = estado_previo.get("categoria")
 
-    # Si trae un monto nuevo y categoría/descripción propia y difiere de la previa -> Operación nueva
+    # Si el mensaje nuevo trae monto y categoría/descripción propios, es una operación independiente
+    # (incluso si tiene el mismo monto y categoría que la anterior, ej: gasto repetido).
+    # Solo se fusiona si el sistema estaba esperando explícitamente que el usuario completara el monto.
     if monto_nuevo is not None and (cat_nueva is not None or desc_nueva is not None):
-        if monto_prev is not None and (monto_nuevo != monto_prev or (cat_nueva and cat_nueva != cat_prev)):
+        if "monto" not in estado_previo.get("datos_faltantes", []):
             return dict(entidades_nuevas)
 
     datos_faltantes = estado_previo.get("datos_faltantes", [])
     merged = dict(estado_previo)
+    # Nunca arrastrar transacciones adicionales de un estado previo
+    merged.pop("transacciones_adicionales", None)
 
     for k, v in entidades_nuevas.items():
         if k == "datos_faltantes":
@@ -473,8 +477,9 @@ def _merge_entidades(
             # Solo fusionar si era un campo pendiente o si es resolución de billetera
             if k in datos_faltantes or (k in ("billetera_origen", "billetera_destino") and any("billetera" in d for d in datos_faltantes)):
                 merged[k] = v
-            elif k == "transacciones_adicionales" and not v and estado_previo.get("transacciones_adicionales"):
-                continue
+            elif k == "transacciones_adicionales":
+                if v:
+                    merged[k] = v
             elif estado_previo.get(k) is None:
                 merged[k] = v
 

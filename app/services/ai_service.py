@@ -305,6 +305,7 @@ MÚLTIPLES OPERACIONES EN UN SOLO MENSAJE:
   * Tomá la primera como la transacción principal en los campos directos de "entidades" (monto, moneda, tipo, categoria, descripcion, fecha).
   * Colocá el resto en la lista "transacciones_adicionales" dentro de "entidades", donde cada elemento es un objeto con exactamente los campos: monto, moneda, tipo, categoria, descripcion, fecha (con el mismo significado y aplicando las mismas reglas de categorización automática y fecha relativa que la principal).
   * Si alguna operación adicional detectada es una transferencia o una compra en cuotas, NO la incluyas en "transacciones_adicionales" — tratá el mensaje como si solo mencionara la transacción principal.
+  * REGLA ESTRICTA DE AISLAMIENTO: "transacciones_adicionales" SOLO debe contener operaciones que el usuario haya escrito EXPLÍCITAMENTE en el texto del mensaje actual (por ejemplo: "gasté 5000 en kiosco y 2000 en farmacia"). NUNCA tomes operaciones de mensajes anteriores del historial ni las repitas en "transacciones_adicionales". Si el mensaje actual del usuario solo describe un movimiento, "transacciones_adicionales" DEBE ser una lista vacía [], incluso si en el historial de conversación hay un movimiento idéntico o repetido.
   * Si falta la billetera y el usuario tiene más de una activa, hacé UNA SOLA pregunta de billetera que aplicará a todas las operaciones.
   * Cuando haya transacciones adicionales y la billetera esté resuelta, el resumen de confirmación en "respuesta_usuario" las lista todas en un solo mensaje. Ejemplo: "Voy a anotar 3 movimientos desde Efectivo ARS: $10.560 en Verdulería, $6.000 en Otros, $14.550 en Carnicería. ¿Va?"
 
@@ -876,12 +877,21 @@ def procesar_mensaje(
 
             # Sanitizar descripciones en transacciones adicionales si existen
             if isinstance(entidades_dict.get("transacciones_adicionales"), list):
-                for tx_ad in entidades_dict["transacciones_adicionales"]:
-                    if isinstance(tx_ad, dict) and tx_ad.get("descripcion"):
-                        tx_ad["descripcion"] = sanitizar_descripcion(
-                            tx_ad["descripcion"],
-                            tipo=tx_ad.get("tipo") or "egreso",
-                        )
+                # Salvaguarda: si el mensaje actual no tiene indicios de múltiples movimientos
+                # (por ejemplo, es un gasto simple como "gasté 5000 en el kiosco"),
+                # transacciones_adicionales no debe poblarse con alucinaciones de turnos previos.
+                montos_en_texto = re.findall(r"\b\d+(?:[.,]\d+)?\b", mensaje)
+                conectores = ["y ", "y otros", "y otra", "además", "ademas", "también", "tambien", "\n", ","]
+                tiene_conectores = any(c in mensaje.lower() for c in conectores)
+                if len(montos_en_texto) <= 1 and not tiene_conectores:
+                    entidades_dict["transacciones_adicionales"] = []
+                else:
+                    for tx_ad in entidades_dict["transacciones_adicionales"]:
+                        if isinstance(tx_ad, dict) and tx_ad.get("descripcion"):
+                            tx_ad["descripcion"] = sanitizar_descripcion(
+                                tx_ad["descripcion"],
+                                tipo=tx_ad.get("tipo") or "egreso",
+                            )
 
         logger.info(f"Mensaje procesado con éxito. Intent: {parsed['intent']}, Confianza: {parsed['confianza']}")
         return parsed

@@ -270,34 +270,59 @@ def enviar_reset_password_email(email: str, nombre: str, reset_url: str) -> bool
     return _enviar_email(email, asunto, cuerpo, cuerpo_html)
 
 
-def enviar_email_aviso_google(destinatario: str) -> bool:
-    asunto = "Acceso a tu cuenta de Argentum con Google"
+def enviar_email_aviso_google(destinatario: str, codigo: str) -> bool:
+    asunto = "Recuperación de acceso a tu cuenta de Argentum"
     nombre = _obtener_nombre_usuario(destinatario)
     login_url = f"{settings.FRONTEND_URL}/login"
+    link_recupero = f"{settings.FRONTEND_URL}/auth/recuperar-password?email={destinatario}&codigo={codigo}"
     cuerpo = (
         f"Hola {nombre},\n\n"
-        f"Recibimos una solicitud para recuperar la contraseña de tu cuenta en Argentum.\n\n"
-        f"Tu cuenta está vinculada a Google OAuth, por lo que no necesitás una contraseña local. "
-        f"Podés iniciar sesión directamente haciendo clic en el botón 'Continuar con Google' en la pantalla de inicio de sesión:\n"
+        f"Recibimos una solicitud para restablecer el acceso a tu cuenta en Argentum.\n\n"
+        f"Tu cuenta fue registrada originalmente con Google. Si el servicio de Google está funcionando con normalidad en tu dispositivo, podés iniciar sesión directamente desde:\n"
         f"{login_url}\n\n"
-        f"Si no realizaste esta solicitud, podés ignorar este mensaje de forma segura."
+        f"Si el inicio de sesión con Google no te funciona o preferís acceder mediante contraseña, podés establecer una contraseña para tu cuenta con el siguiente código de recuperación:\n\n"
+        f"Tu código de recuperación es: {codigo}\n\n"
+        f"O podés hacer clic directamente en el siguiente enlace para crear tu contraseña:\n"
+        f"{link_recupero}\n\n"
+        f"Este código y enlace expiran en 15 minutos y son de un solo uso. Una vez establecida tu contraseña, vas a poder entrar tanto con Google como con tu email y contraseña.\n\n"
+        f"Si vos no solicitaste esto, podés ignorar este correo de forma segura. Tu cuenta permanece protegida."
     )
     cuerpo_html = f"""
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 32px 24px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px;">
-        <h2 style="color: #0f172a; margin-top: 0; font-size: 22px; font-weight: 700;">Acceso mediante Google en Argentum</h2>
+        <h2 style="color: #0D2045; margin-top: 0; font-size: 22px; font-weight: 700;">Acceso a tu cuenta de Argentum</h2>
         <p style="color: #475569; font-size: 15px; line-height: 1.6;">Hola <strong>{nombre}</strong>,</p>
-        <p style="color: #475569; font-size: 15px; line-height: 1.6;">Recibimos una solicitud para restablecer la contraseña de tu cuenta.</p>
-        <div style="background-color: #f8fafc; border-left: 4px solid #4285f4; padding: 16px; border-radius: 8px; margin: 20px 0;">
-            <p style="color: #1e293b; font-size: 14px; margin: 0; font-weight: 500;">
-                Tu cuenta utiliza autenticación directa con <strong>Google OAuth</strong>, por lo que no utiliza una contraseña local en Argentum.
+        <p style="color: #475569; font-size: 15px; line-height: 1.6;">Recibimos una solicitud para restablecer el acceso a tu cuenta.</p>
+        
+        <!-- BLOQUE 1: GOOGLE -->
+        <div style="background-color: #f8fafc; border-left: 4px solid #4285f4; padding: 16px 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="color: #1e293b; font-size: 14px; margin: 0 0 12px 0; font-weight: 500;">
+                Tu cuenta fue creada con <strong>Google</strong>. Si podés usar Google normalmente, ingresá desde la pantalla principal:
+            </p>
+            <div style="text-align: left; margin: 8px 0;">
+                <a href="{login_url}" style="background-color: #ffffff; color: #1e293b; border: 1px solid #cbd5e1; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">Iniciar sesión con Google</a>
+            </div>
+        </div>
+
+        <!-- BLOQUE 2: RECUPERACIÓN / CONTRASEÑA ALTERNATIVA -->
+        <div style="background-color: #F5F4F0; border-left: 4px solid #0D2045; padding: 20px; border-radius: 8px; margin: 24px 0;">
+            <h3 style="color: #0D2045; margin-top: 0; margin-bottom: 8px; font-size: 16px; font-weight: 700;">¿Tuviste problemas con Google o preferís usar contraseña?</h3>
+            <p style="color: #52565F; font-size: 14px; line-height: 1.5; margin: 0 0 16px 0;">
+                Podés configurar una contraseña propia para ingresar siempre con tu email, sin depender de Google.
+            </p>
+            <p style="color: #0A0D12; font-size: 13px; font-weight: 600; margin: 0 0 8px 0; text-transform: uppercase; letter-spacing: 0.5px;">Tu código de recuperación:</p>
+            <div style="background-color: #ffffff; border: 1px dashed #0D2045; border-radius: 8px; padding: 12px 24px; display: inline-block; font-family: monospace; font-size: 26px; font-weight: 700; letter-spacing: 6px; color: #0D2045; margin-bottom: 16px;">
+                {codigo}
+            </div>
+            <div style="margin-top: 8px;">
+                <a href="{link_recupero}" style="background-color: #0D2045; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">Crear mi contraseña</a>
+            </div>
+            <p style="color: #8E9198; font-size: 12px; margin: 12px 0 0 0;">
+                El código y el enlace expiran en 15 minutos y son de un solo uso.
             </p>
         </div>
-        <p style="color: #475569; font-size: 15px; line-height: 1.6;">Podés ingresar a tu cuenta directamente tocando el botón de Google en el inicio de sesión:</p>
-        <div style="text-align: center; margin: 32px 0;">
-            <a href="{login_url}" style="background-color: #0f172a; color: #ffffff; text-decoration: none; padding: 14px 28px; border-radius: 10px; font-weight: 600; font-size: 15px; display: inline-block;">Iniciar sesión con Google</a>
-        </div>
-        <p style="color: #94a3b8; font-size: 13px; line-height: 1.5; margin-top: 32px; border-top: 1px solid #f1f5f9; padding-top: 16px;">
-            Si no fuiste vos quien solicitó esto, podés ignorar este correo con total tranquilidad.
+
+        <p style="color: #94a3b8; font-size: 13px; line-height: 1.5; margin-top: 24px; border-top: 1px solid #f1f5f9; padding-top: 16px;">
+            Si no realizaste esta solicitud, podés ignorar este correo con total tranquilidad. Tu cuenta continúa segura.
         </p>
     </div>
     """
