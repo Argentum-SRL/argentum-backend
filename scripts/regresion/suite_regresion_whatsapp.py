@@ -34,6 +34,7 @@ from app.models.cuota import Cuota
 from app.models.categoria import Categoria
 from app.models.subcategoria import Subcategoria
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
+from app.models.transferencia_interna import TransferenciaInterna
 from app.models.transaccion import (
     Transaccion,
     TipoTransaccion,
@@ -1224,6 +1225,236 @@ def p9_caso_12(datos):
     return run_isolated(test)
 
 # ==============================================================================
+# ESCENARIOS PUNTO 9B: Transferencias, Extracciones y Dólares (12 casos)
+# ==============================================================================
+
+def p9b_caso_1(datos):
+    """pasé 10 mil de Galicia a Santander: crea transferencia, ajusta los dos saldos, cero gastos"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        s = Session()
+        txs_ini = s.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        bg_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
+        bs_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Santander", Billetera.usuario_id == u.id)).scalar()
+        
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "pasé 10 mil de Galicia a Santander"), time.perf_counter())
+        prop = respuestas[-1][1] if respuestas else ""
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        conf = respuestas[-1][1] if respuestas else ""
+        
+        bg_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
+        bs_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Santander", Billetera.usuario_id == u.id)).scalar()
+        txs_fin = s.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        
+        cero_gastos = (txs_ini == txs_fin)
+        saldos_ok = (bg_fin == bg_ini - Decimal("10000") and bs_fin == bs_ini + Decimal("10000"))
+        return f"Propuesta: {prop} | Confirmación: {conf} | Saldos ajustados: {saldos_ok} | Cero gastos: {cero_gastos}"
+    return run_isolated(test)
+
+def p9b_caso_2(datos):
+    """me transferí 20000 a Santander: pregunta el origen o usa la principal, según corresponda"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "me transferí 20000 a Santander"), time.perf_counter())
+        return respuestas[-1][1] if respuestas else ""
+    return run_isolated(test)
+
+def p9b_caso_3(datos):
+    """saqué 50000 del cajero: transfiere de la cuenta al efectivo, cero gastos"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        s = Session()
+        txs_ini = s.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        bg_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
+        be_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo ARS", Billetera.usuario_id == u.id)).scalar()
+        
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "saqué 50000 del cajero"), time.perf_counter())
+        prop = respuestas[-1][1] if respuestas else ""
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        conf = respuestas[-1][1] if respuestas else ""
+        
+        bg_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
+        be_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo ARS", Billetera.usuario_id == u.id)).scalar()
+        txs_fin = s.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        
+        saldos_ok = (bg_fin == bg_ini - Decimal("50000") and be_fin == be_ini + Decimal("50000"))
+        cero_gastos = (txs_ini == txs_fin)
+        return f"Propuesta: {prop} | Confirmación: {conf} | Saldos ajustados: {saldos_ok} | Cero gastos: {cero_gastos}"
+    return run_isolated(test)
+
+def p9b_caso_4(datos):
+    """saqué 50000 del cajero con un usuario sin billetera de efectivo: mensaje claro, no registra"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET estado = 'archivada' WHERE usuario_id = :uid AND es_efectivo = true"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        s = Session()
+        txs_ini = s.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        trs_ini = s.execute(select(func.count(TransferenciaInterna.id)).where(TransferenciaInterna.usuario_id == u.id)).scalar()
+        
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "saqué 50000 del cajero"), time.perf_counter())
+        msg = respuestas[-1][1] if respuestas else ""
+        
+        txs_fin = s.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        trs_fin = s.execute(select(func.count(TransferenciaInterna.id)).where(TransferenciaInterna.usuario_id == u.id)).scalar()
+        no_registro = (txs_ini == txs_fin and trs_ini == trs_fin)
+        return f"Respuesta: {msg} | No registra: {no_registro}"
+    return run_isolated(test)
+
+def p9b_caso_5(datos):
+    """compré 100 dólares a 1500: transfiere 150.000 pesos y suma 100 dólares"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        s = Session()
+        txs_ini = s.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        bg_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
+        bu_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo USD", Billetera.usuario_id == u.id)).scalar()
+        
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "compré 100 dólares a 1500"), time.perf_counter())
+        prop = respuestas[-1][1] if respuestas else ""
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        conf = respuestas[-1][1] if respuestas else ""
+        
+        bg_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
+        bu_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo USD", Billetera.usuario_id == u.id)).scalar()
+        txs_fin = s.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        
+        saldos_ok = (bg_fin == bg_ini - Decimal("150000") and bu_fin == bu_ini + Decimal("100"))
+        cero_gastos = (txs_ini == txs_fin)
+        return f"Propuesta: {prop} | Confirmación: {conf} | Saldos ajustados: {saldos_ok} | Cero gastos: {cero_gastos}"
+    return run_isolated(test)
+
+def p9b_caso_6(datos):
+    """compré 100 dólares: pregunta la cotización o los pesos"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "compré 100 dólares"), time.perf_counter())
+        return respuestas[-1][1] if respuestas else ""
+    return run_isolated(test)
+
+def p9b_caso_7(datos):
+    """vendí 50 dólares a 1450: transfiere al revés"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE billeteras SET saldo_actual = 100 WHERE usuario_id = :uid AND nombre = 'Efectivo USD'"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        s = Session()
+        bg_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
+        bu_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo USD", Billetera.usuario_id == u.id)).scalar()
+        
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "vendí 50 dólares a 1450"), time.perf_counter())
+        prop = respuestas[-1][1] if respuestas else ""
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        conf = respuestas[-1][1] if respuestas else ""
+        
+        bg_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
+        bu_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo USD", Billetera.usuario_id == u.id)).scalar()
+        
+        saldos_ok = (bu_fin == bu_ini - Decimal("50") and bg_fin == bg_ini + Decimal("72500"))
+        return f"Propuesta: {prop} | Confirmación: {conf} | Saldos ajustados: {saldos_ok}"
+    return run_isolated(test)
+
+def p9b_caso_8(datos):
+    """compré 100 dólares a 5: advierte que la cotización es absurda"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "compré 100 dólares a 5"), time.perf_counter())
+        return respuestas[-1][1] if respuestas else ""
+    return run_isolated(test)
+
+def p9b_caso_9(datos):
+    """le transferí 5000 a mi hermano: es un gasto, no una transferencia"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        s = Session()
+        txs_ini = s.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        trs_ini = s.execute(select(func.count(TransferenciaInterna.id)).where(TransferenciaInterna.usuario_id == u.id)).scalar()
+        
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "le transferí 5000 a mi hermano"), time.perf_counter())
+        prop = respuestas[-1][1] if respuestas else ""
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        conf = respuestas[-1][1] if respuestas else ""
+        
+        txs_fin = s.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        trs_fin = s.execute(select(func.count(TransferenciaInterna.id)).where(TransferenciaInterna.usuario_id == u.id)).scalar()
+        es_gasto = (txs_fin == txs_ini + 1 and trs_fin == trs_ini)
+        return f"Propuesta: {prop} | Confirmación: {conf} | Es gasto: {es_gasto}"
+    return run_isolated(test)
+
+def p9b_caso_10(datos):
+    """gasté 5000 en el kiosco: sigue siendo un gasto"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
+        return respuestas[-1][1] if respuestas else ""
+    return run_isolated(test)
+
+def p9b_caso_11(datos):
+    """Registrar una transferencia y deshacerla: los dos saldos vuelven"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        s = Session()
+        bg_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
+        bs_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Santander", Billetera.usuario_id == u.id)).scalar()
+        
+        # Transferir
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "pasé 10 mil de Galicia a Santander"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        
+        # Deshacer
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "borrá eso"), time.perf_counter())
+        prop_undo = respuestas[-1][1] if respuestas else ""
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        conf_undo = respuestas[-1][1] if respuestas else ""
+        
+        bg_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
+        bs_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Santander", Billetera.usuario_id == u.id)).scalar()
+        
+        saldos_vuelven = (bg_ini == bg_fin and bs_ini == bs_fin)
+        return f"Propuesta undo: {prop_undo} | Confirmación undo: {conf_undo} | Saldos intactos: {saldos_vuelven}"
+    return run_isolated(test)
+
+def p9b_caso_12(datos):
+    """Transferencia con origen y destino iguales: se rechaza"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "pasé 10 mil de Galicia a Galicia"), time.perf_counter())
+        return respuestas[-1][1] if respuestas else ""
+    return run_isolated(test)
+
+
+# ==============================================================================
 # RUNNER GENERAL DE SUITE
 # ==============================================================================
 
@@ -1861,6 +2092,104 @@ def correr_suite_completa():
             "ejecutar": lambda: p9_caso_12(datos),
             "esperado": "No interpretado como 3000: True",
             "match": "contiene",
+        },
+
+        # --- PUNTO 9B: Transferencias, Extracciones y Dólares ---
+        {
+            "id": "P9B.1",
+            "punto": "Punto 9B",
+            "nombre": "pasé 10 mil de Galicia a Santander: crea transferencia, ajusta los dos saldos, cero gastos",
+            "ejecutar": lambda: p9b_caso_1(datos),
+            "esperado": "Saldos ajustados: True | Cero gastos: True",
+            "match": "contiene",
+        },
+        {
+            "id": "P9B.2",
+            "punto": "Punto 9B",
+            "nombre": "me transferí 20000 a Santander: pregunta el origen o usa la principal, según corresponda",
+            "ejecutar": lambda: p9b_caso_2(datos),
+            "esperado": "Voy a transferir $20.000 de Galicia a Santander. ¿Confirmás?",
+            "match": "exacto",
+        },
+        {
+            "id": "P9B.3",
+            "punto": "Punto 9B",
+            "nombre": "saqué 50000 del cajero: transfiere de la cuenta al efectivo, cero gastos",
+            "ejecutar": lambda: p9b_caso_3(datos),
+            "esperado": "Saldos ajustados: True | Cero gastos: True",
+            "match": "contiene",
+        },
+        {
+            "id": "P9B.4",
+            "punto": "Punto 9B",
+            "nombre": "saqué 50000 del cajero con un usuario sin billetera de efectivo: mensaje claro, no registra",
+            "ejecutar": lambda: p9b_caso_4(datos),
+            "esperado": "No tenés ninguna billetera de efectivo en pesos. Podés crearla desde la web de Argentum. | No registra: True",
+            "match": "contiene",
+        },
+        {
+            "id": "P9B.5",
+            "punto": "Punto 9B",
+            "nombre": "compré 100 dólares a 1500: transfiere 150.000 pesos y suma 100 dólares",
+            "ejecutar": lambda: p9b_caso_5(datos),
+            "esperado": "Saldos ajustados: True | Cero gastos: True",
+            "match": "contiene",
+        },
+        {
+            "id": "P9B.6",
+            "punto": "Punto 9B",
+            "nombre": "compré 100 dólares: pregunta la cotización o los pesos",
+            "ejecutar": lambda: p9b_caso_6(datos),
+            "esperado": "¿A qué cotización compraste o cuántos pesos pagaste?",
+            "match": "exacto",
+        },
+        {
+            "id": "P9B.7",
+            "punto": "Punto 9B",
+            "nombre": "vendí 50 dólares a 1450: transfiere al revés",
+            "ejecutar": lambda: p9b_caso_7(datos),
+            "esperado": "Saldos ajustados: True",
+            "match": "contiene",
+        },
+        {
+            "id": "P9B.8",
+            "punto": "Punto 9B",
+            "nombre": "compré 100 dólares a 5: advierte que la cotización es absurda",
+            "ejecutar": lambda: p9b_caso_8(datos),
+            "esperado": "La cotización de $5 por dólar no parece razonable. Por favor verificá el valor e intentá de nuevo.",
+            "match": "exacto",
+        },
+        {
+            "id": "P9B.9",
+            "punto": "Punto 9B",
+            "nombre": "le transferí 5000 a mi hermano: es un gasto, no una transferencia",
+            "ejecutar": lambda: p9b_caso_9(datos),
+            "esperado": "Es gasto: True",
+            "match": "contiene",
+        },
+        {
+            "id": "P9B.10",
+            "punto": "Punto 9B",
+            "nombre": "gasté 5000 en el kiosco: sigue siendo un gasto",
+            "ejecutar": lambda: p9b_caso_10(datos),
+            "esperado": "Voy a anotar $5.000 en Kiosco desde Galicia. ¿Va?",
+            "match": "contiene",
+        },
+        {
+            "id": "P9B.11",
+            "punto": "Punto 9B",
+            "nombre": "Registrar una transferencia y deshacerla: los dos saldos vuelven",
+            "ejecutar": lambda: p9b_caso_11(datos),
+            "esperado": "Saldos intactos: True",
+            "match": "contiene",
+        },
+        {
+            "id": "P9B.12",
+            "punto": "Punto 9B",
+            "nombre": "Transferencia con origen y destino iguales: se rechaza",
+            "ejecutar": lambda: p9b_caso_12(datos),
+            "esperado": "La billetera de origen y destino no pueden ser la misma.",
+            "match": "exacto",
         },
     ]
 

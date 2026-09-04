@@ -254,6 +254,7 @@ ERRORES ORTOGRÁFICOS: ignoralos completamente y procesá el mensaje igual. El u
 
 INTENTS VÁLIDOS — respondé siempre con exactamente uno de estos:
 - registrar_transaccion
+- transferir_fondos
 - consultar_saldo
 - consultar_balance
 - consultar_proyeccion
@@ -277,6 +278,13 @@ REGLAS DE CLASIFICACIÓN DE INTENTS:
 - "borrá eso", "borralo", "eliminá eso", "me equivoqué", "eso estaba mal", "anulá eso", "cancelá el último" → deshacer
 - "eran 3.000 no 30.000", "eso era supermercado", "fue con Galicia", "fue ayer", "no, 5000" (corrección de dato suelto del último movimiento registrado) → corregir
 - CRITERIO OPERACIÓN NUEVA VS CORRECCIÓN: Si el mensaje contiene un monto Y un concepto/categoría propios independientes (ej: "gasté 12000 en verdulería", "almuerzo 4500", "cargué 30000 de nafta"), es SIEMPRE "registrar_transaccion". Si solo contiene un dato suelto corrigiendo el valor anterior (ej: "no, 5000", "eran 3000 no 30000", "eso era verdulería", "fue con Galicia", "fue ayer"), es "corregir".
+- TRANSFERENCIAS ENTRE CUENTAS PROPIAS (intent="transferir_fondos"):
+  * Pasaje entre cuentas del usuario: "pasé", "transferí", "me transferí", "mandé", "moví", "mandé plata", "pasé plata".
+  * Extracción de cajero: "saqué del cajero", "saqué plata", "extraje", "retiré del cajero", "fui al cajero", "saqué del banco". Es una transferencia de la cuenta bancaria a la billetera de efectivo de la misma moneda.
+  * Compra y venta de dólares: "compré dólares", "compré verdes", "cambié pesos a dólares", "vendí dólares", "pasé a dólares", "dolaricé". Es una transferencia entre una billetera en pesos y una en dólares. Si menciona cotización, colocarla en tasa_cambio.
+  * DISTINCIÓN OBLIGATORIA (CUENTA PROPIA VS OTRA PERSONA): Si el destino NO coincide con ninguna billetera o cuenta propia del usuario (por ejemplo "le transferí 5000 a mi hermano", "le mandé 2000 a Juan", "le pagué a Pedro"), NO es transferencia interna, es un GASTO (intent="registrar_transaccion", tipo="egreso"). Solo es "transferir_fondos" si el destino es una cuenta/billetera propia del usuario, o si dice "me transferí" / "pasé de X a Y", o extracción de cajero, o compra/venta de dólares.
+  * Cargar la SUBE: NO es transferencia interna, es un gasto común en Transporte público. Cargar Mercado Pago: SÍ es transferencia interna si el usuario tiene billetera Mercado Pago.
+  * Una transferencia interna NUNCA es un gasto ni un ingreso.
 - "puse X", "metí X", "deposité X" SIN contexto claro → slot_filling=true, preguntá "¿Fue un gasto, ingreso o transferencia?"
 - "cuánta plata tengo", "cuánto tengo", "mi saldo" → consultar_saldo
 - "cómo voy", "cómo estoy este mes" → consultar_balance
@@ -645,6 +653,8 @@ def _construir_schema_estricto(db: Session) -> dict[str, Any]:
                             "destinatario": {"type": ["string", "null"]},
                             "persona": {"type": ["string", "null"]},
                             "tasa_cambio": {"type": ["number", "null"]},
+                            "monto_destino": {"type": ["number", "null"]},
+                            "monto_comision": {"type": ["number", "null"]},
                             "confirmado": {"type": ["boolean", "null"]},
                             "transacciones_adicionales": {
                                 "type": "array",
@@ -684,6 +694,8 @@ def _construir_schema_estricto(db: Session) -> dict[str, Any]:
                             "destinatario",
                             "persona",
                             "tasa_cambio",
+                            "monto_destino",
+                            "monto_comision",
                             "confirmado",
                             "transacciones_adicionales",
                         ],
