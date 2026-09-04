@@ -41,7 +41,7 @@ class MovimientoMeta(Base):
     )
     monto: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     moneda_movimiento: Mapped[Moneda] = mapped_column(SAEnum(Moneda, values_callable=lambda obj: [e.value for e in obj], name="moneda_enum"), nullable=False)
-    cotizacion_usada: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
+    cotizacion_usada: Mapped[Decimal | None] = mapped_column(Numeric(15, 4), nullable=True)
     tipo_dolar_usado: Mapped[str | None] = mapped_column(String(30), nullable=True)
     billetera_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("billeteras.id"), nullable=False

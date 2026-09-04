@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.auth import get_current_admin_user
 from app.core.database import SessionLocal, get_db
 from app.core.config import settings
+from app.core.constants import MAX_MONTO_INTEGRIDAD
 from app.utils.fecha import hoy_argentina, TZ_ARGENTINA, ahora_argentina
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria, EstadoCategoria, TipoCategoria
@@ -1229,7 +1230,7 @@ def _validar_item_movimiento(
 
     if monto_decimal <= Decimal("0"):
         return None, f"No se pudo registrar {desc} porque el monto debe ser mayor a cero."
-    if monto_decimal > Decimal("1000000000000"):
+    if monto_decimal > MAX_MONTO_INTEGRIDAD:
         return None, f"No se pudo registrar {desc} porque el monto supera el límite permitido."
 
     moneda_solicitada_str = datos.get("moneda")
@@ -1866,8 +1867,47 @@ def _confirmar_propuesta_transaccion(
     return transaccion, msg_resp, False
 
 
-RANGO_MIN_COTIZACION_DOLAR = Decimal("500")
-RANGO_MAX_COTIZACION_DOLAR = Decimal("5000")
+FACTOR_MIN_COTIZACION_DOLAR = Decimal("0.40")
+FACTOR_MAX_COTIZACION_DOLAR = Decimal("2.50")
+
+
+def _obtener_cotizacion_referencia_usuario(usuario: Usuario, db: Session) -> Decimal | None:
+    """
+    Obtiene la cotización de referencia según la preferencia del usuario desde la tabla
+    cotizaciones_dolar (nunca inventa un valor ni consulta servicios externos).
+    Retorna None si la tabla está vacía o no hay registros disponibles.
+    """
+    from app.services.dolar_service import obtener_cotizacion_por_fecha
+    from app.models.cotizacion_dolar import CotizacionDolar
+    from sqlalchemy import desc
+
+    tipo_pref = getattr(usuario, "tipo_dolar", "blue") or "blue"
+    hoy = hoy_argentina()
+
+    # 1. Búsqueda por preferencia del usuario (fecha exacta o anterior más cercana)
+    cot = obtener_cotizacion_por_fecha(db, tipo_pref, hoy)
+    if cot is not None:
+        val = cot.promedio or cot.venta or cot.compra
+        if val and val > Decimal("0"):
+            return val
+
+    # 2. Fallback a 'blue' si la preferencia era distinta
+    if tipo_pref.lower() != "blue":
+        cot_blue = obtener_cotizacion_por_fecha(db, "blue", hoy)
+        if cot_blue is not None:
+            val = cot_blue.promedio or cot_blue.venta or cot_blue.compra
+            if val and val > Decimal("0"):
+                return val
+
+    # 3. Fallback al registro más reciente en la tabla independientemente del tipo o fecha
+    stmt_any = select(CotizacionDolar).order_by(desc(CotizacionDolar.fecha)).limit(1)
+    cot_any = db.execute(stmt_any).scalars().first()
+    if cot_any is not None:
+        val = cot_any.promedio or cot_any.venta or cot_any.compra
+        if val and val > Decimal("0"):
+            return val
+
+    return None
 
 
 def _buscar_propuesta_transferencia_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
@@ -2011,16 +2051,74 @@ def _interpretar_transferencia(
                     m_cot = _parsear_monto_argentino(m_num.group(1))
             if m_cot:
                 dolares = Decimal(str(estado_previo["monto_usd"]))
-                if m_cot > Decimal("10000"):
-                    cotiz = (m_cot / dolares).quantize(Decimal("0.01"))
-                    pesos = m_cot
-                else:
-                    cotiz = m_cot
-                    pesos = (dolares * cotiz).quantize(Decimal("0.01"))
+                # Candidato 1: m_cot interpretado como cotización unitaria
+                c1_cotiz = m_cot
+                c1_pesos = (dolares * c1_cotiz).quantize(Decimal("0.01"))
 
-                if cotiz < RANGO_MIN_COTIZACION_DOLAR or cotiz > RANGO_MAX_COTIZACION_DOLAR:
-                    c_str = str(int(cotiz)) if cotiz == int(cotiz) else str(cotiz)
-                    return True, "absurda", {}, f"La cotización de ${c_str} por dólar no parece razonable. Por favor verificá el valor e intentá de nuevo."
+                # Candidato 2: m_cot interpretado como monto total en pesos
+                c2_pesos = m_cot
+                c2_cotiz = (c2_pesos / dolares).quantize(Decimal("0.01"))
+
+                cot_ref = _obtener_cotizacion_referencia_usuario(usuario, db)
+
+                if cot_ref is None:
+                    # Sin cotización de referencia: preguntar al usuario mostrando ambas opciones
+                    c1_c_str = formatear_monto(float(c1_cotiz), Moneda.ARS)
+                    c1_p_str = formatear_monto(float(c1_pesos), Moneda.ARS)
+                    c2_p_str = formatear_monto(float(c2_pesos), Moneda.ARS)
+                    c2_c_str = formatear_monto(float(c2_cotiz), Moneda.ARS)
+                    pregunta = (
+                        f"¿Te referís a una cotización de {c1_c_str} por dólar (total {c1_p_str}) "
+                        f"o a un total de {c2_p_str} ({c2_c_str} por dólar)?"
+                    )
+                    return True, "slot_filling", estado_previo, pregunta
+
+                # Con cotización de referencia: evaluar plausibilidad y cercanía
+                rango_min = (cot_ref * FACTOR_MIN_COTIZACION_DOLAR).quantize(Decimal("0.01"))
+                rango_max = (cot_ref * FACTOR_MAX_COTIZACION_DOLAR).quantize(Decimal("0.01"))
+
+                c1_valida = (rango_min <= c1_cotiz <= rango_max)
+                c2_valida = (rango_min <= c2_cotiz <= rango_max)
+
+                d1 = abs(c1_cotiz - cot_ref)
+                d2 = abs(c2_cotiz - cot_ref)
+
+                if c1_valida and c2_valida:
+                    # Ambas plausibles: si están demasiado cerca en distancia relativa, preguntar
+                    umbral_ambiguedad = cot_ref * Decimal("0.25")
+                    if abs(d1 - d2) < umbral_ambiguedad:
+                        c1_c_str = formatear_monto(float(c1_cotiz), Moneda.ARS)
+                        c1_p_str = formatear_monto(float(c1_pesos), Moneda.ARS)
+                        c2_p_str = formatear_monto(float(c2_pesos), Moneda.ARS)
+                        c2_c_str = formatear_monto(float(c2_cotiz), Moneda.ARS)
+                        pregunta = (
+                            f"¿Te referís a una cotización de {c1_c_str} por dólar (total {c1_p_str}) "
+                            f"o a un total de {c2_p_str} ({c2_c_str} por dólar)?"
+                        )
+                        return True, "slot_filling", estado_previo, pregunta
+                    if d1 <= d2:
+                        cotiz = c1_cotiz
+                        pesos = c1_pesos
+                    else:
+                        cotiz = c2_cotiz
+                        pesos = c2_pesos
+                elif c1_valida and not c2_valida:
+                    cotiz = c1_cotiz
+                    pesos = c1_pesos
+                elif c2_valida and not c1_valida:
+                    cotiz = c2_cotiz
+                    pesos = c2_pesos
+                else:
+                    # Fuera de rango plausible
+                    candidato_elegido = c1_cotiz if d1 <= d2 else c2_cotiz
+                    c_str = str(int(candidato_elegido)) if candidato_elegido == int(candidato_elegido) else str(candidato_elegido)
+                    ref_str = str(int(cot_ref)) if cot_ref == int(cot_ref) else str(cot_ref)
+                    return (
+                        True,
+                        "absurda",
+                        {},
+                        f"La cotización de ${c_str} por dólar no parece razonable (la cotización de referencia es de ${ref_str}). Por favor verificá el valor e intentá de nuevo.",
+                    )
 
                 usd_wallets = [w for w in billeteras_usuario if w.moneda == Moneda.USD and w.estado == EstadoBilletera.ACTIVA]
                 ars_wallets = [w for w in billeteras_usuario if w.moneda == Moneda.ARS and w.estado == EstadoBilletera.ACTIVA]
@@ -2176,9 +2274,19 @@ def _interpretar_transferencia(
         if m_cot:
             dolares = _parsear_monto_argentino(m_cot.group(1))
             cotiz = _parsear_monto_argentino(m_cot.group(2))
-            if cotiz < RANGO_MIN_COTIZACION_DOLAR or cotiz > RANGO_MAX_COTIZACION_DOLAR:
-                c_str = str(int(cotiz)) if cotiz == int(cotiz) else str(cotiz)
-                return True, "absurda", {}, f"La cotización de ${c_str} por dólar no parece razonable. Por favor verificá el valor e intentá de nuevo."
+            cot_ref = _obtener_cotizacion_referencia_usuario(usuario, db)
+            if cot_ref is not None:
+                rango_min = (cot_ref * FACTOR_MIN_COTIZACION_DOLAR).quantize(Decimal("0.01"))
+                rango_max = (cot_ref * FACTOR_MAX_COTIZACION_DOLAR).quantize(Decimal("0.01"))
+                if cotiz < rango_min or cotiz > rango_max:
+                    c_str = str(int(cotiz)) if cotiz == int(cotiz) else str(cotiz)
+                    ref_str = str(int(cot_ref)) if cot_ref == int(cot_ref) else str(cot_ref)
+                    return (
+                        True,
+                        "absurda",
+                        {},
+                        f"La cotización de ${c_str} por dólar no parece razonable (la cotización de referencia es de ${ref_str}). Por favor verificá el valor e intentá de nuevo.",
+                    )
             pesos = (dolares * cotiz).quantize(Decimal("0.01"))
 
             cotiz_fmt = formatear_monto(float(cotiz), Moneda.ARS)
@@ -3254,7 +3362,7 @@ def _crear_transaccion_adicional(
     # Validación de monto: estrictamente positivo y dentro de límites reales
     if monto_decimal <= Decimal("0"):
         return None, f"No se pudo registrar {desc} porque el monto debe ser mayor a cero."
-    if monto_decimal > Decimal("1000000000000"):
+    if monto_decimal > MAX_MONTO_INTEGRIDAD:
         return None, f"No se pudo registrar {desc} porque el monto supera el límite permitido."
 
     # Validación de moneda: si el ítem adicional especifica una moneda que no coincide con la billetera resuelta, no descartar en silencio
@@ -4466,7 +4574,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
             # 7. Si el mensaje es únicamente un número sin pregunta pendiente
-            if mensaje_texto.strip().isdigit():
+            if mensaje_texto.strip().isdigit() and not (conv_activa and conv_activa.slot_filling_activo) and not estado_previo:
                 msg_numero_suelto = (
                     "Mandaste solo un número. Si querés registrar un movimiento, "
                     "escribí el monto y el concepto (por ejemplo: 'gasté 5000 en el kiosco')."

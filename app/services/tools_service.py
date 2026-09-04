@@ -101,7 +101,7 @@ def _get_closest_ipc_record(
     return closest_record
 
 
-def _calcular_y_asignar_valor_mensual(db: Session, record: IPCCache) -> IPCCache:
+def _calcular_y_asignar_valor_mensual(db: Session, record: IPCCache | None) -> IPCCache | None:
     if not record:
         return record
     prev_record = db.execute(
@@ -113,11 +113,28 @@ def _calcular_y_asignar_valor_mensual(db: Session, record: IPCCache) -> IPCCache
     if prev_record and prev_record.indice_acumulado > 0:
         record.valor_mensual = round(((record.indice_acumulado / prev_record.indice_acumulado) - 1.0) * 100, 2)
     else:
-        record.valor_mensual = 3.0
+        # Si no hay registro previo para esta fecha exacta, derivar del promedio de las variaciones
+        # mensuales disponibles en la tabla ipc_cache (hasta los últimos 12 meses)
+        records = db.execute(
+            select(IPCCache)
+            .order_by(IPCCache.fecha_dato.desc())
+            .limit(13)
+        ).scalars().all()
+        variaciones = []
+        for i in range(len(records) - 1):
+            act = records[i]
+            ant = records[i + 1]
+            if ant.indice_acumulado > 0:
+                var = ((act.indice_acumulado / ant.indice_acumulado) - 1.0) * 100
+                variaciones.append(var)
+        if variaciones:
+            record.valor_mensual = round(sum(variaciones) / len(variaciones), 2)
+        else:
+            record.valor_mensual = None
     return record
 
 
-def get_current_ipc(db: Session) -> IPCCache:
+def get_current_ipc(db: Session) -> IPCCache | None:
     """
     Obtiene el último IPC de la base de datos (si tiene menos de 24 horas)
     o realiza upsert contra la API de datos.gob.ar únicamente, cacheando
@@ -194,22 +211,9 @@ def get_current_ipc(db: Session) -> IPCCache:
             db.commit()
             return _calcular_y_asignar_valor_mensual(db, ultimo_cache)
 
-    # Si nunca hubo caché ni datos, crear uno por defecto estimado
-    logger.warning("No hay datos disponibles en la base de datos. Retornando valor por defecto estimado.")
-    mes_anterior = ahora - timedelta(days=30)
-    fecha_dato_default = mes_anterior.strftime("%Y-%m")
-    
-    nuevo_ipc = IPCCache(
-        indice_acumulado=11607.39,
-        fecha_dato=fecha_dato_default,
-        fecha_actualizacion=ahora,
-        fuente="default",
-        es_estimado=True
-    )
-    db.add(nuevo_ipc)
-    db.commit()
-    db.refresh(nuevo_ipc)
-    return _calcular_y_asignar_valor_mensual(db, nuevo_ipc)
+    # Si la base está vacía y la API no responde, nunca inventar un punto de partida
+    logger.warning("No hay datos de IPC disponibles en la base de datos ni en la API.")
+    return None
 
 
 def ejecutar_backfill_ipc(db: Session) -> dict:
