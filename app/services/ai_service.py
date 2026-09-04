@@ -13,12 +13,13 @@ from uuid import UUID
 
 from openai import OpenAI
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.meta import Meta, EstadoMeta
 from app.models.presupuesto import Presupuesto, EstadoPresupuesto
+from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
 from app.models.usuario import Usuario
 from app.services.dashboard_service import get_ciclo_fechas
 from app.services.openai_client import get_openai_client
@@ -126,7 +127,8 @@ TONO — ejemplos de lo que NUNCA decís:
 JERGA ARGENTINA QUE DEBÉS ENTENDER:
 - 5k / 10k = 5.000 / 10.000
 - 1 luca = 1.000, lucas = miles
-- 1 palo = 1.000.000, palos = millones
+- 1 palo / 1 melón = 1.000.000, palos / melones = millones
+- "gamba" / "gambas": NO es un monto válido (es ambigua y está en desuso). NUNCA lo interpretes como 100, ni 300, ni 1.000, ni 3.000. Si el usuario dice "3 gambas" o menciona gambas, poné monto = null.
 - mp / mercadopago / merca = Mercado Pago
 - bru = Brubank
 - gali / galicia = Banco Galicia
@@ -137,8 +139,17 @@ JERGA ARGENTINA QUE DEBÉS ENTENDER:
 - verdes / usd / dólares / dolar = USD
 - me entró / me depositaron / cobré = ingreso
 - me cobraron / saqué / pagué / gasté / puse / gatillé / garpé = egreso
-- cuotas / en X cuotas = compra en cuotas
 - efectivo / cash / plata física = Efectivo ARS
+
+JERGA Y REGLAS DE TARJETAS DE CRÉDITO Y CUOTAS EN ARGENTINA:
+- Redes de tarjetas: visa, master, mastercard, amex, american express, naranja, cabal, y sus formas coloquiales (la visa, la master, la amex, etc.).
+- Formas coloquiales de nombrar tarjetas de crédito: la tarjeta, la tarje, la de crédito, la credi, con crédito, con la tarjeta.
+- TARJETA DE DÉBITO NO ES CRÉDITO: Si el usuario dice "tarjeta de débito", "con la de débito" o "débito", NO es tarjeta de crédito ni compra en cuotas; es un egreso común pagado desde la cuenta o billetera bancaria.
+- CUOTAS: Toda mención de cuotas implica tarjeta de crédito por definición.
+  * "en X cuotas de M" o "X cuotas de M" (o pagos de M): M es el valor de CADA cuota. El monto total es X * M. En "entidades", poné monto = X * M (el total financiado) y cantidad_cuotas = X.
+  * "M en X cuotas" o "M en X pagos": M es el MONTO TOTAL de la compra. En "entidades", poné monto = M y cantidad_cuotas = X.
+  * Si el usuario dice "con tarjeta" o "en un pago" / "en 1 pago": cantidad_cuotas = 1.
+- PAGO DE RESUMEN: El pago del resumen de la tarjeta no se hace por WhatsApp. Si el usuario pide pagar el resumen de la tarjeta, explicá que se hace desde la web de Argentum.
 
 MAPEO DE JERGA ARGENTINA A CATEGORÍAS Y SUBCATEGORÍAS REALES (OBLIGATORIO):
 Al categorizar, debés mapear la jerga rioplatense al nombre exacto de la categoría o subcategoría más específica del listado (sin prefijo "Categoría > "):
@@ -457,6 +468,24 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
         "billeteras": [
             {"id": str(b.id), "nombre": b.nombre, "moneda": b.moneda.value, "saldo": float(b.saldo_actual)}
             for b in billeteras
+        ],
+        "tarjetas": [
+            {
+                "id": str(t.id),
+                "nombre": t.nombre,
+                "apodo": t.apodo,
+                "red": t.red.value if hasattr(t.red, "value") else str(t.red),
+                "banco": t.billetera.nombre if t.billetera else None,
+            }
+            for t in db.execute(
+                select(TarjetaCredito)
+                .options(joinedload(TarjetaCredito.billetera))
+                .where(
+                    TarjetaCredito.usuario_id == usuario.id,
+                    TarjetaCredito.estado == EstadoTarjeta.ACTIVA,
+                )
+                .order_by(TarjetaCredito.nombre.asc(), TarjetaCredito.id.asc())
+            ).scalars().all()
         ],
         "categorias": categorias_lista,
         "ciclo_actual": {
@@ -829,6 +858,9 @@ def procesar_mensaje(
             elif cat_actual == "Salud":
                 if re.search(r"\b(prepaga|obra\s+social|osde|swiss\s+medical|galeno|omint|medif[eé])\b", texto_eval):
                     entidades_dict["categoria"] = "Obra social / Prepaga"
+            elif cat_actual == "Empleo":
+                if re.search(r"\b(sueldo|salario|haberes|quincena)\b", texto_eval):
+                    entidades_dict["categoria"] = "Sueldo"
 
             # Sanitizar descripciones en transacciones adicionales si existen
             if isinstance(entidades_dict.get("transacciones_adicionales"), list):

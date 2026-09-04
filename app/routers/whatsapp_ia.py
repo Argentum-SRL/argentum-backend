@@ -22,7 +22,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.auth import get_current_admin_user
 from app.core.database import SessionLocal, get_db
@@ -33,8 +33,12 @@ from app.models.categoria import Categoria, EstadoCategoria, TipoCategoria
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 from app.models.mensaje_whatsapp_procesado import MensajeWhatsappProcesado
 from app.models.subcategoria import EstadoSubcategoria, Subcategoria
+from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta, RedTarjeta
+from app.models.grupo_cuotas import GrupoCuotas
+from app.models.cuota import Cuota
 from app.models.transaccion import (
     EstadoVerificacionTransaccion,
+    MetodoPago,
     OrigenTransaccion,
     TipoTransaccion,
     Transaccion,
@@ -43,12 +47,14 @@ from app.models.usuario import EstadoUsuario, Moneda, Usuario
 from app.services import ai_service
 from app.services.evento_service import emitir_evento_actualizacion
 from app.services.openai_client import get_openai_client
+from app.services import transaccion_service
 from app.services.transaccion_service import (
     deducir_metodo_pago,
     eliminar_transaccion,
     actualizar_transaccion,
 )
-from app.schemas.transaccion import TransaccionUpdate
+from app.services.tarjeta_service import calcular_primer_vencimiento
+from app.schemas.transaccion import InfoCuotas, TransaccionCreate, TransaccionUpdate
 from app.services.whatsapp_service import enviar_whatsapp
 from app.utils.telefono import normalizar_telefono_ar
 import structlog
@@ -769,6 +775,378 @@ def _generar_menu_billeteras(billeteras: list[Billetera], tipo: str = "egreso") 
     return "\n".join(lineas)
 
 
+# ==============================================================================
+# HELPERS Y CONSTANTES DE TARJETAS DE CRÉDITO Y CUOTAS (PUNTO 9A)
+# ==============================================================================
+
+ALIAS_REDES_ARGENTINAS = {
+    "visa": ["visa", "la visa", "tarjeta visa", "visita"],
+    "mastercard": ["master", "mastercard", "la master", "la mastercard", "master card"],
+    "amex": ["amex", "american express", "american", "la amex", "la american"],
+    "naranja": ["naranja", "tarjeta naranja", "la naranja", "naranja x"],
+    "cabal": ["cabal", "la cabal"],
+}
+
+ALIAS_BANCOS_ARGENTINOS = {
+    "galicia": ["gali", "banco galicia"],
+    "santander": ["rio", "banco santander", "santander rio"],
+    "bbva": ["frances", "banco frances", "bbva frances"],
+    "macro": ["banco macro"],
+    "nacion": ["banco nacion"],
+    "provincia": ["bapro", "banco provincia"],
+    "ciudad": ["banco ciudad"],
+    "brubank": ["bru"],
+}
+
+FORMAS_GENERICAS_TARJETA = [
+    "la tarjeta", "la tarje", "la de credito", "la de crédito",
+    "la credi", "tarjeta", "tarje", "de credito", "de crédito",
+    "credi", "credito", "crédito", "con tarjeta", "con la tarjeta",
+    "con credito", "con crédito"
+]
+
+PALABRAS_FUERZAN_CREDITO = [
+    "credito", "crédito", "cuota", "cuotas", "en cuotas",
+    "visa", "master", "mastercard", "amex", "american express", "american",
+    "naranja", "cabal", "tarje", "la tarje", "la de credito", "la de crédito",
+    "la credi", "tarjeta de credito", "tarjeta de crédito"
+]
+
+PALABRAS_FUERZAN_DEBITO = [
+    "debito", "débito", "tarjeta de debito", "tarjeta de débito",
+    "debito automatico", "débito automático"
+]
+
+MESES_ES_GEN = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
+]
+
+
+def _obtener_tarjetas_activas(usuario_id: UUID, db: Session) -> list[TarjetaCredito]:
+    """Carga todas las tarjetas de crédito activas del usuario con su billetera vinculada."""
+    return db.execute(
+        select(TarjetaCredito)
+        .options(joinedload(TarjetaCredito.billetera))
+        .where(
+            TarjetaCredito.usuario_id == usuario_id,
+            TarjetaCredito.estado == EstadoTarjeta.ACTIVA,
+        )
+        .order_by(TarjetaCredito.nombre.asc(), TarjetaCredito.id.asc())
+    ).scalars().all()
+
+
+def construir_alias_tarjeta(t: TarjetaCredito) -> set[str]:
+    """Construye el conjunto de alias reconocibles para una tarjeta de crédito (Tareas 2.1, 2.2, 2.3)."""
+    if hasattr(t, "_alias_cache") and t._alias_cache is not None:
+        return t._alias_cache
+
+    alias = set()
+
+    # 1. Apodo si lo tiene
+    if getattr(t, "apodo", None):
+        ap_norm = normalizar_texto(t.apodo)
+        if ap_norm:
+            alias.add(ap_norm)
+            alias.add(f"la {ap_norm}")
+            alias.add(f"la de {ap_norm}")
+
+    # 2. Nombre visible y últimos 4 dígitos
+    nom_norm = normalizar_texto(t.nombre)
+    if nom_norm:
+        alias.add(nom_norm)
+    digitos = "".join(re.findall(r"\d+", t.nombre))
+    if len(digitos) >= 4:
+        ult4 = digitos[-4:]
+        alias.add(ult4)
+        alias.add(f"terminada en {ult4}")
+        alias.add(f"finalizada en {ult4}")
+        alias.add(f"la {ult4}")
+
+    # 3. Red y modismos argentinos
+    red_val = t.red.value.lower() if hasattr(t.red, "value") else str(t.red).lower()
+    red_aliases = ALIAS_REDES_ARGENTINAS.get(red_val, [red_val])
+    for r in red_aliases:
+        alias.add(r)
+        if len(digitos) >= 4:
+            alias.add(f"{r} {digitos[-4:]}")
+
+    # 4. Banco de la billetera vinculada y combinaciones de red + banco
+    banco_norm = normalizar_texto(t.billetera.nombre) if t.billetera else ""
+    if banco_norm:
+        banco_variantes = [banco_norm] + ALIAS_BANCOS_ARGENTINOS.get(banco_norm, [])
+        for b_var in banco_variantes:
+            alias.add(f"del {b_var}")
+            alias.add(f"de {b_var}")
+            alias.add(f"la del {b_var}")
+            alias.add(f"la de {b_var}")
+            alias.add(f"tarjeta {b_var}")
+            alias.add(f"la tarjeta del {b_var}")
+            alias.add(f"la tarjeta de {b_var}")
+            alias.add(f"la de credito del {b_var}")
+            alias.add(f"la de credito de {b_var}")
+            for r in red_aliases:
+                alias.add(f"{r} {b_var}")
+                alias.add(f"{b_var} {r}")
+                alias.add(f"{r} del {b_var}")
+                alias.add(f"{r} de {b_var}")
+                alias.add(f"la {r} del {b_var}")
+                alias.add(f"la {r} de {b_var}")
+
+    # 5. Formas genéricas
+    for g in FORMAS_GENERICAS_TARJETA:
+        alias.add(normalizar_texto(g))
+
+    t._alias_cache = alias
+    return alias
+
+
+def resolver_tarjeta_cascada(
+    nombre: str | None,
+    tarjetas: list[TarjetaCredito],
+) -> tuple[TarjetaCredito | None, list[TarjetaCredito]]:
+    """
+    Resuelve determinísticamente una tarjeta aplicando cascada igual a la de billeteras (Tareas 2.4 y 2.5):
+    1. Coincidencia exacta normalizada (por nombre, apodo o últimos 4 dígitos).
+    2. Coincidencia por alias reconocibles.
+    3. Coincidencia por contención SOLO si produce exactamente una candidata (mínimo 3 caracteres).
+    """
+    if not nombre or not tarjetas:
+        return None, []
+
+    nombre_norm = normalizar_texto(nombre)
+    if not nombre_norm:
+        return None, []
+
+    # 1. Coincidencia exacta normalizada
+    exactas = []
+    for t in tarjetas:
+        t_nom = normalizar_texto(t.nombre)
+        t_apo = normalizar_texto(t.apodo) if getattr(t, "apodo", None) else None
+        digitos = "".join(re.findall(r"\d+", t.nombre))
+        if nombre_norm == t_nom or (t_apo and nombre_norm == t_apo) or (len(digitos) >= 4 and nombre_norm == digitos[-4:]):
+            exactas.append(t)
+    if len(exactas) == 1:
+        return exactas[0], exactas
+    elif len(exactas) > 1:
+        return None, exactas
+
+    # 2. Coincidencia por alias
+    coincidentes_alias = []
+    for t in tarjetas:
+        aliases = construir_alias_tarjeta(t)
+        if nombre_norm in aliases:
+            coincidentes_alias.append(t)
+    if len(coincidentes_alias) == 1:
+        return coincidentes_alias[0], coincidentes_alias
+    elif len(coincidentes_alias) > 1:
+        return None, coincidentes_alias
+
+    # 3. Contención SOLO si produce una única candidata (mínimo 3 caracteres)
+    if len(nombre_norm) >= 3:
+        genericas_norm = {normalizar_texto(g) for g in FORMAS_GENERICAS_TARJETA}
+        cands_cont = []
+        for t in tarjetas:
+            aliases = construir_alias_tarjeta(t)
+            alias_especificos = [a for a in aliases if a not in genericas_norm]
+            if any(nombre_norm in a or (len(a) >= 4 and a in nombre_norm) for a in alias_especificos):
+                cands_cont.append(t)
+        if len(cands_cont) == 1:
+            return cands_cont[0], cands_cont
+        elif len(cands_cont) > 1:
+            return None, cands_cont
+
+    return None, []
+
+
+def _resolver_mencion_tarjeta_en_texto(
+    mensaje: str, tarjetas: list[TarjetaCredito]
+) -> tuple[TarjetaCredito | None, list[TarjetaCredito]]:
+    """
+    Encuentra menciones de tarjetas en el texto del mensaje priorizando coincidencias
+    más específicas (ej: 'visa del galicia' sobre 'visa' o 'galicia').
+    """
+    m_norm = normalizar_texto(mensaje)
+    if not m_norm or not tarjetas:
+        return None, []
+
+    genericas_norm = {normalizar_texto(g) for g in FORMAS_GENERICAS_TARJETA}
+    coincidencias = []
+    for t in tarjetas:
+        aliases = construir_alias_tarjeta(t)
+        for a in aliases:
+            if a in genericas_norm:
+                continue
+            if a in m_norm:
+                coincidencias.append((len(a), a, t))
+
+    if not coincidencias:
+        return None, []
+
+    coincidencias.sort(key=lambda x: x[0], reverse=True)
+    mejores_alias = set()
+    for l, a, t in coincidencias:
+        if any(a in m_alias for m_alias in mejores_alias):
+            continue
+        mejores_alias.add(a)
+
+    cands = []
+    for l, a, t in coincidencias:
+        if a in mejores_alias and t not in cands:
+            cands.append(t)
+
+    if len(cands) == 1:
+        return cands[0], cands
+    return None, cands
+
+
+def _generar_menu_tarjetas(tarjetas: list[TarjetaCredito]) -> str:
+    """Genera menú de selección de tarjetas de crédito sin datos sensibles ni saldos."""
+    lineas = ["¿Con qué tarjeta de crédito fue?"]
+    for idx, t in enumerate(tarjetas[:8], 1):
+        nom_b = t.billetera.nombre if t.billetera else ""
+        red_disp = t.red.value.capitalize() if hasattr(t.red, "value") else str(t.red).capitalize()
+        apo_disp = f' "{t.apodo}"' if getattr(t, "apodo", None) else ""
+        if nom_b:
+            lineas.append(f"{idx}. {t.nombre}{apo_disp} ({red_disp} - {nom_b})")
+        else:
+            lineas.append(f"{idx}. {t.nombre}{apo_disp} ({red_disp})")
+    return "\n".join(lineas)
+
+
+def _es_pedido_pago_resumen(mensaje: str) -> bool:
+    """Detecta si el usuario pide pagar el resumen de la tarjeta de crédito (Tarea 7)."""
+    m = normalizar_texto(mensaje)
+    frases = [
+        "pague el resumen", "pague resumen", "pagar el resumen", "pagar resumen",
+        "pago del resumen", "pago resumen", "pagar la tarjeta", "pague la tarjeta",
+        "pagar tarjeta", "pague tarjeta", "abonar el resumen", "abonar resumen",
+        "pago de resumen", "pagar el saldo de la tarjeta", "pague el saldo de la tarjeta",
+    ]
+    return any(f in m for f in frases)
+
+
+def _parsear_monto_texto_cuota(t: str) -> Decimal | None:
+    """Parsea montos en texto soportando modismos argentinos como '80 mil', '80k', '1 palo'."""
+    t = t.lower().strip()
+    m_mil = re.match(r"^([0-9]+(?:[.,][0-9]+)?)\s*(?:mil|k)$", t)
+    if m_mil:
+        val = float(m_mil.group(1).replace(",", ".")) * 1000
+        return Decimal(str(int(val)))
+    m_palo = re.match(r"^([0-9]+(?:[.,][0-9]+)?)\s*(?:palos?|lucas?)$", t)
+    if m_palo:
+        mult = 1000000 if "palo" in t else 1000
+        val = float(m_palo.group(1).replace(",", ".")) * mult
+        return Decimal(str(int(val)))
+    t_clean = re.sub(r"[^\d.,]", "", t)
+    if not t_clean:
+        return None
+    if "." in t_clean and "," in t_clean:
+        t_clean = t_clean.replace(".", "").replace(",", ".")
+    elif "." in t_clean:
+        partes = t_clean.split(".")
+        if len(partes[-1]) == 3 and len(partes) > 1:
+            t_clean = t_clean.replace(".", "")
+    elif "," in t_clean:
+        t_clean = t_clean.replace(",", ".")
+    try:
+        return Decimal(t_clean)
+    except Exception:
+        return None
+
+
+def _interpretar_cuotas(
+    mensaje: str,
+    monto_ia: Decimal | None,
+) -> tuple[int, Decimal | None, Decimal | None, bool, str | None]:
+    """
+    Interpreta cantidad de cuotas y determina si el monto es total o por cuota (Tarea 5).
+    Retorna: (cant_cuotas, monto_cuota, monto_total, es_ambiguo, err_msg)
+    """
+    m_norm = normalizar_texto(mensaje)
+
+    # Caso 1: "en X cuotas de M" o "X cuotas de M" -> M es por cuota
+    pat_de = re.search(
+        r"(?:en\s+)?(\d+)\s*(?:cuotas?|pagos?)\s+de\s+(?:cada\s+una\s+de\s+)?(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?)(?:\b|$)",
+        m_norm,
+    )
+    if pat_de:
+        cant = int(pat_de.group(1))
+        if cant < 1 or cant > 48:
+            return cant, None, None, False, "La cantidad de cuotas debe ser entre 1 y 48."
+        m_str = pat_de.group(2).strip()
+        m_val = _parsear_monto_texto_cuota(m_str)
+        if m_val is None and monto_ia is not None:
+            m_val = monto_ia
+        if m_val is not None:
+            monto_cuota = m_val
+            monto_total = Decimal(str(cant)) * monto_cuota
+            return cant, monto_cuota, monto_total, False, None
+
+    # Caso 2: "M en X cuotas" o "M a pagar en X cuotas" -> M es el total
+    pat_en = re.search(
+        r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?)\s+(?:a\s+pagar\s+)?en\s+(\d+)\s*(?:cuotas?|pagos?)(?:\b|$)",
+        m_norm,
+    )
+    if pat_en:
+        cant = int(pat_en.group(2))
+        if cant < 1 or cant > 48:
+            return cant, None, None, False, "La cantidad de cuotas debe ser entre 1 y 48."
+        m_str = pat_en.group(1).strip()
+        m_val = _parsear_monto_texto_cuota(m_str)
+        if m_val is None and monto_ia is not None:
+            m_val = monto_ia
+        if m_val is not None:
+            monto_total = m_val
+            monto_cuota = round(monto_total / Decimal(str(cant)), 2)
+            return cant, monto_cuota, monto_total, False, None
+
+    # Caso 3: Menciona cuotas ("X cuotas") pero sin encajar claramente en Caso 1 ni Caso 2
+    pat_gen = re.search(r"(?:en\s+)?(\d+)\s*(?:cuotas?|pagos?)", m_norm)
+    if pat_gen:
+        cant = int(pat_gen.group(1))
+        if cant < 1 or cant > 48:
+            return cant, None, None, False, "La cantidad de cuotas debe ser entre 1 y 48."
+        if cant > 1 and monto_ia is not None:
+            return cant, None, None, True, None
+
+    # Caso 4: No menciona cuotas (1 pago)
+    if monto_ia is not None:
+        return 1, monto_ia, monto_ia, False, None
+
+    return 1, None, None, False, None
+
+
+def _construir_propuesta_credito(
+    entidades: dict,
+    tarjeta: TarjetaCredito,
+    cant_cuotas: int,
+    monto_cuota: Decimal,
+    monto_total: Decimal,
+    fecha_vencimiento: date,
+    se_asumio_tarjeta: bool = False,
+) -> str:
+    """Construye la propuesta obligatoria de consumo con tarjeta de crédito (Tareas 5.4 y 6.5)."""
+    moneda_enum = tarjeta.moneda
+    cuota_fmt = formatear_monto(float(monto_cuota), moneda_enum)
+    total_fmt = formatear_monto(float(monto_total), moneda_enum)
+
+    cat_nom = entidades.get("categoria")
+    cat_disp = _nombre_corto_categoria(cat_nom) if cat_nom else "Otros"
+
+    venc_str = f"{fecha_vencimiento.day} de {MESES_ES_GEN[fecha_vencimiento.month - 1]}"
+
+    if cant_cuotas > 1:
+        msg = f"Voy a anotar {cant_cuotas} cuotas de {cuota_fmt} (total {total_fmt}) en {cat_disp} con tarjeta {tarjeta.nombre} (primer vencimiento: {venc_str}). ¿Va?"
+    else:
+        msg = f"Voy a anotar 1 cuota de {cuota_fmt} (total {total_fmt}) en {cat_disp} con tarjeta {tarjeta.nombre} (primer vencimiento: {venc_str}). ¿Va?"
+
+    if se_asumio_tarjeta:
+        msg += "\nSi fue con otra tarjeta, decime cuál."
+    return msg
+
+
+
 def _resolver_y_validar_fecha(fecha_val: str | None) -> tuple[date, str | None]:
     """
     Resuelve la fecha de la transacción y valida reglas de negocio:
@@ -1266,6 +1644,79 @@ def _confirmar_propuesta_transaccion(
     tipo_val = entidades.get("tipo") or "egreso"
     moneda_solicitada = Moneda.USD if entidades.get("moneda") == "USD" else Moneda.ARS
 
+    tarjeta_id_raw = entidades.get("tarjeta_id")
+    if tarjeta_id_raw:
+        tarjeta_id = UUID(str(tarjeta_id_raw))
+        tarjeta = db.execute(
+            select(TarjetaCredito).where(TarjetaCredito.id == tarjeta_id, TarjetaCredito.usuario_id == usuario.id)
+        ).scalars().first()
+        if not tarjeta:
+            return None, "Tarjeta no encontrada.", False
+
+        cant_cuotas = int(entidades.get("cantidad_cuotas", 1))
+        monto_total = Decimal(str(entidades.get("monto_total", monto_decimal)))
+        monto_cuota = Decimal(str(entidades.get("monto_cuota", monto_total / cant_cuotas)))
+
+        cat_id, subcat_id = _resolver_categoria_y_subcategoria(
+            entidades.get("categoria"), usuario.id, db, tipo="egreso"
+        )
+        fecha_obj, _ = _resolver_y_validar_fecha(entidades.get("fecha"))
+
+        desc_candidata = entidades.get("descripcion")
+        desc_final = ai_service.sanitizar_descripcion(
+            desc_candidata,
+            mensaje_original=conv_previa.mensaje_usuario if conv_previa else None,
+            tipo="egreso",
+        )
+
+        data_tx = TransaccionCreate(
+            tipo=TipoTransaccion.EGRESO,
+            monto=monto_total,
+            moneda=tarjeta.moneda,
+            fecha=fecha_obj,
+            descripcion=desc_final or _nombre_corto_categoria(entidades.get("categoria")),
+            metodo_pago=MetodoPago.CREDITO,
+            billetera_id=tarjeta.billetera_id,
+            tarjeta_id=tarjeta.id,
+            categoria_id=cat_id,
+            subcategoria_id=subcat_id,
+            origen=OrigenTransaccion.IA_WPP,
+            es_padre_cuotas=True,
+            info_cuotas=InfoCuotas(
+                cantidad_cuotas=cant_cuotas,
+                cuota_inicial=1,
+                tiene_interes=False,
+                tasa_interes=None,
+                monto_total=monto_total,
+                proximo_resumen=False,
+            ),
+        )
+        transaccion = transaccion_service.crear_transaccion(
+            db=db,
+            usuario_id=usuario.id,
+            data=data_tx,
+            commit=False,
+        )
+
+        conv_previa.accion_ejecutada = str(transaccion.id)
+        emitir_evento_actualizacion(db, usuario.id, "transacciones")
+        emitir_evento_actualizacion(db, usuario.id, "tarjetas")
+        db.commit()
+
+        primer_v = calcular_primer_vencimiento(fecha_obj, tarjeta.dia_cierre, tarjeta.dia_vencimiento, False)
+        venc_mes = MESES_ES_GEN[primer_v.month - 1]
+        venc_anio = primer_v.year
+        cat_disp = _nombre_corto_categoria(entidades.get("categoria"))
+
+        if cant_cuotas > 1:
+            monto_cuota_fmt = formatear_monto(float(monto_cuota), tarjeta.moneda)
+            msg_resp = f"Listo. {cant_cuotas} cuotas de {monto_cuota_fmt} en {cat_disp} con tarjeta {tarjeta.nombre} — registrado. Va a ingresar en el resumen de {venc_mes} {venc_anio}."
+        else:
+            total_fmt = formatear_monto(float(monto_total), tarjeta.moneda)
+            msg_resp = f"Listo. 1 cuota de {total_fmt} en {cat_disp} con tarjeta {tarjeta.nombre} — registrado. Va a ingresar en el resumen de {venc_mes} {venc_anio}."
+
+        return transaccion, msg_resp, False
+
     nombre_billetera = (
         entidades.get("billetera_destino")
         if tipo_val == "ingreso"
@@ -1425,6 +1876,75 @@ def _registrar_movimiento_directo(
     monto_decimal = Decimal(str(monto))
     tipo_val = entidades.get("tipo") or "egreso"
     moneda_sol = Moneda.USD if entidades.get("moneda") == "USD" else Moneda.ARS
+
+    tarjeta_id_raw = entidades.get("tarjeta_id")
+    if tarjeta_id_raw:
+        tarjeta_id = UUID(str(tarjeta_id_raw))
+        tarjeta = db.execute(
+            select(TarjetaCredito).where(TarjetaCredito.id == tarjeta_id, TarjetaCredito.usuario_id == usuario.id)
+        ).scalars().first()
+        if not tarjeta:
+            return None, "Tarjeta no encontrada."
+
+        cant_cuotas = int(entidades.get("cantidad_cuotas", 1))
+        monto_total = Decimal(str(entidades.get("monto_total", monto_decimal)))
+        monto_cuota = Decimal(str(entidades.get("monto_cuota", monto_total / cant_cuotas)))
+
+        cat_id, subcat_id = _resolver_categoria_y_subcategoria(entidades.get("categoria"), usuario.id, db, tipo="egreso")
+        fecha_obj = _resolver_fecha_transaccion(entidades.get("fecha"))
+
+        desc_candidata = entidades.get("descripcion")
+        desc_final = ai_service.sanitizar_descripcion(
+            desc_candidata,
+            tipo="egreso",
+        )
+
+        data_tx = TransaccionCreate(
+            tipo=TipoTransaccion.EGRESO,
+            monto=monto_total,
+            moneda=tarjeta.moneda,
+            fecha=fecha_obj,
+            descripcion=desc_final or _nombre_corto_categoria(entidades.get("categoria")),
+            metodo_pago=MetodoPago.CREDITO,
+            billetera_id=tarjeta.billetera_id,
+            tarjeta_id=tarjeta.id,
+            categoria_id=cat_id,
+            subcategoria_id=subcat_id,
+            origen=OrigenTransaccion.IA_WPP,
+            es_padre_cuotas=True,
+            info_cuotas=InfoCuotas(
+                cantidad_cuotas=cant_cuotas,
+                cuota_inicial=1,
+                tiene_interes=False,
+                tasa_interes=None,
+                monto_total=monto_total,
+                proximo_resumen=False,
+            ),
+        )
+        tx = transaccion_service.crear_transaccion(
+            db=db,
+            usuario_id=usuario.id,
+            data=data_tx,
+            commit=False,
+        )
+
+        emitir_evento_actualizacion(db, usuario.id, "transacciones")
+        emitir_evento_actualizacion(db, usuario.id, "tarjetas")
+        db.commit()
+
+        primer_v = calcular_primer_vencimiento(fecha_obj, tarjeta.dia_cierre, tarjeta.dia_vencimiento, False)
+        venc_mes = MESES_ES_GEN[primer_v.month - 1]
+        venc_anio = primer_v.year
+        cat_disp = _nombre_corto_categoria(entidades.get("categoria"))
+
+        if cant_cuotas > 1:
+            monto_cuota_fmt = formatear_monto(float(monto_cuota), tarjeta.moneda)
+            msg_resp = f"Listo. {cant_cuotas} cuotas de {monto_cuota_fmt} en {cat_disp} con tarjeta {tarjeta.nombre} — registrado. Va a ingresar en el resumen de {venc_mes} {venc_anio}."
+        else:
+            total_fmt = formatear_monto(float(monto_total), tarjeta.moneda)
+            msg_resp = f"Listo. 1 cuota de {total_fmt} en {cat_disp} con tarjeta {tarjeta.nombre} — registrado. Va a ingresar en el resumen de {venc_mes} {venc_anio}."
+
+        return tx, msg_resp
 
     nombre_billetera = entidades.get("billetera_resuelta_nombre") or (
         entidades.get("billetera_destino") if tipo_val == "ingreso" else entidades.get("billetera_origen")
@@ -1770,7 +2290,7 @@ def _buscar_ultimo_movimiento_whatsapp(usuario_id: UUID, db: Session) -> tuple[T
     # Restricciones (2.8 y Decisiones de Producto)
     if tx.origen != OrigenTransaccion.IA_WPP:
         return None, "ORIGEN_INVALIDO"
-    if tx.es_cuota_hija or tx.es_padre_cuotas or tx.grupo_cuotas_id is not None or tx.tarjeta_id is not None:
+    if tx.es_cuota_hija:
         return None, "ES_CUOTA"
     if tx.pago_resumen_vencimiento is not None or tx.pago_origen_id is not None:
         return None, "ES_RESUMEN"
@@ -2102,6 +2622,17 @@ def _construir_propuesta_deshacer(tx_actual: Transaccion, db: Session) -> str:
     cat_disp = cat_nom or "Otros"
     fecha_nat = _formatear_fecha_natural(tx_actual.fecha)
     fecha_disp = f" ({fecha_nat})" if fecha_nat else ""
+
+    if tx_actual.metodo_pago == MetodoPago.CREDITO or tx_actual.tarjeta_id:
+        tarjeta = db.get(TarjetaCredito, tx_actual.tarjeta_id) if tx_actual.tarjeta_id else None
+        tarjeta_nom = f"tarjeta {tarjeta.nombre}" if tarjeta else "tarjeta de crédito"
+        grupo = db.execute(
+            select(GrupoCuotas).where(GrupoCuotas.transaccion_padre_id == tx_actual.id)
+        ).scalar_one_or_none()
+        if grupo and grupo.cantidad_cuotas > 1:
+            return f"¿Querés eliminar la compra de {monto_fmt} en {grupo.cantidad_cuotas} cuotas con {tarjeta_nom}? ¿Confirmás?"
+        else:
+            return f"¿Querés eliminar el último consumo de {monto_fmt} en {cat_disp} con {tarjeta_nom}{fecha_disp}? ¿Confirmás?"
 
     if tx_actual.tipo == TipoTransaccion.INGRESO:
         return f"¿Querés eliminar el último ingreso de {monto_fmt} en {cat_disp} a {bill_nom}{fecha_disp}? ¿Confirmás?"
@@ -2743,6 +3274,26 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     from_number,
                     "No entendí bien lo que quisiste decir. Podés contarme qué gastaste, por ejemplo: *Almuerzo $1.500*",
                 )
+            # 0. Chequeo determinístico de pedido de pago de resumen de tarjeta (Tarea 7)
+            if _es_pedido_pago_resumen(mensaje_texto):
+                msg_pago_resumen = "El pago del resumen de la tarjeta se gestiona desde la web de Argentum. No se puede realizar por WhatsApp."
+                nueva_conv = ConversacionWpp(
+                    usuario_id=usuario.id,
+                    wamid=wamid,
+                    mensaje_usuario=mensaje_texto,
+                    tipo_mensaje=TipoMensajeWpp.TEXTO,
+                    transcripcion=None,
+                    mensaje_bot=msg_pago_resumen,
+                    intent_detectado="pago_resumen",
+                    entidades={},
+                    accion_ejecutada="bloqueado_web",
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=False,
+                    slot_filling_estado=None,
+                )
+                db.add(nueva_conv)
+                db.commit()
+                enviar_whatsapp(from_number, msg_pago_resumen)
                 return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
             # 1. Chequeo determinístico de saludo rioplatense (Tarea 4)
@@ -3253,6 +3804,157 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     enviar_whatsapp(from_number, propuesta_msg)
                     return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
+            # 5.1 Si hay pregunta de tarjeta pendiente activa
+            if conv_activa and conv_activa.slot_filling_estado and any("tarjeta" in d for d in conv_activa.slot_filling_estado.get("datos_faltantes", [])):
+                estado_prev_tarj = dict(conv_activa.slot_filling_estado)
+                tarjetas_activas = _obtener_tarjetas_activas(usuario.id, db)
+                cands_ids = estado_prev_tarj.get("candidatas_tarjetas_ids", [])
+                if cands_ids:
+                    tarjetas_opciones = [t for t in tarjetas_activas if str(t.id) in cands_ids]
+                else:
+                    tarjetas_opciones = tarjetas_activas
+
+                mensaje_limpio = mensaje_texto.strip()
+                tarjeta_elegida = None
+                es_sel = False
+
+                if mensaje_limpio.isdigit():
+                    num = int(mensaje_limpio)
+                    if 1 <= num <= len(tarjetas_opciones):
+                        tarjeta_elegida = tarjetas_opciones[num - 1]
+                        es_sel = True
+                    else:
+                        enviar_whatsapp(from_number, f"Opción inválida. Elegí un número del 1 al {len(tarjetas_opciones)}.")
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                else:
+                    t_match, cands = resolver_tarjeta_cascada(mensaje_limpio, tarjetas_opciones)
+                    if t_match:
+                        tarjeta_elegida = t_match
+                        es_sel = True
+                    elif len(cands) > 1:
+                        menu = _generar_menu_tarjetas(cands)
+                        enviar_whatsapp(from_number, f"¿A cuál te referís?\n{menu}")
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    else:
+                        menu = _generar_menu_tarjetas(tarjetas_opciones)
+                        enviar_whatsapp(from_number, f"No encontré esa tarjeta entre las tuyas.\n\n{menu}")
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                if es_sel and tarjeta_elegida:
+                    cant_cuotas = int(estado_prev_tarj.get("cantidad_cuotas", 1))
+                    monto_total = Decimal(str(estado_prev_tarj.get("monto_total", estado_prev_tarj["monto"])))
+                    monto_cuota = Decimal(str(estado_prev_tarj.get("monto_cuota", monto_total / Decimal(str(cant_cuotas)))))
+                    fecha_obj, _ = _resolver_y_validar_fecha(estado_prev_tarj.get("fecha"))
+
+                    primer_v = calcular_primer_vencimiento(fecha_obj, tarjeta_elegida.dia_cierre, tarjeta_elegida.dia_vencimiento, False)
+                    estado_prev_tarj["tarjeta_id"] = str(tarjeta_elegida.id)
+                    estado_prev_tarj["tarjeta_nombre"] = tarjeta_elegida.nombre
+                    estado_prev_tarj["tarjeta_billetera_id"] = str(tarjeta_elegida.billetera_id)
+                    estado_prev_tarj["cantidad_cuotas"] = cant_cuotas
+                    estado_prev_tarj["monto_cuota"] = float(monto_cuota)
+                    estado_prev_tarj["monto_total"] = float(monto_total)
+                    estado_prev_tarj["monto"] = float(monto_total)
+                    if "datos_faltantes" in estado_prev_tarj:
+                        estado_prev_tarj["datos_faltantes"] = [d for d in estado_prev_tarj["datos_faltantes"] if "tarjeta" not in d]
+
+                    conv_activa.slot_filling_activo = False
+                    db.flush()
+
+                    propuesta_msg = _construir_propuesta_credito(
+                        estado_prev_tarj, tarjeta_elegida, cant_cuotas, monto_cuota, monto_total, primer_v, se_asumio_tarjeta=False
+                    )
+
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=propuesta_msg,
+                        intent_detectado="registrar_transaccion",
+                        entidades=estado_prev_tarj,
+                        accion_ejecutada=None,
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, propuesta_msg)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            # 5.2 Si hay aclaración de cuotas pendiente activa ("¿Los $80.000 son el total o el valor de cada cuota?")
+            if conv_activa and conv_activa.slot_filling_estado and any("aclarar_cuotas" in d for d in conv_activa.slot_filling_estado.get("datos_faltantes", [])):
+                estado_prev_cuotas = dict(conv_activa.slot_filling_estado)
+                m_txt_norm = normalizar_texto(mensaje_texto)
+                es_total = any(w in m_txt_norm for w in ["total", "el total", "en total", "es el total", "los dos", "todo"])
+                es_por_cuota = any(w in m_txt_norm for w in ["cuota", "cada cuota", "por cuota", "cada una", "de cada cuota", "por mes", "cada mes"])
+
+                if not es_total and not es_por_cuota:
+                    enviar_whatsapp(from_number, "Por favor decime si ese monto es 'el total' o 'por cuota'.")
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                monto_base = Decimal(str(estado_prev_cuotas["monto"]))
+                cant_cuotas = int(estado_prev_cuotas.get("cantidad_cuotas", 1))
+
+                if es_total:
+                    monto_total = monto_base
+                    monto_cuota = round(monto_total / Decimal(str(cant_cuotas)), 2)
+                else:
+                    monto_cuota = monto_base
+                    monto_total = Decimal(str(cant_cuotas)) * monto_cuota
+
+                estado_prev_cuotas["cantidad_cuotas"] = cant_cuotas
+                estado_prev_cuotas["monto_cuota"] = float(monto_cuota)
+                estado_prev_cuotas["monto_total"] = float(monto_total)
+                estado_prev_cuotas["monto"] = float(monto_total)
+                if "datos_faltantes" in estado_prev_cuotas:
+                    estado_prev_cuotas["datos_faltantes"] = [d for d in estado_prev_cuotas["datos_faltantes"] if "aclarar_cuotas" not in d]
+
+                # Resolver tarjeta si no estaba asignada
+                tarjetas_activas = _obtener_tarjetas_activas(usuario.id, db)
+                t_id_prev = estado_prev_cuotas.get("tarjeta_id")
+                tarjeta_obj = db.get(TarjetaCredito, UUID(t_id_prev)) if t_id_prev else None
+
+                if not tarjeta_obj:
+                    if len(tarjetas_activas) == 1:
+                        tarjeta_obj = tarjetas_activas[0]
+                    elif len(tarjetas_activas) > 1:
+                        tarjeta_obj = next((t for t in tarjetas_activas if t.billetera and t.billetera.es_principal), tarjetas_activas[0])
+
+                if tarjeta_obj:
+                    fecha_obj, _ = _resolver_y_validar_fecha(estado_prev_cuotas.get("fecha"))
+                    primer_v = calcular_primer_vencimiento(fecha_obj, tarjeta_obj.dia_cierre, tarjeta_obj.dia_vencimiento, False)
+                    estado_prev_cuotas["tarjeta_id"] = str(tarjeta_obj.id)
+                    estado_prev_cuotas["tarjeta_nombre"] = tarjeta_obj.nombre
+                    estado_prev_cuotas["tarjeta_billetera_id"] = str(tarjeta_obj.billetera_id)
+
+                    conv_activa.slot_filling_activo = False
+                    db.flush()
+
+                    propuesta_msg = _construir_propuesta_credito(
+                        estado_prev_cuotas, tarjeta_obj, cant_cuotas, monto_cuota, monto_total, primer_v, se_asumio_tarjeta=False
+                    )
+
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=propuesta_msg,
+                        intent_detectado="registrar_transaccion",
+                        entidades=estado_prev_cuotas,
+                        accion_ejecutada=None,
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, propuesta_msg)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
             # 7. Si el mensaje es únicamente un número sin pregunta pendiente
             if mensaje_texto.strip().isdigit():
                 msg_numero_suelto = (
@@ -3491,137 +4193,293 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
             clave_otra = "billetera_origen" if tipo_act == "ingreso" else "billetera_destino"
 
             if resultado_ia.get("intent") in ("registrar_transaccion", "slot_filling") or entidades_actuales.get("monto") is not None:
-                moneda_sol_str = entidades_actuales.get("moneda")
-                moneda_sol = Moneda.USD if moneda_sol_str == "USD" else Moneda.ARS
+                tarjetas_usuario = _obtener_tarjetas_activas(usuario.id, db)
+                m_norm = normalizar_texto(mensaje_texto)
 
-                billeteras_moneda = _obtener_billeteras_activas(usuario.id, db, moneda=moneda_sol)
-                if not billeteras_moneda:
-                    nom_moneda = "dólares" if moneda_sol == Moneda.USD else "pesos"
-                    resultado_ia["respuesta_usuario"] = f"No tenés ninguna billetera en {nom_moneda} para registrar este movimiento. Podés crear una desde la web de Argentum."
-                    resultado_ia["intent"] = "sin_billetera_moneda"
-                    resultado_ia["slot_filling"] = False
-                    resultado_ia["datos_faltantes"] = []
-                elif entidades_actuales.get("monto") is not None:
-                    billetera_raw = entidades_actuales.get(clave_bill) or entidades_actuales.get(clave_otra)
-                    billetera_final = None
-                    se_asumio_principal = False
+                # Chequear si fuerza débito (Tarea 4.4)
+                es_debito_explicito = any(d in m_norm for d in PALABRAS_FUERZAN_DEBITO)
 
-                    if billetera_raw:
-                        b_match, cands = resolver_billetera_cascada(billetera_raw, billeteras_moneda)
-                        if b_match:
-                            billetera_final = b_match
-                        elif len(cands) > 1:
+                # Chequear intención de crédito (Tareas 3 y 4)
+                tiene_cuotas = any(c in m_norm for c in ["cuota", "cuotas", "en cuotas", "pagos"])
+                tiene_palabras_credito = any(w in m_norm for w in PALABRAS_FUERZAN_CREDITO)
+                tiene_mencion_tarjeta = any(g in m_norm for g in FORMAS_GENERICAS_TARJETA)
+
+                # Tarjetas candidatas específicas por mención en el mensaje
+                if not es_debito_explicito and tarjetas_usuario:
+                    tarjeta_match_mencion, tarjeta_mencionada_cands = _resolver_mencion_tarjeta_en_texto(
+                        mensaje_texto, tarjetas_usuario
+                    )
+                else:
+                    tarjeta_match_mencion, tarjeta_mencionada_cands = None, []
+
+                # Evaluar colisión con billeteras (Tarea 3)
+                billeteras_todas = _obtener_billeteras_activas(usuario.id, db)
+                bill_raw_cands = []
+                for b in billeteras_todas:
+                    b_nom_norm = normalizar_texto(b.nombre)
+                    if b_nom_norm in m_norm:
+                        bill_raw_cands.append(b)
+
+                # Si matchea a la vez billetera y tarjeta sin palabra que fuerce crédito (Tarea 3.2)
+                hay_colision_sin_credito = (
+                    not es_debito_explicito
+                    and not tiene_cuotas
+                    and not tiene_palabras_credito
+                    and len(bill_raw_cands) == 1
+                    and len(tarjeta_mencionada_cands) == 1
+                    and normalizar_texto(bill_raw_cands[0].nombre) == normalizar_texto(tarjeta_mencionada_cands[0].nombre)
+                )
+
+                if hay_colision_sin_credito:
+                    b_col = bill_raw_cands[0]
+                    t_col = tarjeta_mencionada_cands[0]
+                    resultado_ia["intent"] = "slot_filling"
+                    resultado_ia["slot_filling"] = True
+                    resultado_ia["datos_faltantes"] = ["billetera_o_tarjeta"]
+                    entidades_actuales["datos_faltantes"] = ["billetera_o_tarjeta"]
+                    resultado_ia["respuesta_usuario"] = (
+                        f"¿Te referís a la billetera o a la tarjeta de crédito?\n"
+                        f"1. Billetera {b_col.nombre}\n"
+                        f"2. Tarjeta de crédito {t_col.nombre}"
+                    )
+                    es_credito = False
+                else:
+                    es_credito = (not es_debito_explicito) and (
+                        tiene_cuotas
+                        or tiene_palabras_credito
+                        or tiene_mencion_tarjeta
+                        or len(tarjeta_mencionada_cands) > 0
+                        or entidades_actuales.get("tarjeta_id") is not None
+                        or entidades_actuales.get("tarjeta") is not None
+                    )
+
+                if hay_colision_sin_credito:
+                    pass
+                elif es_credito:
+                    # 1. Si no tiene ninguna tarjeta cargada (Tarea 4.3)
+                    if not tarjetas_usuario:
+                        resultado_ia["respuesta_usuario"] = (
+                            "No tenés ninguna tarjeta de crédito cargada en Argentum. "
+                            "Podés agregarla desde la web, o registrar este movimiento como un gasto común con alguna de tus billeteras."
+                        )
+                        resultado_ia["intent"] = "sin_tarjetas"
+                        resultado_ia["slot_filling"] = False
+                        resultado_ia["datos_faltantes"] = []
+                    elif entidades_actuales.get("monto") is not None:
+                        monto_actual_val = Decimal(str(entidades_actuales["monto"]))
+                        cant_cuotas, monto_cuota, monto_total, es_ambiguo, err_msg = _interpretar_cuotas(
+                            mensaje_texto, monto_actual_val
+                        )
+
+                        if err_msg:
+                            resultado_ia["respuesta_usuario"] = err_msg
+                            resultado_ia["intent"] = "error_cuotas"
+                            resultado_ia["slot_filling"] = False
+                            resultado_ia["datos_faltantes"] = []
+                        elif es_ambiguo:
+                            m_fmt = formatear_monto(float(monto_actual_val), Moneda.ARS)
+                            resultado_ia["respuesta_usuario"] = f"¿Los {m_fmt} son el total o el valor de cada cuota?"
                             resultado_ia["intent"] = "slot_filling"
                             resultado_ia["slot_filling"] = True
-                            resultado_ia["datos_faltantes"] = [clave_bill]
-                            entidades_actuales["datos_faltantes"] = [clave_bill]
-                            entidades_actuales["moneda"] = "USD" if moneda_sol == Moneda.USD else "ARS"
-                            entidades_actuales[clave_bill] = None
-                            resultado_ia["respuesta_usuario"] = f"¿A cuál te referís?\n{_generar_menu_billeteras(cands, tipo=tipo_act)}"
+                            resultado_ia["datos_faltantes"] = ["aclarar_cuotas"]
+                            entidades_actuales["datos_faltantes"] = ["aclarar_cuotas"]
+                            entidades_actuales["cantidad_cuotas"] = cant_cuotas
+                            entidades_actuales["monto"] = float(monto_actual_val)
                         else:
-                            # Verificar si nombró billetera de otra moneda
-                            todas = _obtener_billeteras_activas(usuario.id, db)
-                            b_otra, _ = resolver_billetera_cascada(billetera_raw, todas)
-                            if b_otra and b_otra.moneda != moneda_sol:
-                                nom_otra = "dólares" if b_otra.moneda == Moneda.USD else "pesos"
-                                nom_mov = "pesos" if moneda_sol == Moneda.ARS else "dólares"
-                                resultado_ia["intent"] = "slot_filling"
-                                resultado_ia["slot_filling"] = True
-                                resultado_ia["datos_faltantes"] = [clave_bill]
-                                entidades_actuales["datos_faltantes"] = [clave_bill]
-                                entidades_actuales["moneda"] = "USD" if moneda_sol == Moneda.USD else "ARS"
-                                entidades_actuales[clave_bill] = None
-                                menu = _generar_menu_billeteras(billeteras_moneda, tipo=tipo_act)
-                                resultado_ia["respuesta_usuario"] = f"No podés usar una billetera en {nom_otra} para un movimiento en {nom_mov}.\n{menu}"
-                            else:
-                                resultado_ia["intent"] = "slot_filling"
-                                resultado_ia["slot_filling"] = True
-                                resultado_ia["datos_faltantes"] = [clave_bill]
-                                entidades_actuales["datos_faltantes"] = [clave_bill]
-                                entidades_actuales["moneda"] = "USD" if moneda_sol == Moneda.USD else "ARS"
-                                entidades_actuales[clave_bill] = None
-                                menu = _generar_menu_billeteras(billeteras_moneda, tipo=tipo_act)
-                                resultado_ia["respuesta_usuario"] = f"No encontré esa billetera entre las tuyas.\n\n{menu}"
-                    else:
-                        # Usuario NO nombró billetera
-                        if len(billeteras_moneda) == 1:
-                            # Exactamente una activa en esa moneda: usarla sin preguntar (2.3)
-                            billetera_final = billeteras_moneda[0]
-                            se_asumio_principal = False
-                        else:
-                            # Buscar principal en esa moneda (2.2)
-                            b_ppal = next((b for b in billeteras_moneda if b.es_principal), None)
-                            if b_ppal:
-                                billetera_final = b_ppal
-                                se_asumio_principal = True
-                            else:
-                                # NUNCA ELEGIR POR DESCARTE: mostrar menú (2.1, 2.2)
-                                resultado_ia["intent"] = "slot_filling"
-                                resultado_ia["slot_filling"] = True
-                                resultado_ia["datos_faltantes"] = [clave_bill]
-                                entidades_actuales["datos_faltantes"] = [clave_bill]
-                                entidades_actuales["moneda"] = "USD" if moneda_sol == Moneda.USD else "ARS"
-                                entidades_actuales[clave_bill] = None
-                                resultado_ia["respuesta_usuario"] = _generar_menu_billeteras(billeteras_moneda, tipo=tipo_act)
+                            # Resolver tarjeta (Tareas 2.4, 2.5)
+                            t_match = None
+                            cands_res = []
+                            se_asumio_tarjeta = False
 
-                    if billetera_final:
-                        entidades_actuales[clave_bill] = billetera_final.nombre
-                        entidades_actuales.pop(clave_otra, None)
-                        if "datos_faltantes" in entidades_actuales:
-                            entidades_actuales["datos_faltantes"] = [
-                                d for d in entidades_actuales["datos_faltantes"]
-                                if d not in ("billetera_origen", "billetera_destino", "billetera")
-                            ]
-
-                        # Chequeo 1: Lote con movimientos idénticos (Tarea 4)
-                        hay_lote_dup, m_dup, mon_dup, cat_dup = _detectar_duplicados_en_lote(entidades_actuales)
-                        if hay_lote_dup:
-                            m_dup_fmt = formatear_monto(float(m_dup), Moneda.USD if mon_dup == "USD" else Moneda.ARS)
-                            pregunta_lote = f"Mandaste 2 movimientos iguales de {m_dup_fmt} en {cat_dup} desde {billetera_final.nombre}. ¿Son dos gastos distintos o se te repitió?"
-                            resultado_ia["intent"] = "verificar_lote_duplicado"
-                            resultado_ia["slot_filling"] = True
-                            resultado_ia["datos_faltantes"] = ["confirmar_lote"]
-                            entidades_actuales["tipo_flujo"] = "verificacion_lote_duplicado"
-                            entidades_actuales["billetera_resuelta_nombre"] = billetera_final.nombre
-                            resultado_ia["respuesta_usuario"] = pregunta_lote
-                        else:
-                            # Chequeo 2: Transacción previa en la última hora (Tarea 3)
-                            cat_id_chk, _ = _resolver_categoria_y_subcategoria(
-                                entidades_actuales.get("categoria"), usuario.id, db, tipo=tipo_act
-                            )
-                            tx_dup = _buscar_transaccion_duplicada_reciente(
-                                usuario_id=usuario.id,
-                                monto=Decimal(str(entidades_actuales["monto"])),
-                                moneda=moneda_sol,
-                                categoria_id=cat_id_chk,
-                                db=db,
-                            )
-                            if tx_dup:
-                                hora_dup = tx_dup.fecha_creacion.astimezone(TZ_ARGENTINA).strftime("%H:%M")
-                                cat_disp = _nombre_corto_categoria(entidades_actuales.get("categoria"))
-                                m_fmt = formatear_monto(float(entidades_actuales["monto"]), moneda_sol)
-                                pregunta_dup = f"A las {hora_dup} ya registraste {m_fmt} en {cat_disp}. ¿Es un movimiento nuevo o se te repitió?"
-                                resultado_ia["intent"] = "verificar_duplicado"
-                                resultado_ia["slot_filling"] = True
-                                resultado_ia["datos_faltantes"] = ["confirmar_duplicado"]
-                                entidades_actuales["tipo_flujo"] = "verificacion_duplicado"
-                                entidades_actuales["billetera_resuelta_nombre"] = billetera_final.nombre
-                                entidades_actuales["hora_anterior"] = hora_dup
-                                resultado_ia["respuesta_usuario"] = pregunta_dup
+                            if tarjeta_match_mencion:
+                                t_match = tarjeta_match_mencion
+                                cands_res = [tarjeta_match_mencion]
+                            elif len(tarjeta_mencionada_cands) > 1:
+                                t_match = None
+                                cands_res = tarjeta_mencionada_cands
                             else:
+                                # No nombró tarjeta específica: verificar si dijo forma genérica ("con la tarjeta")
+                                if tiene_mencion_tarjeta or "tarjeta" in m_norm:
+                                    if len(tarjetas_usuario) == 1:
+                                        t_match = tarjetas_usuario[0]
+                                        cands_res = tarjetas_usuario
+                                    else:
+                                        t_match = None
+                                        cands_res = tarjetas_usuario
+                                else:
+                                    # No nombró tarjeta en absoluto (ej. "compré una tele en 12 cuotas de 80000")
+                                    if len(tarjetas_usuario) == 1:
+                                        t_match = tarjetas_usuario[0]
+                                        cands_res = tarjetas_usuario
+                                        se_asumio_tarjeta = False
+                                    else:
+                                        t_match = next((t for t in tarjetas_usuario if t.billetera and t.billetera.es_principal), tarjetas_usuario[0])
+                                        cands_res = [t_match]
+                                        se_asumio_tarjeta = True
+
+                            if len(cands_res) > 1 and not t_match:
+                                resultado_ia["intent"] = "slot_filling"
+                                resultado_ia["slot_filling"] = True
+                                resultado_ia["datos_faltantes"] = ["tarjeta"]
+                                entidades_actuales["datos_faltantes"] = ["tarjeta"]
+                                entidades_actuales["candidatas_tarjetas_ids"] = [str(c.id) for c in cands_res]
+                                entidades_actuales["cantidad_cuotas"] = cant_cuotas
+                                entidades_actuales["monto_cuota"] = float(monto_cuota)
+                                entidades_actuales["monto_total"] = float(monto_total)
+                                entidades_actuales["monto"] = float(monto_total)
+                                resultado_ia["respuesta_usuario"] = _generar_menu_tarjetas(cands_res)
+                            elif t_match:
+                                fecha_obj, _ = _resolver_y_validar_fecha(entidades_actuales.get("fecha"))
+                                primer_v = calcular_primer_vencimiento(fecha_obj, t_match.dia_cierre, t_match.dia_vencimiento, False)
+                                entidades_actuales["tarjeta_id"] = str(t_match.id)
+                                entidades_actuales["tarjeta_nombre"] = t_match.nombre
+                                entidades_actuales["tarjeta_billetera_id"] = str(t_match.billetera_id)
+                                entidades_actuales["cantidad_cuotas"] = cant_cuotas
+                                entidades_actuales["monto_cuota"] = float(monto_cuota)
+                                entidades_actuales["monto_total"] = float(monto_total)
+                                entidades_actuales["monto"] = float(monto_total)
+                                if "datos_faltantes" in entidades_actuales:
+                                    entidades_actuales["datos_faltantes"] = [d for d in entidades_actuales["datos_faltantes"] if "tarjeta" not in d]
+
+                                propuesta_cred = _construir_propuesta_credito(
+                                    entidades_actuales, t_match, cant_cuotas, monto_cuota, monto_total, primer_v, se_asumio_tarjeta=se_asumio_tarjeta
+                                )
                                 resultado_ia["intent"] = "registrar_transaccion"
                                 resultado_ia["slot_filling"] = False
                                 resultado_ia["confianza"] = max(float(resultado_ia.get("confianza", 0.0)), 0.85)
-                                resultado_ia["_asumio_principal"] = se_asumio_principal
-                                resultado_ia["respuesta_usuario"] = _construir_propuesta_transaccion(
-                                    entidades_actuales,
-                                    billetera_final.nombre,
-                                    se_asumio_principal=se_asumio_principal,
-                                    billetera_moneda=billetera_final.moneda,
+                                resultado_ia["respuesta_usuario"] = propuesta_cred
+                else:
+                    moneda_sol_str = entidades_actuales.get("moneda")
+                    moneda_sol = Moneda.USD if moneda_sol_str == "USD" else Moneda.ARS
+
+                    billeteras_moneda = [b for b in billeteras_todas if b.moneda == moneda_sol]
+                    if not billeteras_moneda:
+                        nom_moneda = "dólares" if moneda_sol == Moneda.USD else "pesos"
+                        resultado_ia["respuesta_usuario"] = f"No tenés ninguna billetera en {nom_moneda} para registrar este movimiento. Podés crear una desde la web de Argentum."
+                        resultado_ia["intent"] = "sin_billetera_moneda"
+                        resultado_ia["slot_filling"] = False
+                        resultado_ia["datos_faltantes"] = []
+                    elif entidades_actuales.get("monto") is not None:
+                        billetera_raw = entidades_actuales.get(clave_bill) or entidades_actuales.get(clave_otra)
+                        billetera_final = None
+                        se_asumio_principal = False
+
+                        if billetera_raw:
+                            b_match, cands = resolver_billetera_cascada(billetera_raw, billeteras_moneda)
+                            if b_match:
+                                billetera_final = b_match
+                            elif len(cands) > 1:
+                                resultado_ia["intent"] = "slot_filling"
+                                resultado_ia["slot_filling"] = True
+                                resultado_ia["datos_faltantes"] = [clave_bill]
+                                entidades_actuales["datos_faltantes"] = [clave_bill]
+                                entidades_actuales["moneda"] = "USD" if moneda_sol == Moneda.USD else "ARS"
+                                entidades_actuales[clave_bill] = None
+                                resultado_ia["respuesta_usuario"] = f"¿A cuál te referís?\n{_generar_menu_billeteras(cands, tipo=tipo_act)}"
+                            else:
+                                # Verificar si nombró billetera de otra moneda
+                                todas = billeteras_todas
+                                b_otra, _ = resolver_billetera_cascada(billetera_raw, todas)
+                                if b_otra and b_otra.moneda != moneda_sol:
+                                    nom_otra = "dólares" if b_otra.moneda == Moneda.USD else "pesos"
+                                    nom_mov = "pesos" if moneda_sol == Moneda.ARS else "dólares"
+                                    resultado_ia["intent"] = "slot_filling"
+                                    resultado_ia["slot_filling"] = True
+                                    resultado_ia["datos_faltantes"] = [clave_bill]
+                                    entidades_actuales["datos_faltantes"] = [clave_bill]
+                                    entidades_actuales["moneda"] = "USD" if moneda_sol == Moneda.USD else "ARS"
+                                    entidades_actuales[clave_bill] = None
+                                    menu = _generar_menu_billeteras(billeteras_moneda, tipo=tipo_act)
+                                    resultado_ia["respuesta_usuario"] = f"No podés usar una billetera en {nom_otra} para un movimiento en {nom_mov}.\n{menu}"
+                                else:
+                                    resultado_ia["intent"] = "slot_filling"
+                                    resultado_ia["slot_filling"] = True
+                                    resultado_ia["datos_faltantes"] = [clave_bill]
+                                    entidades_actuales["datos_faltantes"] = [clave_bill]
+                                    entidades_actuales["moneda"] = "USD" if moneda_sol == Moneda.USD else "ARS"
+                                    entidades_actuales[clave_bill] = None
+                                    menu = _generar_menu_billeteras(billeteras_moneda, tipo=tipo_act)
+                                    resultado_ia["respuesta_usuario"] = f"No encontré esa billetera entre las tuyas.\n\n{menu}"
+                        else:
+                            # Usuario NO nombró billetera
+                            if len(billeteras_moneda) == 1:
+                                # Exactamente una activa en esa moneda: usarla sin preguntar (2.3)
+                                billetera_final = billeteras_moneda[0]
+                                se_asumio_principal = False
+                            else:
+                                # Buscar principal en esa moneda (2.2)
+                                b_ppal = next((b for b in billeteras_moneda if b.es_principal), None)
+                                if b_ppal:
+                                    billetera_final = b_ppal
+                                    se_asumio_principal = True
+                                else:
+                                    # NUNCA ELEGIR POR DESCARTE: mostrar menú (2.1, 2.2)
+                                    resultado_ia["intent"] = "slot_filling"
+                                    resultado_ia["slot_filling"] = True
+                                    resultado_ia["datos_faltantes"] = [clave_bill]
+                                    entidades_actuales["datos_faltantes"] = [clave_bill]
+                                    entidades_actuales["moneda"] = "USD" if moneda_sol == Moneda.USD else "ARS"
+                                    entidades_actuales[clave_bill] = None
+                                    resultado_ia["respuesta_usuario"] = _generar_menu_billeteras(billeteras_moneda, tipo=tipo_act)
+
+                        if billetera_final:
+                            entidades_actuales[clave_bill] = billetera_final.nombre
+                            entidades_actuales.pop(clave_otra, None)
+                            if "datos_faltantes" in entidades_actuales:
+                                entidades_actuales["datos_faltantes"] = [
+                                    d for d in entidades_actuales["datos_faltantes"]
+                                    if d not in ("billetera_origen", "billetera_destino", "billetera")
+                                ]
+
+                            # Chequeo 1: Lote con movimientos idénticos (Tarea 4)
+                            hay_lote_dup, m_dup, mon_dup, cat_dup = _detectar_duplicados_en_lote(entidades_actuales)
+                            if hay_lote_dup:
+                                m_dup_fmt = formatear_monto(float(m_dup), Moneda.USD if mon_dup == "USD" else Moneda.ARS)
+                                pregunta_lote = f"Mandaste 2 movimientos iguales de {m_dup_fmt} en {cat_dup} desde {billetera_final.nombre}. ¿Son dos gastos distintos o se te repitió?"
+                                resultado_ia["intent"] = "verificar_lote_duplicado"
+                                resultado_ia["slot_filling"] = True
+                                resultado_ia["datos_faltantes"] = ["confirmar_lote"]
+                                entidades_actuales["tipo_flujo"] = "verificacion_lote_duplicado"
+                                entidades_actuales["billetera_resuelta_nombre"] = billetera_final.nombre
+                                resultado_ia["respuesta_usuario"] = pregunta_lote
+                            else:
+                                # Chequeo 2: Transacción previa en la última hora (Tarea 3)
+                                cat_id_chk, _ = _resolver_categoria_y_subcategoria(
+                                    entidades_actuales.get("categoria"), usuario.id, db, tipo=tipo_act
                                 )
-                                if "No se puede registrar ningún movimiento." in resultado_ia["respuesta_usuario"]:
-                                    resultado_ia["intent"] = "desconocido"
+                                tx_dup = _buscar_transaccion_duplicada_reciente(
+                                    usuario_id=usuario.id,
+                                    monto=Decimal(str(entidades_actuales["monto"])),
+                                    moneda=moneda_sol,
+                                    categoria_id=cat_id_chk,
+                                    db=db,
+                                    )
+                                if tx_dup:
+                                    hora_dup = tx_dup.fecha_creacion.astimezone(TZ_ARGENTINA).strftime("%H:%M")
+                                    cat_disp = _nombre_corto_categoria(entidades_actuales.get("categoria"))
+                                    m_fmt = formatear_monto(float(entidades_actuales["monto"]), moneda_sol)
+                                    pregunta_dup = f"A las {hora_dup} ya registraste {m_fmt} en {cat_disp}. ¿Es un movimiento nuevo o se te repitió?"
+                                    resultado_ia["intent"] = "verificar_duplicado"
+                                    resultado_ia["slot_filling"] = True
+                                    resultado_ia["datos_faltantes"] = ["confirmar_duplicado"]
+                                    entidades_actuales["tipo_flujo"] = "verificacion_duplicado"
+                                    entidades_actuales["billetera_resuelta_nombre"] = billetera_final.nombre
+                                    entidades_actuales["hora_anterior"] = hora_dup
+                                    resultado_ia["respuesta_usuario"] = pregunta_dup
+                                else:
+                                    resultado_ia["intent"] = "registrar_transaccion"
                                     resultado_ia["slot_filling"] = False
+                                    resultado_ia["confianza"] = max(float(resultado_ia.get("confianza", 0.0)), 0.85)
+                                    resultado_ia["_asumio_principal"] = se_asumio_principal
+                                    resultado_ia["respuesta_usuario"] = _construir_propuesta_transaccion(
+                                        entidades_actuales,
+                                        billetera_final.nombre,
+                                        se_asumio_principal=se_asumio_principal,
+                                        billetera_moneda=billetera_final.moneda,
+                                    )
+                                    if "No se puede registrar ningún movimiento." in resultado_ia["respuesta_usuario"]:
+                                        resultado_ia["intent"] = "desconocido"
+                                        resultado_ia["slot_filling"] = False
 
             # Enriquecer respuesta con datos reales para intents de consulta
             intent_detectado = resultado_ia.get("intent")

@@ -48,6 +48,8 @@ class TarjetaCredito(Base):
         PGUUID(as_uuid=True), ForeignKey("billeteras.id"), nullable=False
     )
     nombre: Mapped[str] = mapped_column(String(100), nullable=False)
+    apodo: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
     red: Mapped[RedTarjeta] = mapped_column(
         SAEnum(RedTarjeta, values_callable=lambda obj: [e.value for e in obj], name="red_tarjeta_enum"),
         nullable=False,

@@ -144,6 +144,7 @@ def crear_tarjeta(db: Session, usuario_id: UUID, data: TarjetaCreditoCreate) -> 
         usuario_id=usuario_id,
         billetera_id=data.billetera_id,
         nombre=data.nombre,
+        apodo=data.apodo,
         red=data.red,
         dia_cierre=data.dia_cierre,
         dia_vencimiento=data.dia_vencimiento,
