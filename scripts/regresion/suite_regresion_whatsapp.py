@@ -1,6 +1,7 @@
 """
 Suite consolidada de regresión de WhatsApp para Argentum.
-Ejecuta todos los escenarios acumulados (Puntos 3, 4, 5 y 6) con verificación automática y rollback total.
+Ejecuta todos los escenarios acumulados (Puntos 3, 4, 5, 6 y 7) usando exclusivamente testingadmin@argentum.com
+con verificación automática y rollback total.
 """
 import sys
 import os
@@ -40,6 +41,10 @@ from app.routers.whatsapp_ia import (
     _confirmar_propuesta_transaccion,
     _resolver_categoria_y_subcategoria,
 )
+from app.services import ai_service
+
+USUARIO_PRUEBAS_EMAIL = "testingadmin@argentum.com"
+TELEFONO_TEST = "+5491100000000"
 
 def make_payload(from_number: str, message: str, wamid: str | None = None) -> bytes:
     if not wamid:
@@ -53,7 +58,7 @@ def make_payload(from_number: str, message: str, wamid: str | None = None) -> by
                             "messages": [
                                 {
                                     "id": wamid,
-                                    "from": from_number,
+                                    "from": from_number or TELEFONO_TEST,
                                     "type": "text",
                                     "text": {"body": message},
                                 }
@@ -66,6 +71,14 @@ def make_payload(from_number: str, message: str, wamid: str | None = None) -> by
     }
     return json.dumps(payload).encode("utf-8")
 
+def _mock_buscar_usuario_testingadmin(from_number, db_session):
+    u = db_session.execute(
+        select(Usuario).where(Usuario.email == USUARIO_PRUEBAS_EMAIL)
+    ).scalar_one_or_none()
+    if not u or u.email != USUARIO_PRUEBAS_EMAIL:
+        raise RuntimeError(f"ABORT CRITICO: Intento de resolución a usuario no-testingadmin: {getattr(u, 'email', None)}")
+    return u
+
 def run_isolated(fn):
     """Ejecuta una función en una transacción aislada que siempre termina en rollback."""
     conn = engine.connect()
@@ -74,6 +87,7 @@ def run_isolated(fn):
     BoundSession = sessionmaker(bind=conn, join_transaction_mode="create_savepoint")
     try:
         with patch("app.routers.whatsapp_ia.SessionLocal", BoundSession), \
+             patch("app.routers.whatsapp_ia._buscar_usuario_por_telefono", side_effect=_mock_buscar_usuario_testingadmin), \
              patch("app.routers.whatsapp_ia.enviar_whatsapp", side_effect=lambda t, m: respuestas.append((t, m))), \
              patch("app.routers.whatsapp_ia._verificar_rate_limit_registrado", return_value=(True, None)):
             res = fn(conn, BoundSession, respuestas)
@@ -83,18 +97,19 @@ def run_isolated(fn):
         conn.close()
 
 def resolver_datos_base(db: Session):
-    emails = ["mrm291201@gmail.com", "angieperiolo@hotmail.com", "giordaninosebas@gmail.com"]
-    usuarios = {}
-    for email in emails:
-        u = db.execute(select(Usuario).where(Usuario.email == email)).scalars().first()
-        if not u:
-            raise RuntimeError(f"Usuario requerido no encontrado en base de datos: {email}")
-        bills = db.execute(select(Billetera).where(Billetera.usuario_id == u.id)).scalars().all()
-        usuarios[email] = {
+    u = db.execute(select(Usuario).where(Usuario.email == USUARIO_PRUEBAS_EMAIL)).scalars().first()
+    if not u:
+        raise RuntimeError(f"ABORT CRITICO: Usuario de pruebas no encontrado en base de datos: {USUARIO_PRUEBAS_EMAIL}")
+    if u.email != USUARIO_PRUEBAS_EMAIL:
+        raise RuntimeError(f"ABORT CRITICO: Usuario resuelto no es testingadmin: {u.email}")
+    
+    bills = db.execute(select(Billetera).where(Billetera.usuario_id == u.id)).scalars().all()
+    return {
+        USUARIO_PRUEBAS_EMAIL: {
             "usuario": u,
             "billeteras": {b.nombre: b for b in bills},
         }
-    return usuarios
+    }
 
 def obtener_conteos_base(db: Session):
     tx_cnt = db.execute(select(func.count(Transaccion.id))).scalar()
@@ -102,7 +117,7 @@ def obtener_conteos_base(db: Session):
     msg_cnt = db.execute(select(text("count(*)")).select_from(text("mensajes_whatsapp_procesados"))).scalar()
     saldos = {}
     for b in db.execute(select(Billetera).order_by(Billetera.id)).scalars().all():
-        saldos[b.id] = b.saldo_actual
+        saldos[str(b.id)] = b.saldo_actual
     return {"tx": tx_cnt, "conv": conv_cnt, "msg": msg_cnt, "saldos": saldos}
 
 # ==============================================================================
@@ -110,69 +125,70 @@ def obtener_conteos_base(db: Session):
 # ==============================================================================
 
 def p3_caso_1(datos):
-    u = datos["mrm291201@gmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en el kiosco"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p3_caso_2(datos):
-    u = datos["mrm291201@gmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE billeteras SET es_principal = false WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en el kiosco"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p3_caso_3(datos):
-    u = datos["mrm291201@gmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE billeteras SET es_principal = false WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en el kiosco"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "2"), time.perf_counter())
+        # Opción 2 en menú de testingadmin (Efectivo ARS, Galicia, Santander) es Galicia
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "2"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p3_caso_4(datos):
-    u = datos["mrm291201@gmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE billeteras SET es_principal = false WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en el kiosco"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "Santander JJ"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "Santander"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p3_caso_5(datos):
-    u = datos["mrm291201@gmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE billeteras SET es_principal = false WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en el kiosco"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "9"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "9"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p3_caso_6(datos):
-    u = datos["mrm291201@gmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "2"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "2"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p3_caso_7(datos):
-    u = datos["mrm291201@gmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         db = Session()
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
@@ -182,7 +198,7 @@ def p3_caso_7(datos):
             wamid=f"wamid_venc_{uuid.uuid4().hex[:8]}",
             mensaje_usuario="gasté 5000 en el kiosco",
             tipo_mensaje=TipoMensajeWpp.TEXTO,
-            mensaje_bot="¿Desde qué billetera salió la plata?\n1. Balanz\n2. Efectivo ARS",
+            mensaje_bot="¿Desde qué billetera salió la plata?\n1. Efectivo ARS\n2. Galicia\n3. Santander",
             intent_detectado="slot_filling",
             entidades={"monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "datos_faltantes": ["billetera_origen"]},
             slot_filling_activo=True,
@@ -193,12 +209,12 @@ def p3_caso_7(datos):
         db.add(conv_vencida)
         db.commit()
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "2"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "2"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p3_caso_8(datos):
-    u = datos["angieperiolo@hotmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         db = Session()
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
@@ -207,9 +223,9 @@ def p3_caso_8(datos):
             wamid=f"wamid_prop_{uuid.uuid4().hex[:8]}",
             mensaje_usuario="gasté 5000 en el kiosco",
             tipo_mensaje=TipoMensajeWpp.TEXTO,
-            mensaje_bot="Voy a anotar $5.000 en Kiosco desde Efectivo ARS. ¿Va?\nSi fue con otra, decime cuál.",
+            mensaje_bot="Voy a anotar $5.000 en Kiosco desde Galicia. ¿Va?\nSi fue con otra, decime cuál.",
             intent_detectado="registrar_transaccion",
-            entidades={"monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Efectivo ARS"},
+            entidades={"monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Galicia"},
             slot_filling_activo=False,
             accion_ejecutada=None,
             confianza=Decimal("0.950"),
@@ -218,30 +234,32 @@ def p3_caso_8(datos):
         db.add(conv_propuesta)
         db.commit()
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "no, fue en Mercado Pago"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "no, fue en Santander"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p3_caso_9(datos):
-    u = datos["mrm291201@gmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE billeteras SET es_principal = false WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "cobré 800000 de sueldo"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cobré 800000 de sueldo"), time.perf_counter())
         pregunta = respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "1"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "1"), time.perf_counter())
         propuesta = respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
         return f"{pregunta}\n---\n{propuesta}"
     return run_isolated(test)
 
 def p3_caso_10(datos):
-    u = datos["giordaninosebas@gmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET estado = 'archivada' WHERE usuario_id = :uid AND nombre IN ('Galicia', 'Santander')"), {"uid": u.id})
+        conn.execute(text("UPDATE billeteras SET es_principal = false WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
@@ -250,29 +268,29 @@ def p3_caso_10(datos):
 # ==============================================================================
 
 def p4_caso_1(datos):
-    u = datos["mrm291201@gmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE billeteras SET es_principal = false WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en el kiosco"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "hola"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "hola"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p4_caso_2(datos):
-    u = datos["mrm291201@gmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE billeteras SET es_principal = false WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en el kiosco"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 12000 en verdulería"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 12000 en verdulería"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p4_caso_3(datos):
-    u = datos["angieperiolo@hotmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         db = Session()
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
@@ -281,9 +299,9 @@ def p4_caso_3(datos):
             wamid=f"wamid_prop_{uuid.uuid4().hex[:8]}",
             mensaje_usuario="gasté 5000 en el kiosco",
             tipo_mensaje=TipoMensajeWpp.TEXTO,
-            mensaje_bot="Voy a anotar $5.000 en Kiosco desde Efectivo ARS. ¿Va?",
+            mensaje_bot="Voy a anotar $5.000 en Kiosco desde Galicia. ¿Va?",
             intent_detectado="registrar_transaccion",
-            entidades={"monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Efectivo ARS"},
+            entidades={"monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Galicia"},
             slot_filling_activo=False,
             accion_ejecutada=None,
             confianza=Decimal("0.950"),
@@ -292,12 +310,12 @@ def p4_caso_3(datos):
         db.add(conv_propuesta)
         db.commit()
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "no"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "no"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p4_caso_4(datos):
-    u = datos["angieperiolo@hotmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         db = Session()
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
@@ -306,9 +324,9 @@ def p4_caso_4(datos):
             wamid=f"wamid_prop_{uuid.uuid4().hex[:8]}",
             mensaje_usuario="gasté 5000 en el kiosco",
             tipo_mensaje=TipoMensajeWpp.TEXTO,
-            mensaje_bot="Voy a anotar $5.000 en Kiosco desde Efectivo ARS. ¿Va?",
+            mensaje_bot="Voy a anotar $5.000 en Kiosco desde Galicia. ¿Va?",
             intent_detectado="registrar_transaccion",
-            entidades={"monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Efectivo ARS"},
+            entidades={"monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Galicia"},
             slot_filling_activo=False,
             accion_ejecutada=None,
             confianza=Decimal("0.950"),
@@ -316,38 +334,35 @@ def p4_caso_4(datos):
         )
         db.add(conv_propuesta)
         db.commit()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "no"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "no"), time.perf_counter())
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "dale"), time.perf_counter())
+        txs_antes = db.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "dale"), time.perf_counter())
+        txs_despues = db.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         resp = respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
-        count_tx = db.execute(
-            select(text("count(*)")).select_from(Transaccion).where(
-                Transaccion.usuario_id == u.id, Transaccion.monto == Decimal("5000")
-            )
-        ).scalar()
-        return f"{resp} (txs_creadas={count_tx})"
+        return f"{resp} (txs_creadas={txs_despues - txs_antes})"
     return run_isolated(test)
 
 def p4_caso_5(datos):
-    u = datos["giordaninosebas@gmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "buenas"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "buenas"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p4_caso_6(datos):
-    u = datos["mrm291201@gmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "cuánto gasté en pizza"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cuánto gasté en pizza"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p4_caso_7(datos):
-    u = datos["mrm291201@gmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         db = Session()
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
@@ -357,7 +372,7 @@ def p4_caso_7(datos):
             wamid=f"wamid_venc_{uuid.uuid4().hex[:8]}",
             mensaje_usuario="gasté 5000 en el kiosco",
             tipo_mensaje=TipoMensajeWpp.TEXTO,
-            mensaje_bot="¿Desde qué billetera salió la plata?\n1. Balanz\n2. Efectivo ARS",
+            mensaje_bot="¿Desde qué billetera salió la plata?\n1. Efectivo ARS\n2. Galicia\n3. Santander",
             intent_detectado="slot_filling",
             entidades={"monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "datos_faltantes": ["billetera_origen"]},
             slot_filling_activo=True,
@@ -368,21 +383,21 @@ def p4_caso_7(datos):
         db.add(conv_vencida)
         db.commit()
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "2"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "2"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p4_caso_8(datos):
-    u = datos["mrm291201@gmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "sí"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
-def p4_variante_no(datos, msg_variante, email="angieperiolo@hotmail.com"):
-    u = datos[email]["usuario"]
+def p4_variante_no(datos, msg_variante, billetera_propuesta="Galicia"):
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         db = Session()
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
@@ -391,9 +406,9 @@ def p4_variante_no(datos, msg_variante, email="angieperiolo@hotmail.com"):
             wamid=f"wamid_prop_{uuid.uuid4().hex[:8]}",
             mensaje_usuario="gasté 5000 en el kiosco",
             tipo_mensaje=TipoMensajeWpp.TEXTO,
-            mensaje_bot="Voy a anotar $5.000 en Kiosco desde Efectivo ARS. ¿Va?\nSi fue con otra, decime cuál.",
+            mensaje_bot=f"Voy a anotar $5.000 en Kiosco desde {billetera_propuesta}. ¿Va?",
             intent_detectado="registrar_transaccion",
-            entidades={"monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Efectivo ARS"},
+            entidades={"monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": billetera_propuesta},
             slot_filling_activo=False,
             accion_ejecutada=None,
             confianza=Decimal("0.950"),
@@ -402,53 +417,52 @@ def p4_variante_no(datos, msg_variante, email="angieperiolo@hotmail.com"):
         db.add(conv_propuesta)
         db.commit()
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, msg_variante), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, msg_variante), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 # ==============================================================================
-# ESCENARIOS PUNTO 5: Control de Duplicados y Concurrencia (7 casos + cuotas)
+# ESCENARIOS PUNTO 5: Prevención de Duplicados y Concurrencia (8 casos)
 # ==============================================================================
 
 def p5_caso_1(datos):
-    u = datos["angieperiolo@hotmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en el kiosco"), time.perf_counter())
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "sí"), time.perf_counter())
-        respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en el kiosco"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p5_caso_2(datos):
-    u = datos["angieperiolo@hotmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en el kiosco"), time.perf_counter())
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "sí"), time.perf_counter())
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en el kiosco"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "es nuevo"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "es nuevo"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p5_caso_3(datos):
-    u = datos["angieperiolo@hotmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en el kiosco"), time.perf_counter())
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "sí"), time.perf_counter())
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en el kiosco"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "es un error"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "es un error"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p5_caso_4(datos):
-    u = datos["angieperiolo@hotmail.com"]["usuario"]
-    b = datos["angieperiolo@hotmail.com"]["billeteras"]["Mercado Pago"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    b = datos[USUARIO_PRUEBAS_EMAIL]["billeteras"]["Galicia"]
     def test(conn, Session, respuestas):
         db = Session()
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
@@ -474,31 +488,42 @@ def p5_caso_4(datos):
         db.add(tx_antigua)
         db.commit()
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en el kiosco"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p5_caso_5(datos):
-    u = datos["angieperiolo@hotmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en el kiosco"), time.perf_counter())
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "sí"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en la farmacia"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en la farmacia"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p5_caso_6_concurrente(datos):
-    """Prueba concurrencia real garantizando limpieza absoluta de base de datos."""
-    u = datos["angieperiolo@hotmail.com"]["usuario"]
-    b = datos["angieperiolo@hotmail.com"]["billeteras"]["Mercado Pago"]
+    """
+    Prueba concurrencia real garantizando limpieza absoluta e infalible de base de datos.
+    Usa exclusivamente testingadmin@argentum.com y su billetera Galicia.
+    Registra snapshot exacto de IDs de transacciones antes y después, y borra la diferencia.
+    """
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    b = datos[USUARIO_PRUEBAS_EMAIL]["billeteras"]["Galicia"]
     saldo_original = b.saldo_actual
-    t_inicio = datetime.now(timezone.utc) - timedelta(seconds=5)
     
-    db = SessionLocal()
+    # Snapshot de transacciones existentes antes de la prueba
+    snap_db = SessionLocal()
+    tx_ids_antes = set(snap_db.execute(select(Transaccion.id).where(Transaccion.usuario_id == u.id)).scalars().all())
+    snap_db.close()
+
     pid = uuid.uuid4()
-    p_wamid = f"reg_c6_prop_{uuid.uuid4().hex[:8]}"
+    p_wamid = f"reg_c6_prop_{uuid.uuid4().hex}"
+    wamid1 = f"reg_c6_conf_1_{uuid.uuid4().hex}"
+    wamid2 = f"reg_c6_conf_2_{uuid.uuid4().hex}"
+
+    db = SessionLocal()
     prop = ConversacionWpp(
         id=pid,
         usuario_id=u.id,
@@ -523,30 +548,52 @@ def p5_caso_6_concurrente(datos):
         with lock:
             resp_c6.append(msg)
 
+    def _mock_buscar_concurrente(tel, db_sess):
+        usr = db_sess.query(Usuario).filter(Usuario.email == USUARIO_PRUEBAS_EMAIL).first()
+        if not usr or usr.email != USUARIO_PRUEBAS_EMAIL:
+            raise RuntimeError(f"ABORT CRITICO: Concurrencia intentó usar otro usuario: {getattr(usr, 'email', None)}")
+        return usr
+
     bar = threading.Barrier(2)
-    def worker(wid):
-        payload = make_payload(u.telefono_normalizado, "sí", f"reg_c6_conf_{wid}")
+    def worker(wid, wamid_val):
+        payload = make_payload(TELEFONO_TEST, "sí", wamid_val)
         bar.wait()
         _procesar_webhook_whatsapp_sync(payload, time.perf_counter())
 
     try:
-        with patch("app.routers.whatsapp_ia.enviar_whatsapp", side_effect=mock_envio), \
+        with patch("app.routers.whatsapp_ia._buscar_usuario_por_telefono", side_effect=_mock_buscar_concurrente), \
+             patch("app.routers.whatsapp_ia.enviar_whatsapp", side_effect=mock_envio), \
              patch("app.routers.whatsapp_ia._verificar_rate_limit_registrado", return_value=(True, None)):
-            th1 = threading.Thread(target=worker, args=(1,))
-            th2 = threading.Thread(target=worker, args=(2,))
+            th1 = threading.Thread(target=worker, args=(1, wamid1))
+            th2 = threading.Thread(target=worker, args=(2, wamid2))
             th1.start()
             th2.start()
             th1.join()
             th2.join()
     finally:
-        # Limpieza absoluta de los registros concurrentes
+        # Limpieza infalible: identificar exactamente las transacciones creadas por diferencia de conjuntos
         clean_db = SessionLocal()
-        clean_db.execute(text("DELETE FROM transacciones WHERE usuario_id = :uid AND monto = 5000.00 AND fecha_creacion >= :tmin"), {"uid": u.id, "tmin": t_inicio})
-        clean_db.execute(text("DELETE FROM mensajes_whatsapp_procesados WHERE wamid LIKE 'reg_c6_%'"))
-        clean_db.execute(text("DELETE FROM conversaciones_wpp WHERE usuario_id = :uid AND (wamid LIKE 'reg_c6_%' OR id = :pid)"), {"uid": u.id, "pid": pid})
+        tx_ids_despues = set(clean_db.execute(select(Transaccion.id).where(Transaccion.usuario_id == u.id)).scalars().all())
+        creadas = tx_ids_despues - tx_ids_antes
+        for tx_id in creadas:
+            clean_db.execute(text("DELETE FROM transacciones WHERE id = :txid"), {"txid": tx_id})
+
+        # Limpieza de mensajes procesados y conversaciones creadas en esta prueba
+        clean_db.execute(text("DELETE FROM mensajes_whatsapp_procesados WHERE wamid IN (:w1, :w2, :pw)"), {"w1": wamid1, "w2": wamid2, "pw": p_wamid})
+        clean_db.execute(text("DELETE FROM conversaciones_wpp WHERE usuario_id = :uid AND (wamid IN (:w1, :w2, :pw) OR id = :pid)"), {"uid": u.id, "w1": wamid1, "w2": wamid2, "pw": p_wamid, "pid": pid})
         clean_db.execute(text("UPDATE billeteras SET saldo_actual = :s WHERE id = :bid"), {"s": saldo_original, "bid": b.id})
         clean_db.commit()
+
+        # Verificación estricta post-limpieza
+        tx_post = set(clean_db.execute(select(Transaccion.id).where(Transaccion.usuario_id == u.id)).scalars().all())
+        b_actual = clean_db.execute(select(Billetera).where(Billetera.id == b.id)).scalar_one()
         clean_db.close()
+
+        if tx_post != tx_ids_antes:
+            sobrantes = tx_post - tx_ids_antes
+            raise RuntimeError(f"Limpieza falló: transacciones residuales no borradas: {sobrantes}")
+        if b_actual.saldo_actual != saldo_original:
+            raise RuntimeError(f"Limpieza falló: saldo billetera {b_actual.saldo_actual} != original {saldo_original}")
 
     # Verificar que exactamente 1 confirmó con éxito y 1 fue rechazada por ya confirmada
     exitos = [r for r in resp_c6 if "registrado" in r.lower()]
@@ -554,18 +601,18 @@ def p5_caso_6_concurrente(datos):
     return f"Exitos={len(exitos)}, Rechazados_por_concurrencia={len(dups)}"
 
 def p5_caso_7(datos):
-    u = datos["angieperiolo@hotmail.com"]["usuario"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en el kiosco y otros 5000 en el kiosco"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco y otros 5000 en el kiosco"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
 def p5_caso_cuotas(datos):
     from app.models.transaccion import MetodoPago
-    u = datos["angieperiolo@hotmail.com"]["usuario"]
-    b = datos["angieperiolo@hotmail.com"]["billeteras"]["Mercado Pago"]
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    b = datos[USUARIO_PRUEBAS_EMAIL]["billeteras"]["Galicia"]
     def test(conn, Session, respuestas):
         db = Session()
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
@@ -591,7 +638,7 @@ def p5_caso_cuotas(datos):
         db.add(tx_cuota)
         db.commit()
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(u.telefono_normalizado, "gasté 5000 en el kiosco"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
 
@@ -600,22 +647,13 @@ def p5_caso_cuotas(datos):
 # ==============================================================================
 
 def p6_ejecutar_caso(datos, nombre_caso, ent):
-    hoy = datetime.now(timezone.utc).date()
-    ayer = hoy - timedelta(days=1)
-    
     def test(conn, Session, respuestas):
         db = Session()
-        if ent.get("moneda") == "USD" and "Efectivo USD" in (ent.get("billetera_origen") or ""):
-            email = "mrm291201@gmail.com"
-        elif "Galicia" in (ent.get("billetera_destino") or ""):
-            email = "mrm291201@gmail.com"
-        else:
-            email = "angieperiolo@hotmail.com"
-        u = db.execute(select(Usuario).where(Usuario.email == email)).scalar_one()
+        u = db.execute(select(Usuario).where(Usuario.email == USUARIO_PRUEBAS_EMAIL)).scalar_one()
 
         b_nom = ent.get("billetera_destino") if ent.get("tipo") == "ingreso" else ent.get("billetera_origen")
         b_obj = db.execute(select(Billetera).where(Billetera.usuario_id == u.id, Billetera.nombre == b_nom)).scalars().first()
-        b_mon = b_obj.moneda if b_obj else (Moneda.USD if "USD" in b_nom else Moneda.ARS)
+        b_mon = b_obj.moneda if b_obj else (Moneda.USD if "USD" in (b_nom or "") else Moneda.ARS)
 
         entidades_caso = dict(ent)
         if "transacciones_adicionales" in ent:
@@ -650,17 +688,43 @@ def p6_ejecutar_caso(datos, nombre_caso, ent):
     return run_isolated(test)
 
 # ==============================================================================
+# ESCENARIOS PUNTO 7: Categorías estrictas, jerga argentina y descripciones
+# ==============================================================================
+
+def p7_ejecutar_caso(datos, mensaje, cat_esperada, desc_esperada):
+    def test(conn, Session, respuestas):
+        db = Session()
+        u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+        res = ai_service.procesar_mensaje(mensaje, u, db)
+        cat_obtenida = res.get("entidades", {}).get("categoria")
+        desc_obtenida = res.get("entidades", {}).get("descripcion")
+
+        cat_id, sub_id = _resolver_categoria_y_subcategoria(cat_obtenida, u.id, db, tipo="egreso")
+        if not cat_id:
+            return f"Error: no se pudo resolver categoría {cat_obtenida}"
+
+        return f"Cat: {cat_obtenida} | Desc: {desc_obtenida}"
+    return run_isolated(test)
+
+# ==============================================================================
 # RUNNER GENERAL DE SUITE
 # ==============================================================================
 
 def correr_suite_completa():
     print("=== INICIANDO SUITE CONSOLIDADA DE REGRESION DE WHATSAPP ===")
+    print(f"Usuario exclusivo de pruebas: {USUARIO_PRUEBAS_EMAIL}")
+    
     db = SessionLocal()
     datos = resolver_datos_base(db)
+    u_admin = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    if u_admin.email != USUARIO_PRUEBAS_EMAIL:
+        raise RuntimeError(f"ABORT CRITICO: Verificación de usuario fallida. Resuelto: {u_admin.email}")
+    
     conteos_inicio = obtener_conteos_base(db)
     db.close()
 
-    hoy = datetime.now(timezone.utc).date()
+    from app.utils.fecha import hoy_argentina
+    hoy = hoy_argentina()
     ayer = hoy - timedelta(days=1)
 
     escenarios = [
@@ -678,7 +742,7 @@ def correr_suite_completa():
             "punto": "Punto 3",
             "nombre": "Usuario sin billetera principal, lo mismo",
             "ejecutar": lambda: p3_caso_2(datos),
-            "esperado": "¿Desde qué billetera salió la plata?\n\n1. Balanz\n2. Efectivo ARS\n3. Galicia\n4. Santander JJ",
+            "esperado": "¿Desde qué billetera salió la plata?\n\n1. Efectivo ARS\n2. Galicia\n3. Santander",
             "match": "exacto",
         },
         {
@@ -686,7 +750,7 @@ def correr_suite_completa():
             "punto": "Punto 3",
             "nombre": "Responde '2' a un menú de billeteras",
             "ejecutar": lambda: p3_caso_3(datos),
-            "esperado": "Voy a anotar $5.000 en Kiosco desde Efectivo ARS. ¿Va?",
+            "esperado": "Voy a anotar $5.000 en Kiosco desde Galicia. ¿Va?",
             "match": "exacto",
         },
         {
@@ -694,7 +758,7 @@ def correr_suite_completa():
             "punto": "Punto 3",
             "nombre": "Responde con el nombre de la billetera en vez del número",
             "ejecutar": lambda: p3_caso_4(datos),
-            "esperado": "Voy a anotar $5.000 en Kiosco desde Santander JJ. ¿Va?",
+            "esperado": "Voy a anotar $5.000 en Kiosco desde Santander. ¿Va?",
             "match": "exacto",
         },
         {
@@ -702,7 +766,7 @@ def correr_suite_completa():
             "punto": "Punto 3",
             "nombre": "Responde un número fuera de rango",
             "ejecutar": lambda: p3_caso_5(datos),
-            "esperado": "Opción inválida. Elegí un número del 1 al 4.",
+            "esperado": "Opción inválida. Elegí un número del 1 al 3.",
             "match": "exacto",
         },
         {
@@ -724,9 +788,9 @@ def correr_suite_completa():
         {
             "id": "P3.8",
             "punto": "Punto 3",
-            "nombre": "Recibe una propuesta y responde 'no, fue en Mercado Pago'",
+            "nombre": "Recibe una propuesta y responde 'no, fue en Santander'",
             "ejecutar": lambda: p3_caso_8(datos),
-            "esperado": "Voy a anotar $5.000 en Kiosco desde Mercado Pago. ¿Va?",
+            "esperado": "Voy a anotar $5.000 en Kiosco desde Santander. ¿Va?",
             "match": "exacto",
         },
         {
@@ -734,7 +798,7 @@ def correr_suite_completa():
             "punto": "Punto 3",
             "nombre": "Dice 'cobré 800000 de sueldo' y elige billetera de destino",
             "ejecutar": lambda: p3_caso_9(datos),
-            "esperado": "¿A qué billetera entró la plata?\n\n1. Balanz\n2. Efectivo ARS\n3. Galicia\n4. Santander JJ\n---\nVoy a registrar un ingreso de $800.000 en Sueldo a Balanz. ¿Va?",
+            "esperado": "¿A qué billetera entró la plata?\n\n1. Efectivo ARS\n2. Galicia\n3. Santander\n---\nVoy a registrar un ingreso de $800.000 en Sueldo a Efectivo ARS. ¿Va?",
             "match": "exacto",
         },
         {
@@ -760,7 +824,7 @@ def correr_suite_completa():
             "punto": "Punto 4",
             "nombre": "Operación a medias y manda un gasto distinto",
             "ejecutar": lambda: p4_caso_2(datos),
-            "esperado": "Descarté la de $5.000 en Kiosco. Para los $12.000 en Verdulería:\n\n¿Desde qué billetera salió la plata?\n\n1. Balanz\n2. Efectivo ARS\n3. Galicia\n4. Santander JJ",
+            "esperado": "Descarté la de $5.000 en Kiosco. Para los $12.000 en Verdulería:\n\n¿Desde qué billetera salió la plata?\n\n1. Efectivo ARS\n2. Galicia\n3. Santander",
             "match": "exacto",
         },
         {
@@ -823,16 +887,16 @@ def correr_suite_completa():
         {
             "id": "P4.VAR2",
             "punto": "Punto 4",
-            "nombre": "Variante de no: 'no, fue en Mercado Pago'",
-            "ejecutar": lambda: p4_variante_no(datos, "no, fue en Mercado Pago"),
-            "esperado": "Voy a anotar $5.000 en Kiosco desde Mercado Pago. ¿Va?",
+            "nombre": "Variante de no: 'no, fue en Santander'",
+            "ejecutar": lambda: p4_variante_no(datos, "no, fue en Santander", billetera_propuesta="Galicia"),
+            "esperado": "Voy a anotar $5.000 en Kiosco desde Santander. ¿Va?",
             "match": "exacto",
         },
         {
             "id": "P4.VAR3",
             "punto": "Punto 4",
             "nombre": "Variante de no: 'no fue en galicia'",
-            "ejecutar": lambda: p4_variante_no(datos, "no fue en galicia", email="mrm291201@gmail.com"),
+            "ejecutar": lambda: p4_variante_no(datos, "no fue en galicia", billetera_propuesta="Santander"),
             "esperado": "Voy a anotar $5.000 en Kiosco desde Galicia. ¿Va?",
             "match": "exacto",
         },
@@ -875,7 +939,7 @@ def correr_suite_completa():
             "punto": "Punto 5",
             "nombre": "Ante la pregunta de duplicado, responde que es nuevo",
             "ejecutar": lambda: p5_caso_2(datos),
-            "esperado": "Listo. $5.000 en Kiosco desde Mercado Pago — registrado.",
+            "esperado": "Listo. $5.000 en Kiosco desde Galicia — registrado.",
             "match": "contiene",
         },
         {
@@ -891,7 +955,7 @@ def correr_suite_completa():
             "punto": "Punto 5",
             "nombre": "Gasto igual de hace dos horas (>1h)",
             "ejecutar": lambda: p5_caso_4(datos),
-            "esperado": "Voy a anotar $5.000 en Kiosco desde Mercado Pago. ¿Va?\nSi fue con otra, decime cuál.",
+            "esperado": "Voy a anotar $5.000 en Kiosco desde Galicia. ¿Va?\nSi fue con otra, decime cuál.",
             "match": "exacto",
         },
         {
@@ -899,7 +963,7 @@ def correr_suite_completa():
             "punto": "Punto 5",
             "nombre": "Mismo monto, otra categoría (sin advertencia)",
             "ejecutar": lambda: p5_caso_5(datos),
-            "esperado": "Voy a anotar $5.000 en Farmacia desde Mercado Pago. ¿Va?",
+            "esperado": "Voy a anotar $5.000 en Farmacia desde Galicia. ¿Va?",
             "match": "exacto",
         },
         {
@@ -915,7 +979,7 @@ def correr_suite_completa():
             "punto": "Punto 5",
             "nombre": "Lote con dos movimientos idénticos",
             "ejecutar": lambda: p5_caso_7(datos),
-            "esperado": "Mandaste 2 movimientos iguales de $5.000 en Kiosco desde Mercado Pago. ¿Son dos gastos distintos o se te repitió?",
+            "esperado": "Mandaste 2 movimientos iguales de $5.000 en Kiosco desde Galicia. ¿Son dos gastos distintos o se te repitió?",
             "match": "exacto",
         },
         {
@@ -923,7 +987,7 @@ def correr_suite_completa():
             "punto": "Punto 5",
             "nombre": "Cuotas de tarjeta no disparan falso positivo de duplicado",
             "ejecutar": lambda: p5_caso_cuotas(datos),
-            "esperado": "Voy a anotar $5.000 en Kiosco desde Mercado Pago. ¿Va?\nSi fue con otra, decime cuál.",
+            "esperado": "Voy a anotar $5.000 en Kiosco desde Galicia. ¿Va?\nSi fue con otra, decime cuál.",
             "match": "exacto",
         },
 
@@ -933,9 +997,9 @@ def correr_suite_completa():
             "punto": "Punto 6",
             "nombre": "Gasto de hoy",
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto hoy", {
-                "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Mercado Pago", "fecha": hoy.isoformat()
+                "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Galicia", "fecha": hoy.isoformat()
             }),
-            "esperado": "Propuesta:\nVoy a anotar $5.000 en Kiosco desde Mercado Pago. ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Mercado Pago — registrado.",
+            "esperado": "Propuesta:\nVoy a anotar $5.000 en Kiosco desde Galicia. ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Galicia — registrado.",
             "match": "exacto",
         },
         {
@@ -943,9 +1007,9 @@ def correr_suite_completa():
             "punto": "Punto 6",
             "nombre": "Gasto de ayer",
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto ayer", {
-                "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Mercado Pago", "fecha": ayer.isoformat()
+                "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Galicia", "fecha": ayer.isoformat()
             }),
-            "esperado": "Propuesta:\nVoy a anotar $5.000 en Kiosco desde Mercado Pago (ayer). ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Mercado Pago (ayer) — registrado.",
+            "esperado": "Propuesta:\nVoy a anotar $5.000 en Kiosco desde Galicia (ayer). ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Galicia (ayer) — registrado.",
             "match": "exacto",
         },
         {
@@ -953,9 +1017,9 @@ def correr_suite_completa():
             "punto": "Punto 6",
             "nombre": "Gasto del 31 de agosto",
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto 31 agosto", {
-                "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Mercado Pago", "fecha": "2026-08-31"
+                "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Galicia", "fecha": "2026-08-31"
             }),
-            "esperado": "Propuesta:\nVoy a anotar $5.000 en Kiosco desde Mercado Pago (el 31 de agosto). ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Mercado Pago (el 31 de agosto) — registrado.",
+            "esperado": "Propuesta:\nVoy a anotar $5.000 en Kiosco desde Galicia (el 31 de agosto). ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Galicia (el 31 de agosto) — registrado.",
             "match": "exacto",
         },
         {
@@ -963,9 +1027,9 @@ def correr_suite_completa():
             "punto": "Punto 6",
             "nombre": "Gasto de hace tres meses (>60 días)",
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto 3 meses", {
-                "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Mercado Pago", "fecha": "2026-06-03"
+                "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Galicia", "fecha": "2026-06-03"
             }),
-            "esperado": "Propuesta:\nNo puedo registrar movimientos de más de 60 días atrás. Va a quedar con fecha de hoy.\nVoy a anotar $5.000 en Kiosco desde Mercado Pago. ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Mercado Pago — registrado.",
+            "esperado": "Propuesta:\nNo puedo registrar movimientos de más de 60 días atrás. Va a quedar con fecha de hoy.\nVoy a anotar $5.000 en Kiosco desde Galicia. ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Galicia — registrado.",
             "match": "exacto",
         },
         {
@@ -973,9 +1037,9 @@ def correr_suite_completa():
             "punto": "Punto 6",
             "nombre": "Gasto con fecha futura",
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto futuro", {
-                "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Mercado Pago", "fecha": "2026-09-10"
+                "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Galicia", "fecha": "2026-09-10"
             }),
-            "esperado": "Propuesta:\nNo puedo registrar movimientos con fecha futura porque todavía no ocurrieron. Va a quedar con fecha de hoy.\nVoy a anotar $5.000 en Kiosco desde Mercado Pago. ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Mercado Pago — registrado.",
+            "esperado": "Propuesta:\nNo puedo registrar movimientos con fecha futura porque todavía no ocurrieron. Va a quedar con fecha de hoy.\nVoy a anotar $5.000 en Kiosco desde Galicia. ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Galicia — registrado.",
             "match": "exacto",
         },
         {
@@ -1007,9 +1071,9 @@ def correr_suite_completa():
             "punto": "Punto 6",
             "nombre": "Gasto que deja la billetera en negativo",
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto negativo", {
-                "monto": 60000, "moneda": "ARS", "tipo": "egreso", "categoria": "Supermercado", "billetera_origen": "Mercado Pago", "fecha": hoy.isoformat()
+                "monto": 600000, "moneda": "ARS", "tipo": "egreso", "categoria": "Supermercado", "billetera_origen": "Galicia", "fecha": hoy.isoformat()
             }),
-            "esperado": "Propuesta:\nVoy a anotar $60.000 en Supermercado desde Mercado Pago. ¿Va?\nConfirmación:\nListo. $60.000 en Supermercado desde Mercado Pago — registrado.\nLa billetera quedó en negativo.",
+            "esperado": "Propuesta:\nVoy a anotar $600.000 en Supermercado desde Galicia. ¿Va?\nConfirmación:\nListo. $600.000 en Supermercado desde Galicia — registrado.\nLa billetera quedó en negativo.",
             "match": "exacto",
         },
         {
@@ -1035,19 +1099,84 @@ def correr_suite_completa():
             "esperado": "Propuesta:\nNo se pudo registrar Farmacia de US$10 porque es en dólares y la billetera Efectivo ARS es en pesos.\nNo se pudo registrar Supermercado de US$20 porque es en dólares y la billetera Efectivo ARS es en pesos.\nNo se puede registrar ningún movimiento.\nConfirmación:\nNO_APLICA",
             "match": "exacto",
         },
+
+        # --- PUNTO 7: Categorías estructuradas, jerga argentina y descripciones ---
+        {
+            "id": "P7.1",
+            "punto": "Punto 7",
+            "nombre": "Golosinas -> Kiosco (jerga argentina + descripción)",
+            "ejecutar": lambda: p7_ejecutar_caso(datos, "gasté 5000 en golosinas", "Kiosco", "Golosinas"),
+            "esperado": "Cat: Kiosco | Desc: Golosinas",
+            "match": "exacto",
+        },
+        {
+            "id": "P7.2",
+            "punto": "Punto 7",
+            "nombre": "Verdulería -> Verdulería (jerga argentina + descripción)",
+            "ejecutar": lambda: p7_ejecutar_caso(datos, "gasté 8000 en la verdulería", "Verdulería", "Verdulería"),
+            "esperado": "Cat: Verdulería | Desc: Verdulería",
+            "match": "exacto",
+        },
+        {
+            "id": "P7.3",
+            "punto": "Punto 7",
+            "nombre": "Nafta -> Combustible (jerga argentina + descripción)",
+            "ejecutar": lambda: p7_ejecutar_caso(datos, "cargué 30000 de nafta", "Combustible", "Nafta"),
+            "esperado": "Cat: Combustible | Desc: Nafta",
+            "match": "exacto",
+        },
+        {
+            "id": "P7.4",
+            "punto": "Punto 7",
+            "nombre": "Prepaga -> Obra social / Prepaga (jerga argentina + descripción)",
+            "ejecutar": lambda: p7_ejecutar_caso(datos, "pagué 12000 de la prepaga", "Obra social / Prepaga", "Prepaga"),
+            "esperado": "Cat: Obra social / Prepaga | Desc: Prepaga",
+            "match": "exacto",
+        },
+        {
+            "id": "P7.5",
+            "punto": "Punto 7",
+            "nombre": "Bondi -> Transporte público (jerga argentina + descripción)",
+            "ejecutar": lambda: p7_ejecutar_caso(datos, "gasté 4000 en el bondi", "Transporte público", "Bondi"),
+            "esperado": "Cat: Transporte público | Desc: Bondi",
+            "match": "exacto",
+        },
+        {
+            "id": "P7.6",
+            "punto": "Punto 7",
+            "nombre": "Corte de pelo -> Cuidado personal (jerga argentina + descripción preservada)",
+            "ejecutar": lambda: p7_ejecutar_caso(datos, "me corté el pelo, 15000", "Cuidado personal", "Corte de pelo"),
+            "esperado": "Cat: Cuidado personal | Desc: Corte de pelo",
+            "match": "exacto",
+        },
+        {
+            "id": "P7.7",
+            "punto": "Punto 7",
+            "nombre": "Concepto raro -> Otros (prohibición de categorías inventadas + descripción)",
+            "ejecutar": lambda: p7_ejecutar_caso(datos, "gasté 2500 en un coso cuántico intergaláctico", "Otros", "Coso cuántico intergaláctico"),
+            "esperado": "Cat: Otros | Desc: Coso cuántico intergaláctico",
+            "match": "exacto",
+        },
     ]
 
     total = len(escenarios)
     aprobados = 0
+    omitidos = 0
     fallidos = 0
     detalles_fallidos = []
 
-    print(f"Total escenarios a ejecutar: {total}\n")
+    print(f"Total escenarios: {total}\n")
 
     for i, esc in enumerate(escenarios, 1):
         eid = esc["id"]
         punto = esc["punto"]
         nombre = esc["nombre"]
+
+        if esc.get("omitido"):
+            omitidos += 1
+            print(f"[{eid}] {nombre}: OMITIDO (Motivo: {esc['motivo']})")
+            continue
+
         esperado = esc["esperado"]
         match_tipo = esc["match"]
 
@@ -1085,7 +1214,7 @@ def correr_suite_completa():
             })
 
     print("\n=== RESUMEN DE EJECUCION ===")
-    print(f"Total: {total} | Aprobados: {aprobados} | Fallidos: {fallidos}")
+    print(f"Total: {total} | Aprobados: {aprobados} | Omitidos: {omitidos} | Fallidos: {fallidos}")
 
     if detalles_fallidos:
         print("\n=== DETALLE DE ESCENARIOS FALLIDOS ===")
@@ -1117,7 +1246,7 @@ def correr_suite_completa():
     )
     print(f"¿Rollback total verificado (cero residuo)?: {'SÍ' if sin_residuos else 'NO'}")
 
-    return total, aprobados, fallidos, detalles_fallidos
+    return total, aprobados, omitidos, fallidos, detalles_fallidos
 
 if __name__ == "__main__":
     correr_suite_completa()

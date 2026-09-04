@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o-mini-2024-07-18"
 
     # Dolar API
     DOLAR_API_BASE_URL: str = "https://dolarapi.com"
