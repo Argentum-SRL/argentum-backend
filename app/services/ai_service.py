@@ -83,6 +83,7 @@ def sanitizar_descripcion(desc: str | None, mensaje_original: str | None = None,
         limpio = re.sub(r"[\$€£]\s*[\d\.,]+", "", limpio)
         limpio = re.sub(r"\b\d+[\.,]?\d*\b", "", limpio)
         limpio = re.sub(r"\s+", " ", limpio).strip(" ,.-")
+        limpio = re.sub(r"^(?:el|la|los|las|un|una|unos|unas)\s+", "", limpio, flags=re.IGNORECASE).strip()
         if len(limpio) >= 2:
             return limpio[:60].strip().capitalize()
 
@@ -254,12 +255,17 @@ INTENTS VÁLIDOS — respondé siempre con exactamente uno de estos:
 - agregar_suscripcion
 - consultar_cotizacion
 - pedir_consejo
+- deshacer
+- corregir
 - confirmar
 - cancelar
 - saludo
 - desconocido
 
 REGLAS DE CLASIFICACIÓN DE INTENTS:
+- "borrá eso", "borralo", "eliminá eso", "me equivoqué", "eso estaba mal", "anulá eso", "cancelá el último" → deshacer
+- "eran 3.000 no 30.000", "eso era supermercado", "fue con Galicia", "fue ayer", "no, 5000" (corrección de dato suelto del último movimiento registrado) → corregir
+- CRITERIO OPERACIÓN NUEVA VS CORRECCIÓN: Si el mensaje contiene un monto Y un concepto/categoría propios independientes (ej: "gasté 12000 en verdulería", "almuerzo 4500", "cargué 30000 de nafta"), es SIEMPRE "registrar_transaccion". Si solo contiene un dato suelto corrigiendo el valor anterior (ej: "no, 5000", "eran 3000 no 30000", "eso era verdulería", "fue con Galicia", "fue ayer"), es "corregir".
 - "puse X", "metí X", "deposité X" SIN contexto claro → slot_filling=true, preguntá "¿Fue un gasto, ingreso o transferencia?"
 - "cuánta plata tengo", "cuánto tengo", "mi saldo" → consultar_saldo
 - "cómo voy", "cómo estoy este mes" → consultar_balance
@@ -286,7 +292,7 @@ MÚLTIPLES OPERACIONES EN UN SOLO MENSAJE:
 FLUJO DE SLOT FILLING Y CATEGORIZACIÓN AUTOMÁTICA:
 1. CATEGORIZACIÓN SIEMPRE AUTOMÁTICA (NUNCA PREGUNTAR CATEGORÍA):
    - La categoría NUNCA se pregunta al usuario bajo ninguna circunstancia.
-   - REGLA DE ESPECIFICIDAD ESTRICTA: Debés devolver SIEMPRE la subcategoría más específica (ej: "Kiosco", "Verdulería", "Combustible", "Obra social / Prepaga", "Transporte público", "Cuidado personal", "Farmacia", "Supermercado", "Sueldo"). NUNCA elijas la categoría padre general ("Alimentación", "Salud", "Transporte", "Servicios", "Empleo", etc.) cuando exista una subcategoría aplicable al concepto (por ejemplo, para bondi/colectivo usá SIEMPRE "Transporte público", NUNCA "Transporte"; para sueldo usá SIEMPRE "Sueldo", NUNCA "Empleo"; para prepaga u obra social usá SIEMPRE "Obra social / Prepaga", NUNCA "Salud").
+   - REGLA DE ESPECIFICIDAD ESTRICTA: Debés devolver SIEMPRE la subcategoría más específica (ej: "Kiosco", "Verdulería", "Combustible", "Obra social / Prepaga", "Transporte público", "Cuidado personal", "Farmacia", "Supermercado", "Sueldo"). NUNCA elijas la categoría padre general ("Alimentación", "Salud", "Transporte", "Servicios", "Empleo", etc.) cuando exista una subcategoría aplicable al concepto (por ejemplo, para golosinas/alfajores/kiosco usá SIEMPRE "Kiosco", NUNCA "Alimentación"; para verdulería usá SIEMPRE "Verdulería", NUNCA "Alimentación"; para bondi/colectivo usá SIEMPRE "Transporte público", NUNCA "Transporte"; para sueldo usá SIEMPRE "Sueldo", NUNCA "Empleo"; para prepaga u obra social usá SIEMPRE "Obra social / Prepaga", NUNCA "Salud").
    - NUNCA uses el formato "Categoría > Subcategoría", devolvé únicamente el nombre exacto de la subcategoría o categoría seleccionada (ej: "Verdulería", "Obra social / Prepaga", "Kiosco").
    - Si no hay ninguna subcategoría aplicable pero sí una categoría general que aplique, usá la categoría general.
    - Si el mensaje NO contiene ninguna pista (ej: monto pelado como "gasté 500", "pagué 2000", "me entraron 10000"), o si es un concepto desconocido o raro (ej: "un coso cuántico intergaláctico"), devolvé SIEMPRE: "Otros".
@@ -574,6 +580,7 @@ def _construir_schema_estricto(db: Session) -> dict[str, Any]:
         "consultar_ahorro",
         "transferir_fondos",
         "deshacer",
+        "corregir",
         "cancelar",
         "confirmar",
         "saludo",
@@ -803,6 +810,25 @@ def procesar_mensaje(
                     mensaje_original=mensaje,
                     tipo=tipo_ent,
                 )
+
+            # Normalizar subcategorías específicas si el modelo devolvió categoría padre general
+            cat_actual = entidades_dict.get("categoria")
+            texto_eval = f"{mensaje} {desc_actual or ''}".lower()
+            if cat_actual == "Alimentación":
+                if re.search(r"\b(golosinas?|caramelos?|alfajor(?:es)?|chocolates?|chicles?|kiosco|maxikiosco|puchos|cigarrillos)\b", texto_eval):
+                    entidades_dict["categoria"] = "Kiosco"
+                elif re.search(r"\b(verduler[ií]a|fruter[ií]a|verduras?|frutas?)\b", texto_eval):
+                    entidades_dict["categoria"] = "Verdulería"
+                elif re.search(r"\b(supermercado|s[uú]per|coto|carrefour|dia|disco|jumbo|chango|vea)\b", texto_eval):
+                    entidades_dict["categoria"] = "Supermercado"
+            elif cat_actual == "Transporte":
+                if re.search(r"\b(nafta|combustible|gnc|gasoil|ypf|shell|axion)\b", texto_eval):
+                    entidades_dict["categoria"] = "Combustible"
+                elif re.search(r"\b(bondi|colectivo|subte|tren|transporte\s+p[uú]blico)\b", texto_eval):
+                    entidades_dict["categoria"] = "Transporte público"
+            elif cat_actual == "Salud":
+                if re.search(r"\b(prepaga|obra\s+social|osde|swiss\s+medical|galeno|omint|medif[eé])\b", texto_eval):
+                    entidades_dict["categoria"] = "Obra social / Prepaga"
 
             # Sanitizar descripciones en transacciones adicionales si existen
             if isinstance(entidades_dict.get("transacciones_adicionales"), list):
