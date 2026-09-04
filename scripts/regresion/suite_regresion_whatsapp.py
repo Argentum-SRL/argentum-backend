@@ -1177,7 +1177,10 @@ def p9_caso_8(datos):
 
 def p9_caso_9(datos):
     """'gasté 5000 con la tarjeta de débito': NO es crédito."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 con la tarjeta de débito"), time.perf_counter())
         return respuestas[-1][1] if respuestas else ""
@@ -1450,6 +1453,96 @@ def p9b_caso_12(datos):
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "pasé 10 mil de Galicia a Galicia"), time.perf_counter())
+        return respuestas[-1][1] if respuestas else ""
+    return run_isolated(test)
+
+def p9b_caso_13(datos):
+    """compré 5 dólares y responder 7500: debe registrar 5 dólares a 1.500, no rechazar"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        s = Session()
+        bg_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
+        bu_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo USD", Billetera.usuario_id == u.id)).scalar()
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "compré 5 dólares"), time.perf_counter())
+        r1 = respuestas[-1][1] if respuestas else ""
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "7500"), time.perf_counter())
+        r2 = respuestas[-1][1] if respuestas else ""
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        r3 = respuestas[-1][1] if respuestas else ""
+
+        bg_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
+        bu_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo USD", Billetera.usuario_id == u.id)).scalar()
+
+        saldos_ok = (bu_fin == bu_ini + Decimal("5") and bg_fin == bg_ini - Decimal("7500"))
+        return f"R1: {r1} | R2: {r2} | R3: {r3} | Saldos: {saldos_ok}"
+    return run_isolated(test)
+
+def p9b_caso_14(datos):
+    """compré 100 dólares y responder 1500: cotización unitaria"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "compré 100 dólares"), time.perf_counter())
+        r1 = respuestas[-1][1] if respuestas else ""
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "1500"), time.perf_counter())
+        r2 = respuestas[-1][1] if respuestas else ""
+
+        return f"R1: {r1} | R2: {r2}"
+    return run_isolated(test)
+
+def p9b_caso_15(datos):
+    """compré 100 dólares y responder 150000: monto total"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "compré 100 dólares"), time.perf_counter())
+        r1 = respuestas[-1][1] if respuestas else ""
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "150000"), time.perf_counter())
+        r2 = respuestas[-1][1] if respuestas else ""
+
+        return f"R1: {r1} | R2: {r2}"
+    return run_isolated(test)
+
+def p9b_caso_16(datos):
+    """compré 100 dólares a 15: debe advertir, con la cotización de referencia en el mensaje"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "compré 100 dólares a 15"), time.perf_counter())
+        return respuestas[-1][1] if respuestas else ""
+    return run_isolated(test)
+
+def p9b_caso_17(datos):
+    """compré 100 dólares a 1500 con la tabla de cotizaciones vacía: no rechaza, pide confirmación"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("DELETE FROM cotizaciones_dolar"))
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "compré 100 dólares a 1500"), time.perf_counter())
         return respuestas[-1][1] if respuestas else ""
     return run_isolated(test)
 
@@ -2156,8 +2249,8 @@ def correr_suite_completa():
             "punto": "Punto 9B",
             "nombre": "compré 100 dólares a 5: advierte que la cotización es absurda",
             "ejecutar": lambda: p9b_caso_8(datos),
-            "esperado": "La cotización de $5 por dólar no parece razonable. Por favor verificá el valor e intentá de nuevo.",
-            "match": "exacto",
+            "esperado": "La cotización de $5 por dólar no parece razonable",
+            "match": "contiene",
         },
         {
             "id": "P9B.9",
@@ -2190,6 +2283,46 @@ def correr_suite_completa():
             "ejecutar": lambda: p9b_caso_12(datos),
             "esperado": "La billetera de origen y destino no pueden ser la misma.",
             "match": "exacto",
+        },
+        {
+            "id": "P9B.13",
+            "punto": "Punto 9B",
+            "nombre": "compré 5 dólares y responder 7500: debe registrar 5 dólares a 1.500, no rechazar",
+            "ejecutar": lambda: p9b_caso_13(datos),
+            "esperado": "Saldos: True",
+            "match": "contiene",
+        },
+        {
+            "id": "P9B.14",
+            "punto": "Punto 9B",
+            "nombre": "compré 100 dólares y responder 1500: cotización unitaria",
+            "ejecutar": lambda: p9b_caso_14(datos),
+            "esperado": "compra de USD 100 a $1.500: salen $150.000",
+            "match": "contiene",
+        },
+        {
+            "id": "P9B.15",
+            "punto": "Punto 9B",
+            "nombre": "compré 100 dólares y responder 150000: monto total",
+            "ejecutar": lambda: p9b_caso_15(datos),
+            "esperado": "compra de USD 100 a $1.500: salen $150.000",
+            "match": "contiene",
+        },
+        {
+            "id": "P9B.16",
+            "punto": "Punto 9B",
+            "nombre": "compré 100 dólares a 15: debe advertir, con la cotización de referencia en el mensaje",
+            "ejecutar": lambda: p9b_caso_16(datos),
+            "esperado": "la cotización de referencia es de",
+            "match": "contiene",
+        },
+        {
+            "id": "P9B.17",
+            "punto": "Punto 9B",
+            "nombre": "compré 100 dólares a 1500 con la tabla de cotizaciones vacía: no rechaza, pide confirmación",
+            "ejecutar": lambda: p9b_caso_17(datos),
+            "esperado": "Voy a registrar una compra de USD 100 a $1.500: salen $150.000",
+            "match": "contiene",
         },
     ]
 

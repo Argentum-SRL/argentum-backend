@@ -21,6 +21,12 @@ def get_current_ipc_endpoint(
     Devuelve el IPC mensual actual de Argentina para pre-cargar en el frontend.
     """
     ipc_cache = tools_service.get_current_ipc(db)
+    if not ipc_cache or ipc_cache.valor_mensual is None:
+        return {
+            "success": False,
+            "data": None,
+            "mensaje": "Falta el dato de inflación oficial y no se pudo calcular. Por favor, intentalo más tarde."
+        }
     return {
         "success": True,
         "data": {

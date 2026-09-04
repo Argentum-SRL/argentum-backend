@@ -432,6 +432,32 @@ def _job_guardar_cotizaciones_diarias():
         db.close()
 
 
+def _job_actualizar_ipc():
+    """Tarea programada diaria: actualiza la serie de IPC oficial a las 20:00 UTC (17:00 ART)."""
+    from app.services.tools_service import get_current_ipc
+    db = SessionLocal()
+    lock_adquirido = False
+    try:
+        if not intentar_tomar_lock_job(db, "_job_actualizar_ipc"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_actualizar_ipc",
+            )
+            return
+        lock_adquirido = True
+        res = get_current_ipc(db)
+        if res:
+            logger.info("Job actualizar_ipc ejecutado exitosamente (mes: %s, valor: %s).", res.fecha_dato, res.valor_mensual)
+        else:
+            logger.warning("Job actualizar_ipc completado: sin datos de IPC disponibles.")
+    except Exception:
+        logger.exception("Error en job _job_actualizar_ipc")
+    finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_actualizar_ipc")
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Crear el scheduler y registrar jobs aquí para evitar que se
@@ -596,6 +622,16 @@ async def lifespan(app: FastAPI):
         hour=21,
         minute=0,
         id="guardar_cotizaciones_diarias",
+        misfire_grace_time=300,
+        max_instances=1,
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _job_actualizar_ipc,
+        "cron",
+        hour=20,
+        minute=0,
+        id="actualizar_ipc_diario",
         misfire_grace_time=300,
         max_instances=1,
         replace_existing=True,

@@ -18,8 +18,6 @@ from app.utils.formato import formatear_monto
 
 logger = logging.getLogger(__name__)
 
-COTIZACION_MINIMA_FALLBACK = Decimal("100")
-COTIZACION_MAXIMA_FALLBACK = Decimal("100000")
 TOLERANCIA_COTIZACION_PORCENTAJE = Decimal("0.30")
 
 def obtener_metas(db: Session, usuario_id: UUID, activas_solo: bool = False, skip: int = 0, limit: int = 50) -> List[Meta]:
@@ -176,20 +174,32 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
                 detail="La cotización no puede ser 1 cuando la meta y el movimiento son en monedas distintas."
             )
 
-        from app.services.dolar_service import get_cotizaciones_dolar
+        from app.services.dolar_service import get_cotizaciones_dolar, obtener_cotizacion_por_fecha
+        from app.models.cotizacion_dolar import CotizacionDolar
         cotizacion_referencia: Decimal | None = None
+        tipo = (data.tipo_dolar_usado or "blue").lower()
         try:
             cots_data = get_cotizaciones_dolar()
             cots = cots_data.get("cotizaciones", {})
-            tipo = (data.tipo_dolar_usado or "blue").lower()
             info_dolar = cots.get(tipo) or cots.get("blue") or cots.get("oficial")
             if info_dolar and info_dolar.get("promedio"):
                 cotizacion_referencia = Decimal(str(info_dolar["promedio"]))
             elif info_dolar and info_dolar.get("venta"):
                 cotizacion_referencia = Decimal(str(info_dolar["venta"]))
         except Exception as e:
-            logger.warning("No se pudo consultar cotización de referencia para meta: %s", e)
+            logger.warning("No se pudo consultar cotización de referencia en API para meta: %s", e)
             cotizacion_referencia = None
+
+        # Si no hubo respuesta de la API externa, recurrir a la última cotización en la base local
+        if cotizacion_referencia is None:
+            cot_db = obtener_cotizacion_por_fecha(db, tipo, hoy_argentina())
+            if cot_db is not None:
+                cotizacion_referencia = cot_db.promedio or cot_db.venta or cot_db.compra
+            else:
+                stmt_any = select(CotizacionDolar).order_by(desc(CotizacionDolar.fecha)).limit(1)
+                cot_any = db.execute(stmt_any).scalars().first()
+                if cot_any is not None:
+                    cotizacion_referencia = cot_any.promedio or cot_any.venta or cot_any.compra
 
         if cotizacion_referencia is not None:
             min_permitido = (cotizacion_referencia * (Decimal("1") - TOLERANCIA_COTIZACION_PORCENTAJE)).quantize(Decimal("0.01"))
@@ -198,12 +208,6 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
                 raise HTTPException(
                     status_code=400,
                     detail=f"La cotización ingresada (${data.cotizacion_usada:,.2f}) difiere más del 30% de la cotización actual (${cotizacion_referencia:,.2f}). Ingresá un valor entre ${min_permitido:,.2f} y ${max_permitido:,.2f}."
-                )
-        else:
-            if data.cotizacion_usada < COTIZACION_MINIMA_FALLBACK or data.cotizacion_usada > COTIZACION_MAXIMA_FALLBACK:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"La cotización ingresada (${data.cotizacion_usada:,.2f}) no es válida. Debe estar entre ${COTIZACION_MINIMA_FALLBACK} y ${COTIZACION_MAXIMA_FALLBACK}."
                 )
 
         # Meta en USD, Movimiento en ARS. monto_impacto = monto_ars / cotizacion

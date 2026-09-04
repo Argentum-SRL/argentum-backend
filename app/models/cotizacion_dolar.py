@@ -36,9 +36,9 @@ class CotizacionDolar(Base):
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     fecha: Mapped[date] = mapped_column(Date, nullable=False)
     tipo: Mapped[str] = mapped_column(String(30), nullable=False)
-    compra: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
-    venta: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
-    promedio: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
+    compra: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    venta: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
+    promedio: Mapped[Decimal] = mapped_column(Numeric(15, 4), nullable=False)
     fecha_registro: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )

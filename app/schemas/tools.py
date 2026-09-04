@@ -4,7 +4,9 @@ from datetime import datetime
 from pydantic import BaseModel, field_validator, model_validator
 
 
-MAX_MONTO = 1_000_000_000_000.0
+from app.core.constants import MAX_MONTO_FLOAT
+
+MAX_MONTO = MAX_MONTO_FLOAT
 
 
 class InstallmentConvenienceRequest(BaseModel):

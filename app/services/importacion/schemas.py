@@ -5,6 +5,8 @@ from decimal import Decimal
 from uuid import UUID
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.core.constants import MAX_MONTO_INTEGRIDAD
+
 
 class TransaccionCruda(BaseModel):
     """
@@ -52,7 +54,7 @@ class TransaccionCruda(BaseModel):
     def validar_monto(cls, v: Decimal) -> Decimal:
         if v == 0:
             raise ValueError('El monto de la transacción no puede ser cero')
-        if abs(v) > Decimal('1000000000000'):
+        if abs(v) > MAX_MONTO_INTEGRIDAD:
             raise ValueError('El monto de la transacción excede el límite permitido')
         return v
 
