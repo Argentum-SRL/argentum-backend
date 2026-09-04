@@ -7,6 +7,7 @@ from app.models.usuario import Moneda
 
 class TarjetaCreditoBase(BaseModel):
     nombre: str = Field(..., min_length=1, max_length=100)
+    apodo: str | None = Field(default=None, max_length=50)
     red: RedTarjeta
     dia_cierre: int = Field(..., ge=1, le=28)
     dia_vencimiento: int = Field(..., ge=1, le=28)
@@ -31,6 +32,7 @@ class TarjetaCreditoCreate(TarjetaCreditoBase):
 
 class TarjetaCreditoUpdate(BaseModel):
     nombre: str | None = Field(default=None, min_length=1, max_length=100)
+    apodo: str | None = Field(default=None, max_length=50)
     red: RedTarjeta | None = None
     dia_cierre: int | None = Field(None, ge=1, le=28)
     dia_vencimiento: int | None = Field(None, ge=1, le=28)

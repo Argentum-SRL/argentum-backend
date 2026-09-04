@@ -28,6 +28,9 @@ from sqlalchemy.orm import sessionmaker, Session
 from app.core.database import SessionLocal, engine
 from app.models.usuario import Usuario, Moneda
 from app.models.billetera import Billetera
+from app.models.tarjeta_credito import TarjetaCredito
+from app.models.grupo_cuotas import GrupoCuotas
+from app.models.cuota import Cuota
 from app.models.categoria import Categoria
 from app.models.subcategoria import Subcategoria
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
@@ -86,6 +89,7 @@ def run_isolated(fn):
     """Ejecuta una función en una transacción aislada que siempre termina en rollback."""
     conn = engine.connect()
     trans = conn.begin()
+    conn.execute(text("ALTER TABLE tarjetas_credito ADD COLUMN IF NOT EXISTS apodo VARCHAR(50);"))
     respuestas = []
     BoundSession = sessionmaker(bind=conn, join_transaction_mode="create_savepoint")
     try:
@@ -1082,6 +1086,143 @@ def p8_caso_11(datos):
         return f"Respuesta:\n{resp_corr_prop}\nMovimiento anterior intacto en Efectivo ARS: {ok_previa}"
     return run_isolated(test)
 
+# --- PUNTO 9A: Tarjetas de crédito y cuotas ---
+def p9_caso_1(datos):
+    """'gasté 30000 con la Amex': resuelve la tarjeta única, no descuenta saldo, crea una cuota."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    b_gal = datos[USUARIO_PRUEBAS_EMAIL]["billeteras"]["Galicia"]
+    def test(conn, Session, respuestas):
+        saldo_antes = b_gal.saldo_actual
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 30000 con la Amex"), time.perf_counter())
+        resp_prop = respuestas[-1][1] if respuestas else ""
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        resp_conf = respuestas[-1][1] if respuestas else ""
+        
+        db = Session()
+        b_act = db.execute(select(Billetera).where(Billetera.id == b_gal.id)).scalar_one()
+        saldo_intacto = (b_act.saldo_actual == saldo_antes)
+        tx_padre = db.execute(
+            select(Transaccion).where(
+                Transaccion.usuario_id == u.id,
+                Transaccion.origen == OrigenTransaccion.IA_WPP,
+                Transaccion.es_padre_cuotas == True
+            )
+        ).first()
+        cuotas = db.execute(select(Cuota).join(GrupoCuotas).where(GrupoCuotas.usuario_id == u.id)).all()
+        return f"Propuesta:\n{resp_prop}\nConfirmación:\n{resp_conf}\nSaldo intacto: {saldo_intacto} | Es padre: {tx_padre is not None} | Cuotas creadas: {len(cuotas) > 0}"
+    return run_isolated(test)
+
+def p9_caso_2(datos):
+    """'gasté 30000 con la Visa': pregunta cuál de las dos."""
+    def test(conn, Session, respuestas):
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 30000 con la Visa"), time.perf_counter())
+        return respuestas[-1][1] if respuestas else ""
+    return run_isolated(test)
+
+def p9_caso_3(datos):
+    """'gasté 30000 con la del Santander': resuelve la 5077."""
+    def test(conn, Session, respuestas):
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 30000 con la del Santander"), time.perf_counter())
+        return respuestas[-1][1] if respuestas else ""
+    return run_isolated(test)
+
+def p9_caso_4(datos):
+    """'compré una tele en 12 cuotas de 80000': propone 12 cuotas de 80.000, total 960.000."""
+    def test(conn, Session, respuestas):
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "compré una tele en 12 cuotas de 80000"), time.perf_counter())
+        return respuestas[-1][1] if respuestas else ""
+    return run_isolated(test)
+
+def p9_caso_5(datos):
+    """'gasté 80000 en 12 cuotas': propone 12 cuotas de 6.666,67, total 80.000."""
+    def test(conn, Session, respuestas):
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 80000 en 12 cuotas"), time.perf_counter())
+        return respuestas[-1][1] if respuestas else ""
+    return run_isolated(test)
+
+def p9_caso_6(datos):
+    """'gasté 5000 con Galicia': sigue siendo la billetera, no la tarjeta."""
+    def test(conn, Session, respuestas):
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 con Galicia"), time.perf_counter())
+        return respuestas[-1][1] if respuestas else ""
+    return run_isolated(test)
+
+def p9_caso_7(datos):
+    """'gasté 5000 con la Visa del Galicia': resuelve la tarjeta 1506."""
+    def test(conn, Session, respuestas):
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 con la Visa del Galicia"), time.perf_counter())
+        return respuestas[-1][1] if respuestas else ""
+    return run_isolated(test)
+
+def p9_caso_8(datos):
+    """'pagué el resumen de la tarjeta': explica que se hace desde la web, no registra nada."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "pagué el resumen de la tarjeta"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        db = Session()
+        txs = db.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id, Transaccion.origen == OrigenTransaccion.IA_WPP)).scalar()
+        return f"{resp} | Txs creadas: {txs}"
+    return run_isolated(test)
+
+def p9_caso_9(datos):
+    """'gasté 5000 con la tarjeta de débito': NO es crédito."""
+    def test(conn, Session, respuestas):
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 con la tarjeta de débito"), time.perf_counter())
+        return respuestas[-1][1] if respuestas else ""
+    return run_isolated(test)
+
+def p9_caso_10(datos):
+    """Registrar un consumo con tarjeta y deshacerlo: verifica que se borren padre, grupo y cuotas."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 30000 con la Amex"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        # Deshacer
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "borrá eso"), time.perf_counter())
+        r_borra = respuestas[-1][1] if respuestas else ""
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        r_conf = respuestas[-1][1] if respuestas else ""
+        
+        db = Session()
+        padres = db.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id, Transaccion.origen == OrigenTransaccion.IA_WPP)).scalar()
+        return f"Propuesta deshacer:\n{r_borra}\nConfirmación:\n{r_conf}\nPadres restantes: {padres}"
+    return run_isolated(test)
+
+def p9_caso_11(datos):
+    """Un usuario sin tarjetas dice 'gasté 5000 con la tarjeta': mensaje claro."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        db = Session()
+        conn.execute(text("UPDATE tarjetas_credito SET estado = 'archivada' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 con la tarjeta"), time.perf_counter())
+        return respuestas[-1][1] if respuestas else ""
+    return run_isolated(test)
+
+def p9_caso_12(datos):
+    """'gasté 3 gambas en el remis': ya no debe interpretarse como 3.000."""
+    def test(conn, Session, respuestas):
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 3 gambas en el remis"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        no_es_3000 = ("3.000" not in resp and "3000" not in resp)
+        return f"No interpretado como 3000: {no_es_3000} | Respuesta: {resp}"
+    return run_isolated(test)
+
 # ==============================================================================
 # RUNNER GENERAL DE SUITE
 # ==============================================================================
@@ -1622,6 +1763,104 @@ def correr_suite_completa():
             "ejecutar": lambda: p8_caso_11(datos),
             "esperado": "Respuesta:\nVoy a anotar $5.000 en Kiosco desde Santander. ¿Va?\nMovimiento anterior intacto en Efectivo ARS: True",
             "match": "exacto",
+        },
+
+        # --- PUNTO 9A: Tarjetas de crédito y cuotas ---
+        {
+            "id": "P9.1",
+            "punto": "Punto 9A",
+            "nombre": "gasté 30000 con la Amex: resuelve la tarjeta única, no descuenta saldo, crea una cuota",
+            "ejecutar": lambda: p9_caso_1(datos),
+            "esperado": "Saldo intacto: True | Es padre: True | Cuotas creadas: True",
+            "match": "contiene",
+        },
+        {
+            "id": "P9.2",
+            "punto": "Punto 9A",
+            "nombre": "gasté 30000 con la Visa: pregunta cuál de las dos",
+            "ejecutar": lambda: p9_caso_2(datos),
+            "esperado": "¿Con qué tarjeta de crédito fue?\n1. •••• 1506 (Visa - Galicia)\n2. •••• 5077 (Visa - Santander)",
+            "match": "exacto",
+        },
+        {
+            "id": "P9.3",
+            "punto": "Punto 9A",
+            "nombre": "gasté 30000 con la del Santander: resuelve la 5077",
+            "ejecutar": lambda: p9_caso_3(datos),
+            "esperado": "con tarjeta •••• 5077",
+            "match": "contiene",
+        },
+        {
+            "id": "P9.4",
+            "punto": "Punto 9A",
+            "nombre": "compré una tele en 12 cuotas de 80000: propone 12 cuotas de 80.000, total 960.000",
+            "ejecutar": lambda: p9_caso_4(datos),
+            "esperado": "12 cuotas de $80.000 (total $960.000)",
+            "match": "contiene",
+        },
+        {
+            "id": "P9.5",
+            "punto": "Punto 9A",
+            "nombre": "gasté 80000 en 12 cuotas: propone 12 cuotas de 6.666,67, total 80.000",
+            "ejecutar": lambda: p9_caso_5(datos),
+            "esperado": "12 cuotas de $6.666,67 (total $80.000)",
+            "match": "contiene",
+        },
+        {
+            "id": "P9.6",
+            "punto": "Punto 9A",
+            "nombre": "gasté 5000 con Galicia: sigue siendo la billetera, no la tarjeta",
+            "ejecutar": lambda: p9_caso_6(datos),
+            "esperado": "desde Galicia",
+            "match": "contiene",
+        },
+        {
+            "id": "P9.7",
+            "punto": "Punto 9A",
+            "nombre": "gasté 5000 con la Visa del Galicia: resuelve la tarjeta 1506",
+            "ejecutar": lambda: p9_caso_7(datos),
+            "esperado": "con tarjeta •••• 1506",
+            "match": "contiene",
+        },
+        {
+            "id": "P9.8",
+            "punto": "Punto 9A",
+            "nombre": "pagué el resumen de la tarjeta: explica que se hace desde la web, no registra nada",
+            "ejecutar": lambda: p9_caso_8(datos),
+            "esperado": "El pago del resumen de la tarjeta se gestiona desde la web de Argentum. No se puede realizar por WhatsApp. | Txs creadas: 0",
+            "match": "exacto",
+        },
+        {
+            "id": "P9.9",
+            "punto": "Punto 9A",
+            "nombre": "gasté 5000 con la tarjeta de débito: NO es crédito",
+            "ejecutar": lambda: p9_caso_9(datos),
+            "esperado": "desde Galicia",
+            "match": "contiene",
+        },
+        {
+            "id": "P9.10",
+            "punto": "Punto 9A",
+            "nombre": "Registrar un consumo con tarjeta y deshacerlo: verifica que se borren padre, grupo y cuotas",
+            "ejecutar": lambda: p9_caso_10(datos),
+            "esperado": "Listo, movimiento eliminado.\nPadres restantes: 0",
+            "match": "contiene",
+        },
+        {
+            "id": "P9.11",
+            "punto": "Punto 9A",
+            "nombre": "Un usuario sin tarjetas dice 'gasté 5000 con la tarjeta': mensaje claro",
+            "ejecutar": lambda: p9_caso_11(datos),
+            "esperado": "No tenés ninguna tarjeta de crédito cargada en Argentum. Podés agregarla desde la web, o registrar este movimiento como un gasto común con alguna de tus billeteras.",
+            "match": "exacto",
+        },
+        {
+            "id": "P9.12",
+            "punto": "Punto 9A",
+            "nombre": "gasté 3 gambas en el remis: ya no debe interpretarse como 3.000",
+            "ejecutar": lambda: p9_caso_12(datos),
+            "esperado": "No interpretado como 3000: True",
+            "match": "contiene",
         },
     ]
 
