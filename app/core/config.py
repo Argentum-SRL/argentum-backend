@@ -1,3 +1,4 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -51,6 +52,21 @@ class Settings(BaseSettings):
     # Environment
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
+
+    @model_validator(mode="after")
+    def validate_urls(self):
+        url = self.FRONTEND_URL.strip().rstrip("/") if self.FRONTEND_URL else ""
+        if not url:
+            raise ValueError("FRONTEND_URL no puede estar vacía. Debe configurarse una URL válida.")
+        if self.ENVIRONMENT != "development" and ("localhost" in url or "127.0.0.1" in url):
+            raise ValueError(
+                f"FRONTEND_URL no puede apuntar a localhost/127.0.0.1 en entorno '{self.ENVIRONMENT}'. "
+                "Configure la variable de entorno FRONTEND_URL con el dominio público del frontend."
+            )
+        self.FRONTEND_URL = url
+        if self.BACKEND_URL:
+            self.BACKEND_URL = self.BACKEND_URL.strip().rstrip("/")
+        return self
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

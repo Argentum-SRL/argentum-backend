@@ -128,6 +128,149 @@ def obtener_conteos_base(db: Session):
         saldos[str(b.id)] = b.saldo_actual
     return {"tx": tx_cnt, "conv": conv_cnt, "msg": msg_cnt, "saldos": saldos}
 
+# Baseline documentado de diferencias aceptadas en reconciliación.
+# Proviene del alta histórica de datos (junio 2026), donde las billeteras
+# Galicia de mrm291201 y su réplica testingadmin tienen saldo_inicial en 0
+# pero sus movimientos bancarios acumulados difieren en -$800.941 respecto al saldo guardado.
+# La suite fallará si aparece una diferencia NUEVA o si alguna de estas cambia.
+DIFERENCIAS_RECONCILIACION_BASELINE = {
+    ("mrm291201@gmail.com", "Galicia"): Decimal("-800941.00"),
+    ("testingadmin@argentum.com", "Galicia"): Decimal("-800941.00"),
+}
+
+def verificar_reconciliacion_billeteras(db: Session):
+    """
+    Compara el saldo_actual guardado de cada una de las 21 billeteras contra
+    el saldo calculado a partir de sus movimientos confirmados y transferencias:
+      saldo_inicial + sum(ingresos) - sum(egresos) + sum(tr_in) - sum(tr_out)
+    donde las transacciones computadas son aquellas que afectan saldo (no crédito,
+    no pendientes, fecha <= hoy).
+    Compara contra el baseline conocido de diferencias históricas y reporta
+    discrepancias solo si surge una diferencia NUEVA o cambia una existente.
+    """
+    from app.models.billetera import Billetera
+    from app.models.usuario import Usuario
+    from app.utils.fecha import hoy_argentina
+    
+    hoy = hoy_argentina()
+    billeteras = db.execute(
+        select(Billetera, Usuario.email)
+        .join(Usuario, Billetera.usuario_id == Usuario.id)
+        .order_by(Usuario.email, Billetera.nombre)
+    ).all()
+    
+    discrepancias_no_esperadas = []
+    detalles = []
+    
+    for b, email in billeteras:
+        s_guardado = b.saldo_actual
+        s_inicial = b.saldo_inicial or Decimal("0.00")
+        
+        tx_row = db.execute(text("""
+            SELECT 
+                coalesce(sum(case when tipo = 'ingreso' then monto else 0 end), 0) as ingresos,
+                coalesce(sum(case when tipo = 'egreso' then monto else 0 end), 0) as egresos
+            FROM transacciones
+            WHERE billetera_id = :bid
+              AND (metodo_pago != 'credito' OR metodo_pago IS NULL)
+              AND es_padre_cuotas = false
+              AND es_cuota_hija = false
+              AND (estado_verificacion IS NULL OR estado_verificacion != 'pendiente')
+              AND fecha <= :hoy
+        """), {"bid": b.id, "hoy": hoy}).mappings().fetchone()
+        
+        ingresos = Decimal(str(tx_row["ingresos"]))
+        egresos = Decimal(str(tx_row["egresos"]))
+        
+        tr_in = Decimal(str(db.execute(text("""
+            SELECT coalesce(sum(monto_destino), 0) 
+            FROM transferencias_internas 
+            WHERE billetera_destino_id = :bid
+        """), {"bid": b.id}).scalar() or 0))
+        
+        tr_out = Decimal(str(db.execute(text("""
+            SELECT coalesce(sum(monto_origen), 0) 
+            FROM transferencias_internas 
+            WHERE billetera_origen_id = :bid
+        """), {"bid": b.id}).scalar() or 0))
+        
+        s_calc = s_inicial + ingresos - egresos + tr_in - tr_out
+        diff = s_guardado - s_calc
+        esperado_diff = DIFERENCIAS_RECONCILIACION_BASELINE.get((email, b.nombre), Decimal("0.00"))
+        coincide_con_baseline = (diff == esperado_diff)
+        
+        item = {
+            "email": email,
+            "billetera": b.nombre,
+            "guardado": s_guardado,
+            "calculado": s_calc,
+            "diferencia": diff,
+            "esperado_diff": esperado_diff,
+            "ok": coincide_con_baseline
+        }
+        detalles.append(item)
+        if not coincide_con_baseline:
+            discrepancias_no_esperadas.append(item)
+            
+    return len(discrepancias_no_esperadas) == 0, discrepancias_no_esperadas, detalles
+
+SALDOS_REFERENCIA_21 = {
+    ("albanopavia@gmail.com", "Banco Nación"): Decimal("577000.00"),
+    ("albanopavia@gmail.com", "Efectivo ARS"): Decimal("0.00"),
+    ("albanopavia@gmail.com", "Efectivo USD"): Decimal("0.00"),
+    ("albanopavia@gmail.com", "Mercado Pago"): Decimal("0.00"),
+    ("albanopavia@gmail.com", "Naranja X"): Decimal("0.00"),
+    ("angieperiolo@hotmail.com", "Efectivo ARS"): Decimal("800.00"),
+    ("angieperiolo@hotmail.com", "Efectivo USD"): Decimal("0.00"),
+    ("angieperiolo@hotmail.com", "Mercado Pago"): Decimal("51148.00"),
+    ("giordaninosebas@gmail.com", "Efectivo ARS"): Decimal("-30060.00"),
+    ("giordaninosebas@gmail.com", "Efectivo USD"): Decimal("0.00"),
+    ("mrm291201@gmail.com", "Balanz"): Decimal("453000.00"),
+    ("mrm291201@gmail.com", "Efectivo ARS"): Decimal("0.00"),
+    ("mrm291201@gmail.com", "Efectivo USD"): Decimal("0.00"),
+    ("mrm291201@gmail.com", "Galicia"): Decimal("1311289.73"),
+    ("mrm291201@gmail.com", "Santander JJ"): Decimal("0.00"),
+    ("sebastiangiordaninoformoso@gmail.com", "Efectivo ARS"): Decimal("0.00"),
+    ("sebastiangiordaninoformoso@gmail.com", "Efectivo USD"): Decimal("0.00"),
+    ("testingadmin@argentum.com", "Efectivo ARS"): Decimal("0.00"),
+    ("testingadmin@argentum.com", "Efectivo USD"): Decimal("0.00"),
+    ("testingadmin@argentum.com", "Galicia"): Decimal("502514.00"),
+    ("testingadmin@argentum.com", "Santander"): Decimal("84270.29"),
+}
+
+def verificar_saldos_contra_referencia(db: Session):
+    """
+    Compara los saldos actuales de las 21 billeteras contra los valores
+    de referencia históricos y reporta si alguno difiere.
+    """
+    from app.models.billetera import Billetera
+    from app.models.usuario import Usuario
+
+    billeteras = db.execute(
+        select(Billetera, Usuario.email)
+        .join(Usuario, Billetera.usuario_id == Usuario.id)
+        .order_by(Usuario.email, Billetera.nombre)
+    ).all()
+
+    desvios = []
+    detalles = []
+    for b, email in billeteras:
+        ref = SALDOS_REFERENCIA_21.get((email, b.nombre))
+        actual = b.saldo_actual
+        diff = actual - ref if ref is not None else None
+        item = {
+            "email": email,
+            "billetera": b.nombre,
+            "actual": actual,
+            "referencia": ref,
+            "diff": diff
+        }
+        detalles.append(item)
+        if ref is not None and actual != ref:
+            desvios.append(item)
+    return len(desvios) == 0, desvios, detalles
+
+
 # ==============================================================================
 # ESCENARIOS PUNTO 3: Resolución de Billeteras (10 casos)
 # ==============================================================================
@@ -2413,7 +2556,42 @@ def correr_suite_completa():
     )
     print(f"¿Rollback total verificado (cero residuo)?: {'SÍ' if sin_residuos else 'NO'}")
 
+    # Verificación de saldos contra referencia histórica de las 21 billeteras
+    db_ref = SessionLocal()
+    saldos_ref_ok, desvios_ref, detalles_ref = verificar_saldos_contra_referencia(db_ref)
+    db_ref.close()
+
+    print("\n=== VERIFICACION DE SALDOS CONTRA REFERENCIA HISTORICA (21 BILLETERAS) ===")
+    for d in detalles_ref:
+        st = "OK" if d["diff"] == Decimal("0.00") else f"DESVIO ({d['diff']})"
+        print(f"  {d['email']} | {d['billetera']}: actual={d['actual']} | ref={d['referencia']} -> {st}")
+    print(f"¿Todos los saldos coinciden con la referencia histórica?: {'SÍ' if saldos_ref_ok else 'NO'}")
+    if not saldos_ref_ok:
+        print(f"ALERTA: Se detectaron {len(desvios_ref)} billeteras con saldos alterados respecto a la referencia:")
+        for desv in desvios_ref:
+            print(f"  - {desv['email']} ({desv['billetera']}): actual={desv['actual']}, ref={desv['referencia']}, diff={desv['diff']}")
+
+    # Verificación de reconciliación de saldos en todas las 21 billeteras
+    db_rec = SessionLocal()
+    rec_ok, discrepancias, detalles_rec = verificar_reconciliacion_billeteras(db_rec)
+    db_rec.close()
+
+    print("\n=== VERIFICACION DE RECONCILIACION (21 BILLETERAS) ===")
+    for d in detalles_rec:
+        if d["ok"]:
+            st = f"OK (baseline {d['esperado_diff']:+.2f})" if d["esperado_diff"] != Decimal("0.00") else "OK"
+        else:
+            st = f"DESVIO_NO_ESPERADO (diff={d['diferencia']:+.2f}, esperado={d['esperado_diff']:+.2f})"
+        print(f"  {d['email']} | {d['billetera']}: guardado={d['guardado']} | calc={d['calculado']} | diff={d['diferencia']} -> {st}")
+
+    print(f"¿Reconciliación de todas las billeteras dentro del baseline?: {'SÍ' if rec_ok else 'NO'}")
+    if not rec_ok:
+        print(f"ALERTA: Se detectaron {len(discrepancias)} billeteras con desviaciones fuera del baseline:")
+        for disc in discrepancias:
+            print(f"  - {disc['email']} ({disc['billetera']}): guardado={disc['guardado']}, calculado={disc['calculado']}, diff={disc['diferencia']}, esperado={disc['esperado_diff']}")
+
     return total, aprobados, omitidos, fallidos, detalles_fallidos
+
 
 if __name__ == "__main__":
     correr_suite_completa()

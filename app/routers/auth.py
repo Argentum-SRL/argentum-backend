@@ -293,7 +293,9 @@ def login(
 
 
 @router.post("/recuperar-password")
+@limiter.limit("5/minute")
 def recuperar_password(
+    request: Request,
     body: RecuperarPasswordRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
@@ -301,18 +303,23 @@ def recuperar_password(
     """Inicia recuperación de contraseña. No revela si el email existe."""
     email_clean = body.email.strip().lower()
     user = db.execute(select(Usuario).where(Usuario.email.ilike(email_clean))).scalar_one_or_none()
-    if user:
-        if user.auth_provider in (AuthProvider.EMAIL, AuthProvider.TELEFONO) and user.password_configurada:
-            codigo = generar_codigo_recuperacion()
-            guardar_codigo_recuperacion(email_clean, codigo)
+    if user and user.email_verificado:
+        codigo = generar_codigo_recuperacion()
+        guardar_codigo_recuperacion(email_clean, codigo)
+        if user.auth_provider == AuthProvider.GOOGLE:
+            background_tasks.add_task(enviar_email_aviso_google, email_clean, codigo)
+        elif user.auth_provider in (AuthProvider.EMAIL, AuthProvider.TELEFONO):
             background_tasks.add_task(enviar_email_recuperacion, email_clean, codigo)
-        elif user.auth_provider == AuthProvider.GOOGLE:
-            background_tasks.add_task(enviar_email_aviso_google, email_clean)
     return {"detail": "Si el email existe, te enviamos un código de recuperación."}
 
 
 @router.post("/recuperar-password/verificar")
-def verificar_recuperacion(body: VerificarRecuperacionRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def verificar_recuperacion(
+    request: Request,
+    body: VerificarRecuperacionRequest,
+    db: Session = Depends(get_db)
+):
     """Verifica el código de recuperación y actualiza la contraseña con revocación de sesiones previas."""
     email_clean = body.email.strip().lower()
     if not verificar_codigo_recuperacion(email_clean, body.codigo):
@@ -322,11 +329,20 @@ def verificar_recuperacion(body: VerificarRecuperacionRequest, db: Session = Dep
     if not user:
         raise HTTPException(status_code=404, detail="No encontramos una cuenta con esos datos.")
 
-    if len(body.nueva_password) < 8:
-        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 8 caracteres.")
+    if not user.email_verificado:
+        raise HTTPException(status_code=400, detail="El email de la cuenta no está verificado.")
+
+    pw = body.nueva_password
+    if len(pw) < 8 or len(pw) > 128:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener entre 8 y 128 caracteres.")
+    if not any(c.isupper() for c in pw) or not any(c.islower() for c in pw) or not any(c.isdigit() for c in pw):
+        raise HTTPException(
+            status_code=400,
+            detail="La contraseña debe incluir al menos una mayúscula, una minúscula y un número."
+        )
 
     now = datetime.now(timezone.utc)
-    user.password_hash = get_password_hash(body.nueva_password)
+    user.password_hash = get_password_hash(pw)
     user.password_configurada = True
     user.tokens_revocados_at = now
 
