@@ -22,21 +22,29 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        'transacciones',
-        sa.Column(
-            'suscripcion_id',
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey('suscripciones.id', ondelete='SET NULL'),
-            nullable=True,
-        ),
-    )
-    op.create_index(
-        'ix_transacciones_suscripcion_id',
-        'transacciones',
-        ['suscripcion_id'],
-        postgresql_where=sa.text("suscripcion_id IS NOT NULL"),
-    )
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    columns = [col['name'] for col in inspector.get_columns('transacciones')]
+
+    if 'suscripcion_id' not in columns:
+        op.add_column(
+            'transacciones',
+            sa.Column(
+                'suscripcion_id',
+                postgresql.UUID(as_uuid=True),
+                sa.ForeignKey('suscripciones.id', ondelete='SET NULL'),
+                nullable=True,
+            ),
+        )
+
+    indexes = [idx['name'] for idx in inspector.get_indexes('transacciones')]
+    if 'ix_transacciones_suscripcion_id' not in indexes:
+        op.create_index(
+            'ix_transacciones_suscripcion_id',
+            'transacciones',
+            ['suscripcion_id'],
+            postgresql_where=sa.text("suscripcion_id IS NOT NULL"),
+        )
 
 
 def downgrade() -> None:

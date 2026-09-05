@@ -23,21 +23,29 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        'transacciones',
-        sa.Column(
-            'movimiento_meta_id',
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey('movimientos_meta.id', ondelete='SET NULL'),
-            nullable=True,
-        ),
-    )
-    op.create_index(
-        'ix_transacciones_movimiento_meta_id',
-        'transacciones',
-        ['movimiento_meta_id'],
-        postgresql_where=sa.text("movimiento_meta_id IS NOT NULL"),
-    )
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    columns = [col['name'] for col in inspector.get_columns('transacciones')]
+
+    if 'movimiento_meta_id' not in columns:
+        op.add_column(
+            'transacciones',
+            sa.Column(
+                'movimiento_meta_id',
+                postgresql.UUID(as_uuid=True),
+                sa.ForeignKey('movimientos_meta.id', ondelete='SET NULL'),
+                nullable=True,
+            ),
+        )
+
+    indexes = [idx['name'] for idx in inspector.get_indexes('transacciones')]
+    if 'ix_transacciones_movimiento_meta_id' not in indexes:
+        op.create_index(
+            'ix_transacciones_movimiento_meta_id',
+            'transacciones',
+            ['movimiento_meta_id'],
+            postgresql_where=sa.text("movimiento_meta_id IS NOT NULL"),
+        )
     # Backfill histórico seguro: vincula transacciones históricas que coinciden de manera unívoca
     op.execute(
         sa.text("""
