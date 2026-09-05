@@ -311,13 +311,22 @@ Cuando tenés todos los datos para registrar una transacción (monto + tipo + bi
 4. Recién entonces el intent es "confirmar" y el backend ejecuta
 
 MÚLTIPLES OPERACIONES EN UN SOLO MENSAJE:
-- Si el mensaje describe 2 o más operaciones simples de gasto o ingreso (NO transferencias, NO compras en cuotas):
-  * Tomá la primera como la transacción principal en los campos directos de "entidades" (monto, moneda, tipo, categoria, descripcion, fecha).
-  * Colocá el resto en la lista "transacciones_adicionales" dentro de "entidades", donde cada elemento es un objeto con exactamente los campos: monto, moneda, tipo, categoria, descripcion, fecha (con el mismo significado y aplicando las mismas reglas de categorización automática y fecha relativa que la principal).
-  * Si alguna operación adicional detectada es una transferencia o una compra en cuotas, NO la incluyas en "transacciones_adicionales" — tratá el mensaje como si solo mencionara la transacción principal.
-  * REGLA ESTRICTA DE AISLAMIENTO: "transacciones_adicionales" SOLO debe contener operaciones que el usuario haya escrito EXPLÍCITAMENTE en el texto del mensaje actual (por ejemplo: "gasté 5000 en kiosco y 2000 en farmacia"). NUNCA tomes operaciones de mensajes anteriores del historial ni las repitas en "transacciones_adicionales". Si el mensaje actual del usuario solo describe un movimiento, "transacciones_adicionales" DEBE ser una lista vacía [], incluso si en el historial de conversación hay un movimiento idéntico o repetido.
-  * Si falta la billetera y el usuario tiene más de una activa, hacé UNA SOLA pregunta de billetera que aplicará a todas las operaciones.
-  * Cuando haya transacciones adicionales y la billetera esté resuelta, el resumen de confirmación en "respuesta_usuario" las lista todas en un solo mensaje. Ejemplo: "Voy a anotar 3 movimientos desde Efectivo ARS: $10.560 en Verdulería, $6.000 en Otros, $14.550 en Carnicería. ¿Va?"
+- Si el mensaje describe 2 o más operaciones de gasto o ingreso (NO transferencias internas, NO extracciones de cajero, NO compra/venta de dólares):
+  * TOPE DE OPERACIONES: El máximo permitido es de 10 movimientos por mensaje. Si el usuario manda más de 10 operaciones, indicá en 'respuesta_usuario' que el límite es de 10 movimientos por mensaje y sugerí mandarlos en tandas más chicas o usar la importación desde la web de Argentum.
+  * Tomá la primera como la transacción principal en los campos directos de "entidades" (monto, moneda, tipo, categoria, descripcion, fecha, billetera/billetera_origen, tarjeta).
+  * Colocá el resto en la lista "transacciones_adicionales" dentro de "entidades", donde cada elemento es un objeto con exactamente los campos: monto, moneda, tipo, categoria, descripcion, fecha, billetera, tarjeta.
+  * Cada operación (principal o adicional) puede tener su propio tipo ("egreso" o "ingreso"), su propia fecha, su propia categoría y su propia billetera o tarjeta si el usuario la especificó.
+  * AISLAMIENTO ESTRICTO DE BILLETERA Y TARJETA POR MOVIMIENTO:
+    - Cada movimiento es independiente. NUNCA propagues ni copies la billetera o tarjeta de un movimiento a los otros.
+    - Si el usuario dice 'gasté 5000 en el kiosco con Galicia, 3000 en la panadería y 4000 en la verdulería', ÚNICAMENTE la primera operación (kiosco) tiene billetera='Galicia'. Las otras dos (panadería y verdulería) NO tienen billetera nombrada, por lo que su campo 'billetera' DEBE ser null.
+    - NUNCA asignes tarjeta de crédito cuando el usuario nombra un banco o billetera (ej: 'con Galicia', 'con Santander') a menos que diga explícitamente 'tarjeta', 'crédito', 'cuota', 'visa', 'master' o 'amex'. 'con Galicia' es billetera Galicia, NO tarjeta de crédito.
+    - Si el usuario dice 'gasté 5000 en el kiosco y 30000 en zapatillas con la Amex', ÚNICAMENTE la operación de zapatillas tiene tarjeta='•••• 2745'. La operación de kiosco NO fue con tarjeta, por lo que su campo 'tarjeta' DEBE ser null.
+    - GASTOS EN OTRA MONEDA VS COMPRA DE DÓLARES: Comprar o gastar en un bien/servicio en dólares o euros (ej: 'gasté 50 dólares en un libro', 'pagué 15 USD de suscripción') es un GASTO común (tipo='egreso', moneda='USD'), NUNCA una compra de dólares ni transferencia.
+    - Si un movimiento no menciona billetera ni tarjeta, poné SIEMPRE billetera: null y tarjeta: null.
+  * Si para una operación el usuario nombró una billetera específica (ej: "con Santander", "desde Galicia", "a Mercado Pago"), colocá ese nombre en el campo "billetera" de dicha operación (o en billetera_origen/billetera_destino de la principal).
+  * Si para una operación el usuario nombró una tarjeta de crédito (ej: "con la Visa", "con la Amex"), colocá ese nombre en el campo "tarjeta" de dicha operación.
+  * PROHIBICIÓN DE MEZCLA: Las transferencias entre cuentas propias, extracciones de cajero y compra/venta de dólares NUNCA deben mezclarse con gastos o ingresos en un mismo mensaje. Si el mensaje mezcla transferencias/cajero/dólares con gastos o ingresos, NO registres nada y explicá en 'respuesta_usuario' que deben mandarse en mensajes separados.
+  * REGLA ESTRICTA DE AISLAMIENTO: "transacciones_adicionales" SOLO debe contener operaciones que el usuario haya escrito EXPLÍCITAMENTE en el texto del mensaje actual. NUNCA tomes operaciones de mensajes anteriores del historial. Si el mensaje actual del usuario solo describe un movimiento, "transacciones_adicionales" DEBE ser una lista vacía [].
 
 FLUJO DE SLOT FILLING Y CATEGORIZACIÓN AUTOMÁTICA:
 1. CATEGORIZACIÓN SIEMPRE AUTOMÁTICA (NUNCA PREGUNTAR CATEGORÍA):
@@ -673,6 +682,7 @@ def _construir_schema_estricto(db: Session) -> dict[str, Any]:
                             "monto_destino": {"type": ["number", "null"]},
                             "monto_comision": {"type": ["number", "null"]},
                             "confirmado": {"type": ["boolean", "null"]},
+                            "tarjeta": {"type": ["string", "null"]},
                             "transacciones_adicionales": {
                                 "type": "array",
                                 "items": {
@@ -683,6 +693,8 @@ def _construir_schema_estricto(db: Session) -> dict[str, Any]:
                                         "tipo": {"type": "string", "enum": ["egreso", "ingreso"]},
                                         "categoria": {"type": ["string", "null"], "enum": categorias_enum},
                                         "descripcion": {"type": ["string", "null"]},
+                                        "billetera": {"type": ["string", "null"]},
+                                        "tarjeta": {"type": ["string", "null"]},
                                         "fecha": {"type": ["string", "null"]},
                                     },
                                     "required": [
@@ -691,6 +703,8 @@ def _construir_schema_estricto(db: Session) -> dict[str, Any]:
                                         "tipo",
                                         "categoria",
                                         "descripcion",
+                                        "billetera",
+                                        "tarjeta",
                                         "fecha",
                                     ],
                                     "additionalProperties": False,
@@ -708,6 +722,7 @@ def _construir_schema_estricto(db: Session) -> dict[str, Any]:
                             "billetera",
                             "billetera_origen",
                             "billetera_destino",
+                            "tarjeta",
                             "cantidad_cuotas",
                             "fecha",
                             "destinatario",
@@ -819,27 +834,42 @@ def procesar_mensaje(
         model_name = getattr(settings, "OPENAI_MODEL", "gpt-4o-mini-2024-07-18")
         schema_format = _construir_schema_estricto(db)
 
-        # 1. Intento primario con Structured Outputs (strict: true)
-        try:
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=messages_openai,
-                temperature=0.1,
-                max_tokens=800,
-                response_format=schema_format,
-            )
-        except Exception as e_strict:
-            logger.warning(
-                "Fallo en Structured Outputs OpenAI (%s). Reintentando con json_object como fallback.",
-                e_strict,
-            )
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=messages_openai,
-                temperature=0.1,
-                max_tokens=800,
-                response_format={"type": "json_object"},
-            )
+        # 1. Intento primario con Structured Outputs (strict: true) con reintento ante fallos de conexión de red
+        response = None
+        for intento in range(3):
+            try:
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=messages_openai,
+                    temperature=0.1,
+                    max_tokens=2000,
+                    response_format=schema_format,
+                )
+                break
+            except Exception as e_strict:
+                err_str = str(e_strict).lower()
+                if ("connection" in err_str or "getaddrinfo" in err_str or "timeout" in err_str) and intento < 2:
+                    time.sleep(1.0)
+                    continue
+                logger.warning(
+                    "Fallo en Structured Outputs OpenAI (%s). Reintentando con json_object como fallback.",
+                    e_strict,
+                )
+                try:
+                    response = client.chat.completions.create(
+                        model=model_name,
+                        messages=messages_openai,
+                        temperature=0.1,
+                        max_tokens=2000,
+                        response_format={"type": "json_object"},
+                    )
+                    break
+                except Exception as e_fallback:
+                    err_fb = str(e_fallback).lower()
+                    if ("connection" in err_fb or "getaddrinfo" in err_fb or "timeout" in err_fb) and intento < 2:
+                        time.sleep(1.0)
+                        continue
+                    raise e_fallback
 
         content = response.choices[0].message.content
         if settings.ENVIRONMENT == "production":

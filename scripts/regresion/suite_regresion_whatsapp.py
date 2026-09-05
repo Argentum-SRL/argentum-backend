@@ -2004,6 +2004,177 @@ def p10_caso_12(datos):
 # RUNNER GENERAL DE SUITE
 # ==============================================================================
 
+
+
+# ==============================================================================
+# ESCENARIOS PUNTO 11: Lotes y Multi-Operación (10 casos)
+# ==============================================================================
+
+def p11_caso_1(datos):
+    """Dos gastos con billeteras distintas nombradas explícitamente"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco con Galicia y 8000 en la verdulería con Santander"), time.perf_counter())
+        resp_prop = respuestas[-1][1] if respuestas else ""
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        resp_conf = respuestas[-1][1] if respuestas else ""
+        return (
+            f"Propuesta: {'5.000 en Kiosco desde Galicia' in resp_prop and '8.000 en Verdulería desde Santander' in resp_prop} | "
+            f"Confirmacion: {'5.000 en Kiosco desde Galicia' in resp_conf and '8.000 en Verdulería desde Santander' in resp_conf}"
+        )
+    return run_isolated(test)
+
+def p11_caso_2(datos):
+    """Dos gastos sin billetera, con el usuario teniendo principal"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco y 8000 en la verdulería"), time.perf_counter())
+        resp_prop = respuestas[-1][1] if respuestas else ""
+        return (
+            f"Propuesta principal: {'2 movimientos desde Galicia: $5.000 en Kiosco, $8.000 en Verdulería' in resp_prop and 'Si fue con otra, decime cuál.' in resp_prop}"
+        )
+    return run_isolated(test)
+
+def p11_caso_3(datos):
+    """Dos gastos sin billetera, sin principal: pregunta una vez"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = false WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco y 8000 en la verdulería"), time.perf_counter())
+        resp_preg = respuestas[-1][1] if respuestas else ""
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "2"), time.perf_counter())
+        resp_prop = respuestas[-1][1] if respuestas else ""
+        return (
+            f"Pregunta una vez: {'¿Desde qué billetera salieron los gastos?' in resp_preg} | "
+            f"Propuesta resuelta: {'2 movimientos desde Galicia: $5.000 en Kiosco, $8.000 en Verdulería' in resp_prop}"
+        )
+    return run_isolated(test)
+
+def p11_caso_4(datos):
+    """Tres gastos donde solo uno nombra billetera"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = false WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco con Galicia, 3000 en la panadería y 4000 en la verdulería"), time.perf_counter())
+        resp_preg = respuestas[-1][1] if respuestas else ""
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "3"), time.perf_counter())
+        resp_prop = respuestas[-1][1] if respuestas else ""
+        return (
+            f"Pregunta faltantes: {'¿Desde qué billetera salieron los gastos?' in resp_preg} | "
+            f"Propuesta mixta: {'5.000 en Kiosco desde Galicia' in resp_prop and 'Santander' in resp_prop}"
+        )
+    return run_isolated(test)
+
+def p11_caso_5(datos):
+    """Un gasto y un ingreso en el mismo mensaje"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cobré 100000 de sueldo y pagué 30000 de alquiler"), time.perf_counter())
+        resp_prop = respuestas[-1][1] if respuestas else ""
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        resp_conf = respuestas[-1][1] if respuestas else ""
+        return (
+            f"Propuesta signos: {'+$100.000' in resp_prop and '-$30.000' in resp_prop} | "
+            f"Confirmacion signos: {'+$100.000' in resp_conf and '-$30.000' in resp_conf}"
+        )
+    return run_isolated(test)
+
+def p11_caso_6(datos):
+    """Un lote con un consumo de tarjeta y un gasto normal"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco con Galicia y 30000 en zapatillas con la Amex"), time.perf_counter())
+        resp_prop = respuestas[-1][1] if respuestas else ""
+        return (
+            f"Lote tarjeta y gasto: {'$5.000 en Kiosco desde Galicia' in resp_prop and 'con tarjeta •••• 2745' in resp_prop}"
+        )
+    return run_isolated(test)
+
+def p11_caso_7(datos):
+    """Doce movimientos: rechaza con mensaje claro"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        msg_12 = "gasté 100 en kiosco, 200 en pan, 300 en leche, 400 en carne, 500 en verdura, 600 en cafe, 700 en taxi, 800 en bar, 900 en cena, 1000 en cine, 1100 en nafta y 1200 en peaje"
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, msg_12), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        return (
+            f"Rechazo tope: {'El límite es de 10 movimientos por mensaje' in resp and 'web de Argentum' in resp}"
+        )
+    return run_isolated(test)
+
+def p11_caso_8(datos):
+    """Un lote donde una operación está en otra moneda sin billetera de esa moneda"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE billeteras SET estado = 'archivada' WHERE usuario_id = :uid AND moneda = 'USD'"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco y 50 dólares en un libro"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        return (
+            f"Aviso descarte y propuesta: {'No se pudo registrar' in resp and 'dólares' in resp and 'Voy a anotar $5.000 en Kiosco desde Galicia' in resp}"
+        )
+    return run_isolated(test)
+
+def p11_caso_9(datos):
+    """Un lote con dos movimientos idénticos"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco y 5000 en el kiosco"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        return (
+            f"Deteccion duplicado interno: {'Mandaste 2 movimientos iguales de $5.000 en Kiosco' in resp and '¿Son dos gastos distintos o se te repitió?' in resp}"
+        )
+    return run_isolated(test)
+
+def p11_caso_10(datos):
+    """Un lote seguido de 'borrá eso'"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco y 8000 en la verdulería"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "borrá eso"), time.perf_counter())
+        resp_prop_undo = respuestas[-1][1] if respuestas else ""
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        resp_conf_undo = respuestas[-1][1] if respuestas else ""
+        return (
+            f"Propuesta deshacer lote: {'eliminar los 2 movimientos' in resp_prop_undo} | "
+            f"Confirmacion deshacer lote: {'Listo, 2 movimientos eliminados.' in resp_conf_undo}"
+        )
+    return run_isolated(test)
+
 def correr_suite_completa():
     print("=== INICIANDO SUITE CONSOLIDADA DE REGRESION DE WHATSAPP ===")
     print(f"Usuario exclusivo de pruebas: {USUARIO_PRUEBAS_EMAIL}")
@@ -2873,6 +3044,87 @@ def correr_suite_completa():
             "nombre": "Un servicio que no está en el catálogo: lo acepta igual",
             "ejecutar": lambda: p10_caso_12(datos),
             "esperado": "Propuesta servicio no-catálogo: True",
+            "match": "exacto",
+        },
+        # --- PUNTO 11: Lotes y Multi-Operación (10 casos) ---
+        {
+            "id": "P11.1",
+            "punto": "Punto 11",
+            "nombre": "Dos gastos con billeteras distintas nombradas explícitamente",
+            "ejecutar": lambda: p11_caso_1(datos),
+            "esperado": "Propuesta: True | Confirmacion: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P11.2",
+            "punto": "Punto 11",
+            "nombre": "Dos gastos sin billetera, con el usuario teniendo principal",
+            "ejecutar": lambda: p11_caso_2(datos),
+            "esperado": "Propuesta principal: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P11.3",
+            "punto": "Punto 11",
+            "nombre": "Dos gastos sin billetera, sin principal: pregunta una vez",
+            "ejecutar": lambda: p11_caso_3(datos),
+            "esperado": "Pregunta una vez: True | Propuesta resuelta: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P11.4",
+            "punto": "Punto 11",
+            "nombre": "Tres gastos donde solo uno nombra billetera",
+            "ejecutar": lambda: p11_caso_4(datos),
+            "esperado": "Pregunta faltantes: True | Propuesta mixta: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P11.5",
+            "punto": "Punto 11",
+            "nombre": "Un gasto y un ingreso en el mismo mensaje",
+            "ejecutar": lambda: p11_caso_5(datos),
+            "esperado": "Propuesta signos: True | Confirmacion signos: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P11.6",
+            "punto": "Punto 11",
+            "nombre": "Un lote con un consumo de tarjeta y un gasto normal",
+            "ejecutar": lambda: p11_caso_6(datos),
+            "esperado": "Lote tarjeta y gasto: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P11.7",
+            "punto": "Punto 11",
+            "nombre": "Doce movimientos: rechaza con mensaje claro",
+            "ejecutar": lambda: p11_caso_7(datos),
+            "esperado": "Rechazo tope: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P11.8",
+            "punto": "Punto 11",
+            "nombre": "Un lote donde una operación está en otra moneda sin billetera de esa moneda",
+            "ejecutar": lambda: p11_caso_8(datos),
+            "esperado": "Aviso descarte y propuesta: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P11.9",
+            "punto": "Punto 11",
+            "nombre": "Un lote con dos movimientos idénticos",
+            "ejecutar": lambda: p11_caso_9(datos),
+            "esperado": "Deteccion duplicado interno: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P11.10",
+            "punto": "Punto 11",
+            "nombre": "Un lote seguido de 'borrá eso'",
+            "ejecutar": lambda: p11_caso_10(datos),
+            "esperado": "Propuesta deshacer lote: True | Confirmacion deshacer lote: True",
             "match": "exacto",
         },
     ]
