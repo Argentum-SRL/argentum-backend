@@ -1,0 +1,39 @@
+{
+  "escenario_id": "P3.9",
+  "fecha_grabacion": "2026-09-05T18:33:57.264039+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "cobré 800000 de sueldo",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 800000,
+          "moneda": "ARS",
+          "tipo": "ingreso",
+          "categoria": "Sueldo",
+          "descripcion": "Sueldo",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": null,
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "transacciones_adicionales": []
+        },
+        "confianza": 0.9,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Voy a anotar $800.000 en Sueldo. ¿Va?"
+      }
+    }
+  ]
+}

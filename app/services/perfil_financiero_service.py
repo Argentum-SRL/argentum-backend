@@ -60,6 +60,7 @@ def _calcular_tasa_ahorro_sync_moneda(db: Session, usuario_id: UUID, fecha_inici
         .where(
             Transaccion.usuario_id == usuario_id,
             Transaccion.moneda == moneda,
+            Transaccion.movimiento_meta_id.is_(None),
             or_(
                 Transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE,
                 Transaccion.estado_verificacion.is_(None)
@@ -98,6 +99,7 @@ def _calcular_score_impulsividad_sync_moneda(db: Session, usuario_id: UUID, fech
             Transaccion.usuario_id == usuario_id,
             Transaccion.moneda == moneda,
             Transaccion.tipo == TipoTransaccion.EGRESO,
+            Transaccion.movimiento_meta_id.is_(None),
             or_(
                 Transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE,
                 Transaccion.estado_verificacion.is_(None)
@@ -170,6 +172,7 @@ def _calcular_ratio_cuotas_sync_moneda(db: Session, usuario_id: UUID, fecha_inic
         .where(
             Transaccion.usuario_id == usuario_id,
             Transaccion.moneda == moneda,
+            Transaccion.movimiento_meta_id.is_(None),
             or_(
                 Transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE,
                 Transaccion.estado_verificacion.is_(None)
@@ -294,6 +297,7 @@ def _calcular_porcentaje_suscripciones_sync_moneda(db: Session, usuario_id: UUID
             Transaccion.usuario_id == usuario_id,
             Transaccion.moneda == moneda,
             Transaccion.tipo == TipoTransaccion.EGRESO,
+            Transaccion.movimiento_meta_id.is_(None),
             or_(
                 Transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE,
                 Transaccion.estado_verificacion.is_(None)

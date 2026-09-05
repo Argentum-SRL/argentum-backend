@@ -1,0 +1,39 @@
+{
+  "escenario_id": "P9B.9",
+  "fecha_grabacion": "2026-09-05T18:39:26.068839+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "le transferí 5000 a mi hermano",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 5000,
+          "moneda": "ARS",
+          "tipo": "egreso",
+          "categoria": null,
+          "descripcion": "Transferencia a hermano",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": "Santander",
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "transacciones_adicionales": []
+        },
+        "confianza": 0.9,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Voy a anotar $5.000 como transferencia a tu hermano desde Santander. ¿Va?"
+      }
+    }
+  ]
+}

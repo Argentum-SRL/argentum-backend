@@ -1,0 +1,39 @@
+{
+  "escenario_id": "P9.7",
+  "fecha_grabacion": "2026-09-05T18:38:41.645707+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "gasté 5000 con la Visa del Galicia",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 5000,
+          "moneda": "ARS",
+          "tipo": "egreso",
+          "categoria": null,
+          "descripcion": "Gasto",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": null,
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": "•••• 1506",
+          "transacciones_adicionales": []
+        },
+        "confianza": 0.85,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Voy a anotar $5.000 en Gasto desde la tarjeta Visa del Galicia. ¿Va?"
+      }
+    }
+  ]
+}

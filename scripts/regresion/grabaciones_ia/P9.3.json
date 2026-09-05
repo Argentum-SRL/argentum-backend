@@ -1,0 +1,39 @@
+{
+  "escenario_id": "P9.3",
+  "fecha_grabacion": "2026-09-05T18:38:25.105120+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "gasté 30000 con la del Santander",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 30000,
+          "moneda": "ARS",
+          "tipo": "egreso",
+          "categoria": null,
+          "descripcion": "Gasto",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": "Santander",
+          "billetera_origen": null,
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": "•••• 5077",
+          "transacciones_adicionales": []
+        },
+        "confianza": 0.85,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Voy a anotar $30.000 en Gasto desde Santander. ¿Va?"
+      }
+    }
+  ]
+}

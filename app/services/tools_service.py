@@ -459,6 +459,7 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
         Transaccion.usuario_id == user_id,
         Transaccion.tipo == TipoTransaccion.INGRESO,
         Transaccion.moneda == Moneda.ARS,
+        Transaccion.movimiento_meta_id.is_(None),
         or_(Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA, Transaccion.estado_verificacion == None),
         Transaccion.fecha >= start_range,
         Transaccion.fecha <= end_range
@@ -467,7 +468,8 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
     tiene_ingresos_any = db.query(Transaccion.id).filter(
         Transaccion.usuario_id == user_id,
         Transaccion.tipo == TipoTransaccion.INGRESO,
-        Transaccion.moneda == Moneda.ARS
+        Transaccion.moneda == Moneda.ARS,
+        Transaccion.movimiento_meta_id.is_(None)
     ).first() is not None
 
     if not tiene_ingresos_any:
@@ -486,6 +488,7 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
         Transaccion.moneda == Moneda.ARS,
         Transaccion.es_padre_cuotas == False,
         Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
+        Transaccion.movimiento_meta_id.is_(None),
         or_(Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA, Transaccion.estado_verificacion == None),
         Transaccion.fecha >= start_range,
         Transaccion.fecha <= end_range

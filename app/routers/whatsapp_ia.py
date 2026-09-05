@@ -3268,7 +3268,7 @@ def _buscar_ultimo_movimiento_whatsapp(usuario_id: UUID, db: Session) -> tuple[T
         return None, "ES_CUOTA"
     if tx.pago_resumen_vencimiento is not None or tx.pago_origen_id is not None:
         return None, "ES_RESUMEN"
-    if tx.descripcion.startswith("Aporte a la meta:") or tx.descripcion.startswith("Retiro de la meta:"):
+    if tx.movimiento_meta_id is not None or tx.descripcion.startswith("Aporte a la meta:") or tx.descripcion.startswith("Retiro de la meta:"):
         return None, "ES_META"
     if tx.es_recurrente or tx.recurrente_id is not None:
         return None, "ES_RECURRENTE"

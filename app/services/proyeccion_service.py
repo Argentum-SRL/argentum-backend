@@ -61,6 +61,7 @@ def _preparar_datos_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
             .where(
                 and_(
                     Transaccion.usuario_id == usuario.id,
+                    Transaccion.movimiento_meta_id.is_(None),
                     cycle_detection_case != -1
                 )
             )
@@ -98,6 +99,7 @@ def _preparar_datos_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
                     Transaccion.usuario_id == usuario.id,
                     Transaccion.tipo == TipoTransaccion.EGRESO,
                     Transaccion.es_padre_cuotas == False,
+                    Transaccion.movimiento_meta_id.is_(None),
                     or_(
                         Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
                         Transaccion.estado_verificacion == None
@@ -131,6 +133,7 @@ def _preparar_datos_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
                 Transaccion.fecha <= fecha_tope_actual,
                 Transaccion.tipo == TipoTransaccion.EGRESO,
                 Transaccion.es_padre_cuotas == False,
+                Transaccion.movimiento_meta_id.is_(None),
                 or_(
                     Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
                     Transaccion.estado_verificacion == None
@@ -216,6 +219,7 @@ def _preparar_datos_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
                 Transaccion.fecha >= fecha_inicio_actual,
                 Transaccion.fecha <= fecha_tope_actual,
                 Transaccion.tipo == TipoTransaccion.INGRESO,
+                Transaccion.movimiento_meta_id.is_(None),
                 or_(
                     Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
                     Transaccion.estado_verificacion == None

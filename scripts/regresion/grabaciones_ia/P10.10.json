@@ -1,0 +1,39 @@
+{
+  "escenario_id": "P10.10",
+  "fecha_grabacion": "2026-09-05T18:40:22.928525+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "gasté 9000 en Netflix",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 9000,
+          "moneda": "ARS",
+          "tipo": "egreso",
+          "categoria": "Otros",
+          "descripcion": "Netflix",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": null,
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "transacciones_adicionales": []
+        },
+        "confianza": 0.85,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Voy a anotar $9.000 en Otros. ¿Va?"
+      }
+    }
+  ]
+}

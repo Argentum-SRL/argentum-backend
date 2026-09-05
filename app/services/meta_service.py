@@ -227,6 +227,8 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
         billetera_id=data.billetera_id,
         fecha=data.fecha
     )
+    db.add(nuevo_movimiento)
+    db.flush()
     
     if data.tipo == TipoMovimientoMeta.APORTE:
         # Validar saldo suficiente en billetera
@@ -253,9 +255,11 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
             billetera_id=data.billetera_id,
             tarjeta_id=None,
             origen=OrigenTransaccion.MANUAL,
-            estado_verificacion=None
+            estado_verificacion=None,
+            movimiento_meta_id=nuevo_movimiento.id
         )
-        crear_transaccion(db, usuario_id, tx_create, commit=False)
+        tx = crear_transaccion(db, usuario_id, tx_create, commit=False)
+        tx.movimiento_meta_id = nuevo_movimiento.id
         meta.monto_actual += monto_impacto_meta
     else:
         # Validar que no se retire más de lo que hay
@@ -280,9 +284,11 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
             billetera_id=data.billetera_id,
             tarjeta_id=None,
             origen=OrigenTransaccion.MANUAL,
-            estado_verificacion=None
+            estado_verificacion=None,
+            movimiento_meta_id=nuevo_movimiento.id
         )
-        crear_transaccion(db, usuario_id, tx_create, commit=False)
+        tx = crear_transaccion(db, usuario_id, tx_create, commit=False)
+        tx.movimiento_meta_id = nuevo_movimiento.id
         meta.monto_actual -= monto_impacto_meta
     
     # Actualizar estado si se completó (Lógica automática)
@@ -314,7 +320,6 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
     elif meta.estado == EstadoMeta.COMPLETADA and meta.monto_actual < meta.monto_objetivo:
         meta.estado = EstadoMeta.ACTIVA
 
-    db.add(nuevo_movimiento)
     db.commit()
     db.refresh(nuevo_movimiento)
     return nuevo_movimiento
@@ -341,47 +346,45 @@ def eliminar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, movimiento
     from app.models.transaccion import Transaccion
     from app.services.transaccion_service import eliminar_transaccion
     
-    desc_exacta = f"Aporte a la meta: {meta.nombre}" if movimiento.tipo == TipoMovimientoMeta.APORTE else f"Retiro de la meta: {meta.nombre}"
-    desc_patron = f"%Aporte a la meta:%" if movimiento.tipo == TipoMovimientoMeta.APORTE else f"%Retiro de la meta:%"
-    
+    # 1. Búsqueda directa y precisa por identificador de movimiento de meta
     tx = db.query(Transaccion).filter(
         Transaccion.usuario_id == usuario_id,
-        Transaccion.billetera_id == movimiento.billetera_id,
-        Transaccion.monto == movimiento.monto,
-        Transaccion.fecha == movimiento.fecha,
-        Transaccion.descripcion == desc_exacta
+        Transaccion.movimiento_meta_id == movimiento.id
     ).first()
 
+    # 2. Fallback por compatibilidad con movimientos históricos no vinculados
     if not tx:
-        # Si la meta fue renombrada, buscar por el patrón general
+        desc_exacta = f"Aporte a la meta: {meta.nombre}" if movimiento.tipo == TipoMovimientoMeta.APORTE else f"Retiro de la meta: {meta.nombre}"
+        desc_patron = f"%Aporte a la meta:%" if movimiento.tipo == TipoMovimientoMeta.APORTE else f"%Retiro de la meta:%"
+        
         tx = db.query(Transaccion).filter(
             Transaccion.usuario_id == usuario_id,
             Transaccion.billetera_id == movimiento.billetera_id,
             Transaccion.monto == movimiento.monto,
             Transaccion.fecha == movimiento.fecha,
-            Transaccion.descripcion.like(desc_patron)
+            Transaccion.descripcion == desc_exacta
         ).first()
 
-    if tx:
-        eliminar_transaccion(db, usuario_id, tx.id)
-    else:
-        # Fallback sin transaccion vinculada
-        if movimiento.tipo == TipoMovimientoMeta.APORTE:
-            if billetera:
-                try:
-                    from app.services.transaccion_service import _validar_moneda_coincide
-                    _validar_moneda_coincide(movimiento.moneda_movimiento, billetera)
-                    billetera.saldo_actual += movimiento.monto
-                except Exception as e:
-                    logger.critical(f"Error crítico de inconsistencia de moneda al revertir aporte de meta {movimiento.id}: {e}")
-        else:
-            if billetera:
-                try:
-                    from app.services.transaccion_service import _validar_moneda_coincide
-                    _validar_moneda_coincide(movimiento.moneda_movimiento, billetera)
-                    billetera.saldo_actual -= movimiento.monto
-                except Exception as e:
-                    logger.critical(f"Error crítico de inconsistencia de moneda al revertir retiro de meta {movimiento.id}: {e}")
+        if not tx:
+            tx = db.query(Transaccion).filter(
+                Transaccion.usuario_id == usuario_id,
+                Transaccion.billetera_id == movimiento.billetera_id,
+                Transaccion.monto == movimiento.monto,
+                Transaccion.fecha == movimiento.fecha,
+                Transaccion.descripcion.like(desc_patron)
+            ).first()
+
+    # Revertir saldo de billetera
+    if billetera:
+        try:
+            from app.services.transaccion_service import _validar_moneda_coincide
+            _validar_moneda_coincide(movimiento.moneda_movimiento, billetera)
+            if movimiento.tipo == TipoMovimientoMeta.APORTE:
+                billetera.saldo_actual += movimiento.monto
+            else:
+                billetera.saldo_actual -= movimiento.monto
+        except Exception as e:
+            logger.critical(f"Error crítico de inconsistencia de moneda al revertir movimiento de meta {movimiento.id}: {e}")
 
     # Revertir en la meta
     if movimiento.tipo == TipoMovimientoMeta.APORTE:
@@ -394,6 +397,9 @@ def eliminar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, movimiento
         meta.estado = EstadoMeta.COMPLETADA
     else:
         meta.estado = EstadoMeta.ACTIVA
+
+    if tx:
+        db.delete(tx)
 
     db.delete(movimiento)
     db.commit()
@@ -525,6 +531,11 @@ def obtener_o_crear_categoria_ahorro(db: Session, usuario_id: UUID, tipo: str) -
             estado=EstadoCategoria.ACTIVA
         )
         db.add(categoria)
+        db.flush()
+        from app.services.categoria_service import invalidar_cache_categorias_globales
+        invalidar_cache_categorias_globales()
+    elif categoria.estado != EstadoCategoria.ACTIVA:
+        categoria.estado = EstadoCategoria.ACTIVA
         db.flush()
         from app.services.categoria_service import invalidar_cache_categorias_globales
         invalidar_cache_categorias_globales()
