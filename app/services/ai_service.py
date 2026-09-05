@@ -265,6 +265,9 @@ INTENTS VÁLIDOS — respondé siempre con exactamente uno de estos:
 - crear_presupuesto
 - consultar_presupuesto
 - agregar_suscripcion
+- cancelar_suscripcion
+- cambiar_precio_suscripcion
+- consultar_suscripciones
 - consultar_cotizacion
 - pedir_consejo
 - deshacer
@@ -275,6 +278,13 @@ INTENTS VÁLIDOS — respondé siempre con exactamente uno de estos:
 - desconocido
 
 REGLAS DE CLASIFICACIÓN DE INTENTS:
+- SUSCRIPCIONES VS GASTO SUELTO:
+  * Señales de suscripción: "empecé a pagar", "me suscribí", "me aboné", "contraté", "pago todos los meses", "es mensual", "se debita", "me lo descuentan" o mención de frecuencia explícita ("por mes", "mensual", "anual", etc.) -> intent="agregar_suscripcion".
+  * Señales de gasto suelto: "gasté", "pagué", "me salió", "aboné" referidas a un hecho puntual con monto (ej: "gasté 5000 en Disney+") -> intent="registrar_transaccion". NUNCA lo conviertas en suscripción si dice "gasté".
+  * Ambigüedad: Si el mensaje nombra un servicio (como Spotify o Disney+) pero no hay señal clara de ninguno de los dos tipos (ej: "pagué el Spotify"), PREGUNTÁ si es un gasto único o una suscripción. No asumas.
+  * Dar de baja: "di de baja", "cancelé", "ya no pago más", "me desuscribí" -> intent="cancelar_suscripcion".
+  * Cambiar precio: "aumentó", "ahora sale", "subió a", "me lo aumentaron" -> intent="cambiar_precio_suscripcion".
+  * Consultar suscripciones: "cuánto gasto en suscripciones", "qué suscripciones tengo", "cuánto pago por mes en suscripciones" -> intent="consultar_suscripciones".
 - "borrá eso", "borralo", "eliminá eso", "me equivoqué", "eso estaba mal", "anulá eso", "cancelá el último" → deshacer
 - "eran 3.000 no 30.000", "eso era supermercado", "fue con Galicia", "fue ayer", "no, 5000" (corrección de dato suelto del último movimiento registrado) → corregir
 - CRITERIO OPERACIÓN NUEVA VS CORRECCIÓN: Si el mensaje contiene un monto Y un concepto/categoría propios independientes (ej: "gasté 12000 en verdulería", "almuerzo 4500", "cargué 30000 de nafta"), es SIEMPRE "registrar_transaccion". Si solo contiene un dato suelto corrigiendo el valor anterior (ej: "no, 5000", "eran 3000 no 30000", "eso era verdulería", "fue con Galicia", "fue ayer"), es "corregir".
@@ -617,6 +627,10 @@ def _construir_schema_estricto(db: Session) -> dict[str, Any]:
         "consultar_deuda",
         "consultar_ahorro",
         "transferir_fondos",
+        "agregar_suscripcion",
+        "cancelar_suscripcion",
+        "cambiar_precio_suscripcion",
+        "consultar_suscripciones",
         "deshacer",
         "corregir",
         "cancelar",
@@ -646,6 +660,8 @@ def _construir_schema_estricto(db: Session) -> dict[str, Any]:
                             "tipo": {"type": ["string", "null"], "enum": ["egreso", "ingreso", "transferencia", None]},
                             "categoria": {"type": ["string", "null"], "enum": categorias_enum},
                             "descripcion": {"type": ["string", "null"]},
+                            "servicio": {"type": ["string", "null"]},
+                            "frecuencia": {"type": ["string", "null"]},
                             "billetera": {"type": ["string", "null"]},
                             "billetera_origen": {"type": ["string", "null"]},
                             "billetera_destino": {"type": ["string", "null"]},
@@ -687,6 +703,8 @@ def _construir_schema_estricto(db: Session) -> dict[str, Any]:
                             "tipo",
                             "categoria",
                             "descripcion",
+                            "servicio",
+                            "frecuencia",
                             "billetera",
                             "billetera_origen",
                             "billetera_destino",

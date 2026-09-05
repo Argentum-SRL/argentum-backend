@@ -61,6 +61,11 @@ from app.services.tarjeta_service import calcular_primer_vencimiento
 from app.schemas.transaccion import InfoCuotas, TransaccionCreate, TransaccionUpdate
 from app.services.whatsapp_service import enviar_whatsapp
 from app.utils.telefono import normalizar_telefono_ar
+from app.models.suscripcion import Suscripcion, EstadoSuscripcion, FrecuenciaSuscripcion
+from app.models.historial_suscripcion import HistorialSuscripcion
+from app.schemas.suscripcion import SuscripcionCreate, ActualizarPrecioRequest
+from app.services import suscripcion_service
+from app.core.catalogo_suscripciones import buscar_servicio_por_texto, identificar_servicio_en_texto, CATALOGO_SERVICIOS
 import structlog
 
 from app.core.constants import CATEGORIAS_SISTEMA
@@ -1428,6 +1433,7 @@ def _buscar_transaccion_duplicada_reciente(
             Transaccion.es_padre_cuotas == False,
             Transaccion.es_recurrente == False,
             Transaccion.recurrente_id.is_(None),
+            Transaccion.suscripcion_id.is_(None),
             Transaccion.pago_origen_id.is_(None),
             Transaccion.pago_resumen_vencimiento.is_(None),
         )
@@ -2042,6 +2048,11 @@ def _interpretar_transferencia(
     """
     billeteras_usuario = _obtener_billeteras_activas(usuario.id, db)
     m_norm = normalizar_texto(mensaje_texto)
+
+    # Si es señal de suscripción, no interpretar como transferencia/dólares
+    if not estado_previo:
+        if _es_senial_suscripcion(mensaje_texto) or (_extraer_frecuencia_mencionada(mensaje_texto) and _extraer_nombre_servicio(mensaje_texto)):
+            return False, None, None, None
 
     # Manejo de slot-filling previo para transferir_fondos
     if estado_previo and (estado_previo.get("intent_origen") == "transferir_fondos" or estado_previo.get("tipo_operacion") in ("compra_usd", "venta_usd", "transferencia", "extraccion")):
@@ -3296,6 +3307,506 @@ def _construir_propuesta_corregir(
         f"¿Confirmás?"
     )
 
+# ==============================================================================
+# HELPERS Y GESTIÓN DE SUSCRIPCIONES POR WHATSAPP (ETAPA B)
+# ==============================================================================
+
+def _es_senial_suscripcion(mensaje: str) -> bool:
+    norm = normalizar_texto(mensaje)
+    if not norm:
+        return False
+    patrones = [
+        r"\b(?:empece|empecé)\s+a\s+pagar\b",
+        r"\b(?:me\s+suscribi|me\s+suscribí)\b",
+        r"\b(?:me\s+abone|me\s+aboné)\b",
+        r"\bcontrat[eé]\b",
+        r"\bpago\s+todos\s+los\s+meses\b",
+        r"\bpago\s+mensual\b",
+        r"\bes\s+(?:mensual|anual|bimestral|trimestral|semestral)\b",
+        r"\bse\s+debita\b",
+        r"\bme\s+lo\s+descuentan\b",
+        r"\bnueva\s+suscripci[oó]n\b",
+        r"\bme\s+anot[eé]\b",
+    ]
+    return any(re.search(p, norm) for p in patrones)
+
+
+def _es_senial_gasto_suelto(mensaje: str) -> bool:
+    norm = normalizar_texto(mensaje)
+    if not norm:
+        return False
+    if _es_senial_suscripcion(mensaje):
+        return False
+    return bool(re.search(r"\b(?:gast[eé]|me\s+sali[oó])\b", norm))
+
+
+def _extraer_frecuencia_mencionada(mensaje: str) -> str | None:
+    norm = normalizar_texto(mensaje)
+    if not norm:
+        return None
+    if re.search(r"\b(?:por\s+mes|al\s+mes|cada\s+mes|todos\s+los\s+meses|mensual(?:mente)?)\b", norm):
+        return "mensual"
+    if re.search(r"\b(?:bimestral(?:mente)?|cada\s+2\s+meses|cada\s+dos\s+meses)\b", norm):
+        return "bimestral"
+    if re.search(r"\b(?:trimestral(?:mente)?|cada\s+3\s+meses|cada\s+tres\s+meses)\b", norm):
+        return "trimestral"
+    if re.search(r"\b(?:semestral(?:mente)?|cada\s+6\s+meses|cada\s+seis\s+meses)\b", norm):
+        return "semestral"
+    if re.search(r"\b(?:por\s+a[nñ]o|al\s+a[nñ]o|todos\s+los\s+a[nñ]os|anual(?:mente)?)\b", norm):
+        return "anual"
+    return None
+
+
+def _extraer_nombre_servicio(mensaje: str) -> str | None:
+    serv_cat = identificar_servicio_en_texto(mensaje)
+    if serv_cat:
+        return serv_cat["nombre"]
+
+    m1 = re.search(
+        r"(?:empec[eé]|empece)\s+a\s+pagar\s+(?:\$?\s*[\d\.,]+(?:k|\s*mil)?\s*(?:d[oó]lares|usd|pesos)?\s+)?(?:de\s+la|de\s+el|del|de|a|en)\s+(.+?)(?:\s+(?:por\s+mes|al\s+mes|mensual|anual|cada\s+mes|con|desde)\b|$)",
+        mensaje,
+        flags=re.IGNORECASE,
+    )
+    if m1:
+        cand = m1.group(1).strip(" .,-")
+        if cand:
+            return cand
+
+    m2 = re.search(
+        r"me\s+suscrib[ií]\s+a\s+(.+?)(?:\s+(?:por\s+\$?[\d\.,]+|por\s+mes|al\s+mes|mensual|anual|con|desde)\b|$)",
+        mensaje,
+        flags=re.IGNORECASE,
+    )
+    if m2:
+        cand = m2.group(1).strip(" .,-")
+        if cand:
+            return cand
+
+    m3 = re.search(
+        r"(?:di\s+de\s+baja|dar\s+de\s+baja|baja\s+de|cancel[eé]|cancele|ya\s+no\s+pago\s+m[aá]s|me\s+desuscrib[ií])\s+(?:la\s+suscripci[oó]n\s+a\s+|a\s+|el\s+|la\s+)?([^,\.]+?)(?:\s+por\s+favor|$)",
+        mensaje,
+        flags=re.IGNORECASE,
+    )
+    if m3:
+        cand = m3.group(1).strip(" .,-")
+        if cand:
+            return cand
+
+    m4 = re.search(
+        r"(?:aument[oó]|aumento|subi[oó]|subio|cambi[oó]\s+de\s+precio)\s+(?:el\s+|la\s+)?([^,\.]+?)(?:,|\s+ahora|\s+a\s+|\s+subio|$)",
+        mensaje,
+        flags=re.IGNORECASE,
+    )
+    if m4:
+        cand = m4.group(1).strip(" .,-")
+        if cand:
+            return cand
+
+    return None
+
+
+def _es_pedido_baja_suscripcion(mensaje: str) -> tuple[bool, str | None]:
+    norm = normalizar_texto(mensaje)
+    if not norm:
+        return False, None
+    if re.search(r"\b(?:di\s+de\s+baja|dar\s+de\s+baja|baja\s+de|cancele\s+la\s+suscripcion|cancele|cancel[eé]|ya\s+no\s+pago\s+mas|ya\s+no\s+pago\s+más|me\s+desuscribi|me\s+desuscribí)\b", norm):
+        srv = _extraer_nombre_servicio(mensaje)
+        return True, srv
+    return False, None
+
+
+def _es_cambio_precio_suscripcion(mensaje: str) -> tuple[bool, str | None, Decimal | None]:
+    norm = normalizar_texto(mensaje)
+    if not norm:
+        return False, None, None
+    if re.search(r"\b(?:aument[oó]|aumento|ahora\s+sale|subi[oó]\s+a|subio\s+a|me\s+lo\s+aumentaron|cambi[oó]\s+de\s+precio)\b", norm):
+        srv = _extraer_nombre_servicio(mensaje)
+        m_num = re.search(r"(?:ahora\s+son|ahora\s+sale|a|subi[oó]\s+a|subio\s+a|en)\s+(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\b", norm)
+        monto = None
+        if m_num:
+            monto = _parsear_monto_argentino(m_num.group(1))
+        else:
+            m_alt = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\b", norm)
+            if m_alt:
+                monto = _parsear_monto_argentino(m_alt.group(1))
+        return True, srv, monto
+    return False, None, None
+
+
+def _es_consulta_suscripciones(mensaje: str) -> bool:
+    norm = normalizar_texto(mensaje)
+    if not norm:
+        return False
+    frases = [
+        "cuanto gasto en suscripciones",
+        "cuanto pago por mes en suscripciones",
+        "cuanto pago en suscripciones",
+        "que suscripciones tengo",
+        "cuales son mis suscripciones",
+        "mis suscripciones",
+        "suscripciones activas",
+        "cuanto pago por mes",
+    ]
+    return any(f in norm for f in frases)
+
+
+def _detectar_ambiguedad_suscripcion(mensaje: str) -> tuple[bool, str | None]:
+    norm = normalizar_texto(mensaje)
+    if not norm:
+        return False, None
+    if _es_senial_suscripcion(mensaje):
+        return False, None
+    if _extraer_frecuencia_mencionada(mensaje):
+        return False, None
+    if _es_senial_gasto_suelto(mensaje):
+        return False, None
+
+    srv = identificar_servicio_en_texto(mensaje)
+    if srv:
+        if re.search(r"\b(?:pagu[eé]|abone|abon[eé])\b", norm):
+            return True, srv["nombre"]
+        if norm in (normalizar_texto(srv["nombre"]), f"el {normalizar_texto(srv['nombre'])}", f"la {normalizar_texto(srv['nombre'])}"):
+            return True, srv["nombre"]
+
+    return False, None
+
+
+def _buscar_suscripcion_cobrada_periodo_actual(
+    usuario_id: UUID,
+    monto: Decimal,
+    nombre_servicio_o_concepto: str,
+    db: Session,
+) -> tuple[Suscripcion | None, Transaccion | None]:
+    if not nombre_servicio_o_concepto or monto <= 0:
+        return None, None
+
+    subs_activas = db.query(Suscripcion).filter(
+        Suscripcion.usuario_id == usuario_id,
+        Suscripcion.estado == EstadoSuscripcion.ACTIVA,
+    ).all()
+
+    norm_concepto = normalizar_texto(nombre_servicio_o_concepto)
+    hoy = hoy_argentina()
+    limite_periodo = hoy - timedelta(days=32)
+
+    for s in subs_activas:
+        s_norm = normalizar_texto(s.nombre)
+        coincide = (s_norm == norm_concepto or s_norm in norm_concepto or norm_concepto in s_norm)
+        if not coincide:
+            srv_cat = buscar_servicio_por_texto(s.nombre)
+            if srv_cat:
+                variantes = [normalizar_texto(v) for v in srv_cat.get("variantes", [])]
+                if any(v in norm_concepto for v in variantes):
+                    coincide = True
+
+        if coincide:
+            tx = db.execute(
+                select(Transaccion)
+                .where(
+                    Transaccion.usuario_id == usuario_id,
+                    Transaccion.suscripcion_id == s.id,
+                    Transaccion.fecha >= limite_periodo,
+                    Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
+                )
+                .order_by(Transaccion.fecha.desc())
+            ).scalars().first()
+
+            if tx and tx.monto == monto:
+                return s, tx
+
+    return None, None
+
+
+def _es_confirmacion_gasto_aparte(mensaje: str) -> bool:
+    norm = normalizar_texto(mensaje)
+    if not norm:
+        return False
+    frases = [
+        "es un gasto aparte", "gasto aparte", "es aparte", "aparte",
+        "es otro gasto", "es otro", "otro gasto", "anotalo igual",
+        "anotarlo igual", "es nuevo", "nuevo", "si anotalo", "si, anotalo"
+    ]
+    return any(f in norm for f in frases)
+
+
+def _buscar_propuesta_suscripcion_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    return db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.intent_detectado == "agregar_suscripcion",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+
+def _confirmar_propuesta_suscripcion(
+    usuario: Usuario,
+    db: Session,
+) -> tuple[Suscripcion | None, str, bool]:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    conv_sub = db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario.id,
+            ConversacionWpp.intent_detectado == "agregar_suscripcion",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+        .with_for_update()
+    ).scalars().first()
+
+    if not conv_sub:
+        return None, "No tenés ninguna suscripción pendiente para confirmar.", False
+
+    entidades = conv_sub.entidades or {}
+    nombre = entidades.get("servicio")
+    monto_val = entidades.get("monto")
+    frecuencia_val = entidades.get("frecuencia", "mensual")
+    moneda_val = entidades.get("moneda", "ARS")
+    billetera_id_str = entidades.get("billetera_id")
+    tarjeta_id_str = entidades.get("tarjeta_id")
+    proximo_cobro_str = entidades.get("proximo_cobro")
+
+    if not nombre or monto_val is None or not proximo_cobro_str:
+        return None, "Faltan datos para crear la suscripción.", False
+
+    proximo_cobro = date.fromisoformat(proximo_cobro_str)
+    billetera_id = UUID(billetera_id_str) if billetera_id_str else None
+    tarjeta_id = UUID(tarjeta_id_str) if tarjeta_id_str else None
+
+    cat_id = None
+    subcat_id = None
+    cat_sugerida = entidades.get("categoria")
+    if cat_sugerida:
+        c_id, s_id = _resolver_categoria_y_subcategoria(cat_sugerida, usuario.id, db, tipo="egreso")
+        cat_id = c_id
+        subcat_id = s_id
+
+    data_create = SuscripcionCreate(
+        nombre=nombre,
+        monto=Decimal(str(monto_val)),
+        moneda=moneda_val,
+        frecuencia=frecuencia_val,
+        proximo_cobro=proximo_cobro,
+        billetera_id=billetera_id,
+        tarjeta_id=tarjeta_id,
+        categoria_id=cat_id,
+        subcategoria_id=subcat_id,
+        vigente_desde=hoy_argentina(),
+    )
+
+    nueva_sub = suscripcion_service.crear_suscripcion(db, usuario.id, data_create)
+
+    conv_sub.accion_ejecutada = str(nueva_sub.id)
+    db.commit()
+
+    mon_enum = Moneda.USD if moneda_val == "USD" else Moneda.ARS
+    monto_fmt = formatear_monto(float(monto_val), mon_enum)
+    medio_pago_txt = entidades.get("medio_pago_txt", "")
+    fecha_fmt = f"{proximo_cobro.day} de {MESES_ES_GEN[proximo_cobro.month - 1]}"
+
+    msg_resp = f"Listo. Suscripción a {nombre} por {monto_fmt} {frecuencia_val} programada {medio_pago_txt} (primer cobro el {fecha_fmt})."
+    return nueva_sub, msg_resp, False
+
+
+def _buscar_propuesta_baja_suscripcion_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    return db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.intent_detectado == "dar_baja_suscripcion",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+
+def _confirmar_propuesta_baja_suscripcion(
+    usuario: Usuario,
+    db: Session,
+) -> tuple[Suscripcion | None, str, bool]:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    conv_baja = db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario.id,
+            ConversacionWpp.intent_detectado == "dar_baja_suscripcion",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+        .with_for_update()
+    ).scalars().first()
+
+    if not conv_baja:
+        return None, "No tenés ninguna baja de suscripción pendiente para confirmar.", False
+
+    entidades = conv_baja.entidades or {}
+    sub_id_str = entidades.get("suscripcion_id")
+    nombre = entidades.get("nombre", "el servicio")
+
+    if not sub_id_str:
+        return None, "No pude procesar la baja.", False
+
+    sub_id = UUID(sub_id_str)
+    sub = suscripcion_service.cambiar_estado(db, usuario.id, sub_id, EstadoSuscripcion.CANCELADA)
+
+    conv_baja.accion_ejecutada = f"baja:{sub.id}"
+    db.commit()
+
+    return sub, f"Listo, dimos de baja tu suscripción a {nombre}.", False
+
+
+def _buscar_propuesta_cambio_precio_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    return db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.intent_detectado == "cambiar_precio_suscripcion",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+
+def _confirmar_propuesta_cambio_precio(
+    usuario: Usuario,
+    db: Session,
+) -> tuple[HistorialSuscripcion | None, str, bool]:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    conv_cp = db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario.id,
+            ConversacionWpp.intent_detectado == "cambiar_precio_suscripcion",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+        .with_for_update()
+    ).scalars().first()
+
+    if not conv_cp:
+        return None, "No tenés ningún cambio de precio pendiente para confirmar.", False
+
+    entidades = conv_cp.entidades or {}
+    sub_id_str = entidades.get("suscripcion_id")
+    nuevo_monto = entidades.get("nuevo_monto")
+    moneda = entidades.get("moneda", "ARS")
+    nombre = entidades.get("nombre", "el servicio")
+
+    if not sub_id_str or nuevo_monto is None:
+        return None, "No pude procesar el cambio de precio.", False
+
+    sub_id = UUID(sub_id_str)
+    req = ActualizarPrecioRequest(
+        monto=Decimal(str(nuevo_monto)),
+        moneda=moneda,
+        vigente_desde=hoy_argentina(),
+    )
+    hist = suscripcion_service.actualizar_precio(db, usuario.id, sub_id, req)
+
+    conv_cp.accion_ejecutada = f"precio:{hist.id}"
+    db.commit()
+
+    mon_enum = Moneda.USD if moneda == "USD" else Moneda.ARS
+    nuevo_fmt = formatear_monto(float(nuevo_monto), mon_enum)
+    return hist, f"Listo, actualicé el precio de {nombre} a {nuevo_fmt}.", False
+
+
+def _extraer_monto_y_moneda_suscripcion(mensaje: str) -> tuple[Decimal | None, str]:
+    norm = normalizar_texto(mensaje)
+    moneda = "USD" if any(w in norm for w in ["dolar", "dolares", "dólares", "usd", "us$"]) else "ARS"
+    m = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\s*(?:d[oó]lares|usd|pesos)?\b", mensaje, flags=re.IGNORECASE)
+    if m:
+        monto = _parsear_monto_argentino(m.group(1))
+        return monto, moneda
+    return None, moneda
+
+
+def _buscar_suscripcion_activa_por_nombre(usuario_id: UUID, nombre: str | None, db: Session) -> Suscripcion | None:
+    subs = db.query(Suscripcion).options(joinedload(Suscripcion.historial)).filter(
+        Suscripcion.usuario_id == usuario_id,
+        Suscripcion.estado == EstadoSuscripcion.ACTIVA,
+    ).all()
+    if not subs:
+        return None
+    if not nombre:
+        if len(subs) == 1:
+            return subs[0]
+        return None
+
+    norm = normalizar_texto(nombre)
+    for s in subs:
+        s_norm = normalizar_texto(s.nombre)
+        if s_norm == norm or norm in s_norm or s_norm in norm:
+            return s
+        srv_cat = buscar_servicio_por_texto(s.nombre)
+        if srv_cat:
+            variantes = [normalizar_texto(v) for v in srv_cat.get("variantes", [])]
+            if any(v in norm or norm in v for v in variantes):
+                return s
+    return None
+
+
+def _procesar_consulta_suscripciones(usuario: Usuario, db: Session) -> str:
+    subs = suscripcion_service.obtener_suscripciones(db, usuario.id, estado="activa")
+    if not subs:
+        return "No tenés suscripciones activas registradas."
+
+    totales = suscripcion_service.obtener_total_mensual(db, usuario.id)
+    total_ars = totales["total_ars"]
+    total_usd = totales["total_usd"]
+
+    lineas = ["Tus suscripciones activas:"]
+    for s in subs:
+        monto_p = s.precio_actual.monto if s.precio_actual else Decimal("0")
+        moneda_p = s.precio_actual.moneda if s.precio_actual else "ARS"
+        mon_enum = Moneda.USD if moneda_p == "USD" else Moneda.ARS
+        monto_fmt = formatear_monto(float(monto_p), mon_enum)
+        frec_str = s.frecuencia.value if hasattr(s.frecuencia, "value") else str(s.frecuencia)
+        lineas.append(f"- {s.nombre}: {monto_fmt} {frec_str}")
+
+    totales_str = []
+    if total_ars > 0:
+        totales_str.append(formatear_monto(float(total_ars), Moneda.ARS))
+    if total_usd > 0:
+        totales_str.append(formatear_monto(float(total_usd), Moneda.USD))
+
+    if not totales_str:
+        totales_str = ["$0"]
+
+    lineas.append(f"Total mensual estimado: {' y '.join(totales_str)}")
+    return "\n".join(lineas)
+
+
+def _es_intento_alta_suscripcion(mensaje: str) -> bool:
+    if _es_senial_gasto_suelto(mensaje):
+        return False
+    if _es_senial_suscripcion(mensaje):
+        return True
+    frec = _extraer_frecuencia_mencionada(mensaje)
+    if frec:
+        srv = _extraer_nombre_servicio(mensaje)
+        if srv:
+            return True
+    return False
+
 
 def _obtener_historial_reciente(usuario_id: UUID, db: Session, n: int = 6) -> list[dict]:
     """
@@ -4032,7 +4543,10 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     select(ConversacionWpp)
                     .where(
                         ConversacionWpp.usuario_id == usuario.id,
-                        ConversacionWpp.intent_detectado.in_(["registrar_transaccion", "deshacer", "corregir"]),
+                        ConversacionWpp.intent_detectado.in_([
+                            "registrar_transaccion", "deshacer", "corregir",
+                            "agregar_suscripcion", "dar_baja_suscripcion", "cambiar_precio_suscripcion"
+                        ]),
                         ConversacionWpp.accion_ejecutada.is_(None),
                     )
                 ).scalars().all()
@@ -4184,6 +4698,224 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         enviar_whatsapp(from_number, msg_desc)
                         return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
+                elif tipo_flujo == "verificacion_duplicado_suscripcion":
+                    if _es_confirmacion_gasto_aparte(mensaje_texto):
+                        entidades_pend = conv_activa_dup.slot_filling_estado
+                        tx_creada, msg_confirm = _registrar_movimiento_directo(usuario, entidades_pend, db)
+                        conv_activa_dup.slot_filling_activo = False
+                        conv_activa_dup.accion_ejecutada = str(tx_creada.id) if tx_creada else "error"
+                        nueva_conv = ConversacionWpp(
+                            usuario_id=usuario.id,
+                            wamid=wamid,
+                            mensaje_usuario=mensaje_texto,
+                            tipo_mensaje=TipoMensajeWpp.TEXTO,
+                            transcripcion=None,
+                            mensaje_bot=msg_confirm,
+                            intent_detectado="confirmar_gasto_aparte",
+                            entidades=entidades_pend,
+                            accion_ejecutada=str(tx_creada.id) if tx_creada else None,
+                            confianza=Decimal("1.000"),
+                            slot_filling_activo=False,
+                            slot_filling_estado=None,
+                        )
+                        db.add(nueva_conv)
+                        db.commit()
+                        enviar_whatsapp(from_number, msg_confirm)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                    elif _es_cancelacion(mensaje_texto) or _es_descarte_duplicado(mensaje_texto):
+                        conv_activa_dup.slot_filling_activo = False
+                        conv_activa_dup.accion_ejecutada = "descartado_por_duplicado"
+                        msg_desc = "Listo, cancelado."
+                        nueva_conv = ConversacionWpp(
+                            usuario_id=usuario.id,
+                            wamid=wamid,
+                            mensaje_usuario=mensaje_texto,
+                            tipo_mensaje=TipoMensajeWpp.TEXTO,
+                            transcripcion=None,
+                            mensaje_bot=msg_desc,
+                            intent_detectado="cancelar",
+                            entidades={},
+                            accion_ejecutada="cancelada",
+                            confianza=Decimal("1.000"),
+                            slot_filling_activo=False,
+                            slot_filling_estado=None,
+                        )
+                        db.add(nueva_conv)
+                        db.commit()
+                        enviar_whatsapp(from_number, msg_desc)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                elif tipo_flujo == "ambiguedad_suscripcion":
+                    norm_amb = normalizar_texto(mensaje_texto)
+                    srv_nom = conv_activa_dup.slot_filling_estado.get("servicio")
+                    if any(w in norm_amb for w in ["suscripcion", "suscripción", "me suscribi", "me suscribí", "es una suscripcion", "es suscripcion", "abono"]):
+                        srv_cat = buscar_servicio_por_texto(srv_nom) if srv_nom else None
+                        if srv_cat and srv_cat.get("frecuencia_sugerida"):
+                            frec_tipica = srv_cat["frecuencia_sugerida"]
+                            msg_frec = f"¿Con qué frecuencia se paga {srv_nom}? (lo habitual es {frec_tipica}: mensual, bimestral, trimestral, semestral o anual)"
+                        else:
+                            msg_frec = f"¿Con qué frecuencia se paga {srv_nom}? (mensual, bimestral, trimestral, semestral o anual)"
+
+                        conv_activa_dup.slot_filling_estado = {
+                            "tipo_flujo": "crear_suscripcion_frecuencia",
+                            "servicio": srv_nom,
+                            "monto": conv_activa_dup.slot_filling_estado.get("monto"),
+                            "moneda": conv_activa_dup.slot_filling_estado.get("moneda", "ARS"),
+                        }
+                        db.commit()
+                        enviar_whatsapp(from_number, msg_frec)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                    elif any(w in norm_amb for w in ["gasto", "unico", "único", "gasto unico", "es un gasto"]):
+                        msg_monto = f"¿Cuánto gastaste en {srv_nom}?"
+                        conv_activa_dup.slot_filling_estado = {
+                            "tipo_flujo": "pedir_monto_gasto",
+                            "concepto": srv_nom,
+                            "categoria": "Entretenimiento",
+                        }
+                        db.commit()
+                        enviar_whatsapp(from_number, msg_monto)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                elif tipo_flujo == "crear_suscripcion_frecuencia":
+                    frec = _extraer_frecuencia_mencionada(mensaje_texto)
+                    if frec:
+                        srv_nom = conv_activa_dup.slot_filling_estado.get("servicio")
+                        monto_val = conv_activa_dup.slot_filling_estado.get("monto")
+                        moneda_val = conv_activa_dup.slot_filling_estado.get("moneda", "ARS")
+                        if monto_val is not None:
+                            billetera_obj = db.query(Billetera).filter(Billetera.usuario_id == usuario.id, Billetera.es_principal == True).first()
+                            if not billetera_obj:
+                                billetera_obj = db.query(Billetera).filter(Billetera.usuario_id == usuario.id).first()
+
+                            proximo_cobro = suscripcion_service.calcular_siguiente_cobro(hoy_argentina(), frec)
+                            fecha_fmt = f"{proximo_cobro.day} de {MESES_ES_GEN[proximo_cobro.month - 1]}"
+                            mon_enum = Moneda.USD if moneda_val == "USD" else Moneda.ARS
+                            monto_fmt = formatear_monto(float(monto_val), mon_enum)
+                            medio_pago_txt = f"desde {billetera_obj.nombre}" if billetera_obj else ""
+                            propuesta_msg = f"Voy a programar la suscripción a {srv_nom}: {monto_fmt} {frec} {medio_pago_txt}, primer cobro el {fecha_fmt}. ¿Confirmás?"
+
+                            conv_activa_dup.slot_filling_activo = False
+                            conv_activa_dup.accion_ejecutada = "propuesta_creada"
+                            db.flush()
+
+                            srv_cat = buscar_servicio_por_texto(srv_nom) if srv_nom else None
+                            cat_sugerida = srv_cat.get("categoria_sugerida") if srv_cat else "Entretenimiento"
+
+                            nueva_conv = ConversacionWpp(
+                                usuario_id=usuario.id,
+                                wamid=wamid,
+                                mensaje_usuario=mensaje_texto,
+                                tipo_mensaje=TipoMensajeWpp.TEXTO,
+                                transcripcion=None,
+                                mensaje_bot=propuesta_msg,
+                                intent_detectado="agregar_suscripcion",
+                                entidades={
+                                    "servicio": srv_nom,
+                                    "monto": float(monto_val),
+                                    "moneda": moneda_val,
+                                    "frecuencia": frec,
+                                    "billetera_id": str(billetera_obj.id) if billetera_obj else None,
+                                    "medio_pago_txt": medio_pago_txt,
+                                    "proximo_cobro": proximo_cobro.isoformat(),
+                                    "categoria": cat_sugerida,
+                                },
+                                accion_ejecutada=None,
+                                confianza=Decimal("1.000"),
+                                slot_filling_activo=False,
+                                slot_filling_estado=None,
+                            )
+                            db.add(nueva_conv)
+                            db.commit()
+                            enviar_whatsapp(from_number, propuesta_msg)
+                            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        else:
+                            msg_monto = f"¿Cuánto pagás por {srv_nom}?"
+                            conv_activa_dup.slot_filling_estado["frecuencia"] = frec
+                            conv_activa_dup.slot_filling_estado["tipo_flujo"] = "crear_suscripcion_monto"
+                            db.commit()
+                            enviar_whatsapp(from_number, msg_monto)
+                            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    else:
+                        enviar_whatsapp(from_number, "Por favor elegí una frecuencia: mensual, bimestral, trimestral, semestral o anual.")
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                elif tipo_flujo == "duplicado_suscripcion_existente":
+                    norm_dup = normalizar_texto(mensaje_texto)
+                    if any(w in norm_dup for w in ["otra", "otra igual", "crear otra", "si", "sí", "registrar otra"]):
+                        srv_nom = conv_activa_dup.slot_filling_estado.get("servicio")
+                        monto_val = conv_activa_dup.slot_filling_estado.get("monto")
+                        moneda_val = conv_activa_dup.slot_filling_estado.get("moneda", "ARS")
+                        frec = conv_activa_dup.slot_filling_estado.get("frecuencia") or "mensual"
+                        billetera_obj = db.query(Billetera).filter(Billetera.usuario_id == usuario.id, Billetera.es_principal == True).first()
+                        if not billetera_obj:
+                            billetera_obj = db.query(Billetera).filter(Billetera.usuario_id == usuario.id).first()
+
+                        proximo_cobro = suscripcion_service.calcular_siguiente_cobro(hoy_argentina(), frec)
+                        fecha_fmt = f"{proximo_cobro.day} de {MESES_ES_GEN[proximo_cobro.month - 1]}"
+                        mon_enum = Moneda.USD if moneda_val == "USD" else Moneda.ARS
+                        monto_fmt = formatear_monto(float(monto_val), mon_enum)
+                        medio_pago_txt = f"desde {billetera_obj.nombre}" if billetera_obj else ""
+                        propuesta_msg = f"Voy a programar la suscripción a {srv_nom}: {monto_fmt} {frec} {medio_pago_txt}, primer cobro el {fecha_fmt}. ¿Confirmás?"
+
+                        conv_activa_dup.slot_filling_activo = False
+                        conv_activa_dup.accion_ejecutada = "propuesta_creada"
+                        db.flush()
+
+                        srv_cat = buscar_servicio_por_texto(srv_nom) if srv_nom else None
+                        cat_sugerida = srv_cat.get("categoria_sugerida") if srv_cat else "Entretenimiento"
+
+                        nueva_conv = ConversacionWpp(
+                            usuario_id=usuario.id,
+                            wamid=wamid,
+                            mensaje_usuario=mensaje_texto,
+                            tipo_mensaje=TipoMensajeWpp.TEXTO,
+                            transcripcion=None,
+                            mensaje_bot=propuesta_msg,
+                            intent_detectado="agregar_suscripcion",
+                            entidades={
+                                "servicio": srv_nom,
+                                "monto": float(monto_val),
+                                "moneda": moneda_val,
+                                "frecuencia": frec,
+                                "billetera_id": str(billetera_obj.id) if billetera_obj else None,
+                                "medio_pago_txt": medio_pago_txt,
+                                "proximo_cobro": proximo_cobro.isoformat(),
+                                "categoria": cat_sugerida,
+                            },
+                            accion_ejecutada=None,
+                            confianza=Decimal("1.000"),
+                            slot_filling_activo=False,
+                            slot_filling_estado=None,
+                        )
+                        db.add(nueva_conv)
+                        db.commit()
+                        enviar_whatsapp(from_number, propuesta_msg)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    else:
+                        conv_activa_dup.slot_filling_activo = False
+                        conv_activa_dup.accion_ejecutada = "cancelada"
+                        msg_desc = "Listo, cancelado."
+                        nueva_conv = ConversacionWpp(
+                            usuario_id=usuario.id,
+                            wamid=wamid,
+                            mensaje_usuario=mensaje_texto,
+                            tipo_mensaje=TipoMensajeWpp.TEXTO,
+                            transcripcion=None,
+                            mensaje_bot=msg_desc,
+                            intent_detectado="cancelar",
+                            entidades={},
+                            accion_ejecutada="cancelada",
+                            confianza=Decimal("1.000"),
+                            slot_filling_activo=False,
+                            slot_filling_estado=None,
+                        )
+                        db.add(nueva_conv)
+                        db.commit()
+                        enviar_whatsapp(from_number, msg_desc)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
             # 4. Chequeo determinístico de confirmación con bloqueo de concurrencia (Tarea 2)
             if _es_confirmacion(mensaje_texto):
                 # Prioridad 1: propuesta de deshacer pendiente
@@ -4246,6 +4978,75 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         intent_detectado="confirmar_transferencia",
                         entidades={},
                         accion_ejecutada=f"transferencia:{tr_creada.id}" if tr_creada else ("ya_confirmada" if ya_conf else None),
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, msg_confirm)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                # Prioridad 2.6: propuesta de dar de baja suscripción pendiente
+                prop_baja = _buscar_propuesta_baja_suscripcion_pendiente(usuario.id, db)
+                if prop_baja:
+                    sub_bajada, msg_confirm, ya_conf = _confirmar_propuesta_baja_suscripcion(usuario, db)
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=msg_confirm,
+                        intent_detectado="confirmar_baja_suscripcion",
+                        entidades={},
+                        accion_ejecutada=f"baja:{sub_bajada.id}" if sub_bajada else ("ya_bajada" if ya_conf else None),
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, msg_confirm)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                # Prioridad 2.7: propuesta de cambio de precio de suscripción pendiente
+                prop_cp = _buscar_propuesta_cambio_precio_pendiente(usuario.id, db)
+                if prop_cp:
+                    hist_cp, msg_confirm, ya_conf = _confirmar_propuesta_cambio_precio(usuario, db)
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=msg_confirm,
+                        intent_detectado="confirmar_cambio_precio",
+                        entidades={},
+                        accion_ejecutada=f"precio:{hist_cp.id}" if hist_cp else ("ya_actualizado" if ya_conf else None),
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, msg_confirm)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                # Prioridad 2.8: propuesta de alta de suscripción pendiente
+                prop_sub = _buscar_propuesta_suscripcion_pendiente(usuario.id, db)
+                if prop_sub:
+                    sub_creada, msg_confirm, ya_conf = _confirmar_propuesta_suscripcion(usuario, db)
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=msg_confirm,
+                        intent_detectado="confirmar_suscripcion",
+                        entidades={},
+                        accion_ejecutada=str(sub_creada.id) if sub_creada else ("ya_creada" if ya_conf else None),
                         confianza=Decimal("1.000"),
                         slot_filling_activo=False,
                         slot_filling_estado=None,
@@ -4376,37 +5177,59 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.flush()
 
                     # Chequeo de duplicados antes de construir propuesta
-                    cat_id_chk, _ = _resolver_categoria_y_subcategoria(
-                        estado_previo_bill.get("categoria"), usuario.id, db, tipo=tipo_mov
-                    )
-                    tx_dup = _buscar_transaccion_duplicada_reciente(
-                        usuario.id,
-                        Decimal(str(estado_previo_bill["monto"])),
-                        moneda_sel,
-                        cat_id_chk,
-                        db,
-                    )
-                    if tx_dup:
-                        hora_dup = tx_dup.fecha_creacion.astimezone(TZ_ARGENTINA).strftime("%H:%M")
-                        cat_disp = _nombre_corto_categoria(estado_previo_bill.get("categoria"))
-                        m_fmt = formatear_monto(float(estado_previo_bill["monto"]), moneda_sel)
-                        propuesta_msg = f"A las {hora_dup} ya registraste {m_fmt} en {cat_disp}. ¿Es un movimiento nuevo o se te repitió?"
-                        intent_val = "verificar_duplicado"
+                    sub_cobrada, tx_cobrada = (None, None)
+                    if tipo_mov == "egreso":
+                        sub_cobrada, tx_cobrada = _buscar_suscripcion_cobrada_periodo_actual(
+                            usuario.id,
+                            Decimal(str(estado_previo_bill["monto"])),
+                            estado_previo_bill.get("servicio") or estado_previo_bill.get("descripcion") or estado_previo_bill.get("concepto") or mensaje_texto,
+                            db,
+                        )
+                    if sub_cobrada and tx_cobrada:
+                        m_fmt = formatear_monto(float(tx_cobrada.monto), tx_cobrada.moneda)
+                        propuesta_msg = f"Aviso: ya se cobró automáticamente {m_fmt} de {sub_cobrada.nombre} este período. ¿Es un gasto aparte o querés cancelarlo?"
+                        intent_val = "verificar_duplicado_suscripcion"
                         slot_activo_val = True
                         slot_estado_val = {
                             **estado_previo_bill,
-                            "tipo_flujo": "verificacion_duplicado",
+                            "tipo_flujo": "verificacion_duplicado_suscripcion",
+                            "suscripcion_id": str(sub_cobrada.id),
+                            "servicio_nombre": sub_cobrada.nombre,
                             "billetera_resuelta_nombre": billetera_elegida.nombre,
-                            "hora_anterior": hora_dup,
-                            "datos_faltantes": ["confirmar_duplicado"],
+                            "datos_faltantes": ["confirmar_gasto_aparte"],
                         }
                     else:
-                        propuesta_msg = _construir_propuesta_transaccion(
-                            estado_previo_bill, billetera_elegida.nombre, se_asumio_principal=False, billetera_moneda=billetera_elegida.moneda
+                        cat_id_chk, _ = _resolver_categoria_y_subcategoria(
+                            estado_previo_bill.get("categoria"), usuario.id, db, tipo=tipo_mov
                         )
-                        intent_val = "registrar_transaccion"
-                        slot_activo_val = False
-                        slot_estado_val = None
+                        tx_dup = _buscar_transaccion_duplicada_reciente(
+                            usuario.id,
+                            Decimal(str(estado_previo_bill["monto"])),
+                            moneda_sel,
+                            cat_id_chk,
+                            db,
+                        )
+                        if tx_dup:
+                            hora_dup = tx_dup.fecha_creacion.astimezone(TZ_ARGENTINA).strftime("%H:%M")
+                            cat_disp = _nombre_corto_categoria(estado_previo_bill.get("categoria"))
+                            m_fmt = formatear_monto(float(estado_previo_bill["monto"]), moneda_sel)
+                            propuesta_msg = f"A las {hora_dup} ya registraste {m_fmt} en {cat_disp}. ¿Es un movimiento nuevo o se te repitió?"
+                            intent_val = "verificar_duplicado"
+                            slot_activo_val = True
+                            slot_estado_val = {
+                                **estado_previo_bill,
+                                "tipo_flujo": "verificacion_duplicado",
+                                "billetera_resuelta_nombre": billetera_elegida.nombre,
+                                "hora_anterior": hora_dup,
+                                "datos_faltantes": ["confirmar_duplicado"],
+                            }
+                        else:
+                            propuesta_msg = _construir_propuesta_transaccion(
+                                estado_previo_bill, billetera_elegida.nombre, se_asumio_principal=False, billetera_moneda=billetera_elegida.moneda
+                            )
+                            intent_val = "registrar_transaccion"
+                            slot_activo_val = False
+                            slot_estado_val = None
 
                     nueva_conv = ConversacionWpp(
                         usuario_id=usuario.id,
@@ -4812,6 +5635,286 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     enviar_whatsapp(from_number, resp_tr)
                     return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
+            # 7.8 Detección determinística de consultas de suscripciones (Tarea 7)
+            if _es_consulta_suscripciones(mensaje_texto):
+                msg_resp = _procesar_consulta_suscripciones(usuario, db)
+                nueva_conv = ConversacionWpp(
+                    usuario_id=usuario.id,
+                    wamid=wamid,
+                    mensaje_usuario=mensaje_texto,
+                    tipo_mensaje=TipoMensajeWpp.TEXTO,
+                    transcripcion=None,
+                    mensaje_bot=msg_resp,
+                    intent_detectado="consultar_suscripciones",
+                    entidades={},
+                    accion_ejecutada="consulta",
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=False,
+                    slot_filling_estado=None,
+                )
+                db.add(nueva_conv)
+                db.commit()
+                enviar_whatsapp(from_number, msg_resp)
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            # 7.9 Detección determinística de baja de suscripciones (Tarea 5)
+            es_baja, srv_baja = _es_pedido_baja_suscripcion(mensaje_texto)
+            if es_baja:
+                sub_candidata = _buscar_suscripcion_activa_por_nombre(usuario.id, srv_baja, db)
+                if not sub_candidata:
+                    srv_display = srv_baja or "ese servicio"
+                    msg_resp = f"No tenés ninguna suscripción activa a {srv_display}."
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=msg_resp,
+                        intent_detectado="dar_baja_suscripcion",
+                        entidades={},
+                        accion_ejecutada="no_encontrada",
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, msg_resp)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                pv = suscripcion_service.obtener_precio_vigente(db, sub_candidata.id)
+                m_val = pv.monto if pv else Decimal("0")
+                mon_val = pv.moneda if pv else "ARS"
+                frec_str = sub_candidata.frecuencia.value if hasattr(sub_candidata.frecuencia, "value") else str(sub_candidata.frecuencia)
+                m_fmt = formatear_monto(float(m_val), Moneda.USD if mon_val == "USD" else Moneda.ARS)
+                msg_propuesta = f"¿Confirmás dar de baja la suscripción a {sub_candidata.nombre} ({m_fmt} {frec_str})?"
+
+                nueva_conv = ConversacionWpp(
+                    usuario_id=usuario.id,
+                    wamid=wamid,
+                    mensaje_usuario=mensaje_texto,
+                    tipo_mensaje=TipoMensajeWpp.TEXTO,
+                    transcripcion=None,
+                    mensaje_bot=msg_propuesta,
+                    intent_detectado="dar_baja_suscripcion",
+                    entidades={"suscripcion_id": str(sub_candidata.id), "nombre": sub_candidata.nombre},
+                    accion_ejecutada=None,
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=False,
+                    slot_filling_estado=None,
+                )
+                db.add(nueva_conv)
+                db.commit()
+                enviar_whatsapp(from_number, msg_propuesta)
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            # 7.10 Detección determinística de cambio de precio de suscripción (Tarea 6)
+            es_cp, srv_cp, nuevo_precio = _es_cambio_precio_suscripcion(mensaje_texto)
+            if es_cp and nuevo_precio:
+                sub_candidata = _buscar_suscripcion_activa_por_nombre(usuario.id, srv_cp, db)
+                if not sub_candidata:
+                    srv_display = srv_cp or "ese servicio"
+                    msg_resp = f"No tenés ninguna suscripción activa a {srv_display}."
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=msg_resp,
+                        intent_detectado="cambiar_precio_suscripcion",
+                        entidades={},
+                        accion_ejecutada="no_encontrada",
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, msg_resp)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                pv = suscripcion_service.obtener_precio_vigente(db, sub_candidata.id)
+                m_ant = pv.monto if pv else Decimal("0")
+                mon_val = pv.moneda if pv else "ARS"
+                mon_enum = Moneda.USD if mon_val == "USD" else Moneda.ARS
+                m_ant_fmt = formatear_monto(float(m_ant), mon_enum)
+                m_nuevo_fmt = formatear_monto(float(nuevo_precio), mon_enum)
+
+                msg_propuesta = f"¿Confirmás actualizar el precio de {sub_candidata.nombre} de {m_ant_fmt} a {m_nuevo_fmt}?"
+                nueva_conv = ConversacionWpp(
+                    usuario_id=usuario.id,
+                    wamid=wamid,
+                    mensaje_usuario=mensaje_texto,
+                    tipo_mensaje=TipoMensajeWpp.TEXTO,
+                    transcripcion=None,
+                    mensaje_bot=msg_propuesta,
+                    intent_detectado="cambiar_precio_suscripcion",
+                    entidades={
+                        "suscripcion_id": str(sub_candidata.id),
+                        "nombre": sub_candidata.nombre,
+                        "nuevo_monto": float(nuevo_precio),
+                        "moneda": mon_val,
+                    },
+                    accion_ejecutada=None,
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=False,
+                    slot_filling_estado=None,
+                )
+                db.add(nueva_conv)
+                db.commit()
+                enviar_whatsapp(from_number, msg_propuesta)
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            # 7.11 Detección determinística de ambigüedad suscripción vs gasto suelto (Tarea 3.4)
+            es_amb, srv_amb = _detectar_ambiguedad_suscripcion(mensaje_texto)
+            if es_amb and srv_amb:
+                msg_pregunta = f"¿Es un gasto único o una suscripción a {srv_amb}?"
+                nueva_conv = ConversacionWpp(
+                    usuario_id=usuario.id,
+                    wamid=wamid,
+                    mensaje_usuario=mensaje_texto,
+                    tipo_mensaje=TipoMensajeWpp.TEXTO,
+                    transcripcion=None,
+                    mensaje_bot=msg_pregunta,
+                    intent_detectado="ambiguedad_suscripcion",
+                    entidades={"servicio": srv_amb},
+                    accion_ejecutada=None,
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=True,
+                    slot_filling_estado={"tipo_flujo": "ambiguedad_suscripcion", "servicio": srv_amb},
+                )
+                db.add(nueva_conv)
+                db.commit()
+                enviar_whatsapp(from_number, msg_pregunta)
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            # 7.12 Detección determinística de alta de suscripción (Tarea 4)
+            if _es_intento_alta_suscripcion(mensaje_texto):
+                srv_nom = _extraer_nombre_servicio(mensaje_texto)
+                monto_sub, mon_sub = _extraer_monto_y_moneda_suscripcion(mensaje_texto)
+                if srv_nom:
+                    # Verificar si ya tiene suscripción activa a este servicio (Tarea 4.9)
+                    sub_act = _buscar_suscripcion_activa_por_nombre(usuario.id, srv_nom, db)
+                    if sub_act:
+                        pv = suscripcion_service.obtener_precio_vigente(db, sub_act.id)
+                        m_val = pv.monto if pv else Decimal("0")
+                        mon_val = pv.moneda if pv else "ARS"
+                        mon_enum = Moneda.USD if mon_val == "USD" else Moneda.ARS
+                        m_fmt = formatear_monto(float(m_val), mon_enum)
+                        frec_str = sub_act.frecuencia.value if hasattr(sub_act.frecuencia, "value") else str(sub_act.frecuencia)
+                        msg_aviso = f"Ya tenés una suscripción activa a {sub_act.nombre} por {m_fmt} {frec_str}. ¿Querés registrar otra igual o te referías a la existente?"
+                        nueva_conv = ConversacionWpp(
+                            usuario_id=usuario.id,
+                            wamid=wamid,
+                            mensaje_usuario=mensaje_texto,
+                            tipo_mensaje=TipoMensajeWpp.TEXTO,
+                            transcripcion=None,
+                            mensaje_bot=msg_aviso,
+                            intent_detectado="agregar_suscripcion",
+                            entidades={
+                                "servicio": srv_nom,
+                                "monto": float(monto_sub) if monto_sub else None,
+                                "moneda": mon_sub,
+                            },
+                            accion_ejecutada=None,
+                            confianza=Decimal("1.000"),
+                            slot_filling_activo=True,
+                            slot_filling_estado={
+                                "tipo_flujo": "duplicado_suscripcion_existente",
+                                "servicio": srv_nom,
+                                "monto": float(monto_sub) if monto_sub else None,
+                                "moneda": mon_sub,
+                            },
+                        )
+                        db.add(nueva_conv)
+                        db.commit()
+                        enviar_whatsapp(from_number, msg_aviso)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                    # Verificar frecuencia (Tarea 4.3)
+                    frecuencia = _extraer_frecuencia_mencionada(mensaje_texto)
+                    if not frecuencia:
+                        srv_cat = buscar_servicio_por_texto(srv_nom)
+                        if srv_cat and srv_cat.get("frecuencia_sugerida"):
+                            frec_tipica = srv_cat["frecuencia_sugerida"]
+                            msg_frec = f"¿Con qué frecuencia se paga {srv_nom}? (lo habitual es {frec_tipica}: mensual, bimestral, trimestral, semestral o anual)"
+                        else:
+                            msg_frec = f"¿Con qué frecuencia se paga {srv_nom}? (mensual, bimestral, trimestral, semestral o anual)"
+
+                        nueva_conv = ConversacionWpp(
+                            usuario_id=usuario.id,
+                            wamid=wamid,
+                            mensaje_usuario=mensaje_texto,
+                            tipo_mensaje=TipoMensajeWpp.TEXTO,
+                            transcripcion=None,
+                            mensaje_bot=msg_frec,
+                            intent_detectado="agregar_suscripcion",
+                            entidades={
+                                "servicio": srv_nom,
+                                "monto": float(monto_sub) if monto_sub else None,
+                                "moneda": mon_sub,
+                            },
+                            accion_ejecutada=None,
+                            confianza=Decimal("1.000"),
+                            slot_filling_activo=True,
+                            slot_filling_estado={
+                                "tipo_flujo": "crear_suscripcion_frecuencia",
+                                "servicio": srv_nom,
+                                "monto": float(monto_sub) if monto_sub else None,
+                                "moneda": mon_sub,
+                            },
+                        )
+                        db.add(nueva_conv)
+                        db.commit()
+                        enviar_whatsapp(from_number, msg_frec)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                    if monto_sub is not None:
+                        # Todo listo para proponer suscripción (Tarea 4.6)
+                        billetera_obj = db.query(Billetera).filter(Billetera.usuario_id == usuario.id, Billetera.es_principal == True).first()
+                        if not billetera_obj:
+                            billetera_obj = db.query(Billetera).filter(Billetera.usuario_id == usuario.id).first()
+
+                        proximo_cobro = suscripcion_service.calcular_siguiente_cobro(hoy_argentina(), frecuencia)
+                        fecha_fmt = f"{proximo_cobro.day} de {MESES_ES_GEN[proximo_cobro.month - 1]}"
+                        mon_enum = Moneda.USD if mon_sub == "USD" else Moneda.ARS
+                        monto_fmt = formatear_monto(float(monto_sub), mon_enum)
+                        medio_pago_txt = f"desde {billetera_obj.nombre}" if billetera_obj else ""
+                        propuesta_msg = f"Voy a programar la suscripción a {srv_nom}: {monto_fmt} {frecuencia} {medio_pago_txt}, primer cobro el {fecha_fmt}. ¿Confirmás?"
+
+                        srv_cat = buscar_servicio_por_texto(srv_nom)
+                        cat_sugerida = srv_cat.get("categoria_sugerida") if srv_cat else "Entretenimiento"
+
+                        nueva_conv = ConversacionWpp(
+                            usuario_id=usuario.id,
+                            wamid=wamid,
+                            mensaje_usuario=mensaje_texto,
+                            tipo_mensaje=TipoMensajeWpp.TEXTO,
+                            transcripcion=None,
+                            mensaje_bot=propuesta_msg,
+                            intent_detectado="agregar_suscripcion",
+                            entidades={
+                                "servicio": srv_nom,
+                                "monto": float(monto_sub),
+                                "moneda": mon_sub,
+                                "frecuencia": frecuencia,
+                                "billetera_id": str(billetera_obj.id) if billetera_obj else None,
+                                "medio_pago_txt": medio_pago_txt,
+                                "proximo_cobro": proximo_cobro.isoformat(),
+                                "categoria": cat_sugerida,
+                            },
+                            accion_ejecutada=None,
+                            confianza=Decimal("1.000"),
+                            slot_filling_activo=False,
+                            slot_filling_estado=None,
+                        )
+                        db.add(nueva_conv)
+                        db.commit()
+                        enviar_whatsapp(from_number, propuesta_msg)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
             # 8. Procesamiento normal de IA
             t_ia_start = time.perf_counter()
             resultado_ia = ai_service.procesar_mensaje(
@@ -5141,42 +6244,63 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                                 entidades_actuales["billetera_resuelta_nombre"] = billetera_final.nombre
                                 resultado_ia["respuesta_usuario"] = pregunta_lote
                             else:
-                                # Chequeo 2: Transacción previa en la última hora (Tarea 3)
-                                cat_id_chk, _ = _resolver_categoria_y_subcategoria(
-                                    entidades_actuales.get("categoria"), usuario.id, db, tipo=tipo_act
-                                )
-                                tx_dup = _buscar_transaccion_duplicada_reciente(
-                                    usuario_id=usuario.id,
-                                    monto=Decimal(str(entidades_actuales["monto"])),
-                                    moneda=moneda_sol,
-                                    categoria_id=cat_id_chk,
-                                    db=db,
+                                sub_cobrada, tx_cobrada = (None, None)
+                                if tipo_act == "egreso":
+                                    sub_cobrada, tx_cobrada = _buscar_suscripcion_cobrada_periodo_actual(
+                                        usuario_id=usuario.id,
+                                        monto=Decimal(str(entidades_actuales["monto"])),
+                                        nombre_servicio_o_concepto=entidades_actuales.get("servicio") or entidades_actuales.get("descripcion") or entidades_actuales.get("concepto") or mensaje_texto,
+                                        db=db,
                                     )
-                                if tx_dup:
-                                    hora_dup = tx_dup.fecha_creacion.astimezone(TZ_ARGENTINA).strftime("%H:%M")
-                                    cat_disp = _nombre_corto_categoria(entidades_actuales.get("categoria"))
-                                    m_fmt = formatear_monto(float(entidades_actuales["monto"]), moneda_sol)
-                                    pregunta_dup = f"A las {hora_dup} ya registraste {m_fmt} en {cat_disp}. ¿Es un movimiento nuevo o se te repitió?"
-                                    resultado_ia["intent"] = "verificar_duplicado"
+                                if sub_cobrada and tx_cobrada:
+                                    m_fmt = formatear_monto(float(tx_cobrada.monto), tx_cobrada.moneda)
+                                    aviso_dup_sub = f"Aviso: ya se cobró automáticamente {m_fmt} de {sub_cobrada.nombre} este período. ¿Es un gasto aparte o querés cancelarlo?"
+                                    resultado_ia["intent"] = "verificar_duplicado_suscripcion"
                                     resultado_ia["slot_filling"] = True
-                                    resultado_ia["datos_faltantes"] = ["confirmar_duplicado"]
-                                    entidades_actuales["tipo_flujo"] = "verificacion_duplicado"
+                                    resultado_ia["datos_faltantes"] = ["confirmar_gasto_aparte"]
+                                    entidades_actuales["tipo_flujo"] = "verificacion_duplicado_suscripcion"
+                                    entidades_actuales["suscripcion_id"] = str(sub_cobrada.id)
+                                    entidades_actuales["servicio_nombre"] = sub_cobrada.nombre
                                     entidades_actuales["billetera_resuelta_nombre"] = billetera_final.nombre
-                                    entidades_actuales["hora_anterior"] = hora_dup
-                                    resultado_ia["respuesta_usuario"] = pregunta_dup
+                                    resultado_ia["respuesta_usuario"] = aviso_dup_sub
                                 else:
-                                    resultado_ia["intent"] = "registrar_transaccion"
-                                    resultado_ia["slot_filling"] = False
-                                    resultado_ia["confianza"] = max(float(resultado_ia.get("confianza", 0.0)), 0.85)
-                                    resultado_ia["_asumio_principal"] = se_asumio_principal
-                                    resultado_ia["respuesta_usuario"] = _construir_propuesta_transaccion(
-                                        entidades_actuales,
-                                        billetera_final.nombre,
-                                        se_asumio_principal=se_asumio_principal,
-                                        billetera_moneda=billetera_final.moneda,
+                                    # Chequeo 2: Transacción previa en la última hora (Tarea 3)
+                                    cat_id_chk, _ = _resolver_categoria_y_subcategoria(
+                                        entidades_actuales.get("categoria"), usuario.id, db, tipo=tipo_act
                                     )
-                                    if "No se puede registrar ningún movimiento." in resultado_ia["respuesta_usuario"]:
-                                        resultado_ia["intent"] = "desconocido"
+                                    tx_dup = _buscar_transaccion_duplicada_reciente(
+                                        usuario_id=usuario.id,
+                                        monto=Decimal(str(entidades_actuales["monto"])),
+                                        moneda=moneda_sol,
+                                        categoria_id=cat_id_chk,
+                                        db=db,
+                                        )
+                                    if tx_dup:
+                                        hora_dup = tx_dup.fecha_creacion.astimezone(TZ_ARGENTINA).strftime("%H:%M")
+                                        cat_disp = _nombre_corto_categoria(entidades_actuales.get("categoria"))
+                                        m_fmt = formatear_monto(float(entidades_actuales["monto"]), moneda_sol)
+                                        pregunta_dup = f"A las {hora_dup} ya registraste {m_fmt} en {cat_disp}. ¿Es un movimiento nuevo o se te repitió?"
+                                        resultado_ia["intent"] = "verificar_duplicado"
+                                        resultado_ia["slot_filling"] = True
+                                        resultado_ia["datos_faltantes"] = ["confirmar_duplicado"]
+                                        entidades_actuales["tipo_flujo"] = "verificacion_duplicado"
+                                        entidades_actuales["billetera_resuelta_nombre"] = billetera_final.nombre
+                                        entidades_actuales["hora_anterior"] = hora_dup
+                                        resultado_ia["respuesta_usuario"] = pregunta_dup
+                                    else:
+                                        resultado_ia["intent"] = "registrar_transaccion"
+                                        resultado_ia["slot_filling"] = False
+                                        resultado_ia["confianza"] = max(float(resultado_ia.get("confianza", 0.0)), 0.85)
+                                        resultado_ia["_asumio_principal"] = se_asumio_principal
+                                        resultado_ia["respuesta_usuario"] = _construir_propuesta_transaccion(
+                                            entidades_actuales,
+                                            billetera_final.nombre,
+                                            se_asumio_principal=se_asumio_principal,
+                                            billetera_moneda=billetera_final.moneda,
+                                        )
+                                        if "No se puede registrar ningún movimiento." in resultado_ia["respuesta_usuario"]:
+                                            resultado_ia["intent"] = "desconocido"
+                                            resultado_ia["slot_filling"] = False
                                         resultado_ia["slot_filling"] = False
 
             # Enriquecer respuesta con datos reales para intents de consulta
