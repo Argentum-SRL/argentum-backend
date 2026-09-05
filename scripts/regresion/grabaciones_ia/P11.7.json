@@ -1,0 +1,150 @@
+{
+  "escenario_id": "P11.7",
+  "fecha_grabacion": "2026-09-05T18:41:18.276442+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "gasté 100 en kiosco, 200 en pan, 300 en leche, 400 en carne, 500 en verdura, 600 en cafe, 700 en taxi, 800 en bar, 900 en cena, 1000 en cine, 1100 en nafta y 1200 en peaje",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 100,
+          "moneda": "ARS",
+          "tipo": "egreso",
+          "categoria": "Kiosco",
+          "descripcion": "Kiosco",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": null,
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "transacciones_adicionales": [
+            {
+              "monto": 200,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Otros",
+              "descripcion": "Pan",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            },
+            {
+              "monto": 300,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Otros",
+              "descripcion": "Leche",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            },
+            {
+              "monto": 400,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Carnicería",
+              "descripcion": "Carne",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            },
+            {
+              "monto": 500,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Verdulería",
+              "descripcion": "Verdura",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            },
+            {
+              "monto": 600,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Cafetería",
+              "descripcion": "Café",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            },
+            {
+              "monto": 700,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Taxi / Apps",
+              "descripcion": "Taxi",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            },
+            {
+              "monto": 800,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Salidas",
+              "descripcion": "Bar",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            },
+            {
+              "monto": 900,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Restaurantes",
+              "descripcion": "Cena",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            },
+            {
+              "monto": 1000,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Otros",
+              "descripcion": "Cine",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            },
+            {
+              "monto": 1100,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Combustible",
+              "descripcion": "Nafta",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            },
+            {
+              "monto": 1200,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Peajes",
+              "descripcion": "Peaje",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            }
+          ]
+        },
+        "confianza": 0.9,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Voy a anotar $100 en Kiosco desde billetera null. ¿Va?"
+      }
+    }
+  ]
+}

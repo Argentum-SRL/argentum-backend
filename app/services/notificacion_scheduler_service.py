@@ -552,6 +552,7 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                     Transaccion.fecha >= fecha_inicio,
                     Transaccion.fecha <= fecha_fin,
                     Transaccion.es_padre_cuotas == False,
+                    Transaccion.movimiento_meta_id.is_(None),
                 ).scalar() or 0)
 
                 egresos_ars = float(db.query(func.sum(Transaccion.monto)).filter(
@@ -561,6 +562,7 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                     Transaccion.fecha >= fecha_inicio,
                     Transaccion.fecha <= fecha_fin,
                     Transaccion.es_padre_cuotas == False,
+                    Transaccion.movimiento_meta_id.is_(None),
                 ).scalar() or 0)
 
                 ingresos_usd = float(db.query(func.sum(Transaccion.monto)).filter(
@@ -570,6 +572,7 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                     Transaccion.fecha >= fecha_inicio,
                     Transaccion.fecha <= fecha_fin,
                     Transaccion.es_padre_cuotas == False,
+                    Transaccion.movimiento_meta_id.is_(None),
                 ).scalar() or 0)
 
                 egresos_usd = float(db.query(func.sum(Transaccion.monto)).filter(
@@ -579,6 +582,7 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                     Transaccion.fecha >= fecha_inicio,
                     Transaccion.fecha <= fecha_fin,
                     Transaccion.es_padre_cuotas == False,
+                    Transaccion.movimiento_meta_id.is_(None),
                 ).scalar() or 0)
 
                 hay_ars = (ingresos_ars > 0 or egresos_ars > 0)
@@ -603,6 +607,7 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                     Transaccion.fecha >= fecha_inicio,
                     Transaccion.fecha <= fecha_fin,
                     Transaccion.es_padre_cuotas == False,
+                    Transaccion.movimiento_meta_id.is_(None),
                 ).group_by(Categoria.nombre).order_by(func.sum(Transaccion.monto).desc()).first()
 
                 # Gastos hormiga: categorías con muchas transacciones de monto bajo
@@ -618,6 +623,7 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                     Transaccion.fecha >= fecha_inicio,
                     Transaccion.fecha <= fecha_fin,
                     Transaccion.es_padre_cuotas == False,
+                    Transaccion.movimiento_meta_id.is_(None),
                 ).group_by(Categoria.nombre).having(
                     func.count(Transaccion.id) >= hormiga_threshold
                 ).order_by(func.count(Transaccion.id).desc()).limit(3).all()
@@ -744,6 +750,7 @@ def _job_resumen_semanal(db_session_factory):
                         Transaccion.fecha >= lunes_pasado,
                         Transaccion.fecha <= domingo_pasado,
                         Transaccion.es_padre_cuotas == False,
+                        Transaccion.movimiento_meta_id.is_(None),
                     )
                 ).scalar() or 0)
 
@@ -755,6 +762,7 @@ def _job_resumen_semanal(db_session_factory):
                         Transaccion.fecha >= lunes_pasado,
                         Transaccion.fecha <= domingo_pasado,
                         Transaccion.es_padre_cuotas == False,
+                        Transaccion.movimiento_meta_id.is_(None),
                     )
                 ).scalar() or 0)
 
@@ -766,6 +774,7 @@ def _job_resumen_semanal(db_session_factory):
                         Transaccion.fecha >= lunes_pasado,
                         Transaccion.fecha <= domingo_pasado,
                         Transaccion.es_padre_cuotas == False,
+                        Transaccion.movimiento_meta_id.is_(None),
                     )
                 ).scalar() or 0)
 
@@ -777,6 +786,7 @@ def _job_resumen_semanal(db_session_factory):
                         Transaccion.fecha >= lunes_pasado,
                         Transaccion.fecha <= domingo_pasado,
                         Transaccion.es_padre_cuotas == False,
+                        Transaccion.movimiento_meta_id.is_(None),
                     )
                 ).scalar() or 0)
 
@@ -801,6 +811,7 @@ def _job_resumen_semanal(db_session_factory):
                         Transaccion.fecha <= domingo_pasado,
                         Transaccion.categoria_id.isnot(None),
                         Transaccion.es_padre_cuotas == False,
+                        Transaccion.movimiento_meta_id.is_(None),
                     )
                     .group_by(Categoria.nombre)
                     .order_by(sa_func.sum(Transaccion.monto).desc())

@@ -103,6 +103,13 @@ CATEGORIAS_SEED = [
             "Impuestos"
         ]
     },
+    {
+        "nombre": "Ahorro",
+        "tipo": "egreso",
+        "icono": "ahorro",
+        "color": "#2563EB",
+        "subcategorias": []
+    },
     # ── INGRESOS (4) ─────────────────────────────────────
     {
         "nombre": "Empleo",
@@ -178,6 +185,9 @@ def seed_categorias(db: Session):
             categoria = existente
             categoria.icono = cat_data["icono"]
             categoria.color = cat_data["color"]
+            if categoria.estado != "activa":
+                categoria.estado = "activa"
+                print(f"[+] Categoria reactivada: {categoria.nombre} ({categoria.tipo})")
 
         # 2. Seedear subcategorías con idempotencia estricta por categoría
         for idx, nombre_sub in enumerate(cat_data["subcategorias"]):

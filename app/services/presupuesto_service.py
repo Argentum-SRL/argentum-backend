@@ -174,6 +174,7 @@ def calcular_gasto_en_periodo(
     ).where(
         Transaccion.usuario_id == usuario_id,
         Transaccion.tipo == TipoTransaccion.EGRESO,
+        Transaccion.movimiento_meta_id.is_(None),
         or_(
             Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
             Transaccion.estado_verificacion == None
@@ -543,6 +544,8 @@ def registrar_impacto_presupuesto(db: Session, transaccion: Transaccion, reverti
     if transaccion.estado_verificacion not in [EstadoVerificacionTransaccion.CONFIRMADA, None]:
         return
     if transaccion.es_padre_cuotas:
+        return
+    if transaccion.movimiento_meta_id is not None:
         return
 
     presupuestos = db.execute(

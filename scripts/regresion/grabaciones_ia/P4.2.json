@@ -1,0 +1,77 @@
+{
+  "escenario_id": "P4.2",
+  "fecha_grabacion": "2026-09-05T18:34:13.106364+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "gasté 5000 en el kiosco",
+      "respuesta": {
+        "intent": "slot_filling",
+        "entidades": {
+          "monto": 5000,
+          "moneda": "ARS",
+          "tipo": "egreso",
+          "categoria": "Kiosco",
+          "descripcion": "Kiosco",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": null,
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "transacciones_adicionales": [],
+          "datos_faltantes": [
+            "billetera_origen"
+          ]
+        },
+        "confianza": 0.9,
+        "slot_filling": true,
+        "datos_faltantes": [
+          "billetera_origen"
+        ],
+        "respuesta_usuario": "¿Desde qué billetera salió la plata?\n\n1. Efectivo ARS\n2. Galicia\n3. Santander"
+      }
+    },
+    {
+      "call_idx": 1,
+      "mensaje": "gasté 12000 en verdulería",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 12000,
+          "moneda": "ARS",
+          "tipo": "egreso",
+          "categoria": "Verdulería",
+          "descripcion": "Verdulería",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": null,
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "transacciones_adicionales": []
+        },
+        "confianza": 0.9,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Voy a anotar $12.000 en Verdulería. También tengo registrado $5.000 en Kiosco. ¿Confirmás?"
+      }
+    }
+  ]
+}

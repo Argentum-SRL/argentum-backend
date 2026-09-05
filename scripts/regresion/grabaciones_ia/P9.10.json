@@ -1,0 +1,41 @@
+{
+  "escenario_id": "P9.10",
+  "fecha_grabacion": "2026-09-05T18:38:50.874646+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "gasté 30000 con la Amex",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 30000,
+          "moneda": "ARS",
+          "tipo": "egreso",
+          "categoria": null,
+          "descripcion": "Amex",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": null,
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": "•••• 2745",
+          "transacciones_adicionales": []
+        },
+        "confianza": 0.8,
+        "slot_filling": true,
+        "datos_faltantes": [
+          "¿Qué concepto fue?"
+        ],
+        "respuesta_usuario": "¿Qué concepto fue?"
+      }
+    }
+  ]
+}

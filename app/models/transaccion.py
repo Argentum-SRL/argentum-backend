@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from app.models.importacion import ImportacionResumen
     from app.models.tarjeta_credito import TarjetaCredito
     from app.models.suscripcion import Suscripcion
+    from app.models.movimiento_meta import MovimientoMeta
 
 from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, String, Index, text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
@@ -80,6 +81,7 @@ class Transaccion(Base):
         Index("ix_transacciones_pago_resumen_vencimiento", "tarjeta_id", "pago_resumen_vencimiento", postgresql_where=text("pago_resumen_vencimiento IS NOT NULL")),
         Index("ix_transacciones_pago_origen_id", "pago_origen_id", postgresql_where=text("pago_origen_id IS NOT NULL")),
         Index("ix_transacciones_suscripcion_id", "suscripcion_id", postgresql_where=text("suscripcion_id IS NOT NULL")),
+        Index("ix_transacciones_movimiento_meta_id", "movimiento_meta_id", postgresql_where=text("movimiento_meta_id IS NOT NULL")),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -151,6 +153,11 @@ class Transaccion(Base):
         PGUUID(as_uuid=True), ForeignKey("suscripciones.id", ondelete="SET NULL"), nullable=True, deferred=True
     )
 
+    # Vínculo al movimiento de meta que originó esta transacción (Aportes/Retiros de metas)
+    movimiento_meta_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("movimientos_meta.id", ondelete="SET NULL"), nullable=True
+    )
+
     fecha_creacion: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -162,6 +169,7 @@ class Transaccion(Base):
     tarjeta: Mapped[TarjetaCredito | None] = relationship("TarjetaCredito")
     importacion: Mapped[ImportacionResumen | None] = relationship("ImportacionResumen", back_populates="transacciones")
     suscripcion: Mapped[Suscripcion | None] = relationship("Suscripcion", back_populates="transacciones")
+    movimiento_meta: Mapped[MovimientoMeta | None] = relationship("MovimientoMeta")
 
     def __repr__(self) -> str:
         return (

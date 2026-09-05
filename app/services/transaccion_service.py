@@ -591,10 +591,14 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID):
             return {"detail": "Grupo de cuotas eliminado exitosamente"}
 
     # Revertir impacto en metas si es una transacción vinculada a una meta
-    if transaccion.descripcion.startswith("Aporte a la meta:") or transaccion.descripcion.startswith("Retiro de la meta:"):
-        from app.models.meta import Meta, EstadoMeta
+    movimiento = None
+    if transaccion.movimiento_meta_id is not None:
+        from app.models.movimiento_meta import MovimientoMeta
+        movimiento = db.get(MovimientoMeta, transaccion.movimiento_meta_id)
+
+    if not movimiento and (transaccion.descripcion.startswith("Aporte a la meta:") or transaccion.descripcion.startswith("Retiro de la meta:")):
+        from app.models.meta import Meta
         from app.models.movimiento_meta import MovimientoMeta, TipoMovimientoMeta
-        from app.models.usuario import Moneda
         
         prefix_aporte = "Aporte a la meta: "
         prefix_retiro = "Retiro de la meta: "
@@ -606,36 +610,42 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID):
             meta_nombre = transaccion.descripcion[len(prefix_retiro):]
             tipo_mov = TipoMovimientoMeta.RETIRO
             
-        meta = db.query(Meta).filter(Meta.usuario_id == usuario_id, Meta.nombre == meta_nombre).first()
-        if meta:
+        meta_hist = db.query(Meta).filter(Meta.usuario_id == usuario_id, Meta.nombre == meta_nombre).first()
+        if meta_hist:
             movimiento = db.query(MovimientoMeta).filter(
-                MovimientoMeta.meta_id == meta.id,
+                MovimientoMeta.meta_id == meta_hist.id,
                 MovimientoMeta.billetera_id == transaccion.billetera_id,
                 MovimientoMeta.monto == transaccion.monto,
                 MovimientoMeta.fecha == transaccion.fecha,
                 MovimientoMeta.tipo == tipo_mov
             ).first()
-            
-            if movimiento:
-                monto_impacto_meta = movimiento.monto
-                if movimiento.moneda_movimiento != meta.moneda:
-                    if meta.moneda == Moneda.USD and movimiento.moneda_movimiento == Moneda.ARS:
-                        monto_impacto_meta = movimiento.monto / movimiento.cotizacion_usada
-                    elif meta.moneda == Moneda.ARS and movimiento.moneda_movimiento == Moneda.USD:
-                        monto_impacto_meta = movimiento.monto * movimiento.cotizacion_usada
- 
-                if tipo_mov == TipoMovimientoMeta.APORTE:
-                    meta.monto_actual -= monto_impacto_meta
-                else:
-                    meta.monto_actual += monto_impacto_meta
-                    
-                # Ajustar estado de la meta
-                if meta.monto_actual >= meta.monto_objetivo:
-                    meta.estado = EstadoMeta.COMPLETADA
-                else:
-                    meta.estado = EstadoMeta.ACTIVA
-                    
-                db.delete(movimiento)
+
+    if movimiento:
+        from app.models.meta import Meta, EstadoMeta
+        from app.models.movimiento_meta import TipoMovimientoMeta
+        from app.models.usuario import Moneda
+        meta = db.get(Meta, movimiento.meta_id)
+        if meta:
+            monto_impacto_meta = movimiento.monto
+            if movimiento.moneda_movimiento != meta.moneda:
+                cotiz = movimiento.cotizacion_usada or Decimal("1")
+                if meta.moneda == Moneda.USD and movimiento.moneda_movimiento == Moneda.ARS:
+                    monto_impacto_meta = movimiento.monto / cotiz
+                elif meta.moneda == Moneda.ARS and movimiento.moneda_movimiento == Moneda.USD:
+                    monto_impacto_meta = movimiento.monto * cotiz
+
+            if movimiento.tipo == TipoMovimientoMeta.APORTE:
+                meta.monto_actual -= monto_impacto_meta
+            else:
+                meta.monto_actual += monto_impacto_meta
+                
+            # Ajustar estado de la meta
+            if meta.monto_actual >= meta.monto_objetivo:
+                meta.estado = EstadoMeta.COMPLETADA
+            else:
+                meta.estado = EstadoMeta.ACTIVA
+                
+        db.delete(movimiento)
 
     # Reversión de pago de resumen de tarjeta (Etapa 3A y 3B):
     if _tabla_saldo_arrastrado_existe(db):
@@ -842,11 +852,11 @@ def evaluar_gasto_inusual(db: Session, usuario_id: UUID, transaccion: Transaccio
     Utiliza tres niveles de sensibilidad según el volumen de historial de la categoría.
     """
     from app.models.usuario import Moneda
-    if transaccion.categoria_id is None or transaccion.tipo != TipoTransaccion.EGRESO:
+    if transaccion.categoria_id is None or transaccion.tipo != TipoTransaccion.EGRESO or transaccion.movimiento_meta_id is not None:
         return
 
     # 1. Obtener historial de transacciones de egreso en la misma categoría y moneda
-    # Excluyendo transacciones pendientes y la transacción actual evaluada
+    # Excluyendo transacciones pendientes, aportes a metas y la transacción actual evaluada
     stmt = (
         select(Transaccion)
         .where(
@@ -856,6 +866,7 @@ def evaluar_gasto_inusual(db: Session, usuario_id: UUID, transaccion: Transaccio
                 Transaccion.tipo == TipoTransaccion.EGRESO,
                 Transaccion.moneda == transaccion.moneda,
                 Transaccion.es_padre_cuotas == False,
+                Transaccion.movimiento_meta_id.is_(None),
                 or_(
                     Transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE,
                     Transaccion.estado_verificacion.is_(None)

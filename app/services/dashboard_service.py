@@ -162,6 +162,7 @@ def get_dashboard_resumen(
         Transaccion.usuario_id == usuario.id,
         Transaccion.es_padre_cuotas == False,
         Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
+        Transaccion.movimiento_meta_id.is_(None),
         or_(Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA, Transaccion.estado_verificacion == None)
     )
     if billetera_ids:
@@ -211,7 +212,8 @@ def get_dashboard_resumen(
         Billetera.nombre.label("extra_2"), # billetera_nombre
         cast(Transaccion.estado_verificacion, String).label("extra_3"), # estado_verificacion
         cast(Transaccion.tipo, String).label("extra_4"), # tipo_transaccion
-        Subcategoria.nombre.label("extra_5") # subcategoria_nombre
+        Subcategoria.nombre.label("extra_5"), # subcategoria_nombre
+        cast(Transaccion.movimiento_meta_id, String).label("extra_6") # movimiento_meta_id
     ).join(Categoria, Transaccion.categoria_id == Categoria.id, isouter=True)\
      .join(Billetera, Transaccion.billetera_id == Billetera.id, isouter=True)\
      .join(Subcategoria, Transaccion.subcategoria_id == Subcategoria.id, isouter=True).where(m_stmt_where)\
@@ -244,7 +246,8 @@ def get_dashboard_resumen(
         cast(null(), String).label("extra_2"),
         cast(null(), String).label("extra_3"),
         cast(null(), String).label("extra_4"),
-        cast(null(), String).label("extra_5")
+        cast(null(), String).label("extra_5"),
+        cast(null(), String).label("extra_6")
     ).where(s_stmt_where)
 
     c_stmt_where = and_(
@@ -286,7 +289,8 @@ def get_dashboard_resumen(
         cast(GrupoCuotas.tarjeta_id, String).label("extra_2"),
         cast(null(), String).label("extra_3"),
         cast(null(), String).label("extra_4"),
-        cast(null(), String).label("extra_5")
+        cast(null(), String).label("extra_5"),
+        cast(null(), String).label("extra_6")
     ).join(GrupoCuotas)\
      .join(Transaccion, GrupoCuotas.transaccion_padre_id == Transaccion.id)\
      .join(Categoria, Transaccion.categoria_id == Categoria.id, isouter=True)\
@@ -318,7 +322,8 @@ def get_dashboard_resumen(
         "id": r.id, "descripcion": r.nombre, "fecha": r.fecha.isoformat(), "monto": float(r.monto),
         "tipo": r.extra_4, "moneda": r.moneda, "billetera_nombre": r.extra_2 or "Billetera",
         "categoria_nombre": r.extra_1, "estado_verificacion": r.extra_3,
-        "subcategoria_nombre": r.extra_5
+        "subcategoria_nombre": r.extra_5,
+        "movimiento_meta_id": r.extra_6 if hasattr(r, "extra_6") else None
     } for r in actividad if r.item_tipo == "movimiento"]
 
     proximos_pagos = [{
@@ -578,6 +583,7 @@ def get_subcategorias_gasto(
         Transaccion.tipo == TipoTransaccion.EGRESO,
         Transaccion.es_padre_cuotas == False,
         Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
+        Transaccion.movimiento_meta_id.is_(None),
         or_(
             Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
             Transaccion.estado_verificacion == None

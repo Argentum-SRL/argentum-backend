@@ -1,0 +1,39 @@
+{
+  "escenario_id": "P8.7",
+  "fecha_grabacion": "2026-09-05T18:37:43.946888+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "gasté 5000 en el kiosco",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 5000,
+          "moneda": "ARS",
+          "tipo": "egreso",
+          "categoria": "Kiosco",
+          "descripcion": "Kiosco",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": null,
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "transacciones_adicionales": []
+        },
+        "confianza": 0.9,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Voy a anotar $5.000 en Kiosco. ¿Va?"
+      }
+    }
+  ]
+}

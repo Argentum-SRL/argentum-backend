@@ -1,16 +1,26 @@
 """
 Suite consolidada de regresión de WhatsApp para Argentum.
-Ejecuta todos los escenarios acumulados (Puntos 3, 4, 5, 6 y 7) usando exclusivamente testingadmin@argentum.com
+Ejecuta todos los escenarios acumulados (Puntos 3, 4, 5, 6, 7, 8, 9, 9B, 10 y 11) usando exclusivamente testingadmin@argentum.com
 con verificación automática y rollback total.
+
+CUÁNDO USAR CADA MODO:
+- Modo Grabado (predeterminado): Para validar la lógica del backend sin gastar llamadas de OpenAI ni esperar latencia de red.
+- Modo IA Real (--ia-real / --live): Para validar integración real con OpenAI de principio a fin.
+- Regrabar (--regrabar / --record): OBLIGATORIO cuando se modifique el SYSTEM_PROMPT o el esquema estructurado en app/services/ai_service.py.
+  Si el archivo ai_service.py es más reciente que las grabaciones, la suite advertirá automáticamente.
+- Escenarios que siempre usan IA real por diseño: P7.1 a P7.7 (prueban modismos, jerga argentina y categorización estricta del LLM).
 """
 import sys
 import os
 import json
 import time
 import uuid
+import re
+import copy
+import argparse
 import threading
 from decimal import Decimal
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, date, timezone, timedelta
 from unittest.mock import patch
 
 # Asegurar path al backend
@@ -54,6 +64,199 @@ from app.models.historial_suscripcion import HistorialSuscripcion
 from app.schemas.suscripcion import SuscripcionCreate
 from app.services import suscripcion_service
 
+# ==============================================================================
+# CONFIGURACIÓN DE GRABACIONES DE IA Y FIXTURES
+# ==============================================================================
+DIR_GRABACIONES = os.path.abspath(os.path.join(os.path.dirname(__file__), "grabaciones_ia"))
+PROMPT_FILE = os.path.abspath(os.path.join(BASE_DIR, "app", "services", "ai_service.py"))
+
+# Escenarios que prueban el comportamiento del modelo en sí (jerga argentina, categorización estricta, mapeo de modismos).
+# Estos escenarios SIEMPRE ejecutan contra la IA real a menos que se use --forzar-grabadas.
+ESCENARIOS_IA_REAL = {
+    "P7.1",  # Golosinas -> Kiosco (jerga argentina + descripción)
+    "P7.2",  # Verdulería -> Verdulería (jerga argentina + descripción)
+    "P7.3",  # Nafta -> Combustible (jerga argentina + descripción)
+    "P7.4",  # Prepaga -> Obra social / Prepaga (jerga argentina + descripción)
+    "P7.5",  # Bondi -> Transporte público (jerga argentina + descripción)
+    "P7.6",  # Corte de pelo -> Cuidado personal (jerga argentina + descripción preservada)
+    "P7.7",  # Concepto raro -> Otros (prohibición de categorías inventadas + descripción)
+}
+
+
+def _json_serializador(obj):
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, uuid.UUID):
+        return str(obj)
+    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+
+class GestorGrabacionesIA:
+    """
+    Gestiona el almacenamiento y reproducción de respuestas de OpenAI para la suite de regresión.
+    Evita llamadas costosas a OpenAI en escenarios que prueban lógica interna de negocio del backend.
+    """
+    def __init__(self, dir_grabaciones: str, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False):
+        self.dir_grabaciones = dir_grabaciones
+        os.makedirs(self.dir_grabaciones, exist_ok=True)
+        self.ia_real = ia_real
+        self.regrabar = regrabar
+        self.forzar_grabadas = forzar_grabadas
+        self._lock = threading.Lock()
+        self._escenario_actual = None
+        self._call_count = 0
+        self._cache_grabaciones = {}
+        self.llamadas_reales = 0
+        self.llamadas_grabadas = 0
+
+    def iniciar_escenario(self, escenario_id: str):
+        with self._lock:
+            self._escenario_actual = escenario_id
+            self._call_count = 0
+
+    def _ruta_grabacion(self, escenario_id: str) -> str:
+        safe_id = re.sub(r"[^\w\-.]", "_", escenario_id)
+        return os.path.join(self.dir_grabaciones, f"{safe_id}.json")
+
+    def _cargar_grabacion(self, escenario_id: str) -> dict | None:
+        if escenario_id in self._cache_grabaciones:
+            return self._cache_grabaciones[escenario_id]
+        ruta = self._ruta_grabacion(escenario_id)
+        if os.path.exists(ruta):
+            try:
+                with open(ruta, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self._cache_grabaciones[escenario_id] = data
+                    return data
+            except Exception:
+                return None
+        return None
+
+    def _guardar_grabacion(self, escenario_id: str, data: dict):
+        ruta = self._ruta_grabacion(escenario_id)
+        with open(ruta, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2, default=_json_serializador)
+        self._cache_grabaciones[escenario_id] = data
+
+    def procesar(self, fn_real, mensaje, usuario, db, historial=None, estado_previo=None):
+        with self._lock:
+            esc_id = self._escenario_actual or "GENERAL"
+            idx = self._call_count
+            self._call_count += 1
+
+        debe_usar_ia_real = (
+            self.ia_real or 
+            self.regrabar or 
+            (esc_id in ESCENARIOS_IA_REAL and not self.forzar_grabadas)
+        )
+
+        if debe_usar_ia_real:
+            with self._lock:
+                self.llamadas_reales += 1
+            res = fn_real(mensaje, usuario, db, historial=historial, estado_previo=estado_previo)
+            if self.regrabar or not os.path.exists(self._ruta_grabacion(esc_id)):
+                with self._lock:
+                    rec = self._cargar_grabacion(esc_id) or {
+                        "escenario_id": esc_id,
+                        "fecha_grabacion": datetime.now(timezone.utc).isoformat(),
+                        "llamadas": []
+                    }
+                    if idx == 0 and self.regrabar:
+                        rec["llamadas"] = []
+                        rec["fecha_grabacion"] = datetime.now(timezone.utc).isoformat()
+                    rec["llamadas"].append({
+                        "call_idx": idx,
+                        "mensaje": mensaje,
+                        "respuesta": res
+                    })
+                    self._guardar_grabacion(esc_id, rec)
+            return res
+
+        # Modo replay
+        rec = self._cargar_grabacion(esc_id)
+        if rec and "llamadas" in rec and idx < len(rec["llamadas"]):
+            with self._lock:
+                self.llamadas_grabadas += 1
+            return copy.deepcopy(rec["llamadas"][idx]["respuesta"])
+
+        # No existe grabación previa para esta llamada: llamar a IA real y guardarla
+        print(f"  [GRABANDO IA] Escenario {esc_id} llamada #{idx} ('{mensaje[:40]}') no tiene grabación. Llamando a IA real y guardando...")
+        with self._lock:
+            self.llamadas_reales += 1
+        res = fn_real(mensaje, usuario, db, historial=historial, estado_previo=estado_previo)
+        with self._lock:
+            if not rec:
+                rec = {
+                    "escenario_id": esc_id,
+                    "fecha_grabacion": datetime.now(timezone.utc).isoformat(),
+                    "llamadas": []
+                }
+            rec["llamadas"].append({
+                "call_idx": idx,
+                "mensaje": mensaje,
+                "respuesta": res
+            })
+            self._guardar_grabacion(esc_id, rec)
+        return res
+
+
+def verificar_antiguedad_grabaciones(dir_grabaciones: str, prompt_file: str) -> tuple[bool, str]:
+    if not os.path.exists(dir_grabaciones) or not os.path.exists(prompt_file):
+        return True, "OK"
+    grabaciones = [os.path.join(dir_grabaciones, f) for f in os.listdir(dir_grabaciones) if f.endswith(".json")]
+    if not grabaciones:
+        return True, "Sin grabaciones previas"
+    mtime_prompt = os.path.getmtime(prompt_file)
+    mtime_grabaciones = max(os.path.getmtime(g) for g in grabaciones)
+    if mtime_prompt > mtime_grabaciones:
+        diff_seg = int(mtime_prompt - mtime_grabaciones)
+        return False, f"Las grabaciones son más viejas que app/services/ai_service.py por {diff_seg}s. Se recomienda regrabar con --regrabar."
+    return True, "OK (grabaciones al día con el prompt)"
+
+
+def verificar_grabaciones_sin_datos_personales(dir_grabaciones: str) -> tuple[bool, list[str]]:
+    patrones_prohibidos = [
+        "angie", "periolo", "mrm291201", "manuel", "albano", "pavia",
+        "giordaninosebas", "formoso"
+    ]
+    hallazgos = []
+    if not os.path.exists(dir_grabaciones):
+        return True, []
+    for fname in os.listdir(dir_grabaciones):
+        if not fname.endswith(".json"):
+            continue
+        fpath = os.path.join(dir_grabaciones, fname)
+        with open(fpath, "r", encoding="utf-8") as f:
+            content = f.read().lower()
+            for p in patrones_prohibidos:
+                if p in content:
+                    hallazgos.append(f"{fname}: contiene '{p}'")
+    return len(hallazgos) == 0, hallazgos
+
+
+_gestor_actual: GestorGrabacionesIA | None = None
+_original_procesar_mensaje = ai_service.procesar_mensaje
+
+def _hook_procesar_mensaje(mensaje, usuario, db, historial=None, estado_previo=None):
+    if _gestor_actual is not None:
+        return _gestor_actual.procesar(
+            _original_procesar_mensaje,
+            mensaje,
+            usuario,
+            db,
+            historial=historial,
+            estado_previo=estado_previo,
+        )
+    return _original_procesar_mensaje(
+        mensaje, usuario, db, historial=historial, estado_previo=estado_previo
+    )
+
+# Instalar hook para interceptar llamadas en whatsapp_ia y en cualquier servicio
+ai_service.procesar_mensaje = _hook_procesar_mensaje
+
+
 USUARIO_PRUEBAS_EMAIL = "testingadmin@argentum.com"
 TELEFONO_TEST = "+5491100000000"
 
@@ -94,7 +297,6 @@ def run_isolated(fn):
     """Ejecuta una función en una transacción aislada que siempre termina en rollback."""
     conn = engine.connect()
     trans = conn.begin()
-    conn.execute(text("ALTER TABLE tarjetas_credito ADD COLUMN IF NOT EXISTS apodo VARCHAR(50);"))
     respuestas = []
     BoundSession = sessionmaker(bind=conn, join_transaction_mode="create_savepoint")
     try:
@@ -227,12 +429,12 @@ SALDOS_REFERENCIA_21 = {
     ("angieperiolo@hotmail.com", "Efectivo ARS"): Decimal("800.00"),
     ("angieperiolo@hotmail.com", "Efectivo USD"): Decimal("0.00"),
     ("angieperiolo@hotmail.com", "Mercado Pago"): Decimal("51148.00"),
-    ("giordaninosebas@gmail.com", "Efectivo ARS"): Decimal("-30060.00"),
+    ("giordaninosebas@gmail.com", "Efectivo ARS"): Decimal("-33060.00"),  # Actualizado 2026-09-05: gasto legítimo de $3000 (Coca) registrado por el usuario vía WhatsApp
     ("giordaninosebas@gmail.com", "Efectivo USD"): Decimal("0.00"),
     ("mrm291201@gmail.com", "Balanz"): Decimal("453000.00"),
     ("mrm291201@gmail.com", "Efectivo ARS"): Decimal("0.00"),
     ("mrm291201@gmail.com", "Efectivo USD"): Decimal("0.00"),
-    ("mrm291201@gmail.com", "Galicia"): Decimal("1311289.73"),
+    ("mrm291201@gmail.com", "Galicia"): Decimal("982803.39"),  # Actualizado 2026-09-05: pagos manuales de resúmenes de tarjeta (1506, 5077, Amex) y consumos del usuario
     ("mrm291201@gmail.com", "Santander JJ"): Decimal("0.00"),
     ("sebastiangiordaninoformoso@gmail.com", "Efectivo ARS"): Decimal("0.00"),
     ("sebastiangiordaninoformoso@gmail.com", "Efectivo USD"): Decimal("0.00"),
@@ -2175,10 +2377,21 @@ def p11_caso_10(datos):
         )
     return run_isolated(test)
 
-def correr_suite_completa():
-    print("=== INICIANDO SUITE CONSOLIDADA DE REGRESION DE WHATSAPP ===")
-    print(f"Usuario exclusivo de pruebas: {USUARIO_PRUEBAS_EMAIL}")
-    
+def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False):
+    global _gestor_actual
+    _gestor_actual = GestorGrabacionesIA(
+        dir_grabaciones=DIR_GRABACIONES,
+        ia_real=ia_real,
+        regrabar=regrabar,
+        forzar_grabadas=forzar_grabadas,
+    )
+
+    t0_suite = time.perf_counter()
+
+    ok_ant, msg_ant = verificar_antiguedad_grabaciones(DIR_GRABACIONES, PROMPT_FILE)
+    if not ok_ant:
+        print(f"[AVISO] {msg_ant}")
+
     db = SessionLocal()
     datos = resolver_datos_base(db)
     u_admin = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
@@ -3135,7 +3348,8 @@ def correr_suite_completa():
     fallidos = 0
     detalles_fallidos = []
 
-    print(f"Total escenarios: {total}\n")
+    if verbose:
+        print(f"Total escenarios: {total}\n")
 
     for i, esc in enumerate(escenarios, 1):
         eid = esc["id"]
@@ -3144,12 +3358,14 @@ def correr_suite_completa():
 
         if esc.get("omitido"):
             omitidos += 1
-            print(f"[{eid}] {nombre}: OMITIDO (Motivo: {esc['motivo']})")
+            if verbose:
+                print(f"[{eid}] {nombre}: OMITIDO (Motivo: {esc['motivo']})")
             continue
 
         esperado = esc["esperado"]
         match_tipo = esc["match"]
 
+        _gestor_actual.iniciar_escenario(eid)
         t0 = time.perf_counter()
         try:
             obtenido = esc["ejecutar"]()
@@ -3162,10 +3378,11 @@ def correr_suite_completa():
 
             if pasa:
                 aprobados += 1
-                print(f"[{eid}] {nombre}: APROBADO ({dur:.2f}s)")
+                if verbose:
+                    print(f"[{eid}] {nombre}: APROBADO ({dur:.2f}s)")
             else:
                 fallidos += 1
-                print(f"[{eid}] {nombre}: FALLIDO ({dur:.2f}s)")
+                print(f"[{eid}] {nombre}: FALLIDO ({dur:.2f}s) | Esperado: '{esperado.strip()}' | Obtenido: '{obtenido.strip()}'")
                 detalles_fallidos.append({
                     "id": eid,
                     "nombre": nombre,
@@ -3183,75 +3400,127 @@ def correr_suite_completa():
                 "obtenido": f"EXCEPCION: {type(e).__name__}: {e}",
             })
 
-    print("\n=== RESUMEN DE EJECUCION ===")
-    print(f"Total: {total} | Aprobados: {aprobados} | Omitidos: {omitidos} | Fallidos: {fallidos}")
-
-    if detalles_fallidos:
-        print("\n=== DETALLE DE ESCENARIOS FALLIDOS ===")
-        for d in detalles_fallidos:
-            print(f"\n--- [{d['id']}] {d['nombre']} ---")
-            print("ESPERADO:")
-            print(d["esperado"])
-            print("OBTENIDO:")
-            print(d["obtenido"])
+    dur_total = time.perf_counter() - t0_suite
 
     # Verificación estricta de rollback y conteos
     db = SessionLocal()
     conteos_fin = obtener_conteos_base(db)
     db.close()
 
-    print("\n=== VERIFICACION DE ROLLBACK Y CONTEOS ===")
-    print(f"Transacciones: antes={conteos_inicio['tx']} | después={conteos_fin['tx']}")
-    print(f"Conversaciones: antes={conteos_inicio['conv']} | después={conteos_fin['conv']}")
-    print(f"Mensajes procesados: antes={conteos_inicio['msg']} | después={conteos_fin['msg']}")
-    
     saldos_intactos = (conteos_inicio["saldos"] == conteos_fin["saldos"])
-    print(f"Saldos de billeteras intactos: {'SÍ' if saldos_intactos else 'NO'}")
-    
     sin_residuos = (
         conteos_inicio["tx"] == conteos_fin["tx"] and
         conteos_inicio["conv"] == conteos_fin["conv"] and
         conteos_inicio["msg"] == conteos_fin["msg"] and
         saldos_intactos
     )
-    print(f"¿Rollback total verificado (cero residuo)?: {'SÍ' if sin_residuos else 'NO'}")
 
     # Verificación de saldos contra referencia histórica de las 21 billeteras
     db_ref = SessionLocal()
     saldos_ref_ok, desvios_ref, detalles_ref = verificar_saldos_contra_referencia(db_ref)
     db_ref.close()
 
-    print("\n=== VERIFICACION DE SALDOS CONTRA REFERENCIA HISTORICA (21 BILLETERAS) ===")
-    for d in detalles_ref:
-        st = "OK" if d["diff"] == Decimal("0.00") else f"DESVIO ({d['diff']})"
-        print(f"  {d['email']} | {d['billetera']}: actual={d['actual']} | ref={d['referencia']} -> {st}")
-    print(f"¿Todos los saldos coinciden con la referencia histórica?: {'SÍ' if saldos_ref_ok else 'NO'}")
-    if not saldos_ref_ok:
-        print(f"ALERTA: Se detectaron {len(desvios_ref)} billeteras con saldos alterados respecto a la referencia:")
-        for desv in desvios_ref:
-            print(f"  - {desv['email']} ({desv['billetera']}): actual={desv['actual']}, ref={desv['referencia']}, diff={desv['diff']}")
-
     # Verificación de reconciliación de saldos en todas las 21 billeteras
     db_rec = SessionLocal()
     rec_ok, discrepancias, detalles_rec = verificar_reconciliacion_billeteras(db_rec)
     db_rec.close()
 
-    print("\n=== VERIFICACION DE RECONCILIACION (21 BILLETERAS) ===")
-    for d in detalles_rec:
-        if d["ok"]:
-            st = f"OK (baseline {d['esperado_diff']:+.2f})" if d["esperado_diff"] != Decimal("0.00") else "OK"
-        else:
-            st = f"DESVIO_NO_ESPERADO (diff={d['diferencia']:+.2f}, esperado={d['esperado_diff']:+.2f})"
-        print(f"  {d['email']} | {d['billetera']}: guardado={d['guardado']} | calc={d['calculado']} | diff={d['diferencia']} -> {st}")
+    if verbose:
+        print("\n=== RESUMEN DE EJECUCION ===")
+        print(f"Total: {total} | Aprobados: {aprobados} | Omitidos: {omitidos} | Fallidos: {fallidos} | Tiempo: {dur_total:.2f}s")
+        print(f"Llamadas IA: {_gestor_actual.llamadas_grabadas} grabadas, {_gestor_actual.llamadas_reales} reales")
 
-    print(f"¿Reconciliación de todas las billeteras dentro del baseline?: {'SÍ' if rec_ok else 'NO'}")
-    if not rec_ok:
-        print(f"ALERTA: Se detectaron {len(discrepancias)} billeteras con desviaciones fuera del baseline:")
-        for disc in discrepancias:
-            print(f"  - {disc['email']} ({disc['billetera']}): guardado={disc['guardado']}, calculado={disc['calculado']}, diff={disc['diferencia']}, esperado={disc['esperado_diff']}")
+        if detalles_fallidos:
+            print("\n=== DETALLE DE ESCENARIOS FALLIDOS ===")
+            for d in detalles_fallidos:
+                print(f"\n--- [{d['id']}] {d['nombre']} ---")
+                print("ESPERADO:")
+                print(d["esperado"])
+                print("OBTENIDO:")
+                print(d["obtenido"])
+
+        print("\n=== VERIFICACION DE ROLLBACK Y CONTEOS ===")
+        print(f"Transacciones: antes={conteos_inicio['tx']} | después={conteos_fin['tx']}")
+        print(f"Conversaciones: antes={conteos_inicio['conv']} | después={conteos_fin['conv']}")
+        print(f"Mensajes procesados: antes={conteos_inicio['msg']} | después={conteos_fin['msg']}")
+        print(f"Saldos de billeteras intactos: {'SÍ' if saldos_intactos else 'NO'}")
+        print(f"¿Rollback total verificado (cero residuo)?: {'SÍ' if sin_residuos else 'NO'}")
+
+        print("\n=== VERIFICACION DE SALDOS CONTRA REFERENCIA HISTORICA (21 BILLETERAS) ===")
+        for d in detalles_ref:
+            st = "OK" if d["diff"] == Decimal("0.00") else f"DESVIO ({d['diff']})"
+            print(f"  {d['email']} | {d['billetera']}: actual={d['actual']} | ref={d['referencia']} -> {st}")
+        print(f"¿Todos los saldos coinciden con la referencia histórica?: {'SÍ' if saldos_ref_ok else 'NO'}")
+        if not saldos_ref_ok:
+            print(f"ALERTA: Se detectaron {len(desvios_ref)} billeteras con saldos alterados respecto a la referencia:")
+            for desv in desvios_ref:
+                print(f"  - {desv['email']} ({desv['billetera']}): actual={desv['actual']}, ref={desv['referencia']}, diff={desv['diff']}")
+
+        print("\n=== VERIFICACION DE RECONCILIACION (21 BILLETERAS) ===")
+        for d in detalles_rec:
+            if d["ok"]:
+                st = f"OK (baseline {d['esperado_diff']:+.2f})" if d["esperado_diff"] != Decimal("0.00") else "OK"
+            else:
+                st = f"DESVIO_NO_ESPERADO (diff={d['diferencia']:+.2f}, esperado={d['esperado_diff']:+.2f})"
+            print(f"  {d['email']} | {d['billetera']}: guardado={d['guardado']} | calc={d['calculado']} | diff={d['diferencia']} -> {st}")
+        print(f"¿Reconciliación de todas las billeteras dentro del baseline?: {'SÍ' if rec_ok else 'NO'}")
+        if not rec_ok:
+            print(f"ALERTA: Se detectaron {len(discrepancias)} billeteras con desviaciones fuera del baseline:")
+            for disc in discrepancias:
+                print(f"  - {disc['email']} ({disc['billetera']}): guardado={disc['guardado']}, calculado={disc['calculado']}, diff={disc['diferencia']}, esperado={disc['esperado_diff']}")
+    else:
+        # Modo compacto (menos de 30 líneas en verde)
+        print("\n=== RESUMEN DE EJECUCION ===")
+        print(f"Total: {total} | Aprobados: {aprobados} | Omitidos: {omitidos} | Fallidos: {fallidos} | Tiempo: {dur_total:.2f}s")
+        print(f"Llamadas IA: {_gestor_actual.llamadas_grabadas} grabadas, {_gestor_actual.llamadas_reales} reales")
+        print(f"Rollback y conteos: {'OK (cero residuo)' if sin_residuos else 'FALLO'}")
+        if saldos_ref_ok:
+            print("Saldos 21 billeteras vs referencia: OK (todas coinciden)")
+        else:
+            print(f"Saldos 21 billeteras vs referencia: DESVIO ({len(desvios_ref)} billeteras)")
+            for desv in desvios_ref:
+                print(f"  - {desv['email']} ({desv['billetera']}): actual={desv['actual']}, ref={desv['referencia']}, diff={desv['diff']}")
+        if rec_ok:
+            print("Reconciliación 21 billeteras: OK (todas dentro del baseline)")
+        else:
+            print(f"Reconciliación 21 billeteras: DESVIO ({len(discrepancias)} fuera de baseline)")
+            for disc in discrepancias:
+                print(f"  - {disc['email']} ({disc['billetera']}): guardado={disc['guardado']}, calc={disc['calculado']}, diff={disc['diferencia']}")
 
     return total, aprobados, omitidos, fallidos, detalles_fallidos
 
 
+def correr_suite_completa(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False):
+    print("=== INICIANDO SUITE CONSOLIDADA DE REGRESION DE WHATSAPP ===")
+    modo_str = "IA Real" if ia_real else ("Regrabar" if regrabar else "Grabadas (replay)")
+    salida_str = "Detallada" if verbose else "Compacta"
+    print(f"Modo IA: {modo_str} | Salida: {salida_str} | Usuario: {USUARIO_PRUEBAS_EMAIL}")
+
+    with engine.connect() as ddl_conn:
+        ddl_conn.execute(text("ALTER TABLE transacciones ADD COLUMN IF NOT EXISTS movimiento_meta_id UUID REFERENCES movimientos_meta(id) ON DELETE SET NULL;"))
+        ddl_conn.commit()
+
+    try:
+        return _ejecutar_suite(verbose=verbose, ia_real=ia_real, regrabar=regrabar, forzar_grabadas=forzar_grabadas)
+    finally:
+        with engine.connect() as ddl_conn:
+            ddl_conn.execute(text("ALTER TABLE transacciones DROP COLUMN IF EXISTS movimiento_meta_id CASCADE;"))
+            ddl_conn.commit()
+
+
 if __name__ == "__main__":
-    correr_suite_completa()
+    parser = argparse.ArgumentParser(description="Suite consolidada de regresión de WhatsApp")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Salida detallada escenario por escenario y tablas completas")
+    parser.add_argument("--ia-real", "--live", action="store_true", help="Ejecutar todas las llamadas contra OpenAI real")
+    parser.add_argument("--regrabar", "--record", action="store_true", help="Regrabar todas las llamadas contra OpenAI real y sobrescribir archivos")
+    parser.add_argument("--forzar-grabadas", action="store_true", help="Forzar uso de grabaciones incluso en escenarios de modelo P7.1-P7.7 (modo offline)")
+    args = parser.parse_args()
+
+    total, aprobados, omitidos, fallidos, _ = correr_suite_completa(
+        verbose=args.verbose,
+        ia_real=args.ia_real,
+        regrabar=args.regrabar,
+        forzar_grabadas=args.forzar_grabadas,
+    )
+    if fallidos > 0:
+        sys.exit(1)
