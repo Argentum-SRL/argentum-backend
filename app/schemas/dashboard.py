@@ -61,12 +61,28 @@ class PagoDashboard(BaseModel):
     red: Optional[str] = None
     billetera_nombre: Optional[str] = None
     billetera_id: Optional[str] = None
+    es_vencido: Optional[bool] = False
+
+
+class CategoriaGastoItem(BaseModel):
+    categoria_id: Optional[str] = None
+    categoria_nombre: str
+    monto: float = Field(..., ge=0, description="Monto real gastado en el ciclo")
+
+
+class GastosPorCategoriaDashboard(BaseModel):
+    ars: List[CategoriaGastoItem] = Field(default_factory=list, description="Desglose real de gastos en ARS")
+    usd: List[CategoriaGastoItem] = Field(default_factory=list, description="Desglose real de gastos en USD")
 
 
 class DashboardResumenResponse(BaseModel):
     periodo: PeriodoDashboard
     balance: BalanceDashboard
     disponible_real: DisponibleRealDashboard
+    gastos_por_categoria: GastosPorCategoriaDashboard = Field(
+        default_factory=lambda: GastosPorCategoriaDashboard(ars=[], usd=[]),
+        description="Desglose de gastos reales acumulados por categoría en el ciclo actual"
+    )
     ultimos_movimientos: List[MovimientoDashboard]
     proximos_pagos: List[PagoDashboard]
 

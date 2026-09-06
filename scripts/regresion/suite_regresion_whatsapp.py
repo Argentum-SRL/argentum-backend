@@ -285,10 +285,15 @@ def make_payload(from_number: str, message: str, wamid: str | None = None) -> by
     }
     return json.dumps(payload).encode("utf-8")
 
+_testingadmin_id = None
+
 def _mock_buscar_usuario_testingadmin(from_number, db_session):
-    u = db_session.execute(
-        select(Usuario).where(Usuario.email == USUARIO_PRUEBAS_EMAIL)
-    ).scalar_one_or_none()
+    global _testingadmin_id
+    if _testingadmin_id is None:
+        _testingadmin_id = db_session.execute(
+            select(Usuario.id).where(Usuario.email == USUARIO_PRUEBAS_EMAIL)
+        ).scalar_one_or_none()
+    u = db_session.get(Usuario, _testingadmin_id)
     if not u or u.email != USUARIO_PRUEBAS_EMAIL:
         raise RuntimeError(f"ABORT CRITICO: Intento de resolución a usuario no-testingadmin: {getattr(u, 'email', None)}")
     return u
@@ -336,12 +341,12 @@ def obtener_conteos_base(db: Session):
 
 # Baseline documentado de diferencias aceptadas en reconciliación.
 # Proviene del alta histórica de datos (junio 2026), donde las billeteras
-# Galicia de mrm291201 y su réplica testingadmin tienen saldo_inicial en 0
+# Galicia de mrm291201 tienen saldo_inicial en 0
 # pero sus movimientos bancarios acumulados difieren en -$800.941 respecto al saldo guardado.
+# (testingadmin@argentum.com reconcilia con diff=0.00 tras el enriquecimiento histórico del 2026-09-05).
 # La suite fallará si aparece una diferencia NUEVA o si alguna de estas cambia.
 DIFERENCIAS_RECONCILIACION_BASELINE = {
     ("mrm291201@gmail.com", "Galicia"): Decimal("-800941.00"),
-    ("testingadmin@argentum.com", "Galicia"): Decimal("-800941.00"),
 }
 
 def verificar_reconciliacion_billeteras(db: Session):
@@ -440,7 +445,7 @@ SALDOS_REFERENCIA_21 = {
     ("sebastiangiordaninoformoso@gmail.com", "Efectivo USD"): Decimal("0.00"),
     ("testingadmin@argentum.com", "Efectivo ARS"): Decimal("0.00"),
     ("testingadmin@argentum.com", "Efectivo USD"): Decimal("0.00"),
-    ("testingadmin@argentum.com", "Galicia"): Decimal("502514.00"),
+    ("testingadmin@argentum.com", "Galicia"): Decimal("4785055.00"),  # Actualizado 2026-09-05: enriquecimiento de 12+ ciclos históricos realistas
     ("testingadmin@argentum.com", "Santander"): Decimal("84270.29"),
 }
 
@@ -1940,11 +1945,16 @@ def p10_caso_2(datos):
         return respuestas[-1][1] if respuestas else ""
     return run_isolated(test)
 
+def _limpiar_subs(conn, u_id):
+    conn.execute(text("DELETE FROM historial_suscripciones WHERE suscripcion_id IN (SELECT id FROM suscripciones WHERE usuario_id = :uid)"), {"uid": u_id})
+    conn.execute(text("DELETE FROM suscripciones WHERE usuario_id = :uid"), {"uid": u_id})
+
 def p10_caso_3(datos):
     """me suscribí a Netflix por 9000 por mes: crea con frecuencia mensual confirmada"""
     u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         db = Session()
+        _limpiar_subs(conn, u.id)
         conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
 
@@ -2009,6 +2019,7 @@ def p10_caso_6(datos):
     """di de baja Netflix sin tenerla: mensaje claro"""
     u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
+        _limpiar_subs(conn, u.id)
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "di de baja Netflix"), time.perf_counter())
@@ -2021,6 +2032,7 @@ def p10_caso_7(datos):
     u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         db = Session()
+        _limpiar_subs(conn, u.id)
         conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
 
@@ -2057,6 +2069,7 @@ def p10_caso_8(datos):
     u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         db = Session()
+        _limpiar_subs(conn, u.id)
         conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
 
@@ -2093,6 +2106,7 @@ def p10_caso_9(datos):
     u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         db = Session()
+        _limpiar_subs(conn, u.id)
         conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
 
@@ -2749,9 +2763,9 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             "punto": "Punto 6",
             "nombre": "Gasto que deja la billetera en negativo",
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto negativo", {
-                "monto": 600000, "moneda": "ARS", "tipo": "egreso", "categoria": "Supermercado", "billetera_origen": "Galicia", "fecha": hoy.isoformat()
+                "monto": 5000000, "moneda": "ARS", "tipo": "egreso", "categoria": "Supermercado", "billetera_origen": "Galicia", "fecha": hoy.isoformat()
             }),
-            "esperado": "Propuesta:\nVoy a anotar $600.000 en Supermercado desde Galicia. ¿Va?\nConfirmación:\nListo. $600.000 en Supermercado desde Galicia — registrado.\nLa billetera quedó en negativo.",
+            "esperado": "Propuesta:\nVoy a anotar $5.000.000 en Supermercado desde Galicia. ¿Va?\nConfirmación:\nListo. $5.000.000 en Supermercado desde Galicia — registrado.\nLa billetera quedó en negativo.",
             "match": "exacto",
         },
         {
@@ -3496,16 +3510,7 @@ def correr_suite_completa(verbose: bool = False, ia_real: bool = False, regrabar
     salida_str = "Detallada" if verbose else "Compacta"
     print(f"Modo IA: {modo_str} | Salida: {salida_str} | Usuario: {USUARIO_PRUEBAS_EMAIL}")
 
-    with engine.connect() as ddl_conn:
-        ddl_conn.execute(text("ALTER TABLE transacciones ADD COLUMN IF NOT EXISTS movimiento_meta_id UUID REFERENCES movimientos_meta(id) ON DELETE SET NULL;"))
-        ddl_conn.commit()
-
-    try:
-        return _ejecutar_suite(verbose=verbose, ia_real=ia_real, regrabar=regrabar, forzar_grabadas=forzar_grabadas)
-    finally:
-        with engine.connect() as ddl_conn:
-            ddl_conn.execute(text("ALTER TABLE transacciones DROP COLUMN IF EXISTS movimiento_meta_id CASCADE;"))
-            ddl_conn.commit()
+    return _ejecutar_suite(verbose=verbose, ia_real=ia_real, regrabar=regrabar, forzar_grabadas=forzar_grabadas)
 
 
 if __name__ == "__main__":

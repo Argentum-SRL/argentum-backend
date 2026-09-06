@@ -163,6 +163,8 @@ def get_dashboard_resumen(
         Transaccion.es_padre_cuotas == False,
         Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
         Transaccion.movimiento_meta_id.is_(None),
+        ~Transaccion.descripcion.ilike("Aporte a la meta:%"),
+        ~Transaccion.descripcion.ilike("Retiro de la meta:%"),
         or_(Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA, Transaccion.estado_verificacion == None)
     )
     if billetera_ids:
@@ -188,6 +190,10 @@ def get_dashboard_resumen(
     # --- QUERY 2: Actividad Unificada (Movimientos + Pagos) ---
     latest_monto_sq = (
         select(HistorialSuscripcion.monto).where(HistorialSuscripcion.suscripcion_id == Suscripcion.id)
+        .order_by(desc(HistorialSuscripcion.vigente_desde)).limit(1).scalar_subquery()
+    )
+    latest_moneda_sq = (
+        select(cast(HistorialSuscripcion.moneda, String)).where(HistorialSuscripcion.suscripcion_id == Suscripcion.id)
         .order_by(desc(HistorialSuscripcion.vigente_desde)).limit(1).scalar_subquery()
     )
 
@@ -222,7 +228,6 @@ def get_dashboard_resumen(
     s_stmt_where = and_(
         Suscripcion.usuario_id == usuario.id,
         Suscripcion.estado == EstadoSuscripcion.ACTIVA,
-        Suscripcion.proximo_cobro >= hoy,
         Suscripcion.proximo_cobro <= limite_pagos
     )
     if billetera_ids:
@@ -240,7 +245,7 @@ def get_dashboard_resumen(
         cast(Suscripcion.id, String).label("id"),
         Suscripcion.nombre.label("nombre"),
         latest_monto_sq.label("monto"),
-        cast(literal(moneda_p), String).label("moneda"),
+        func.coalesce(latest_moneda_sq, cast(literal(moneda_p), String)).label("moneda"),
         Suscripcion.proximo_cobro.label("fecha"),
         cast(null(), String).label("extra_1"),
         cast(null(), String).label("extra_2"),
@@ -253,7 +258,6 @@ def get_dashboard_resumen(
     c_stmt_where = and_(
         GrupoCuotas.usuario_id == usuario.id,
         Cuota.pagada == False,
-        Cuota.fecha_vencimiento >= hoy,
         Cuota.fecha_vencimiento <= limite_pagos
     )
     if billetera_ids:
@@ -328,7 +332,8 @@ def get_dashboard_resumen(
 
     proximos_pagos = [{
         "id": r.id, "nombre": r.nombre, "monto": float(r.monto or 0), "moneda": r.moneda,
-        "fecha_cobro": r.fecha.isoformat(), "dias_restantes": (r.fecha - hoy).days, "tipo": r.item_tipo
+        "fecha_cobro": r.fecha.isoformat(), "dias_restantes": (r.fecha - hoy).days, "tipo": r.item_tipo,
+        "es_vencido": (r.fecha - hoy).days < 0
     } for r in actividad if r.item_tipo in ("suscripcion", "cuota") and not (r.item_tipo == "cuota" and r.extra_2)]
 
     # --- AGREGAR VENCIMIENTOS DE TARJETAS ---
@@ -357,7 +362,6 @@ def get_dashboard_resumen(
             GrupoCuotas.usuario_id == usuario.id,
             GrupoCuotas.tarjeta_id.in_(tarjetas_ids) if tarjetas_ids else False,
             Cuota.pagada == False,
-            Cuota.fecha_vencimiento >= hoy,
             Cuota.fecha_vencimiento <= limite_futuro
         )
         .order_by(Cuota.fecha_vencimiento)
@@ -373,7 +377,7 @@ def get_dashboard_resumen(
 
     for tarjeta in tarjetas:
         resumen_t = calcular_resumen_actual(db, tarjeta, cuotas_preloaded=cuotas_por_tarjeta.get(tarjeta.id, []))
-        total_t = resumen_t.total_comprometido_resumen_actual
+        total_t = getattr(resumen_t, 'total_a_pagar_resumen_actual', resumen_t.total_comprometido_resumen_actual)
         total_siguiente = resumen_t.total_comprometido_resumen_siguiente if hasattr(resumen_t, 'total_comprometido_resumen_siguiente') else 0
 
         d_venc = resumen_t.fecha_vencimiento_proximo
@@ -384,12 +388,13 @@ def get_dashboard_resumen(
         # mostrar el próximo resumen con deuda real
         if total_t <= 0:
             if total_siguiente and total_siguiente > 0:
-                # Calcular fecha del siguiente vencimiento
+                # Calcular fecha del siguiente vencimiento ajustada a día hábil
                 proximo_mes = d_venc + relativedelta(months=1)
                 from calendar import monthrange
+                from app.services.dias_habiles_service import ajustar_fecha_habil_sync
                 ultimo_dia = monthrange(proximo_mes.year, proximo_mes.month)[1]
                 dia_venc_sig = min(tarjeta.dia_vencimiento, ultimo_dia)
-                d_venc_sig = date(proximo_mes.year, proximo_mes.month, dia_venc_sig)
+                d_venc_sig = ajustar_fecha_habil_sync(date(proximo_mes.year, proximo_mes.month, dia_venc_sig), direccion="posterior")
                 dias_restantes_sig = (d_venc_sig - hoy).days
                 if 0 <= dias_restantes_sig <= 60:
                     proximos_pagos.append({
@@ -403,14 +408,15 @@ def get_dashboard_resumen(
                         "color": tarjeta.color,
                         "red": tarjeta.red.value,
                         "billetera_nombre": tarjeta.billetera.nombre,
-                        "billetera_id": str(tarjeta.billetera_id)
+                        "billetera_id": str(tarjeta.billetera_id),
+                        "es_vencido": dias_restantes_sig < 0
                     })
             continue
 
         dias_restantes = (d_venc - hoy).days
 
-        # Solo incluir si vence dentro de los próximos 45 días
-        if 0 <= dias_restantes <= 45:
+        # Incluir si está vencido o si vence dentro de los próximos 45 días
+        if dias_restantes <= 45:
             proximos_pagos.append({
                 "id": str(tarjeta.id),
                 "nombre": f"Resumen {tarjeta.nombre}",
@@ -422,7 +428,8 @@ def get_dashboard_resumen(
                 "color": tarjeta.color,
                 "red": tarjeta.red.value,
                 "billetera_nombre": tarjeta.billetera.nombre,
-                "billetera_id": str(tarjeta.billetera_id)
+                "billetera_id": str(tarjeta.billetera_id),
+                "es_vencido": dias_restantes < 0
             })
 
     from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
@@ -432,7 +439,74 @@ def get_dashboard_resumen(
         disp_ctx["usd"]["total_billeteras"] = total_billeteras_override.get("usd", Decimal("0"))
         disp_ctx["ars"]["saldo_disponible"] = disp_ctx["ars"]["total_billeteras"] - disp_ctx["ars"]["cuotas_comprometidas"] - disp_ctx["ars"]["suscripciones_mensuales"]
         disp_ctx["usd"]["saldo_disponible"] = disp_ctx["usd"]["total_billeteras"] - disp_ctx["usd"]["cuotas_comprometidas"] - disp_ctx["usd"]["suscripciones_mensuales"]
-    proximos_pagos = sorted(proximos_pagos, key=lambda x: x["fecha_cobro"])[:5]
+    
+    pagos_ars = sorted(
+        [p for p in proximos_pagos if p.get("moneda") == "ARS"],
+        key=lambda x: (0 if x["dias_restantes"] < 0 else 1, x["fecha_cobro"])
+    )[:5]
+    pagos_usd = sorted(
+        [p for p in proximos_pagos if p.get("moneda") == "USD"],
+        key=lambda x: (0 if x["dias_restantes"] < 0 else 1, x["fecha_cobro"])
+    )[:5]
+    pagos_otros = sorted(
+        [p for p in proximos_pagos if p.get("moneda") not in ("ARS", "USD")],
+        key=lambda x: (0 if x["dias_restantes"] < 0 else 1, x["fecha_cobro"])
+    )[:5]
+    proximos_pagos = sorted(
+        pagos_ars + pagos_usd + pagos_otros,
+        key=lambda x: (0 if x["dias_restantes"] < 0 else 1, x["fecha_cobro"])
+    )
+
+    # --- QUERY: Gastos Reales por Categoría en el Ciclo Actual ---
+    cat_where = and_(
+        Transaccion.usuario_id == usuario.id,
+        Transaccion.fecha >= fecha_inicio,
+        Transaccion.fecha <= fecha_fin,
+        Transaccion.tipo == TipoTransaccion.EGRESO,
+        Transaccion.es_padre_cuotas == False,
+        Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
+        Transaccion.movimiento_meta_id.is_(None),
+        ~Transaccion.descripcion.ilike("Aporte a la meta:%"),
+        ~Transaccion.descripcion.ilike("Retiro de la meta:%"),
+        or_(
+            Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
+            Transaccion.estado_verificacion == None
+        )
+    )
+    if billetera_ids:
+        cat_where = and_(cat_where, Transaccion.billetera_id.in_(billetera_ids))
+
+    cat_stmt = (
+        select(
+            Transaccion.categoria_id,
+            Categoria.nombre.label("categoria_nombre"),
+            Transaccion.moneda,
+            func.sum(Transaccion.monto).label("total")
+        )
+        .outerjoin(Categoria, Transaccion.categoria_id == Categoria.id)
+        .where(cat_where)
+        .group_by(Transaccion.categoria_id, Categoria.nombre, Transaccion.moneda)
+    )
+    cat_rows = db.execute(cat_stmt).all()
+
+    gastos_cat_ars: List[Dict[str, Any]] = []
+    gastos_cat_usd: List[Dict[str, Any]] = []
+    for r in cat_rows:
+        nombre = r.categoria_nombre or "General"
+        cid = str(r.categoria_id) if r.categoria_id else None
+        monto_float = float(r.total or 0)
+        item = {
+            "categoria_id": cid,
+            "categoria_nombre": nombre,
+            "monto": monto_float
+        }
+        if r.moneda == Moneda.ARS:
+            gastos_cat_ars.append(item)
+        elif r.moneda == Moneda.USD:
+            gastos_cat_usd.append(item)
+
+    gastos_cat_ars.sort(key=lambda x: -x["monto"])
+    gastos_cat_usd.sort(key=lambda x: -x["monto"])
 
     return {
         "periodo": {
@@ -466,6 +540,10 @@ def get_dashboard_resumen(
                 "suscripciones_mensuales": float(disp_ctx["usd"]["suscripciones_mensuales"]),
                 "disponible": float(disp_ctx["usd"]["saldo_disponible"])
             }
+        },
+        "gastos_por_categoria": {
+            "ars": gastos_cat_ars,
+            "usd": gastos_cat_usd
         },
         "ultimos_movimientos": movimientos_data,
         "proximos_pagos": proximos_pagos
@@ -584,6 +662,8 @@ def get_subcategorias_gasto(
         Transaccion.es_padre_cuotas == False,
         Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
         Transaccion.movimiento_meta_id.is_(None),
+        ~Transaccion.descripcion.ilike("Aporte a la meta:%"),
+        ~Transaccion.descripcion.ilike("Retiro de la meta:%"),
         or_(
             Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
             Transaccion.estado_verificacion == None
