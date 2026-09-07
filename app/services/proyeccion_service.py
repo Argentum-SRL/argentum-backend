@@ -560,8 +560,6 @@ def _calcular_proyeccion_por_moneda(
 
 
 def calcular_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
-    preloaded = _preparar_datos_proyeccion(db, usuario)
-    return {
-        "ars": _calcular_proyeccion_por_moneda(db, usuario, Moneda.ARS, preloaded=preloaded),
-        "usd": _calcular_proyeccion_por_moneda(db, usuario, Moneda.USD, preloaded=preloaded)
-    }
+    from app.services.analisis_financiero_service import calcular_proyeccion_nueva
+
+    return calcular_proyeccion_nueva(db, usuario)

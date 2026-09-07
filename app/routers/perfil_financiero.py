@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.models.usuario import Usuario
 from app.models.historial_perfil_financiero import HistorialPerfilFinanciero
-from app.schemas.perfil_financiero import PerfilFinancieroRead, HistorialPerfilFinancieroRead
+from app.schemas.perfil_financiero import PerfilFinancieroRead, HistorialPerfilFinancieroRead, PerfilNuevoRead
 from app.services import perfil_financiero_service
 
 
@@ -35,6 +35,7 @@ class PerfilInterpretaciones(BaseModel):
 
 class PerfilFinancieroResponse(PerfilFinancieroRead):
     interpretaciones: PerfilInterpretaciones
+    perfil_nuevo: PerfilNuevoRead
 
 
 def construir_interpretaciones(perfil) -> dict:
@@ -139,12 +140,15 @@ def get_perfil_financiero(
 ):
     perfil = perfil_financiero_service.obtener_perfil(db, current_user.id)
     interpretaciones = construir_interpretaciones(perfil)
+    from app.services.analisis_financiero_service import calcular_perfil_nuevo
+    perfil_nuevo = calcular_perfil_nuevo(db, current_user)
     
     # Mapear a esquema de respuesta
     response_data = PerfilFinancieroRead.model_validate(perfil)
     return PerfilFinancieroResponse(
         **response_data.model_dump(),
-        interpretaciones=PerfilInterpretaciones(**interpretaciones)
+        interpretaciones=PerfilInterpretaciones(**interpretaciones),
+        perfil_nuevo=PerfilNuevoRead(**perfil_nuevo)
     )
 
 
@@ -155,12 +159,15 @@ def recalcular_perfil_financiero(
 ):
     perfil = perfil_financiero_service.calcular_y_persistir_perfil(db, current_user.id)
     interpretaciones = construir_interpretaciones(perfil)
+    from app.services.analisis_financiero_service import calcular_perfil_nuevo
+    perfil_nuevo = calcular_perfil_nuevo(db, current_user)
     
     # Mapear a esquema de respuesta
     response_data = PerfilFinancieroRead.model_validate(perfil)
     return PerfilFinancieroResponse(
         **response_data.model_dump(),
-        interpretaciones=PerfilInterpretaciones(**interpretaciones)
+        interpretaciones=PerfilInterpretaciones(**interpretaciones),
+        perfil_nuevo=PerfilNuevoRead(**perfil_nuevo)
     )
 
 

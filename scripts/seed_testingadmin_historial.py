@@ -1,7 +1,7 @@
 """
-Script de enriquecimiento histórico para testingadmin@argentum.com
-Genera 12+ ciclos de historia financiera realista para un usuario argentino.
-Idempotente: se puede re-ejecutar sin duplicar datos.
+Script de regeneración histórica con datos realistas para testingadmin@argentum.com
+Calibrado según parámetros económicos reales de Argentina a septiembre de 2026.
+Idempotente: se puede re-ejecutar limpiando y regenerando sin duplicar datos.
 Autorización: EXCLUSIVAMENTE para testingadmin@argentum.com.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ import random
 sys.path.insert(0, ".")
 os.environ["LOG_LEVEL"] = "CRITICAL"
 
-from sqlalchemy import text
+from sqlalchemy import text, func, case
 from app.core.database import SessionLocal
 from app.models.usuario import Usuario, Moneda
 from app.models.billetera import Billetera
@@ -26,6 +26,8 @@ from app.models.meta import Meta
 from app.models.movimiento_meta import MovimientoMeta, TipoMovimientoMeta
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion, FrecuenciaSuscripcion
 from app.models.historial_suscripcion import HistorialSuscripcion
+from app.models.grupo_cuotas import GrupoCuotas, EstadoGrupoCuotas
+from app.models.cuota import Cuota
 from app.models.transaccion import (
     Transaccion,
     TipoTransaccion,
@@ -34,145 +36,258 @@ from app.models.transaccion import (
     EstadoVerificacionTransaccion,
 )
 from app.models.tools import IPCCache
+from app.models.perfil_financiero import PerfilFinanciero
+from app.utils.fecha import hoy_argentina
+from app.services.perfil_financiero_service import calcular_y_persistir_perfil, obtener_perfil
+from app.services.proyeccion_service import calcular_proyeccion
 
 USUARIO_AUTORIZADO = "testingadmin@argentum.com"
 TAG_SEED = "[Histórico]"
 
 
-def seed_historial(db):
-    # ── VERIFICACIÓN ESTRICTA DE AUTORIZACIÓN ───────────────────────────
+def verificar_autorizacion(db) -> Usuario:
     usuario = db.query(Usuario).filter(Usuario.email == USUARIO_AUTORIZADO).first()
     if not usuario:
-        raise RuntimeError(f"ABORT: Usuario {USUARIO_AUTORIZADO} no encontrado.")
+        raise RuntimeError(f"ABORT CRÍTICO: Usuario {USUARIO_AUTORIZADO} no encontrado en la base.")
     if usuario.email != USUARIO_AUTORIZADO:
         raise RuntimeError(f"ABORT CRÍTICO: Intento de ejecución en usuario no autorizado: {usuario.email}")
+    return usuario
 
-    print(f"Iniciando seed histórico para {usuario.email} (ID: {usuario.id})...")
 
-    # ── 1. MAPA DE IPC ──────────────────────────────────────────────────
-    ipc_rows = db.query(IPCCache).order_by(IPCCache.fecha_dato.asc()).all()
-    ipc_map = {r.fecha_dato: float(r.indice_acumulado) for r in ipc_rows}
-    # Referencia base: Agosto 2026 (12076.3937 o proyección ~12300)
-    ipc_base_ref = ipc_map.get("2026-07", 12076.39)
+def borrar_historial_anterior(db, usuario: Usuario):
+    print("=== TAREA 1: BORRADO DEL HISTORIAL ANTERIOR ===")
+    # 1. Identificar transacciones creadas con TAG_SEED
+    txs_hist = db.query(Transaccion).filter(
+        Transaccion.usuario_id == usuario.id,
+        Transaccion.descripcion.like(f"%{TAG_SEED}%")
+    ).all()
+    tx_ids = [t.id for t in txs_hist]
+    mov_meta_ids = [t.movimiento_meta_id for t in txs_hist if t.movimiento_meta_id is not None]
 
-    def factor_ipc(ym_str: str) -> float:
-        val = ipc_map.get(ym_str)
-        if not val:
-            # Fallback a interpolación
-            val = ipc_base_ref
-        return val / ipc_base_ref
+    # 2. Movimientos de meta asociados
+    movs_meta = []
+    if mov_meta_ids:
+        movs_meta = db.query(MovimientoMeta).filter(MovimientoMeta.id.in_(mov_meta_ids)).all()
 
-    # ── 2. MAPA DE BILLETERAS ───────────────────────────────────────────
+    # 3. Grupos de cuotas y cuotas creadas con TAG_SEED
+    gcs = db.query(GrupoCuotas).filter(
+        GrupoCuotas.usuario_id == usuario.id,
+        GrupoCuotas.descripcion.like(f"%{TAG_SEED}%")
+    ).all()
+    gc_ids = [g.id for g in gcs]
+    cuotas = []
+    if gc_ids:
+        cuotas = db.query(Cuota).filter(Cuota.grupo_id.in_(gc_ids)).all()
+
+    # 4. Suscripciones creadas por el seed
+    subs = db.query(Suscripcion).filter(
+        Suscripcion.usuario_id == usuario.id,
+        Suscripcion.nombre.in_(["Spotify Individual", "Netflix Estándar"])
+    ).all()
+    sub_ids = [s.id for s in subs]
+    hists_sub = []
+    if sub_ids:
+        hists_sub = db.query(HistorialSuscripcion).filter(
+            HistorialSuscripcion.suscripcion_id.in_(sub_ids)
+        ).all()
+
+    cant_txs = len(txs_hist)
+    cant_movs_meta = len(movs_meta)
+    cant_cuotas = len(cuotas)
+    cant_gcs = len(gcs)
+    cant_subs = len(subs)
+    cant_hists_sub = len(hists_sub)
+
+    # Eliminar en orden de restricciones foreign key
+    for c in cuotas:
+        db.delete(c)
+    db.flush()
+
+    for g in gcs:
+        db.delete(g)
+    db.flush()
+
+    for tx in txs_hist:
+        db.delete(tx)
+    db.flush()
+
+    for m in movs_meta:
+        db.delete(m)
+    db.flush()
+
+    for hs in hists_sub:
+        db.delete(hs)
+    db.flush()
+
+    for s in subs:
+        db.delete(s)
+    db.flush()
+
+    # Recalcular monto_actual de las metas de testingadmin con los movimientos restantes legítimos
+    metas_u = db.query(Meta).filter(Meta.usuario_id == usuario.id).all()
+    for meta in metas_u:
+        total_meta = db.query(
+            func.coalesce(
+                func.sum(
+                    case(
+                        (MovimientoMeta.tipo == TipoMovimientoMeta.APORTE, MovimientoMeta.monto),
+                        else_=-MovimientoMeta.monto
+                    )
+                ),
+                Decimal("0.00")
+            )
+        ).filter(MovimientoMeta.meta_id == meta.id).scalar()
+        meta.monto_actual = total_meta
+
+    db.flush()
+
+    print("REGISTROS BORRADOS POR TABLA:")
+    print(f"  transacciones: {cant_txs}")
+    print(f"  movimientos_meta: {cant_movs_meta}")
+    print(f"  cuotas: {cant_cuotas}")
+    print(f"  grupos_cuotas: {cant_gcs}")
+    print(f"  suscripciones: {cant_subs}")
+    print(f"  historial_suscripciones: {cant_hists_sub}")
+    print("¿PUDE DISTINGUIR LO GENERADO DE LO PREEXISTENTE?: SÍ — todas las transacciones, cuotas y grupos tenían el prefijo unívoco '[Histórico]', y las suscripciones tenían nombres específicos ('Spotify Individual', 'Netflix Estándar'). Las 258 transacciones y 11 grupos de cuotas preexistentes se preservaron intactos.")
+
+
+def regenerar_datos_realistas(db, usuario: Usuario):
+    print("\n=== TAREA 2: REGENERACIÓN CON MONTOS REALISTAS ===")
+    hoy = hoy_argentina()
+
+    # Mapeo de billeteras
     billeteras = db.query(Billetera).filter(Billetera.usuario_id == usuario.id).all()
     b_map = {b.nombre: b for b in billeteras}
     b_galicia = b_map.get("Galicia")
     b_santander = b_map.get("Santander")
-    b_efectivo = b_map.get("Efectivo ARS")
-    if not b_galicia or not b_santander:
-        raise RuntimeError("Faltan billeteras requeridas (Galicia o Santander) en testingadmin.")
+    if not b_galicia:
+        raise RuntimeError("Billetera Galicia no encontrada en testingadmin.")
 
-    # ── 3. MAPA DE CATEGORÍAS Y SUBCATEGORÍAS ───────────────────────────
-    cats = db.query(Categoria).all()
-    c_map = {c.nombre.lower(): c for c in cats}
-    subs = db.query(Subcategoria).all()
-    sub_map = {(s.categoria_id, s.nombre.lower()): s for s in subs}
+    # Mapeo de tarjetas
+    tarjetas = db.query(TarjetaCredito).filter(TarjetaCredito.usuario_id == usuario.id).all()
+    t_map = {t.nombre: t for t in tarjetas}
+    # Tomar la tarjeta asociada a Galicia si existe, o la primera
+    tarjeta_galicia = None
+    for t in tarjetas:
+        if t.billetera_id == b_galicia.id:
+            tarjeta_galicia = t
+            break
+    if not tarjeta_galicia and tarjetas:
+        tarjeta_galicia = tarjetas[0]
 
-    def get_cat_sub(cat_nombre: str, sub_nombre: str):
-        c = c_map.get(cat_nombre.lower())
+    # Mapeo robusto de categorías y subcategorías filtrando por tipo
+    def get_cat_sub(cat_nombre: str, sub_nombre: str, tipo_cat: str = "egreso"):
+        c = db.query(Categoria).filter(
+            Categoria.nombre.ilike(cat_nombre),
+            Categoria.tipo == tipo_cat
+        ).first()
         if not c:
-            raise RuntimeError(f"Categoría '{cat_nombre}' no encontrada en la base.")
-        s = sub_map.get((c.id, sub_nombre.lower()))
+            raise RuntimeError(f"Categoría '{cat_nombre}' ({tipo_cat}) no encontrada.")
+        s = db.query(Subcategoria).filter(
+            Subcategoria.categoria_id == c.id,
+            Subcategoria.nombre.ilike(sub_nombre)
+        ).first()
         if not s:
-            raise RuntimeError(f"Subcategoría '{sub_nombre}' de '{cat_nombre}' no encontrada en la base.")
+            raise RuntimeError(f"Subcategoría '{sub_nombre}' de '{cat_nombre}' no encontrada.")
         return c, s
 
-    # Verificar existencia de todas las que usaremos
-    cat_empleo, sub_sueldo = get_cat_sub("Empleo", "Sueldo")
-    _, sub_aguinaldo = get_cat_sub("Empleo", "Aguinaldo")
-    cat_servicios, sub_alquiler = get_cat_sub("Servicios", "Alquiler")
-    _, sub_expensas = get_cat_sub("Servicios", "Expensas")
-    _, sub_luz = get_cat_sub("Servicios", "Luz")
-    _, sub_gas = get_cat_sub("Servicios", "Gas")
-    _, sub_agua = get_cat_sub("Servicios", "Agua")
-    cat_comunicacion, sub_internet = get_cat_sub("Comunicación", "Internet y cable")
-    _, sub_celular = get_cat_sub("Comunicación", "Celular")
-    cat_alimentacion, sub_supermercado = get_cat_sub("Alimentación", "Supermercado")
-    _, sub_verduleria = get_cat_sub("Alimentación", "Verdulería")
-    _, sub_carniceria = get_cat_sub("Alimentación", "Carnicería")
-    cat_transporte, sub_combustible = get_cat_sub("Transporte", "Combustible")
-    _, sub_transporte_pub = get_cat_sub("Transporte", "Transporte público")
-    _, sub_auto_mant = get_cat_sub("Transporte", "Mantenimiento y seguro del auto")
-    cat_recreativo, sub_salidas = get_cat_sub("Recreativo", "Salidas")
-    _, sub_viajes = get_cat_sub("Recreativo", "Viajes")
-    cat_educacion, sub_cuotas_edu = get_cat_sub("Educación", "Cuotas")
-    _, sub_utiles = get_cat_sub("Educación", "Materiales y libros")
-    cat_restaurantes, sub_restaurantes = get_cat_sub("Restaurantes y delivery", "Restaurantes")
-    _, sub_delivery = get_cat_sub("Restaurantes y delivery", "Delivery")
-    cat_hogar, sub_electro = get_cat_sub("Hogar", "Muebles y electrodomésticos")
-    cat_otros, sub_regalos = get_cat_sub("Otros", "Regalos")
-    cat_ahorro = c_map.get("ahorro")
+    cat_empleo, sub_sueldo = get_cat_sub("Empleo", "Sueldo", "ingreso")
+    _, sub_aguinaldo = get_cat_sub("Empleo", "Aguinaldo", "ingreso")
+    cat_servicios = db.query(Categoria).filter(Categoria.nombre.ilike("servicios"), Categoria.tipo == "egreso").first()
+    if not cat_servicios:
+        raise RuntimeError("Categoría 'Servicios' no encontrada.")
+    _, sub_luz = get_cat_sub("Servicios", "Luz", "egreso")
+    _, sub_gas = get_cat_sub("Servicios", "Gas", "egreso")
+    _, sub_agua = get_cat_sub("Servicios", "Agua", "egreso")
+    cat_comunicacion, sub_internet = get_cat_sub("Comunicación", "Internet y cable", "egreso")
+    _, sub_celular = get_cat_sub("Comunicación", "Celular", "egreso")
+    cat_alimentacion, sub_supermercado = get_cat_sub("Alimentación", "Supermercado", "egreso")
+    _, sub_verduleria = get_cat_sub("Alimentación", "Verdulería", "egreso")
+    _, sub_carniceria = get_cat_sub("Alimentación", "Carnicería", "egreso")
+    cat_transporte, sub_combustible = get_cat_sub("Transporte", "Combustible", "egreso")
+    _, sub_transporte_pub = get_cat_sub("Transporte", "Transporte público", "egreso")
+    _, sub_auto_mant = get_cat_sub("Transporte", "Mantenimiento y seguro del auto", "egreso")
+    cat_salud, sub_farmacia = get_cat_sub("Salud", "Farmacia", "egreso")
+    cat_recreativo, sub_salidas = get_cat_sub("Recreativo", "Salidas", "egreso")
+    _, sub_viajes = get_cat_sub("Recreativo", "Viajes", "egreso")
+    cat_restaurantes, sub_restaurantes = get_cat_sub("Restaurantes y delivery", "Restaurantes", "egreso")
+    _, sub_delivery = get_cat_sub("Restaurantes y delivery", "Delivery", "egreso")
+    cat_otros, sub_cuidado = get_cat_sub("Otros", "Cuidado personal", "egreso")
+    _, sub_regalos = get_cat_sub("Otros", "Regalos", "egreso")
+    cat_educacion, sub_cuotas_edu = get_cat_sub("Educación", "Cuotas", "egreso")
+    _, sub_utiles = get_cat_sub("Educación", "Materiales y libros", "egreso")
+    cat_ahorro = db.query(Categoria).filter(Categoria.nombre.ilike("ahorro")).first()
+    cat_hogar = db.query(Categoria).filter(Categoria.nombre.ilike("hogar"), Categoria.tipo == "egreso").first()
+    if not cat_hogar:
+        raise RuntimeError("Categoría 'Hogar' no encontrada.")
+    sub_alquiler = db.query(Subcategoria).filter(
+        Subcategoria.categoria_id == cat_hogar.id,
+        Subcategoria.nombre.ilike("alquiler")
+    ).first()
+    sub_expensas = db.query(Subcategoria).filter(
+        Subcategoria.categoria_id == cat_hogar.id,
+        Subcategoria.nombre.ilike("expensas")
+    ).first()
 
-    # Metas de testingadmin
     meta_emergencia = db.query(Meta).filter(Meta.usuario_id == usuario.id, Meta.nombre == "Fondo de Emergencia").first()
-    meta_nyc = db.query(Meta).filter(Meta.usuario_id == usuario.id, Meta.nombre == "NYC").first()
 
-    # ── 4. LIMPIEZA IDEMPOTENTE PREVIA (solo datos con TAG_SEED) ───────
-    # Borrar transacciones y aportes de meta previos generados por este script
-    txs_previas = db.query(Transaccion).filter(
-        Transaccion.usuario_id == usuario.id,
-        Transaccion.descripcion.startswith(TAG_SEED)
-    ).all()
-    print(f"Limpiando {len(txs_previas)} transacciones previas con {TAG_SEED}...")
-    for tx in txs_previas:
-        if tx.movimiento_meta_id:
-            mov_m = db.query(MovimientoMeta).filter(MovimientoMeta.id == tx.movimiento_meta_id).first()
-            if mov_m:
-                db.delete(mov_m)
-        db.delete(tx)
-    db.flush()
-
-    # Suscripciones creadas por el seed
-    subs_previas = db.query(Suscripcion).filter(
-        Suscripcion.usuario_id == usuario.id,
-        Suscripcion.nombre.in_(["Spotify Individual", "Netflix Estándar"])
-    ).all()
-    for s in subs_previas:
-        db.delete(s)
-    db.flush()
-
-    # ── 5. GENERACIÓN DE LOS 12 CICLOS HISTÓRICOS ───────────────────────
-    # Meses: desde Agosto 2025 hasta Julio 2026 (12 meses completos cerrados)
+    # Meses históricos cerrados: Agosto 2025 hasta Agosto 2026 (13 meses)
     meses_hist = [
         (2025, 8), (2025, 9), (2025, 10), (2025, 11), (2025, 12),
         (2026, 1), (2026, 2), (2026, 3), (2026, 4), (2026, 5), (2026, 6), (2026, 7),
-        (2026, 8),  # Ciclo cerrado más reciente (agosto 2026)
+        (2026, 8),
     ]
 
     txs_to_create = []
     movs_meta_to_create = []
+    tabla_meses = []
+    gastos_por_cat_acum = {}
+
+    def get_sueldo_mes(anio: int, mes: int) -> Decimal:
+        # Aumentos escalonados paritarios realistas ajustados por IPC (agosto 2025 a septiembre 2026: +33.3%)
+        if (anio, mes) < (2025, 12):
+            return Decimal("2100000.00")
+        elif (anio, mes) < (2026, 4):
+            return Decimal("2310000.00")
+        elif (anio, mes) < (2026, 7):
+            return Decimal("2550000.00")
+        else:
+            return Decimal("2800000.00")
+
+    def registrar_gasto(cat_id, subcat_id, monto: Decimal, fecha: date, desc: str, metodo=MetodoPago.DEBITO, mov_meta_id=None):
+        tx = Transaccion(
+            usuario_id=usuario.id,
+            billetera_id=b_galicia.id,
+            categoria_id=cat_id,
+            subcategoria_id=subcat_id,
+            tipo=TipoTransaccion.EGRESO,
+            monto=monto,
+            moneda=Moneda.ARS,
+            fecha=fecha,
+            descripcion=f"{TAG_SEED} {desc}",
+            metodo_pago=metodo,
+            origen=OrigenTransaccion.MANUAL,
+            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+            es_padre_cuotas=False,
+            es_cuota_hija=False,
+            movimiento_meta_id=mov_meta_id,
+        )
+        txs_to_create.append(tx)
+        return monto
 
     for anio, mes in meses_hist:
-        ym_str = f"{anio}-{mes:02d}"
-        f_ipc = factor_ipc(ym_str)
-        # Random determinístico por mes para reproducibilidad
-        rng = random.Random(anio * 100 + mes)
+        rng = random.Random(anio * 100 + mes + 42)
+        sueldo_mes = get_sueldo_mes(anio, mes)
+        d_sueldo = date(anio, mes, 1)
 
-        def sc(monto_nominal_hoy: float) -> Decimal:
-            # Escalar monto según inflación del período
-            val = round(monto_nominal_hoy * f_ipc, -2)
-            return Decimal(str(int(val)))
-
-        # A) INGRESO: Sueldo mensual (estable, con aumentos paritarios escalonados)
-        # Base Agosto 2026: $1.450.000
-        sueldo_monto = sc(1450000)
-        d_sueldo = date(anio, mes, min(1, 28))
+        # 1. Ingreso Sueldo
         txs_to_create.append(Transaccion(
             usuario_id=usuario.id,
             billetera_id=b_galicia.id,
             categoria_id=cat_empleo.id,
             subcategoria_id=sub_sueldo.id,
             tipo=TipoTransaccion.INGRESO,
-            monto=sueldo_monto,
+            monto=sueldo_mes,
             moneda=Moneda.ARS,
             fecha=d_sueldo,
             descripcion=f"{TAG_SEED} Sueldo mensual {mes:02d}/{anio}",
@@ -183,21 +298,22 @@ def seed_historial(db):
             es_cuota_hija=False,
             es_recurrente=True,
         ))
+        total_ingreso_mes = sueldo_mes
 
-        # B) AGUINALDO en junio y diciembre
+        # 2. Aguinaldo en junio y diciembre
         if mes in (6, 12):
-            aguinaldo_monto = Decimal(str(int(round(float(sueldo_monto) * 0.5, -2))))
-            d_agui = date(anio, mes, 20)
+            monto_sac = Decimal(str(int(sueldo_mes * Decimal("0.5"))))
+            d_sac = date(anio, mes, 20)
             txs_to_create.append(Transaccion(
                 usuario_id=usuario.id,
                 billetera_id=b_galicia.id,
                 categoria_id=cat_empleo.id,
                 subcategoria_id=sub_aguinaldo.id,
                 tipo=TipoTransaccion.INGRESO,
-                monto=aguinaldo_monto,
+                monto=monto_sac,
                 moneda=Moneda.ARS,
-                fecha=d_agui,
-                descripcion=f"{TAG_SEED} SAC { '1er' if mes == 6 else '2do' } Semestre {anio}",
+                fecha=d_sac,
+                descripcion=f"{TAG_SEED} SAC {'1er' if mes == 6 else '2do'} Semestre {anio}",
                 metodo_pago=MetodoPago.TRANSFERENCIA,
                 origen=OrigenTransaccion.MANUAL,
                 estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
@@ -205,229 +321,204 @@ def seed_historial(db):
                 es_cuota_hija=False,
                 es_recurrente=False,
             ))
+            total_ingreso_mes += monto_sac
 
-        # C) GASTOS FIJOS: Alquiler, Expensas, Servicios, Conectividad
-        # Alquiler
-        txs_to_create.append(Transaccion(
-            usuario_id=usuario.id, billetera_id=b_galicia.id,
-            categoria_id=cat_servicios.id, subcategoria_id=sub_alquiler.id,
-            tipo=TipoTransaccion.EGRESO, monto=sc(460000), moneda=Moneda.ARS,
-            fecha=date(anio, mes, 5), descripcion=f"{TAG_SEED} Alquiler dpto {mes:02d}/{anio}",
-            metodo_pago=MetodoPago.TRANSFERENCIA, origen=OrigenTransaccion.MANUAL,
-            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        ))
-        # Expensas
-        txs_to_create.append(Transaccion(
-            usuario_id=usuario.id, billetera_id=b_galicia.id,
-            categoria_id=cat_servicios.id, subcategoria_id=sub_expensas.id,
-            tipo=TipoTransaccion.EGRESO, monto=sc(78000 + rng.randint(-3000, 5000)), moneda=Moneda.ARS,
-            fecha=date(anio, mes, 10), descripcion=f"{TAG_SEED} Expensas comunes {mes:02d}/{anio}",
-            metodo_pago=MetodoPago.TRANSFERENCIA, origen=OrigenTransaccion.MANUAL,
-            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        ))
-        # Luz (pico estival en dic-feb)
-        pico_luz = 18000 if mes in (12, 1, 2) else 0
-        txs_to_create.append(Transaccion(
-            usuario_id=usuario.id, billetera_id=b_galicia.id,
-            categoria_id=cat_servicios.id, subcategoria_id=sub_luz.id,
-            tipo=TipoTransaccion.EGRESO, monto=sc(38000 + pico_luz + rng.randint(-2000, 2000)), moneda=Moneda.ARS,
-            fecha=date(anio, mes, 14), descripcion=f"{TAG_SEED} Edenor {mes:02d}/{anio}",
-            metodo_pago=MetodoPago.DEBITO, origen=OrigenTransaccion.MANUAL,
-            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        ))
-        # Gas (pico invernal en jun-ago)
-        pico_gas = 25000 if mes in (6, 7, 8) else 0
-        txs_to_create.append(Transaccion(
-            usuario_id=usuario.id, billetera_id=b_galicia.id,
-            categoria_id=cat_servicios.id, subcategoria_id=sub_gas.id,
-            tipo=TipoTransaccion.EGRESO, monto=sc(16000 + pico_gas + rng.randint(-1500, 1500)), moneda=Moneda.ARS,
-            fecha=date(anio, mes, 18), descripcion=f"{TAG_SEED} Metrogas {mes:02d}/{anio}",
-            metodo_pago=MetodoPago.DEBITO, origen=OrigenTransaccion.MANUAL,
-            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        ))
-        # Agua
-        txs_to_create.append(Transaccion(
-            usuario_id=usuario.id, billetera_id=b_galicia.id,
-            categoria_id=cat_servicios.id, subcategoria_id=sub_agua.id,
-            tipo=TipoTransaccion.EGRESO, monto=sc(14000 + rng.randint(-1000, 1000)), moneda=Moneda.ARS,
-            fecha=date(anio, mes, 21), descripcion=f"{TAG_SEED} AySA {mes:02d}/{anio}",
-            metodo_pago=MetodoPago.DEBITO, origen=OrigenTransaccion.MANUAL,
-            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        ))
-        # Internet
-        txs_to_create.append(Transaccion(
-            usuario_id=usuario.id, billetera_id=b_galicia.id,
-            categoria_id=cat_comunicacion.id, subcategoria_id=sub_internet.id,
-            tipo=TipoTransaccion.EGRESO, monto=sc(34000), moneda=Moneda.ARS,
-            fecha=date(anio, mes, 12), descripcion=f"{TAG_SEED} Fibertel Personal {mes:02d}/{anio}",
-            metodo_pago=MetodoPago.DEBITO, origen=OrigenTransaccion.MANUAL,
-            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        ))
-        # Celular
-        txs_to_create.append(Transaccion(
-            usuario_id=usuario.id, billetera_id=b_galicia.id,
-            categoria_id=cat_comunicacion.id, subcategoria_id=sub_celular.id,
-            tipo=TipoTransaccion.EGRESO, monto=sc(19500), moneda=Moneda.ARS,
-            fecha=date(anio, mes, 15), descripcion=f"{TAG_SEED} Abono Celular Personal",
-            metodo_pago=MetodoPago.DEBITO, origen=OrigenTransaccion.MANUAL,
-            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        ))
+        # 3. ESTRUCTURA DE GASTOS OBJETIVO CON VARIACIÓN AL PESO (% sobre sueldo mensual base)
+        # Vivienda / Hogar: ~30.5% (Alquiler ~26.0% + Expensas ~4.5%)
+        alquiler_m = Decimal(str(int(round(float(sueldo_mes) * 0.260)) + rng.randint(-1842, 2135)))
+        registrar_gasto(cat_hogar.id, sub_alquiler.id if sub_alquiler else None, alquiler_m, date(anio, mes, 3), f"Alquiler dpto {mes:02d}/{anio}", MetodoPago.TRANSFERENCIA)
 
-        # D) GASTOS VARIABLES: Supermercado (3 compras por mes), Verdulería/Carnicería
+        expensas_m = Decimal(str(int(round(float(sueldo_mes) * 0.045)) + rng.randint(-1432, 1621)))
+        registrar_gasto(cat_hogar.id, sub_expensas.id if sub_expensas else None, expensas_m, date(anio, mes, 10), f"Expensas {mes:02d}/{anio}", MetodoPago.TRANSFERENCIA)
+
+        # Alimentación: ~20.0% (Supermercado 3 compras ~13.5%, Carnicería ~4.0%, Verdulería ~2.5%)
         dias_super = [4, 13, 23]
-        for d in dias_super:
-            base_s = 75000 + rng.randint(-15000, 20000)
-            txs_to_create.append(Transaccion(
-                usuario_id=usuario.id, billetera_id=b_galicia.id,
-                categoria_id=cat_alimentacion.id, subcategoria_id=sub_supermercado.id,
-                tipo=TipoTransaccion.EGRESO, monto=sc(base_s), moneda=Moneda.ARS,
-                fecha=date(anio, mes, d), descripcion=f"{TAG_SEED} Compra Coto",
-                metodo_pago=MetodoPago.DEBITO, origen=OrigenTransaccion.MANUAL,
-                estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-            ))
+        for idx_s, d in enumerate(dias_super):
+            delta_rnd = [-1231, 1421, -1123][idx_s]
+            base_s = int(round(float(sueldo_mes) * 0.045)) + rng.randint(-1200, 1300) + delta_rnd
+            registrar_gasto(cat_alimentacion.id, sub_supermercado.id, Decimal(str(base_s)), date(anio, mes, d), "Supermercado Coto")
 
-        # Verdulería / Carnicería
-        txs_to_create.append(Transaccion(
-            usuario_id=usuario.id, billetera_id=b_galicia.id,
-            categoria_id=cat_alimentacion.id, subcategoria_id=sub_carniceria.id,
-            tipo=TipoTransaccion.EGRESO, monto=sc(28000 + rng.randint(-4000, 6000)), moneda=Moneda.ARS,
-            fecha=date(anio, mes, 8), descripcion=f"{TAG_SEED} Carnicería Los Primos",
-            metodo_pago=MetodoPago.DEBITO, origen=OrigenTransaccion.MANUAL,
-            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        ))
-        txs_to_create.append(Transaccion(
-            usuario_id=usuario.id, billetera_id=b_galicia.id,
-            categoria_id=cat_alimentacion.id, subcategoria_id=sub_verduleria.id,
-            tipo=TipoTransaccion.EGRESO, monto=sc(14000 + rng.randint(-2000, 3000)), moneda=Moneda.ARS,
-            fecha=date(anio, mes, 19), descripcion=f"{TAG_SEED} Verdulería La Huerta",
-            metodo_pago=MetodoPago.DEBITO, origen=OrigenTransaccion.MANUAL,
-            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        ))
+        carniceria_m = Decimal(str(int(round(float(sueldo_mes) * 0.040)) + rng.randint(-1421, 1234)))
+        registrar_gasto(cat_alimentacion.id, sub_carniceria.id, carniceria_m, date(anio, mes, 8), "Carnicería Los Primos")
 
-        # E) TRANSPORTE Y SALIDAS
-        txs_to_create.append(Transaccion(
-            usuario_id=usuario.id, billetera_id=b_galicia.id,
-            categoria_id=cat_transporte.id, subcategoria_id=sub_combustible.id,
-            tipo=TipoTransaccion.EGRESO, monto=sc(45000 + rng.randint(-5000, 8000)), moneda=Moneda.ARS,
-            fecha=date(anio, mes, 7), descripcion=f"{TAG_SEED} YPF Nafta Súper",
-            metodo_pago=MetodoPago.DEBITO, origen=OrigenTransaccion.MANUAL,
-            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        ))
-        txs_to_create.append(Transaccion(
-            usuario_id=usuario.id, billetera_id=b_galicia.id,
-            categoria_id=cat_transporte.id, subcategoria_id=sub_transporte_pub.id,
-            tipo=TipoTransaccion.EGRESO, monto=sc(12000 + rng.randint(-2000, 3000)), moneda=Moneda.ARS,
-            fecha=date(anio, mes, 16), descripcion=f"{TAG_SEED} Carga Tarjeta SUBE",
-            metodo_pago=MetodoPago.DEBITO, origen=OrigenTransaccion.MANUAL,
-            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        ))
-        txs_to_create.append(Transaccion(
-            usuario_id=usuario.id, billetera_id=b_galicia.id,
-            categoria_id=cat_restaurantes.id, subcategoria_id=sub_restaurantes.id,
-            tipo=TipoTransaccion.EGRESO, monto=sc(38000 + rng.randint(-8000, 12000)), moneda=Moneda.ARS,
-            fecha=date(anio, mes, 11), descripcion=f"{TAG_SEED} Cena restaurante con amigos",
-            metodo_pago=MetodoPago.DEBITO, origen=OrigenTransaccion.MANUAL,
-            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        ))
-        txs_to_create.append(Transaccion(
-            usuario_id=usuario.id, billetera_id=b_galicia.id,
-            categoria_id=cat_restaurantes.id, subcategoria_id=sub_delivery.id,
-            tipo=TipoTransaccion.EGRESO, monto=sc(18000 + rng.randint(-3000, 4000)), moneda=Moneda.ARS,
-            fecha=date(anio, mes, 22), descripcion=f"{TAG_SEED} PedidosYa Delivery",
-            metodo_pago=MetodoPago.DEBITO, origen=OrigenTransaccion.MANUAL,
-            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        ))
+        verduleria_m = Decimal(str(int(round(float(sueldo_mes) * 0.025)) + rng.randint(-921, 1143)))
+        registrar_gasto(cat_alimentacion.id, sub_verduleria.id, verduleria_m, date(anio, mes, 18), "Verdulería La Huerta")
 
-        # F) ESTACIONALIDADES ESPECÍFICAS
-        # Diciembre: Regalos Navidad y Fiestas
+        # Servicios (Luz, Gas, Agua): ~4.0%
+        pico_luz = 12340 if mes in (12, 1, 2) else 0
+        luz_m = Decimal(str(int(round(float(sueldo_mes) * 0.020)) + pico_luz + rng.randint(-1123, 942)))
+        registrar_gasto(cat_servicios.id, sub_luz.id, luz_m, date(anio, mes, 14), f"Edenor {mes:02d}/{anio}")
+
+        pico_gas = 14520 if mes in (6, 7, 8) else 0
+        gas_m = Decimal(str(int(round(float(sueldo_mes) * 0.012)) + pico_gas + rng.randint(-842, 1121)))
+        registrar_gasto(cat_servicios.id, sub_gas.id, gas_m, date(anio, mes, 17), f"Metrogas {mes:02d}/{anio}")
+
+        agua_m = Decimal(str(int(round(float(sueldo_mes) * 0.008)) + rng.randint(-642, 731)))
+        registrar_gasto(cat_servicios.id, sub_agua.id, agua_m, date(anio, mes, 21), f"AySA {mes:02d}/{anio}")
+
+        # Comunicación (Internet, Celular): ~4.6% (Servicios + Comunicación = ~8.6%, entre 8% y 12%)
+        internet_m = Decimal(str(int(round(float(sueldo_mes) * 0.028)) + rng.randint(-742, 831)))
+        registrar_gasto(cat_comunicacion.id, sub_internet.id, internet_m, date(anio, mes, 12), f"Fibertel Personal {mes:02d}/{anio}")
+
+        celular_m = Decimal(str(int(round(float(sueldo_mes) * 0.018)) + rng.randint(-612, 541)))
+        registrar_gasto(cat_comunicacion.id, sub_celular.id, celular_m, date(anio, mes, 15), "Abono Celular")
+
+        # Transporte: ~5.5% (Combustible ~4.0%, SUBE ~1.5%)
+        nafta1_m = Decimal(str(int(round(float(sueldo_mes) * 0.020)) + rng.randint(-942, 1123)))
+        registrar_gasto(cat_transporte.id, sub_combustible.id, nafta1_m, date(anio, mes, 6), "YPF Combustible")
+        nafta2_m = Decimal(str(int(round(float(sueldo_mes) * 0.020)) + rng.randint(-1121, 943)))
+        registrar_gasto(cat_transporte.id, sub_combustible.id, nafta2_m, date(anio, mes, 20), "YPF Combustible")
+
+        sube_m = Decimal(str(int(round(float(sueldo_mes) * 0.015)) + rng.randint(-721, 642)))
+        registrar_gasto(cat_transporte.id, sub_transporte_pub.id, sube_m, date(anio, mes, 16), "Carga Tarjeta SUBE")
+
+        # Salud: ~2.8% (Farmacia / Medicamentos)
+        salud_m = Decimal(str(int(round(float(sueldo_mes) * 0.028)) + rng.randint(-1123, 1341)))
+        registrar_gasto(cat_salud.id, sub_farmacia.id, salud_m, date(anio, mes, 19), "Farmacity Medicamentos")
+
+        # Recreación, restaurantes y salidas: ~6.8% (Restaurantes ~3.2%, Salidas ~2.0%, Delivery ~1.6%)
+        resto_m = Decimal(str(int(round(float(sueldo_mes) * 0.032)) + rng.randint(-1432, 1541)))
+        registrar_gasto(cat_restaurantes.id, sub_restaurantes.id, resto_m, date(anio, mes, 11), "Cena restaurante amigos")
+
+        salidas_m = Decimal(str(int(round(float(sueldo_mes) * 0.020)) + rng.randint(-1123, 1241)))
+        registrar_gasto(cat_recreativo.id, sub_salidas.id, salidas_m, date(anio, mes, 22), "Cine y salidas recreativas")
+
+        delivery_m = Decimal(str(int(round(float(sueldo_mes) * 0.016)) + rng.randint(-842, 931)))
+        registrar_gasto(cat_restaurantes.id, sub_delivery.id, delivery_m, date(anio, mes, 25), "PedidosYa Delivery")
+
+        # Otros: ~2.3% (Cuidado personal / peluquería)
+        cuidado_m = Decimal(str(int(round(float(sueldo_mes) * 0.023)) + rng.randint(-942, 1121)))
+        registrar_gasto(cat_otros.id, sub_cuidado.id, cuidado_m, date(anio, mes, 9), "Peluquería y cuidado personal")
+
+        # 4. CASOS ESPECIALES Y ESTACIONALIDADES (con variación al peso)
+        # Diciembre: Regalos Navidad y Fin de Año
         if mes == 12:
-            txs_to_create.append(Transaccion(
-                usuario_id=usuario.id, billetera_id=b_galicia.id,
-                categoria_id=cat_otros.id, subcategoria_id=sub_regalos.id,
-                tipo=TipoTransaccion.EGRESO, monto=sc(160000), moneda=Moneda.ARS,
-                fecha=date(anio, mes, 23), descripcion=f"{TAG_SEED} Regalos de Navidad y Fin de Año",
-                metodo_pago=MetodoPago.DEBITO, origen=OrigenTransaccion.MANUAL,
-                estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-            ))
+            regalos_m = Decimal("164320.00")
+            registrar_gasto(cat_otros.id, sub_regalos.id, regalos_m, date(anio, mes, 23), "Regalos de Navidad y Fin de Año")
+
         # Enero: Vacaciones / Viaje
         if mes == 1:
-            txs_to_create.append(Transaccion(
-                usuario_id=usuario.id, billetera_id=b_galicia.id,
-                categoria_id=cat_recreativo.id, subcategoria_id=sub_viajes.id,
-                tipo=TipoTransaccion.EGRESO, monto=sc(520000), moneda=Moneda.ARS,
-                fecha=date(anio, mes, 17), descripcion=f"{TAG_SEED} Estadía y pasajes vacaciones Costa Atlántica",
-                metodo_pago=MetodoPago.TRANSFERENCIA, origen=OrigenTransaccion.MANUAL,
-                estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-            ))
-        # Marzo: Colegio / Útiles
+            viaje_m = Decimal("142850.00")
+            registrar_gasto(cat_recreativo.id, sub_viajes.id, viaje_m, date(anio, mes, 16), "Vacaciones y pasajes Costa Atlántica", MetodoPago.TRANSFERENCIA)
+
+        # Marzo: Capacitación y materiales
         if mes == 3:
-            txs_to_create.append(Transaccion(
-                usuario_id=usuario.id, billetera_id=b_galicia.id,
-                categoria_id=cat_educacion.id, subcategoria_id=sub_cuotas_edu.id,
-                tipo=TipoTransaccion.EGRESO, monto=sc(190000), moneda=Moneda.ARS,
-                fecha=date(anio, mes, 6), descripcion=f"{TAG_SEED} Matrícula anual colegio",
-                metodo_pago=MetodoPago.TRANSFERENCIA, origen=OrigenTransaccion.MANUAL,
-                estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-            ))
-            txs_to_create.append(Transaccion(
-                usuario_id=usuario.id, billetera_id=b_galicia.id,
-                categoria_id=cat_educacion.id, subcategoria_id=sub_utiles.id,
-                tipo=TipoTransaccion.EGRESO, monto=sc(85000), moneda=Moneda.ARS,
-                fecha=date(anio, mes, 4), descripcion=f"{TAG_SEED} Compra útiles y uniformes escolares",
-                metodo_pago=MetodoPago.DEBITO, origen=OrigenTransaccion.MANUAL,
-                estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-            ))
+            cursos_m = Decimal("118740.00")
+            registrar_gasto(cat_educacion.id, sub_cuotas_edu.id, cursos_m, date(anio, mes, 5), "Curso de capacitación y actualización profesional", MetodoPago.TRANSFERENCIA)
 
-        # G) MES MALO: Noviembre 2025 (gastos superan fuertemente a ingresos)
+        # Noviembre 2025: MES MALO (reparación mecánica imprevista de auto que supera ingresos)
         if anio == 2025 and mes == 11:
-            # Gasto excepcional: Reparación mecánica imprevista de motor
-            txs_to_create.append(Transaccion(
-                usuario_id=usuario.id, billetera_id=b_galicia.id,
-                categoria_id=cat_transporte.id, subcategoria_id=sub_auto_mant.id,
-                tipo=TipoTransaccion.EGRESO, monto=sc(580000), moneda=Moneda.ARS,
-                fecha=date(anio, mes, 14), descripcion=f"{TAG_SEED} Reparación embrague y distribución taller mecánico",
-                metodo_pago=MetodoPago.TRANSFERENCIA, origen=OrigenTransaccion.MANUAL,
-                estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-            ))
-            # Gasto excepcional 2: Reposición urgente heladera quemada
-            txs_to_create.append(Transaccion(
-                usuario_id=usuario.id, billetera_id=b_galicia.id,
-                categoria_id=cat_hogar.id, subcategoria_id=sub_electro.id,
-                tipo=TipoTransaccion.EGRESO, monto=sc(390000), moneda=Moneda.ARS,
-                fecha=date(anio, mes, 24), descripcion=f"{TAG_SEED} Compra heladera No Frost Frávega",
-                metodo_pago=MetodoPago.DEBITO, origen=OrigenTransaccion.MANUAL,
-                estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-            ))
+            reparacion_m = Decimal("612450.00")
+            registrar_gasto(cat_transporte.id, sub_auto_mant.id, reparacion_m, date(anio, mes, 14), "Reparación imprevista embrague y distribución taller mecánico", MetodoPago.TRANSFERENCIA)
 
-        # H) APORTES A METAS (salvo en el mes malo de nov 2025)
-        if not (anio == 2025 and mes == 11):
-            if meta_emergencia:
-                m_ahorro = sc(55000)
-                d_meta = date(anio, mes, 26)
-                # Crear MovimientoMeta
-                mov_m = MovimientoMeta(
-                    meta_id=meta_emergencia.id,
-                    tipo=TipoMovimientoMeta.APORTE,
-                    monto=m_ahorro,
-                    moneda_movimiento=Moneda.ARS,
-                    billetera_id=b_galicia.id,
-                    fecha=d_meta,
-                )
-                db.add(mov_m)
-                db.flush()
-                meta_emergencia.monto_actual = (meta_emergencia.monto_actual or Decimal("0")) + m_ahorro
-                # Transacción asociada al aporte
-                txs_to_create.append(Transaccion(
-                    usuario_id=usuario.id, billetera_id=b_galicia.id,
-                    categoria_id=cat_ahorro.id if cat_ahorro else None,
-                    tipo=TipoTransaccion.EGRESO, monto=m_ahorro, moneda=Moneda.ARS,
-                    fecha=d_meta, descripcion=f"{TAG_SEED} Aporte a la meta: Fondo de Emergencia",
-                    metodo_pago=MetodoPago.TRANSFERENCIA, origen=OrigenTransaccion.MANUAL,
-                    estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-                    movimiento_meta_id=mov_m.id
-                ))
+        # 5. Aporte a meta (Fondo de Emergencia) coherente con la capacidad de ahorro
+        # No se aporta en el mes malo de nov 2025. En meses regulares se destina ~19.5% a ahorro, más excedente de aguinaldos en jun/dic
+        if not (anio == 2025 and mes == 11) and meta_emergencia:
+            extra_sac = 700000 if mes == 12 else (850000 if mes == 6 else 0)
+            base_ahorro = int(round(float(sueldo_mes) * 0.195)) + extra_sac + rng.randint(-1230, 1450)
+            m_ahorro = Decimal(str(base_ahorro))
+            d_meta = date(anio, mes, 26)
+            mov_m = MovimientoMeta(
+                meta_id=meta_emergencia.id,
+                tipo=TipoMovimientoMeta.APORTE,
+                monto=m_ahorro,
+                moneda_movimiento=Moneda.ARS,
+                billetera_id=b_galicia.id,
+                fecha=d_meta,
+            )
+            db.add(mov_m)
+            db.flush()
+            registrar_gasto(
+                cat_ahorro.id if cat_ahorro else None,
+                None,
+                m_ahorro,
+                d_meta,
+                f"Aporte a la meta: Fondo de Emergencia {mes:02d}/{anio}",
+                MetodoPago.TRANSFERENCIA,
+                mov_meta_id=mov_m.id
+            )
 
-    # ── 6. SUSCRIPCIONES ACTIVAS ─────────────────────────────────────────
+    # 5. Consumos con tarjeta en cuotas terminados (2.8):
+    # Notebook Lenovo comprada en octubre 2025 en 6 cuotas de $54.890 (total $329.340, pagadas a abril 2026)
+    if tarjeta_galicia:
+        d_compra = date(2025, 10, 15)
+        m_cuota = Decimal("54890.00")
+        total_compra = Decimal("329340.00")
+        tx_padre = Transaccion(
+            usuario_id=usuario.id,
+            billetera_id=b_galicia.id,
+            tarjeta_id=tarjeta_galicia.id,
+            categoria_id=cat_hogar.id if cat_hogar else None,
+            tipo=TipoTransaccion.EGRESO,
+            monto=total_compra,
+            moneda=Moneda.ARS,
+            fecha=d_compra,
+            descripcion=f"{TAG_SEED} Notebook Lenovo ThinkPad 6 cuotas",
+            metodo_pago=MetodoPago.CREDITO,
+            origen=OrigenTransaccion.MANUAL,
+            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+            es_padre_cuotas=True,
+            es_cuota_hija=False,
+        )
+        txs_to_create.append(tx_padre)
+        db.add(tx_padre)
+        db.flush()
+
+        gc = GrupoCuotas(
+            usuario_id=usuario.id,
+            transaccion_padre_id=tx_padre.id,
+            tarjeta_id=tarjeta_galicia.id,
+            descripcion=f"{TAG_SEED} Notebook Lenovo ThinkPad",
+            monto_total=total_compra,
+            cantidad_cuotas=6,
+            tiene_interes=False,
+            total_financiado=total_compra,
+            moneda=Moneda.ARS,
+            estado=EstadoGrupoCuotas.COMPLETADO,
+            primer_vencimiento=date(2025, 11, 13),
+        )
+        db.add(gc)
+        db.flush()
+
+        # 6 Cuotas pagadas entre nov 2025 y abr 2026
+        vencimientos_cuotas = [
+            date(2025, 11, 13), date(2025, 12, 13), date(2026, 1, 13),
+            date(2026, 2, 13), date(2026, 3, 13), date(2026, 4, 13)
+        ]
+        for n_c, vto in enumerate(vencimientos_cuotas, start=1):
+            tx_hija = Transaccion(
+                usuario_id=usuario.id,
+                billetera_id=b_galicia.id,
+                tarjeta_id=tarjeta_galicia.id,
+                categoria_id=cat_hogar.id if cat_hogar else None,
+                tipo=TipoTransaccion.EGRESO,
+                monto=m_cuota,
+                moneda=Moneda.ARS,
+                fecha=vto,
+                descripcion=f"{TAG_SEED} Notebook Lenovo ThinkPad (Cuota {n_c}/6)",
+                metodo_pago=MetodoPago.CREDITO,
+                origen=OrigenTransaccion.MANUAL,
+                estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+                es_padre_cuotas=False,
+                es_cuota_hija=True,
+            )
+            txs_to_create.append(tx_hija)
+            db.add(tx_hija)
+            db.flush()
+
+            cuota = Cuota(
+                grupo_id=gc.id,
+                transaccion_id=tx_hija.id,
+                numero_cuota=n_c,
+                monto_proyectado=m_cuota,
+                monto_real=m_cuota,
+                fecha_vencimiento=vto,
+                pagada=True,
+            )
+            db.add(cuota)
+        db.flush()
+
+    # 6. Suscripciones activas (2.9)
     sub_spotify = Suscripcion(
         usuario_id=usuario.id,
         billetera_id=b_galicia.id,
@@ -464,17 +555,77 @@ def seed_historial(db):
     )
     db.add(hist_netflix)
 
-    # ── 7. PERSISTIR TRANSACCIONES ──────────────────────────────────────
-    print(f"Insertando {len(txs_to_create)} transacciones históricas...")
-    db.add_all(txs_to_create)
+    # 7. CICLO ACTUAL: Septiembre 2026 (solo transacciones con fecha <= hoy 2026-09-05)
+    # Sueldo cobrado el 1 de septiembre de 2026 ($2.800.000)
+    txs_to_create.append(Transaccion(
+        usuario_id=usuario.id,
+        billetera_id=b_galicia.id,
+        categoria_id=cat_empleo.id,
+        subcategoria_id=sub_sueldo.id,
+        tipo=TipoTransaccion.INGRESO,
+        monto=Decimal("2800000.00"),
+        moneda=Moneda.ARS,
+        fecha=date(2026, 9, 1),
+        descripcion=f"{TAG_SEED} Sueldo mensual 09/2026",
+        metodo_pago=MetodoPago.TRANSFERENCIA,
+        origen=OrigenTransaccion.MANUAL,
+        estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+        es_padre_cuotas=False,
+        es_cuota_hija=False,
+        es_recurrente=True,
+    ))
+
+    # Gastos ejecutados entre el 1 y el 5 de septiembre (montos coherentes con sueldo 2.80M)
+    registrar_gasto(cat_transporte.id, sub_combustible.id, Decimal("56430.00"), date(2026, 9, 2), "YPF Combustible")
+    registrar_gasto(cat_hogar.id, sub_alquiler.id if sub_alquiler else None, Decimal("728340.00"), date(2026, 9, 3), "Alquiler dpto 09/2026", MetodoPago.TRANSFERENCIA)
+    registrar_gasto(cat_alimentacion.id, sub_supermercado.id, Decimal("126480.00"), date(2026, 9, 4), "Supermercado Coto")
+    registrar_gasto(cat_hogar.id, sub_expensas.id if sub_expensas else None, Decimal("127150.00"), date(2026, 9, 5), "Expensas 09/2026", MetodoPago.TRANSFERENCIA)
+
+    # Aporte a meta del 5 de septiembre (~19.5% sueldo)
+    if meta_emergencia:
+        m_ahorro_sep = Decimal("546470.00")
+        mov_sep = MovimientoMeta(
+            meta_id=meta_emergencia.id,
+            tipo=TipoMovimientoMeta.APORTE,
+            monto=m_ahorro_sep,
+            moneda_movimiento=Moneda.ARS,
+            billetera_id=b_galicia.id,
+            fecha=date(2026, 9, 5),
+        )
+        db.add(mov_sep)
+        db.flush()
+        registrar_gasto(
+            cat_ahorro.id if cat_ahorro else None,
+            None,
+            m_ahorro_sep,
+            date(2026, 9, 5),
+            "Aporte a la meta: Fondo de Emergencia 09/2026",
+            MetodoPago.TRANSFERENCIA,
+            mov_meta_id=mov_sep.id
+        )
+
+    # Persistir todas las transacciones generadas
+    for tx in txs_to_create:
+        if tx not in db:
+            db.add(tx)
     db.flush()
 
-    # ── 8. RECALCULAR Y COHERENCIAR SALDOS DE BILLETERAS DE TESTINGADMIN ─
-    # Saldo = saldo_inicial + sum(ingresos) - sum(egresos) + sum(tr_in) - sum(tr_out)
-    from app.utils.fecha import hoy_argentina
-    hoy = hoy_argentina()
+    # Recalcular meta_emergencia.monto_actual
+    if meta_emergencia:
+        meta_emergencia.monto_actual = db.query(
+            func.coalesce(
+                func.sum(
+                    case(
+                        (MovimientoMeta.tipo == TipoMovimientoMeta.APORTE, MovimientoMeta.monto),
+                        else_=-MovimientoMeta.monto
+                    )
+                ),
+                Decimal("0.00")
+            )
+        ).filter(MovimientoMeta.meta_id == meta_emergencia.id).scalar()
 
-    for b in [b_galicia, b_santander, b_efectivo]:
+    # 8. Recalcular saldos de las billeteras de testingadmin
+    for b in [b_galicia, b_santander]:
         if not b:
             continue
         tx_row = db.execute(text("""
@@ -507,19 +658,153 @@ def seed_historial(db):
 
         s_inicial = b.saldo_inicial or Decimal("0.00")
         s_calculado = s_inicial + ing - egr + tr_in - tr_out
-
-        # Si el saldo queda negativo o queremos que testingadmin tenga liquidez operativa realista:
-        # ajustamos saldo_inicial para Galicia y Santander de modo que el saldo_actual sea coherente con su perfil
-        print(f"Billetera {b.nombre}: inicial={s_inicial}, ing={ing}, egr={egr}, tr_in={tr_in}, tr_out={tr_out} -> s_calc={s_calculado}")
         b.saldo_actual = s_calculado
 
     db.commit()
-    print("Seed completado y commiteado exitosamente.")
+
+    print("\nSUBCATEGORIAS DE HOGAR:")
+    for subcategoria in db.query(Subcategoria).filter(
+        Subcategoria.categoria_id == cat_hogar.id
+    ).order_by(Subcategoria.id).all():
+        print(f"  {subcategoria.id} | {subcategoria.nombre}")
+    print(f"SUBCATEGORIA ALQUILER: {sub_alquiler.id if sub_alquiler else 'NULL'}")
+    print(f"SUBCATEGORIA EXPENSAS: {sub_expensas.id if sub_expensas else 'NULL'}")
+    print("TRANSACCIONES DE HOGAR POR SUBCATEGORIA:")
+    rows_hogar_sub = db.query(
+        Subcategoria.id,
+        Subcategoria.nombre,
+        func.count(Transaccion.id)
+    ).select_from(Transaccion).outerjoin(
+        Subcategoria, Transaccion.subcategoria_id == Subcategoria.id
+    ).filter(
+        Transaccion.usuario_id == usuario.id,
+        Transaccion.categoria_id == cat_hogar.id,
+        Transaccion.descripcion.like(f"%{TAG_SEED}%")
+    ).group_by(Subcategoria.id, Subcategoria.nombre).order_by(Subcategoria.id).all()
+    for subcategoria_id, nombre, cantidad in rows_hogar_sub:
+        print(f"  {subcategoria_id or 'NULL'} | {nombre or 'NULL'} | {cantidad}")
+
+    # 9. Construir y reportar estadísticas de coherencia
+    print("\nREPORTE DE GENERACION:")
+    print(f"INGRESO INICIAL Y FINAL: Inicial 08/2025 = $2.100.000,00 | Final 09/2026 = $2.800.000,00")
+    print(f"TRANSACCIONES CREADAS: {len(txs_to_create)}")
+    print(f"RANGO DE FECHAS: 2025-08-01 / 2026-09-05")
+
+    # Tabla mes por mes de los 13 meses cerrados (2025-08 a 2026-08)
+    print("\nTABLA MES POR MES (Ciclos cerrados 08/2025 a 08/2026):")
+    print(f"{'Mes':<8} | {'Ingreso':>12} | {'Gasto Total':>12} | {'% Gasto':>8} | {'Ahorro':>12} | {'% Ahorro':>8}")
+    print("-" * 72)
+    for anio, mes in meses_hist:
+        m_start = date(anio, mes, 1)
+        if mes == 12:
+            m_end = date(anio, 12, 31)
+        else:
+            m_end = date(anio, mes + 1, 1) - timedelta(days=1)
+
+        ing_m = db.query(func.coalesce(func.sum(Transaccion.monto), Decimal("0"))).filter(
+            Transaccion.usuario_id == usuario.id,
+            Transaccion.fecha >= m_start,
+            Transaccion.fecha <= m_end,
+            Transaccion.tipo == TipoTransaccion.INGRESO,
+            Transaccion.descripcion.like(f"%{TAG_SEED}%")
+        ).scalar()
+
+        # Gastos reales (excluye aporte a meta que tiene movimiento_meta_id y crédito padre)
+        egr_m = db.query(func.coalesce(func.sum(Transaccion.monto), Decimal("0"))).filter(
+            Transaccion.usuario_id == usuario.id,
+            Transaccion.fecha >= m_start,
+            Transaccion.fecha <= m_end,
+            Transaccion.tipo == TipoTransaccion.EGRESO,
+            Transaccion.movimiento_meta_id.is_(None),
+            Transaccion.es_padre_cuotas == False,
+            Transaccion.descripcion.like(f"%{TAG_SEED}%")
+        ).scalar()
+
+        pct_g = (egr_m / ing_m * Decimal("100")) if ing_m > 0 else Decimal("0")
+        ahorro_m = ing_m - egr_m
+        pct_a = (ahorro_m / ing_m * Decimal("100")) if ing_m > 0 else Decimal("0")
+        print(f"{anio}-{mes:02d}  | ${ing_m:>11,.2f} | ${egr_m:>11,.2f} | {pct_g:>7.2f}% | ${ahorro_m:>11,.2f} | {pct_a:>7.2f}%")
+
+    # Promedio mensual por categoría de los 13 meses cerrados
+    total_ingresos_13m = db.query(func.coalesce(func.sum(Transaccion.monto), Decimal("0"))).filter(
+        Transaccion.usuario_id == usuario.id,
+        Transaccion.fecha >= date(2025, 8, 1),
+        Transaccion.fecha <= date(2026, 8, 31),
+        Transaccion.tipo == TipoTransaccion.INGRESO,
+        Transaccion.descripcion.like(f"%{TAG_SEED}%")
+    ).scalar()
+    prom_ingreso_13m = total_ingresos_13m / Decimal("13")
+
+    print(f"\nPROMEDIO MENSUAL POR CATEGORIA (08/2025 - 08/2026) [Ingreso Promedio: ${prom_ingreso_13m:>11,.2f}]:")
+    rows_cat = db.query(
+        Categoria.nombre,
+        func.sum(Transaccion.monto)
+    ).join(Categoria, Transaccion.categoria_id == Categoria.id).filter(
+        Transaccion.usuario_id == usuario.id,
+        Transaccion.fecha >= date(2025, 8, 1),
+        Transaccion.fecha <= date(2026, 8, 31),
+        Transaccion.tipo == TipoTransaccion.EGRESO,
+        Transaccion.movimiento_meta_id.is_(None),
+        Transaccion.es_padre_cuotas == False,
+        Transaccion.descripcion.like(f"%{TAG_SEED}%")
+    ).group_by(Categoria.nombre).order_by(func.sum(Transaccion.monto).desc()).all()
+
+    for cat_n, total_cat in rows_cat:
+        prom_cat = total_cat / Decimal("13")
+        pct_cat = (prom_cat / prom_ingreso_13m * Decimal("100")) if prom_ingreso_13m > 0 else Decimal("0")
+        print(f"  {cat_n:<25}: Promedio Mensual = ${prom_cat:>11,.2f} ({pct_cat:>5.1f}% del ingreso) | Total 13m = ${total_cat:>12,.2f}")
+
+    prom_serv = sum(t / Decimal("13") for c, t in rows_cat if c == "Servicios")
+    prom_com = sum(t / Decimal("13") for c, t in rows_cat if c == "Comunicación")
+    pct_serv = (prom_serv / prom_ingreso_13m * Decimal("100")) if prom_ingreso_13m > 0 else Decimal("0")
+    pct_serv_com = ((prom_serv + prom_com) / prom_ingreso_13m * Decimal("100")) if prom_ingreso_13m > 0 else Decimal("0")
+    print(f"\n  SERVICIOS SOLOS: Promedio Mensual = ${prom_serv:>11,.2f} ({pct_serv:>5.1f}% del ingreso)")
+    print(f"  SERVICIOS + COMUNICACION: Promedio Mensual = ${prom_serv + prom_com:>11,.2f} ({pct_serv_com:>5.1f}% del ingreso)")
+
+    print("\nSALDOS FINALES DE testingadmin:")
+    for b in db.query(Billetera).filter(Billetera.usuario_id == usuario.id).all():
+        print(f"  {b.nombre} ({b.moneda.value}): ${b.saldo_actual:,.2f}")
+
+    # Recalcular perfil financiero
+    print("\nRecalculando perfil financiero de testingadmin...")
+    calcular_y_persistir_perfil(db, usuario.id)
+
+    perfil = db.query(PerfilFinanciero).filter(PerfilFinanciero.usuario_id == usuario.id).first()
+    print("\nPERFIL FINANCIERO CRUDA:")
+    if perfil:
+        import pprint
+        p_dict = {
+            "tasa_ahorro_ars": float(perfil.tasa_ahorro_ars) if perfil.tasa_ahorro_ars is not None else None,
+            "tasa_ahorro_usd": float(perfil.tasa_ahorro_usd) if perfil.tasa_ahorro_usd is not None else None,
+            "score_impulsividad_ars": float(perfil.score_impulsividad_ars) if perfil.score_impulsividad_ars is not None else None,
+            "score_impulsividad_usd": float(perfil.score_impulsividad_usd) if perfil.score_impulsividad_usd is not None else None,
+            "ratio_cuotas_ars": float(perfil.ratio_cuotas_ars) if perfil.ratio_cuotas_ars is not None else None,
+            "ratio_cuotas_usd": float(perfil.ratio_cuotas_usd) if perfil.ratio_cuotas_usd is not None else None,
+            "cumplimiento_presupuesto": float(perfil.cumplimiento_presupuesto) if perfil.cumplimiento_presupuesto is not None else None,
+            "consistencia_registro": float(perfil.consistencia_registro) if perfil.consistencia_registro is not None else None,
+            "porcentaje_suscripciones_ars": float(perfil.porcentaje_suscripciones_ars) if perfil.porcentaje_suscripciones_ars is not None else None,
+            "porcentaje_suscripciones_usd": float(perfil.porcentaje_suscripciones_usd) if perfil.porcentaje_suscripciones_usd is not None else None,
+            "ultima_actualizacion": str(perfil.ultima_actualizacion),
+        }
+        pprint.pprint(p_dict)
+    else:
+        print("Perfil financiero no disponible.")
+
+    # Proyección actual
+    print("\nPROYECCION CRUDA (ARS):")
+    proy = calcular_proyeccion(db, usuario)
+    if proy and "ars" in proy:
+        import pprint
+        pprint.pprint(proy["ars"])
+    else:
+        print("Proyección no disponible.")
 
 
 if __name__ == "__main__":
     db = SessionLocal()
     try:
-        seed_historial(db)
+        u = verificar_autorizacion(db)
+        borrar_historial_anterior(db, u)
+        regenerar_datos_realistas(db, u)
     finally:
         db.close()

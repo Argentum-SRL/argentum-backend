@@ -321,78 +321,31 @@ def _calcular_porcentaje_suscripciones_sync_moneda(db: Session, usuario_id: UUID
 
 
 def _calcular_y_persistir_perfil_sync(db: Session, usuario_id: UUID) -> PerfilFinanciero | None:
+    from app.services.analisis_financiero_service import calcular_perfil_nuevo
+
     usuario = db.get(Usuario, usuario_id)
     if not usuario:
         raise ValueError(f"Usuario {usuario_id} no encontrado")
 
-    hoy = hoy_argentina()
-
-    # Guard de historial insuficiente global
-    if not _validar_historial_minimo(db, usuario_id, None):
-        return None
-
-    primera_fecha = _obtener_primera_fecha_sync(db, usuario_id, None)
-
-    inicio_ciclo, _ = get_ciclo_fechas(usuario, hoy)
-
-    # Usar max(inicio_ciclo - 2 ciclos, 90 días atrás) como período
-    inicio_analisis = min(
-        inicio_ciclo - timedelta(days=60),
-        hoy - timedelta(days=90)
-    )
-
-    # Validar historial mínimo por bloque de moneda para cálculo
-    tasa_ahorro_ars = _calcular_tasa_ahorro_sync_moneda(db, usuario_id, inicio_analisis, Moneda.ARS) if _validar_historial_minimo(db, usuario_id, Moneda.ARS) else None
-    tasa_ahorro_usd = _calcular_tasa_ahorro_sync_moneda(db, usuario_id, inicio_analisis, Moneda.USD) if _validar_historial_minimo(db, usuario_id, Moneda.USD) else None
-
-    score_impulsividad_ars = _calcular_score_impulsividad_sync_moneda(db, usuario_id, inicio_analisis, Moneda.ARS) if _validar_historial_minimo(db, usuario_id, Moneda.ARS) else None
-    score_impulsividad_usd = _calcular_score_impulsividad_sync_moneda(db, usuario_id, inicio_analisis, Moneda.USD) if _validar_historial_minimo(db, usuario_id, Moneda.USD) else None
-
-    ratio_cuotas_ars = _calcular_ratio_cuotas_sync_moneda(db, usuario_id, inicio_analisis, Moneda.ARS) if _validar_historial_minimo(db, usuario_id, Moneda.ARS) else None
-    ratio_cuotas_usd = _calcular_ratio_cuotas_sync_moneda(db, usuario_id, inicio_analisis, Moneda.USD) if _validar_historial_minimo(db, usuario_id, Moneda.USD) else None
-
-    porcentaje_suscripciones_ars = _calcular_porcentaje_suscripciones_sync_moneda(db, usuario_id, inicio_analisis, Moneda.ARS) if _validar_historial_minimo(db, usuario_id, Moneda.ARS) else None
-    porcentaje_suscripciones_usd = _calcular_porcentaje_suscripciones_sync_moneda(db, usuario_id, inicio_analisis, Moneda.USD) if _validar_historial_minimo(db, usuario_id, Moneda.USD) else None
-
-    # Globales (agnósticos de moneda)
-    cumplimiento_presupuesto = _calcular_cumplimiento_presupuesto_sync(db, usuario_id, inicio_analisis)
-    consistencia_registro = _calcular_consistencia_registro_sync(db, usuario_id, inicio_analisis, primera_fecha)
-
+    nuevo = calcular_perfil_nuevo(db, usuario)
     perfil = db.execute(
         select(PerfilFinanciero).where(PerfilFinanciero.usuario_id == usuario_id)
     ).scalar_one_or_none()
-
-    ahora = datetime.now(timezone.utc)
-
-    if perfil:
-        perfil.tasa_ahorro_ars = tasa_ahorro_ars
-        perfil.tasa_ahorro_usd = tasa_ahorro_usd
-        perfil.score_impulsividad_ars = score_impulsividad_ars
-        perfil.score_impulsividad_usd = score_impulsividad_usd
-        perfil.ratio_cuotas_ars = ratio_cuotas_ars
-        perfil.ratio_cuotas_usd = ratio_cuotas_usd
-        perfil.cumplimiento_presupuesto = cumplimiento_presupuesto
-        perfil.consistencia_registro = consistencia_registro
-        perfil.porcentaje_suscripciones_ars = porcentaje_suscripciones_ars
-        perfil.porcentaje_suscripciones_usd = porcentaje_suscripciones_usd
-        perfil.ultima_actualizacion = ahora
-    else:
-        perfil = PerfilFinanciero(
-            usuario_id=usuario_id,
-            tasa_ahorro_ars=tasa_ahorro_ars,
-            tasa_ahorro_usd=tasa_ahorro_usd,
-            score_impulsividad_ars=score_impulsividad_ars,
-            score_impulsividad_usd=score_impulsividad_usd,
-            ratio_cuotas_ars=ratio_cuotas_ars,
-            ratio_cuotas_usd=ratio_cuotas_usd,
-            cumplimiento_presupuesto=cumplimiento_presupuesto,
-            consistencia_registro=consistencia_registro,
-            porcentaje_suscripciones_ars=porcentaje_suscripciones_ars,
-            porcentaje_suscripciones_usd=porcentaje_suscripciones_usd,
-            ultima_actualizacion=ahora
-        )
+    if perfil is None:
+        perfil = PerfilFinanciero(usuario_id=usuario_id)
         db.add(perfil)
-
+    perfil.tasa_ahorro_ars = nuevo["capacidad_ahorro"]
+    perfil.tasa_ahorro_usd = None
+    volatilidad = nuevo["volatilidad_gasto_variable"]
+    perfil.score_impulsividad_ars = int((volatilidad * Decimal("100")).to_integral_value()) if volatilidad is not None else None
+    perfil.score_impulsividad_usd = None
+    perfil.ratio_cuotas_ars = nuevo["gasto_comprometido_ratio"]
+    perfil.ratio_cuotas_usd = None
+    perfil.cumplimiento_presupuesto = _calcular_cumplimiento_presupuesto_sync(db, usuario_id, hoy_argentina() - timedelta(days=365))
+    perfil.consistencia_registro = nuevo["consistencia_registro"]
+    perfil.porcentaje_suscripciones_ars = nuevo["gasto_comprometido_ratio"]
+    perfil.porcentaje_suscripciones_usd = None
+    perfil.ultima_actualizacion = datetime.now(timezone.utc)
     db.commit()
     db.refresh(perfil)
     return perfil

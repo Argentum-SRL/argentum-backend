@@ -339,6 +339,16 @@ def obtener_conteos_base(db: Session):
         saldos[str(b.id)] = b.saldo_actual
     return {"tx": tx_cnt, "conv": conv_cnt, "msg": msg_cnt, "saldos": saldos}
 
+def obtener_saldos_21(db: Session):
+    return {
+        (email, b.nombre): b.saldo_actual
+        for b, email in db.execute(
+            select(Billetera, Usuario.email)
+            .join(Usuario, Billetera.usuario_id == Usuario.id)
+            .order_by(Usuario.email, Billetera.nombre)
+        ).all()
+    }
+
 # Baseline documentado de diferencias aceptadas en reconciliación.
 # Proviene del alta histórica de datos (junio 2026), donde las billeteras
 # Galicia de usuario5 tienen saldo_inicial en 0
@@ -426,33 +436,16 @@ def verificar_reconciliacion_billeteras(db: Session):
     return len(discrepancias_no_esperadas) == 0, discrepancias_no_esperadas, detalles
 
 SALDOS_REFERENCIA_21 = {
-    ("usuario1@argentum.test", "Banco Nación"): Decimal("577000.00"),
-    ("usuario1@argentum.test", "Efectivo ARS"): Decimal("0.00"),
-    ("usuario1@argentum.test", "Efectivo USD"): Decimal("0.00"),
-    ("usuario1@argentum.test", "Mercado Pago"): Decimal("0.00"),
-    ("usuario1@argentum.test", "Naranja X"): Decimal("0.00"),
-    ("usuario2@argentum.test", "Efectivo ARS"): Decimal("800.00"),
-    ("usuario2@argentum.test", "Efectivo USD"): Decimal("0.00"),
-    ("usuario2@argentum.test", "Mercado Pago"): Decimal("51148.00"),
-    ("usuario4@argentum.test", "Efectivo ARS"): Decimal("-33060.00"),  # Actualizado 2026-09-05: gasto legítimo de $3000 (Coca) registrado por el usuario vía WhatsApp
-    ("usuario4@argentum.test", "Efectivo USD"): Decimal("0.00"),
-    ("usuario5@argentum.test", "Balanz"): Decimal("453000.00"),
-    ("usuario5@argentum.test", "Efectivo ARS"): Decimal("0.00"),
-    ("usuario5@argentum.test", "Efectivo USD"): Decimal("0.00"),
-    ("usuario5@argentum.test", "Galicia"): Decimal("982803.39"),  # Actualizado 2026-09-05: pagos manuales de resúmenes de tarjeta (1506, 5077, Amex) y consumos del usuario
-    ("usuario5@argentum.test", "Santander JJ"): Decimal("0.00"),
-    ("usuario7@argentum.test", "Efectivo ARS"): Decimal("0.00"),
-    ("usuario7@argentum.test", "Efectivo USD"): Decimal("0.00"),
     ("testingadmin@argentum.com", "Efectivo ARS"): Decimal("0.00"),
     ("testingadmin@argentum.com", "Efectivo USD"): Decimal("0.00"),
-    ("testingadmin@argentum.com", "Galicia"): Decimal("4785055.00"),  # Actualizado 2026-09-05: enriquecimiento de 12+ ciclos históricos realistas
+    ("testingadmin@argentum.com", "Galicia"): Decimal("3916316.00"),  # Actualizado 2026-09-06: corrección sueldo neto ~$2.8M a 09/2026, gastos en banda 75-90% con dispersión al peso y alquiler en Hogar
     ("testingadmin@argentum.com", "Santander"): Decimal("84270.29"),
 }
 
-def verificar_saldos_contra_referencia(db: Session):
+def verificar_saldos_contra_referencia(db: Session, saldos_inicio_21: dict):
     """
-    Compara los saldos actuales de las 21 billeteras contra los valores
-    de referencia históricos y reporta si alguno difiere.
+    Compara testingadmin contra referencias fijas y las otras cinco cuentas
+    contra la foto tomada al inicio de la suite.
     """
     from app.models.billetera import Billetera
     from app.models.usuario import Usuario
@@ -466,18 +459,22 @@ def verificar_saldos_contra_referencia(db: Session):
     desvios = []
     detalles = []
     for b, email in billeteras:
-        ref = SALDOS_REFERENCIA_21.get((email, b.nombre))
         actual = b.saldo_actual
-        diff = actual - ref if ref is not None else None
+        clave = (email, b.nombre)
+        ref = SALDOS_REFERENCIA_21.get(clave)
+        saldo_inicial = saldos_inicio_21.get(clave)
+        esperado = ref if ref is not None else saldo_inicial
+        diff = actual - esperado if esperado is not None else None
         item = {
             "email": email,
             "billetera": b.nombre,
             "actual": actual,
             "referencia": ref,
+            "saldo_inicial": saldo_inicial,
             "diff": diff
         }
         detalles.append(item)
-        if ref is not None and actual != ref:
+        if esperado is None or actual != esperado:
             desvios.append(item)
     return len(desvios) == 0, desvios, detalles
 
@@ -2413,6 +2410,8 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
         raise RuntimeError(f"ABORT CRITICO: Verificación de usuario fallida. Resuelto: {u_admin.email}")
     
     conteos_inicio = obtener_conteos_base(db)
+    saldos_inicio_21 = obtener_saldos_21(db)
+    total_billeteras = len(saldos_inicio_21)
     db.close()
 
     from app.utils.fecha import hoy_argentina
@@ -3431,7 +3430,7 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
 
     # Verificación de saldos contra referencia histórica de las 21 billeteras
     db_ref = SessionLocal()
-    saldos_ref_ok, desvios_ref, detalles_ref = verificar_saldos_contra_referencia(db_ref)
+    saldos_ref_ok, desvios_ref, detalles_ref = verificar_saldos_contra_referencia(db_ref, saldos_inicio_21)
     db_ref.close()
 
     # Verificación de reconciliación de saldos en todas las 21 billeteras
@@ -3460,17 +3459,20 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
         print(f"Saldos de billeteras intactos: {'SÍ' if saldos_intactos else 'NO'}")
         print(f"¿Rollback total verificado (cero residuo)?: {'SÍ' if sin_residuos else 'NO'}")
 
-        print("\n=== VERIFICACION DE SALDOS CONTRA REFERENCIA HISTORICA (21 BILLETERAS) ===")
+        print(f"\n=== VERIFICACION DE SALDOS CONTRA REFERENCIA HISTORICA ({total_billeteras} BILLETERAS) ===")
         for d in detalles_ref:
+            esperado = d["referencia"] if d["referencia"] is not None else d["saldo_inicial"]
+            criterio = "referencia" if d["referencia"] is not None else "foto_inicio"
             st = "OK" if d["diff"] == Decimal("0.00") else f"DESVIO ({d['diff']})"
-            print(f"  {d['email']} | {d['billetera']}: actual={d['actual']} | ref={d['referencia']} -> {st}")
-        print(f"¿Todos los saldos coinciden con la referencia histórica?: {'SÍ' if saldos_ref_ok else 'NO'}")
+            print(f"  {d['email']} | {d['billetera']}: antes={esperado} | después={d['actual']} | diferencia={d['diff']} | criterio={criterio} -> {st}")
+        print(f"¿Todos los saldos cumplen el criterio?: {'SÍ' if saldos_ref_ok else 'NO'}")
         if not saldos_ref_ok:
-            print(f"ALERTA: Se detectaron {len(desvios_ref)} billeteras con saldos alterados respecto a la referencia:")
+            print(f"ALERTA: Se detectaron {len(desvios_ref)} billeteras con saldos alterados:")
             for desv in desvios_ref:
-                print(f"  - {desv['email']} ({desv['billetera']}): actual={desv['actual']}, ref={desv['referencia']}, diff={desv['diff']}")
+                antes = desv["referencia"] if desv["referencia"] is not None else desv["saldo_inicial"]
+                print(f"  - {desv['email']} ({desv['billetera']}): antes={antes}, después={desv['actual']}, diferencia={desv['diff']}")
 
-        print("\n=== VERIFICACION DE RECONCILIACION (21 BILLETERAS) ===")
+        print(f"\n=== VERIFICACION DE RECONCILIACION ({total_billeteras} BILLETERAS) ===")
         for d in detalles_rec:
             if d["ok"]:
                 st = f"OK (baseline {d['esperado_diff']:+.2f})" if d["esperado_diff"] != Decimal("0.00") else "OK"
@@ -3489,15 +3491,16 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
         print(f"Llamadas IA: {_gestor_actual.llamadas_grabadas} grabadas, {_gestor_actual.llamadas_reales} reales")
         print(f"Rollback y conteos: {'OK (cero residuo)' if sin_residuos else 'FALLO'}")
         if saldos_ref_ok:
-            print("Saldos 21 billeteras vs referencia: OK (todas coinciden)")
+            print(f"Saldos {total_billeteras} billeteras: OK (testingadmin contra referencia, cuentas ajenas contra foto inicial)")
         else:
-            print(f"Saldos 21 billeteras vs referencia: DESVIO ({len(desvios_ref)} billeteras)")
+            print(f"Saldos {total_billeteras} billeteras: DESVIO ({len(desvios_ref)} billeteras)")
             for desv in desvios_ref:
-                print(f"  - {desv['email']} ({desv['billetera']}): actual={desv['actual']}, ref={desv['referencia']}, diff={desv['diff']}")
+                antes = desv["referencia"] if desv["referencia"] is not None else desv["saldo_inicial"]
+                print(f"  - {desv['email']} ({desv['billetera']}): antes={antes}, después={desv['actual']}, diferencia={desv['diff']}")
         if rec_ok:
-            print("Reconciliación 21 billeteras: OK (todas dentro del baseline)")
+            print(f"Reconciliación {total_billeteras} billeteras: OK (todas dentro del baseline)")
         else:
-            print(f"Reconciliación 21 billeteras: DESVIO ({len(discrepancias)} fuera de baseline)")
+            print(f"Reconciliación {total_billeteras} billeteras: DESVIO ({len(discrepancias)} fuera de baseline)")
             for disc in discrepancias:
                 print(f"  - {disc['email']} ({disc['billetera']}): guardado={disc['guardado']}, calc={disc['calculado']}, diff={disc['diferencia']}")
 

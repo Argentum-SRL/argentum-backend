@@ -130,6 +130,8 @@ class ProyeccionCategoria(BaseModel):
     gasto_actual_ciclo: float = Field(..., ge=0)
     promedio_historico: float = Field(..., ge=0)
     proyectado: float = Field(..., ge=0)
+    rango_piso: float = Field(..., ge=0)
+    rango_techo: float = Field(..., ge=0)
     fuera_de_patron: bool
 
 
@@ -155,15 +157,18 @@ class PesosProyeccion(BaseModel):
 class ProyeccionMoneda(BaseModel):
     periodo: PeriodoProyeccion
     gasto_proyectado_total: float = Field(..., ge=0)
+    rango: Dict[str, float]
+    rango_poco_informativo: bool
     balance_proyectado: float
     ingresos_proyectados: float = Field(..., ge=0)
     certezas: CertezasProyeccion
     desglose_por_categoria: List[ProyeccionCategoria]
-    nivel_confianza: Literal["alto", "medio", "bajo"]
+    nivel_confianza: Literal["alto", "medio", "bajo", "sin_datos", "inicial"]
     ciclos_analizados: int = Field(..., ge=0)
     pesos: PesosProyeccion
     advertencias: List[str]
     datos_suficientes: bool
+    clasificacion: Dict[str, int]
 
 
 class ProyeccionesResponse(BaseModel):
