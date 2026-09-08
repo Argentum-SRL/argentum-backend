@@ -228,7 +228,7 @@ class RegisterRequest(BaseModel):
     nombre: str
     apellido: str
     email: str
-    telefono: str
+    telefono: str | None = None
     password: str
     acepta_terminos: bool = True
 
@@ -249,7 +249,9 @@ class RegisterRequest(BaseModel):
 
     @field_validator("telefono")
     @classmethod
-    def sanitize_telefono(cls, v: str) -> str:
+    def sanitize_telefono(cls, v: str | None) -> str | None:
+        if not v or not v.strip():
+            return None
         return _validar_telefono(v)
 
     @field_validator("password")

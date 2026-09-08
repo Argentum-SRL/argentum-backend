@@ -80,8 +80,6 @@ from app.services.email_service import (
 from app.services import usuario_service
 from app.services import whatsapp_service
 from app.services.whatsapp_service import (
-    enviar_whatsapp,
-    enviar_mensaje_whatsapp,
     generar_codigo_vinculacion,
 )
 
@@ -93,37 +91,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-_envios_otp_telefono: dict[str, list[float]] = {}
-MAX_OTP_POR_TELEFONO = 3
-VENTANA_OTP_SEGUNDOS = 10 * 60  # 10 minutos
-
-
-def _verificar_rate_limit_otp_telefono(telefono: str) -> bool:
-    ahora = time.time()
-    limite_tiempo = ahora - VENTANA_OTP_SEGUNDOS
-    tel_key = normalizar_telefono_ar(telefono) or telefono.strip()
-
-    timestamps = _envios_otp_telefono.get(tel_key, [])
-    timestamps = [t for t in timestamps if t > limite_tiempo]
-
-    if len(timestamps) >= MAX_OTP_POR_TELEFONO:
-        _envios_otp_telefono[tel_key] = timestamps
-        return False
-
-    timestamps.append(ahora)
-    _envios_otp_telefono[tel_key] = timestamps
-
-    # Purgar periódicamente si el diccionario crece demasiado
-    if len(_envios_otp_telefono) > 2000:
-        for k in list(_envios_otp_telefono.keys()):
-            filtrados = [t for t in _envios_otp_telefono[k] if t > limite_tiempo]
-            if not filtrados:
-                del _envios_otp_telefono[k]
-            else:
-                _envios_otp_telefono[k] = filtrados
-
-    return True
 
 
 def _device_info(request: Request) -> str | None:
@@ -172,7 +139,8 @@ def register(request: Request, user_in: RegisterRequest, background_tasks: Backg
     No devuelve tokens: primero debe verificar email y luego teléfono.
     """
     email_clean = user_in.email.strip().lower()
-    tel_norm = normalizar_telefono_ar(user_in.telefono) if user_in.telefono else None
+    tel_clean = user_in.telefono.strip() if user_in.telefono else None
+    tel_norm = normalizar_telefono_ar(tel_clean) if tel_clean else None
 
     email_existente = db.execute(
         select(Usuario).where(Usuario.email.ilike(email_clean))
@@ -185,18 +153,19 @@ def register(request: Request, user_in: RegisterRequest, background_tasks: Backg
             )
         raise HTTPException(status_code=400, detail="Ya existe una cuenta con ese email.")
 
-    condicion_tel = (Usuario.telefono == user_in.telefono)
-    if tel_norm:
-        condicion_tel = condicion_tel | (Usuario.telefono_normalizado == tel_norm)
+    if tel_clean:
+        condicion_tel = (Usuario.telefono == tel_clean)
+        if tel_norm:
+            condicion_tel = condicion_tel | (Usuario.telefono_normalizado == tel_norm)
 
-    if db.execute(select(Usuario).where(condicion_tel)).scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Ese número de teléfono ya está registrado.")
+        if db.execute(select(Usuario).where(condicion_tel)).scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Ese número de teléfono ya está registrado.")
 
     nuevo = Usuario(
         nombre=user_in.nombre.strip(),
         apellido=user_in.apellido.strip(),
         email=email_clean,
-        telefono=user_in.telefono.strip(),
+        telefono=tel_clean,
         telefono_normalizado=tel_norm,
         password_hash=get_password_hash(user_in.password),
         password_configurada=True, # Ya la puso en el registro
@@ -446,10 +415,11 @@ def enviar_codigo_email(request: Request, body: EnviarCodigoEmailRequest, db: Se
 
 
 @router.get("/email/verificar-link")
-def verificar_email_link(email: str, codigo: str, db: Session = Depends(get_db)):
+def verificar_email_link(email: str, codigo: str, request: Request, db: Session = Depends(get_db)):
     """
     Verifica el email a través de un link (método GET).
-    Si es exitoso, redirige al frontend a la confirmación o al siguiente paso de verificación.
+    Si es exitoso, activa la cuenta, emite tokens en cookies y redirige al frontend
+    a la vinculación de WhatsApp (si no está verificado) o a la confirmación/dashboard.
     """
     from fastapi.responses import RedirectResponse
     import urllib.parse
@@ -470,20 +440,20 @@ def verificar_email_link(email: str, codigo: str, db: Session = Depends(get_db))
         )
 
     user.email_verificado = True
-
-    # Si ya tiene el teléfono verificado o es usuario que vino de teléfono
-    if user.telefono_verificado or user.auth_provider == AuthProvider.TELEFONO:
-        user.estado = EstadoUsuario.ACTIVO
-        db.commit()
-        return RedirectResponse(
-            url=f"{settings.FRONTEND_URL}/auth/verificar-email?email={user.email}&verificado=true"
-        )
-
+    user.estado = EstadoUsuario.ACTIVO
+    user.ultimo_acceso = datetime.now(timezone.utc)
     db.commit()
-    # Si falta verificar teléfono (caso registro normal por email):
-    return RedirectResponse(
-        url=f"{settings.FRONTEND_URL}/auth/verificar-telefono?telefono={user.telefono}&modoVerificacion=true"
-    )
+
+    access, refresh = _tokens(user, request, db)
+
+    if not user.telefono_verificado:
+        target_url = f"{settings.FRONTEND_URL}/auth/verificar-telefono?modoVerificacion=true"
+    else:
+        target_url = f"{settings.FRONTEND_URL}/auth/verificar-email?email={user.email}&verificado=true"
+
+    redirect_resp = RedirectResponse(url=target_url, status_code=303)
+    setear_cookies_auth(redirect_resp, access, refresh, settings)
+    return redirect_resp
 
 
 @router.post("/email/verificar", response_model=AuthResponse)
@@ -495,10 +465,8 @@ def verificar_email(
 ):
     """
     Verifica el código enviado al email.
-
-    - Provider EMAIL: marca email_verificado=True y pide verificación de teléfono.
-    - Provider TELEFONO (viene de completar-perfil): marca email_verificado=True,
-      activa la cuenta y devuelve tokens + requiere_onboarding.
+    Activa la cuenta y emite tokens de autenticación para que el usuario pueda
+    solicitar la vinculación de WhatsApp o continuar a su cuenta.
     """
     email_clean = body.email.strip().lower()
     ok, error = verificar_codigo_email(email_clean, body.codigo.strip())
@@ -510,22 +478,17 @@ def verificar_email(
         raise HTTPException(status_code=404, detail="No encontramos una cuenta con esos datos.")
 
     user.email_verificado = True
-
-    if user.auth_provider == AuthProvider.EMAIL and not user.telefono_verificado:
-        db.commit()
-        return AuthResponse(
-            usuario=UsuarioRead.model_validate(user),
-            requiere_verificacion_telefono=True,
-        )
-
-    # Usuario con teléfono ya verificado o provider TELEFONO: activar cuenta y emitir tokens
     user.estado = EstadoUsuario.ACTIVO
+    user.ultimo_acceso = datetime.now(timezone.utc)
     db.commit()
+
     access, refresh = _tokens(user, request, db)
     setear_cookies_auth(response, access, refresh, settings)
+
     return AuthResponse(
         access_token=access,
         usuario=UsuarioRead.model_validate(user),
+        requiere_verificacion_telefono=not user.telefono_verificado,
         requiere_onboarding=_requiere_onboarding(user),
     )
 
