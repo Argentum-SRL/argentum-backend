@@ -4646,6 +4646,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
             # 2.1 Detección del código de vinculación ANTES de resolver usuario o cooldown
             if msg_type == "text":
                 texto_candidato = msg.get("text", {}).get("body", "").strip()
+                logger.info("whatsapp_webhook_mensaje_recibido", from_number=from_number, texto=texto_candidato, msg_type=msg_type)
                 codigo_vinc, entrada_vinc, es_vencido = buscar_codigo_vinculacion(texto_candidato)
                 if codigo_vinc:
                     if es_vencido or not entrada_vinc:
