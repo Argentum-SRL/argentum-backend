@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.database import get_db
-from app.models.usuario import Usuario
+from app.models.usuario import Usuario, AuthProvider
 from app.schemas.usuario import (
     UsuarioResponse,
     MetodosLoginResponse,
@@ -34,11 +34,12 @@ def get_metodos_login(
     return {
         "email_password": current_user.email_verificado and current_user.password_configurada,
         "telefono": current_user.telefono_verificado,
-        "google": current_user.email_verificado,
+        "google": current_user.auth_provider == AuthProvider.GOOGLE,
         "puede_agregar_password": not current_user.password_configurada and current_user.email_verificado,
         "puede_agregar_email": not current_user.email_verificado,
         "puede_agregar_telefono": not current_user.telefono_verificado
     }
+
 
 @router.put("/me/datos-personales", response_model=UsuarioResponse)
 def update_datos_personales(

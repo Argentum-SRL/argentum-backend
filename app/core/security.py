@@ -31,3 +31,21 @@ def create_refresh_token(data: dict, expires_delta: timedelta | None = None) -> 
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
+
+import re
+
+def validar_reglas_password(v: str) -> str:
+    if not v:
+        raise ValueError("La contraseña no puede estar vacía.")
+    if len(v) < 8:
+        raise ValueError("La contraseña debe tener al menos 8 caracteres.")
+    if len(v) > 128:
+        raise ValueError("La contraseña no puede superar los 128 caracteres.")
+    if not re.search(r"[A-Z]", v):
+        raise ValueError("La contraseña debe incluir al menos una letra mayúscula.")
+    if not re.search(r"[a-z]", v):
+        raise ValueError("La contraseña debe incluir al menos una letra minúscula.")
+    if not re.search(r"[0-9]", v):
+        raise ValueError("La contraseña debe incluir al menos un número.")
+    return v
+

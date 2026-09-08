@@ -131,12 +131,6 @@ def actualizar_email(
 def actualizar_password(
     db: Session, usuario: Usuario, datos: EditarPassword
 ) -> dict:
-    if usuario.auth_provider == AuthProvider.GOOGLE:
-        raise HTTPException(
-            status_code=400,
-            detail="Tu cuenta utiliza Google OAuth. La contraseña es administrada directamente por Google."
-        )
-    
     if usuario.password_configurada and usuario.password_hash:
         if not datos.password_actual:
             raise HTTPException(status_code=400, detail="La contraseña actual es obligatoria.")
@@ -148,16 +142,16 @@ def actualizar_password(
     if datos.password_nueva != datos.password_nueva_confirmacion:
         raise HTTPException(status_code=400, detail="Las contraseñas no coinciden.")
     
-    pw = datos.password_nueva
-    if len(pw) < 8 or not any(c.isupper() for c in pw) or not any(c.islower() for c in pw) or not any(c.isdigit() for c in pw):
-        raise HTTPException(
-            status_code=400,
-            detail="La contraseña debe tener al menos 8 caracteres, una mayúscula, una minúscula y un número."
-        )
+    from app.core.security import validar_reglas_password
+    try:
+        validar_reglas_password(datos.password_nueva)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
-    usuario.password_hash = get_password_hash(pw)
+    usuario.password_hash = get_password_hash(datos.password_nueva)
     usuario.password_configurada = True
     db.commit()
+
 
     try:
         from app.services.notificacion_service import crear_notificacion

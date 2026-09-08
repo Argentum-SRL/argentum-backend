@@ -1,27 +1,13 @@
 import re
 from datetime import datetime
 from pydantic import BaseModel, field_validator
+from app.core.security import validar_reglas_password as _validar_password
 from app.schemas.usuario import UsuarioRead
 
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 PHONE_REGEX = re.compile(r"^\+?[0-9]{8,20}$")
 OTP_REGEX = re.compile(r"^\d{6}$")
 
-
-def _validar_password(v: str) -> str:
-    if not v:
-        raise ValueError("La contraseña no puede estar vacía.")
-    if len(v) < 8:
-        raise ValueError("La contraseña debe tener al menos 8 caracteres.")
-    if len(v) > 128:
-        raise ValueError("La contraseña no puede superar los 128 caracteres.")
-    if not re.search(r"[A-Z]", v):
-        raise ValueError("La contraseña debe incluir al menos una letra mayúscula.")
-    if not re.search(r"[a-z]", v):
-        raise ValueError("La contraseña debe incluir al menos una letra minúscula.")
-    if not re.search(r"[0-9]", v):
-        raise ValueError("La contraseña debe incluir al menos un número.")
-    return v
 
 
 def _validar_email(v: str) -> str:

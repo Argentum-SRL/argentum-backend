@@ -119,10 +119,10 @@ class EditarPassword(BaseModel):
     def validar_passwords(self) -> Self:
         if self.password_nueva != self.password_nueva_confirmacion:
             raise ValueError("Las contraseñas no coinciden.")
-        pw = self.password_nueva
-        if not any(c.isupper() for c in pw) or not any(c.islower() for c in pw) or not any(c.isdigit() for c in pw):
-            raise ValueError("La contraseña debe tener al menos 8 caracteres, una mayúscula, una minúscula y un número.")
+        from app.core.security import validar_reglas_password
+        validar_reglas_password(self.password_nueva)
         return self
+
 
 
 class EditarTelefono(BaseModel):
