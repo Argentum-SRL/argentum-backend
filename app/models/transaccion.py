@@ -150,7 +150,7 @@ class Transaccion(Base):
 
     # Vínculo a la suscripción que originó este egreso recurrente (Etapa Suscripciones)
     suscripcion_id: Mapped[UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("suscripciones.id", ondelete="SET NULL"), nullable=True, deferred=True
+        PGUUID(as_uuid=True), ForeignKey("suscripciones.id", ondelete="SET NULL"), nullable=True
     )
 
     # Vínculo al movimiento de meta que originó esta transacción (Aportes/Retiros de metas)
