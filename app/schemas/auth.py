@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 from pydantic import BaseModel, field_validator
 from app.schemas.usuario import UsuarioRead
 
@@ -267,6 +268,15 @@ class RegisterRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Response schemas
 # ---------------------------------------------------------------------------
+
+class CodigoVinculacionResponse(BaseModel):
+    codigo: str
+    link_whatsapp: str
+    mensaje_precargado: str
+    expiracion: datetime
+    expira_en_segundos: int
+    telefono_bot: str
+
 
 class AuthResponse(BaseModel):
     """

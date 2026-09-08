@@ -59,7 +59,11 @@ from app.services.transaccion_service import (
 )
 from app.services.tarjeta_service import calcular_primer_vencimiento
 from app.schemas.transaccion import InfoCuotas, TransaccionCreate, TransaccionUpdate
-from app.services.whatsapp_service import enviar_whatsapp
+from app.services.whatsapp_service import (
+    enviar_whatsapp,
+    buscar_codigo_vinculacion,
+    consumir_codigo_vinculacion,
+)
 from app.utils.telefono import normalizar_telefono_ar
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion, FrecuenciaSuscripcion
 from app.models.historial_suscripcion import HistorialSuscripcion
@@ -4639,6 +4643,97 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 logger.error("whatsapp_error_registro_wamid", wamid=wamid, error=str(e))
 
         try:
+            # 2.1 Detección del código de vinculación ANTES de resolver usuario o cooldown
+            if msg_type == "text":
+                texto_candidato = msg.get("text", {}).get("body", "").strip()
+                codigo_vinc, entrada_vinc, es_vencido = buscar_codigo_vinculacion(texto_candidato)
+                if codigo_vinc:
+                    if es_vencido or not entrada_vinc:
+                        enviar_whatsapp(
+                            from_number,
+                            "El código de vinculación expiró. Por favor solicitá un código nuevo desde la app.",
+                        )
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                    # Código activo encontrado -> Consumir para asegurar un solo uso
+                    consumir_codigo_vinculacion(codigo_vinc)
+
+                    # 3.1 Normalizar teléfono del payload de Meta
+                    tel_norm = normalizar_telefono_ar(from_number)
+                    tel_guardar = f"+{from_number.lstrip('+')}"
+
+                    usuario_dueno = db.execute(
+                        select(Usuario).where(Usuario.id == entrada_vinc.usuario_id)
+                    ).scalar_one_or_none()
+
+                    if not usuario_dueno:
+                        logger.error("whatsapp_vinculacion_usuario_inexistente", usuario_id=entrada_vinc.usuario_id)
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                    # 3.2 Si el número ya pertenece a otro usuario: no vincular, responder y salir
+                    otro_usuario = db.execute(
+                        select(Usuario).where(
+                            (Usuario.telefono == tel_guardar) |
+                            (Usuario.telefono == from_number) |
+                            (Usuario.telefono_normalizado == tel_norm),
+                            Usuario.id != usuario_dueno.id,
+                        )
+                    ).scalar_one_or_none()
+
+                    if otro_usuario:
+                        logger.warning(
+                            "whatsapp_vinculacion_telefono_duplicado",
+                            from_number=from_number,
+                            dueno_actual=str(otro_usuario.id),
+                        )
+                        enviar_whatsapp(
+                            from_number,
+                            "Ese número de teléfono ya está asociado a otra cuenta de Argentum.",
+                        )
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                    # 3.3 Si ya tenía otro número verificado, avisar al número viejo por WhatsApp
+                    tel_viejo = usuario_dueno.telefono
+                    if tel_viejo and usuario_dueno.telefono_verificado and normalizar_telefono_ar(tel_viejo) != tel_norm:
+                        try:
+                            enviar_whatsapp(
+                                tel_viejo,
+                                "Tu cuenta de Argentum fue desvinculada de este número porque se asoció a un nuevo número de WhatsApp. Si no fuiste vos, contactanos inmediatamente.",
+                            )
+                        except Exception as e:
+                            logger.warning("No se pudo enviar aviso de desvinculación a número anterior: %s", e)
+
+                    # 3.4 Guardar telefono y telefono_verificado=True en una sola transacción
+                    usuario_dueno.telefono = tel_guardar
+                    usuario_dueno.telefono_normalizado = tel_norm
+                    usuario_dueno.telefono_verificado = True
+
+                    # 3.7 Emitir evento de actualización
+                    emitir_evento_actualizacion(db, usuario_dueno.id, "usuario")
+                    db.commit()
+
+                    # 3.5 Responder por WhatsApp confirmando vinculación
+                    enviar_whatsapp(
+                        from_number,
+                        "¡Tu cuenta de Argentum fue vinculada con éxito!\n"
+                        "A partir de ahora podés registrar tus gastos e ingresos directamente desde acá. "
+                        "Probá mandarme un mensaje o audio como: *Almuerzo $3500 con Galicia*.",
+                    )
+
+                    # 3.6 Mandar mail de aviso
+                    try:
+                        from app.services.email_service import enviar_email_telefono_vinculado
+                        enviar_email_telefono_vinculado(
+                            destinatario=usuario_dueno.email,
+                            telefono=tel_guardar,
+                            nombre=usuario_dueno.nombre,
+                        )
+                    except Exception as e:
+                        logger.error("Error al enviar email de confirmación de vinculación: %s", e)
+
+                    logger.info("whatsapp_vinculacion_exitosa", usuario_id=str(usuario_dueno.id), telefono=from_number)
+                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
             usuario = _buscar_usuario_por_telefono(from_number, db)
             if not usuario:
                 telefono_norm = normalizar_telefono_ar(from_number)

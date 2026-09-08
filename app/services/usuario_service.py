@@ -194,41 +194,11 @@ def actualizar_password(
 def actualizar_telefono(
     db: Session, usuario: Usuario, datos: EditarTelefono
 ) -> dict:
-    tel_limpio = datos.telefono_nuevo.strip() if datos.telefono_nuevo else ""
-    if not tel_limpio:
-        raise HTTPException(status_code=400, detail="El número de teléfono es obligatorio.")
-    
-    tel_norm = normalizar_telefono_ar(tel_limpio)
-    if len(tel_norm) < 8:
-        raise HTTPException(status_code=400, detail="Ingresá un número de teléfono válido.")
-    
-    if usuario.auth_provider != AuthProvider.GOOGLE and usuario.password_configurada and usuario.password_hash:
-        if not datos.password_actual or not verify_password(datos.password_actual, usuario.password_hash):
-            raise HTTPException(status_code=400, detail="La contraseña actual no es correcta.")
-    
-    # Verificar que no esté en uso por otra cuenta
-    result = db.execute(
-        select(Usuario).where(
-            (Usuario.telefono == tel_limpio) | (Usuario.telefono_normalizado == tel_norm),
-            Usuario.id != usuario.id
-        )
+    raise HTTPException(
+        status_code=400,
+        detail="El número de teléfono debe vincularse directamente desde WhatsApp iniciando una conversación desde la aplicación.",
     )
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Ese número de teléfono ya está registrado en otra cuenta.")
-    
-    usuario.telefono = tel_limpio
-    usuario.telefono_normalizado = tel_norm
-    usuario.telefono_verificado = False
-    db.commit()
-    
-    codigo = whatsapp_service.generar_codigo()
-    whatsapp_service.guardar_codigo(tel_limpio, codigo)
-    whatsapp_service.enviar_mensaje_whatsapp(
-        tel_limpio, 
-        f"Tu código de verificación de Argentum es *{codigo}*. Expira en 10 minutos."
-    )
-    
-    return {"confirmacion": "Teléfono actualizado. Se envió un código por WhatsApp.", "requiere_verificacion_telefono": True}
+
 
 def actualizar_ciclo_financiero(
     db: Session, usuario: Usuario, datos: EditarCicloFinanciero

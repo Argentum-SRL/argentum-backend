@@ -35,68 +35,135 @@ def _enmascarar_otp_en_mensaje(mensaje: str | None) -> str:
     return re.sub(r"\b\d{4,8}\b", "***", mensaje)
 
 
+CARACTERES_CODIGO_VINCULACION = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # Sin O, 0, I, 1, L (32 caracteres alfanuméricos)
+EXPIRACION_VINCULACION_SEGUNDOS = 15 * 60  # 15 minutos
+
+
 @dataclass
-class EntradaCodigo:
+class EntradaCodigoVinculacion:
+    usuario_id: str
     codigo: str
     expiracion: float
-    intentos_fallidos: int = field(default=0)
+    creado_en: float
 
 
-_codigo_cache: dict[str, EntradaCodigo] = {}
+_codigos_vinculacion: dict[str, EntradaCodigoVinculacion] = {}
+_usuario_a_codigo_vinculacion: dict[str, str] = {}
+_codigos_vencidos_recientes: dict[str, float] = {}
 
 
-def _limpiar_expirados() -> None:
+def _limpiar_codigos_vinculacion_expirados() -> None:
     ahora = time.time()
-    expirados = [k for k, v in _codigo_cache.items() if v.expiracion <= ahora]
-    for k in expirados:
-        del _codigo_cache[k]
+    expirados = [c for c, v in _codigos_vinculacion.items() if v.expiracion <= ahora]
+    for c in expirados:
+        entrada = _codigos_vinculacion.pop(c, None)
+        if entrada:
+            _codigos_vencidos_recientes[c] = ahora
+            if _usuario_a_codigo_vinculacion.get(entrada.usuario_id) == c:
+                _usuario_a_codigo_vinculacion.pop(entrada.usuario_id, None)
+
+    # Purgar códigos vencidos registrados hace más de 1 hora
+    antiguos = [c for c, t in _codigos_vencidos_recientes.items() if ahora - t > 3600]
+    for c in antiguos:
+        _codigos_vencidos_recientes.pop(c, None)
 
 
-def generar_codigo() -> str:
-    return f"{random.randint(0, 999999):06d}"
+def generar_codigo_vinculacion(usuario_id: str | int) -> tuple[str, float]:
+    """
+    Genera un código de 6 caracteres alfanuméricos en mayúscula, sin caracteres ambiguos.
+    Invalida cualquier código previo generado por el usuario.
+    Retorna (codigo, expiracion_timestamp).
+    """
+    _limpiar_codigos_vinculacion_expirados()
+    uid_str = str(usuario_id)
 
+    # Invalidar código previo del mismo usuario si existe
+    codigo_previo = _usuario_a_codigo_vinculacion.get(uid_str)
+    if codigo_previo:
+        _codigos_vinculacion.pop(codigo_previo, None)
+        _usuario_a_codigo_vinculacion.pop(uid_str, None)
 
-def guardar_codigo(telefono: str, codigo: str) -> None:
-    _limpiar_expirados()
-    key = formatear_numero_whatsapp(telefono) or telefono.strip()
-    _codigo_cache[key] = EntradaCodigo(
+    # Generar código único de 6 caracteres
+    for _ in range(20):
+        candidato = "".join(random.choices(CARACTERES_CODIGO_VINCULACION, k=6))
+        if candidato not in _codigos_vinculacion:
+            codigo = candidato
+            break
+    else:
+        codigo = "".join(random.choices(CARACTERES_CODIGO_VINCULACION, k=6))
+
+    expiracion = time.time() + EXPIRACION_VINCULACION_SEGUNDOS
+    entrada = EntradaCodigoVinculacion(
+        usuario_id=uid_str,
         codigo=codigo,
-        expiracion=time.time() + CODIGO_EXPIRACION_SEGUNDOS,
+        expiracion=expiracion,
+        creado_en=time.time(),
     )
+    _codigos_vinculacion[codigo] = entrada
+    _usuario_a_codigo_vinculacion[uid_str] = codigo
+    return codigo, expiracion
 
 
-def verificar_codigo(telefono: str, codigo: str) -> tuple[bool, str | None]:
+def consumir_codigo_vinculacion(codigo: str) -> None:
+    """Invalida inmediatamente el código consumido para asegurar uso único."""
+    cod = codigo.strip().upper()
+    entrada = _codigos_vinculacion.pop(cod, None)
+    if entrada and _usuario_a_codigo_vinculacion.get(entrada.usuario_id) == cod:
+        _usuario_a_codigo_vinculacion.pop(entrada.usuario_id, None)
+    _codigos_vencidos_recientes.pop(cod, None)
+
+
+def buscar_codigo_vinculacion(
+    mensaje_texto: str,
+) -> tuple[str | None, EntradaCodigoVinculacion | None, bool]:
     """
-    Verifica el código. Devuelve (ok, mensaje_error).
-    Si ok=True el código se invalida (uso único).
+    Busca de manera tolerante un código de vinculación en el mensaje de texto entrante.
+    Tolerancia:
+    - Insensible a mayúsculas/minúsculas.
+    - Ignora espacios, guiones y signos de puntuación alrededor o dentro del código.
+    - Encuentra el código aunque el usuario haya editado el resto del mensaje.
+
+    Retorna: (codigo_detectado, entrada_activa_o_None, es_vencido)
     """
-    _limpiar_expirados()
+    if not mensaje_texto:
+        return None, None, False
 
-    key = formatear_numero_whatsapp(telefono) or telefono.strip()
-    entrada = _codigo_cache.get(key)
-    if not entrada:
-        entrada = _codigo_cache.get(telefono.strip())
+    _limpiar_codigos_vinculacion_expirados()
 
-    if not entrada:
-        return False, "El código expiró. Pedí uno nuevo."
+    texto_upper = mensaje_texto.upper()
+    texto_compacto = re.sub(r"[^A-Z0-9]", "", texto_upper)
 
-    if time.time() > entrada.expiracion:
-        _codigo_cache.pop(key, None)
-        _codigo_cache.pop(telefono.strip(), None)
-        return False, "El código expiró. Pedí uno nuevo."
+    # 1. Coincidencia directa con códigos activos en memoria
+    for codigo_activo, entrada in list(_codigos_vinculacion.items()):
+        if codigo_activo in texto_compacto:
+            if time.time() <= entrada.expiracion:
+                return codigo_activo, entrada, False
+            return codigo_activo, None, True
 
-    if entrada.codigo != codigo:
-        entrada.intentos_fallidos += 1
-        restantes = MAX_INTENTOS - entrada.intentos_fallidos
-        if restantes <= 0:
-            _codigo_cache.pop(key, None)
-            _codigo_cache.pop(telefono.strip(), None)
-            return False, "Demasiados intentos fallidos. Pedí un código nuevo."
-        return False, f"Código incorrecto. Te quedan {restantes} intento{'s' if restantes != 1 else ''}."
+    # 2. Coincidencia con códigos vencidos recientemente
+    for codigo_vencido in list(_codigos_vencidos_recientes.keys()):
+        if codigo_vencido in texto_compacto:
+            return codigo_vencido, None, True
 
-    _codigo_cache.pop(key, None)
-    _codigo_cache.pop(telefono.strip(), None)
-    return True, None
+    # 3. Detección por patrón explícito: Codigo / Código / Cod
+    match_prefijo = re.search(
+        r"(?:codigo|código|cod)\s*[:=]?\s*([A-Z0-9\s\-]{6,12})",
+        texto_upper,
+    )
+    if match_prefijo:
+        cand = re.sub(r"[^A-Z0-9]", "", match_prefijo.group(1))[:6]
+        if len(cand) == 6:
+            if cand in _codigos_vinculacion:
+                ent = _codigos_vinculacion[cand]
+                if time.time() <= ent.expiracion:
+                    return cand, ent, False
+                return cand, None, True
+            if cand in _codigos_vencidos_recientes:
+                return cand, None, True
+            return cand, None, True
+
+    return None, None, False
+
 
 
 def formatear_numero_whatsapp(telefono: str) -> str:

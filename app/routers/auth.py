@@ -47,18 +47,18 @@ from app.core.database import get_db
 from app.core.security import get_password_hash, verify_password
 from app.models.usuario import AuthProvider, EstadoUsuario, Usuario
 from app.utils.telefono import normalizar_telefono_ar
+from urllib.parse import quote
 from app.schemas.auth import (
     AuthResponse,
+    CodigoVinculacionResponse,
     CompletarPerfilRequest,
     EnviarCodigoEmailRequest,
-    EnviarCodigoRequest,
     GoogleLoginRequest,
     LoginRequest,
     RecuperarPasswordRequest,
     RegisterRequest,
     TokenResponse,
     VerificarCodigoEmailRequest,
-    VerificarCodigoTelefonoRequest,
     VerificarRecuperacionRequest,
     ConfirmarResetPasswordRequest,
 )
@@ -77,14 +77,13 @@ from app.services.email_service import (
     verificar_codigo_email,
     verificar_codigo_recuperacion,
 )
+from app.services import usuario_service
+from app.services import whatsapp_service
 from app.services.whatsapp_service import (
     enviar_whatsapp,
     enviar_mensaje_whatsapp,
-    generar_codigo,
-    guardar_codigo,
-    verificar_codigo,
+    generar_codigo_vinculacion,
 )
-from app.services import usuario_service
 
 logger = logging.getLogger(__name__)
 
@@ -639,185 +638,68 @@ def login_google(
 
 
 # ---------------------------------------------------------------------------
-# Teléfono (WhatsApp)
+# Teléfono (WhatsApp) — Nuevo Flujo de Vinculación
 # ---------------------------------------------------------------------------
 
-@router.post("/telefono/enviar-codigo")
-@limiter.limit("5/minute")
-def enviar_codigo_telefono(request: Request, body: EnviarCodigoRequest):
-    """Envía un código de 6 dígitos al número dado. Expira en 10 minutos."""
-    if not _verificar_rate_limit_otp_telefono(body.telefono):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Superaste el límite de envíos de código para este número (máximo 3 cada 10 minutos). Por favor, esperá unos minutos.",
-        )
-
-    codigo = generar_codigo()
-    guardar_codigo(body.telefono, codigo)
-
-    mensaje = f"Tu código de verificación de Argentum es *{codigo}*. Expira en 10 minutos."
-    enviado = enviar_mensaje_whatsapp(body.telefono, mensaje)
-    if not enviado:
-        raise HTTPException(status_code=500, detail="No pudimos mandarte el código por WhatsApp. Intentá de nuevo.")
-
-    return {"detail": "Código de verificación enviado.", "telefono": body.telefono}
+_solicitudes_codigo_vinculacion: dict[str, list[float]] = {}
+MAX_CODIGOS_VINCULACION_POR_HORA = 5
+VENTANA_CODIGO_VINCULACION_SEGUNDOS = 60 * 60  # 1 hora
 
 
-@router.post("/telefono/verificar", response_model=AuthResponse)
-def verificar_codigo_telefono(
-    body: VerificarCodigoTelefonoRequest,
-    request: Request,
-    response: Response,
-    db: Session = Depends(get_db),
-    usuario_autenticado: Usuario | None = Depends(get_optional_user),
+def _verificar_rate_limit_codigo_vinculacion(usuario_id: str) -> bool:
+    ahora = time.time()
+    limite = ahora - VENTANA_CODIGO_VINCULACION_SEGUNDOS
+    timestamps = [t for t in _solicitudes_codigo_vinculacion.get(usuario_id, []) if t > limite]
+
+    if len(timestamps) >= MAX_CODIGOS_VINCULACION_POR_HORA:
+        _solicitudes_codigo_vinculacion[usuario_id] = timestamps
+        return False
+
+    timestamps.append(ahora)
+    _solicitudes_codigo_vinculacion[usuario_id] = timestamps
+
+    if len(_solicitudes_codigo_vinculacion) > 2000:
+        for k in list(_solicitudes_codigo_vinculacion.keys()):
+            filtrados = [t for t in _solicitudes_codigo_vinculacion[k] if t > limite]
+            if not filtrados:
+                del _solicitudes_codigo_vinculacion[k]
+            else:
+                _solicitudes_codigo_vinculacion[k] = filtrados
+
+    return True
+
+
+@router.post("/telefono/solicitar-vinculacion", response_model=CodigoVinculacionResponse)
+def solicitar_codigo_vinculacion(
+    current_user: Usuario = Depends(get_current_user),
 ):
     """
-    Verifica el código de WhatsApp. Comportamiento según contexto:
-
-    A) Usuario autenticado (Google sin teléfono):
-       Vincula el teléfono a la cuenta existente.
-
-    B) Usuario no autenticado + teléfono en BD (auth_provider=EMAIL, completando registro):
-       Marca telefono_verificado=True, activa la cuenta, emite tokens.
-
-    C) Usuario no autenticado + teléfono en BD (auth_provider=TELEFONO, login):
-       Login normal, emite tokens.
-
-    D) Usuario no autenticado + teléfono no existe:
-       Crea usuario nuevo con auth_provider=TELEFONO, devuelve requiere_datos=True.
+    Genera un código de 6 caracteres alfanuméricos en mayúscula para vincular WhatsApp.
+    El usuario inicia la conversación enviando este código al bot de WhatsApp.
+    Expira en 15 minutos. Máximo 5 códigos por usuario por hora.
     """
-    ok, error = verificar_codigo(body.telefono, body.codigo)
-    if not ok:
-        raise HTTPException(status_code=400, detail=error)
-
-    # --- Caso A: usuario autenticado (Google añadiendo teléfono) ---
-    if usuario_autenticado and not usuario_autenticado.telefono_verificado:
-        # Verificar que el teléfono no esté tomado por otro usuario
-        otro = db.execute(
-            select(Usuario).where(
-                Usuario.telefono == body.telefono,
-                Usuario.id != usuario_autenticado.id,
-            )
-        ).scalar_one_or_none()
-        if otro:
-            raise HTTPException(status_code=400, detail="Ese número de teléfono ya está registrado.")
-
-        usuario_autenticado.telefono = body.telefono
-        usuario_autenticado.telefono_normalizado = normalizar_telefono_ar(body.telefono) if body.telefono else None
-        usuario_autenticado.telefono_verificado = True
-        db.commit()
-
-        try:
-            from app.services.notificacion_service import crear_notificacion
-            from app.models.notificacion import TipoNotificacion, NivelNotificacion
-            crear_notificacion(
-                db=db,
-                usuario_id=usuario_autenticado.id,
-                tipo=TipoNotificacion.WHATSAPP_NUEVO_VINCULADO,
-                nivel=NivelNotificacion.CRITICA,
-                mensaje="Tu número de WhatsApp fue vinculado exitosamente. Si no fuiste vos, contactanos.",
-                canal_web=True,
-                canal_whatsapp=False,
-                canal_email=False,
-            )
-        except Exception:
-            pass
-
-        return AuthResponse(
-            usuario=UsuarioRead.model_validate(usuario_autenticado),
-            requiere_onboarding=_requiere_onboarding(usuario_autenticado),
+    user_key = str(current_user.id)
+    if not _verificar_rate_limit_codigo_vinculacion(user_key):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Superaste el límite de solicitudes de vinculación (máximo 5 por hora). Por favor, esperá unos minutos.",
         )
 
-    # --- Casos B, C, D: flujo no autenticado ---
-    tel_norm = normalizar_telefono_ar(body.telefono) if body.telefono else None
-    cond_tel = (Usuario.telefono == body.telefono)
-    if tel_norm:
-        cond_tel = cond_tel | (Usuario.telefono_normalizado == tel_norm)
+    codigo, expiracion_ts = whatsapp_service.generar_codigo_vinculacion(current_user.id)
+    numero_bot = getattr(settings, "WHATSAPP_BOT_NUMBER", None) or "5491100000000"
+    texto_precargado = f"Hola, quiero vincular mi cuenta de Argentum. Codigo: {codigo}"
+    link_whatsapp = f"https://wa.me/{numero_bot}?text={quote(texto_precargado)}"
+    expiracion_dt = datetime.fromtimestamp(expiracion_ts, tz=timezone.utc)
 
-    user = db.execute(select(Usuario).where(cond_tel)).scalar_one_or_none()
-
-    if not user:
-        # Caso D: nuevo usuario por teléfono
-        user = Usuario(
-            telefono=body.telefono.strip(),
-            telefono_normalizado=tel_norm,
-            auth_provider=AuthProvider.TELEFONO,
-            estado=EstadoUsuario.ACTIVO,
-            telefono_verificado=True,
-            email_verificado=False,
-            onboarding_completo=False,
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-
-        # Crear billeteras efectivo default
-        usuario_service.crear_billeteras_efectivo_default(db, user.id)
-
-        access, refresh = _tokens(user, request, db)
-        setear_cookies_auth(response, access, refresh, settings)
-        return AuthResponse(
-            access_token=access,
-            usuario=UsuarioRead.model_validate(user),
-            requiere_datos=True,
-        )
-
-    # Caso B/C: Usuario existente.
-    # Si es una cuenta de EMAIL que nunca verificó email, seguimos pidiendo verificación de email.
-    if user.auth_provider == AuthProvider.EMAIL and not user.email_verificado:
-        raise HTTPException(status_code=401, detail="Todavía no verificaste tu cuenta. Revisá tu email para activarla.")
-
-    # Marcamos como verificado y activo (por si venía de pendiente)
-    user.telefono_verificado = True
-    if user.estado == EstadoUsuario.PENDIENTE_VERIFICACION and user.email_verificado:
-        user.estado = EstadoUsuario.ACTIVO
-    
-    user.ultimo_acceso = datetime.now(timezone.utc)
-    db.commit()
-
-    try:
-        from app.services.notificacion_service import crear_notificacion
-        from app.models.notificacion import TipoNotificacion, NivelNotificacion
-        crear_notificacion(
-            db=db,
-            usuario_id=user.id,
-            tipo=TipoNotificacion.WHATSAPP_NUEVO_VINCULADO,
-            nivel=NivelNotificacion.CRITICA,
-            mensaje="Tu número de WhatsApp fue vinculado exitosamente. Si no fuiste vos, contactanos.",
-            canal_web=True,
-            canal_whatsapp=False,
-            canal_email=False,
-        )
-    except Exception:
-        pass
-
-    access, refresh = _tokens(user, request, db)
-    setear_cookies_auth(response, access, refresh, settings)
-    
-    # requiere_datos si no tiene nombre, email o password (usuarios de teléfono que no completaron perfil)
-    if user.auth_provider == AuthProvider.TELEFONO:
-        req_datos = not (
-            user.nombre and user.nombre.strip() and 
-            user.email and user.email.strip() and 
-            user.password_configurada
-        )
-    else:
-        # Para Google o Email, ya tienen los datos básicos en el registro
-        req_datos = not (user.nombre and user.nombre.strip())
-
-    # Si el usuario ya tiene email, no debería pedir completar datos (evita bucles en registro por email)
-    if user.email and user.auth_provider == AuthProvider.EMAIL:
-        req_datos = False
-
-    # Solo pedimos onboarding si ya tiene los datos básicos completos
-    req_onboarding = _requiere_onboarding(user) if not req_datos else False
-
-    return AuthResponse(
-        access_token=access,
-        usuario=UsuarioRead.model_validate(user),
-        requiere_datos=req_datos,
-        requiere_onboarding=req_onboarding,
+    return CodigoVinculacionResponse(
+        codigo=codigo,
+        link_whatsapp=link_whatsapp,
+        mensaje_precargado=texto_precargado,
+        expiracion=expiracion_dt,
+        expira_en_segundos=max(0, int(expiracion_ts - time.time())),
+        telefono_bot=numero_bot,
     )
+
 
 
 # ---------------------------------------------------------------------------

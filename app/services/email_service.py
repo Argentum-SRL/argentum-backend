@@ -344,3 +344,29 @@ def enviar_email_bienvenida(destinatario: str, nombre: str, sexo: object = None)
     return _enviar_email(destinatario, asunto, cuerpo, cuerpo_html)
 
 
+def enviar_email_telefono_vinculado(destinatario: str, telefono: str, nombre: str | None = None) -> bool:
+    """Envía un correo avisando que se vinculó un número de WhatsApp a la cuenta."""
+    nombre_display = nombre or _obtener_nombre_usuario(destinatario)
+    asunto = "Tu cuenta de Argentum fue vinculada a WhatsApp"
+    cuerpo = (
+        f"Hola {nombre_display},\n\n"
+        f"Te informamos que tu cuenta de Argentum fue vinculada exitosamente al número de WhatsApp {telefono}.\n\n"
+        f"Si no realizaste esta acción, por favor cambiá tu contraseña inmediatamente y escribinos a soporte@miargentum.com.\n\n"
+        f"Saludos,\nEl equipo de Argentum"
+    )
+    cuerpo_html = f"""
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 32px 24px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px;">
+        <h2 style="color: #0D2045; margin-top: 0; font-size: 22px; font-weight: 700;">WhatsApp vinculado a tu cuenta</h2>
+        <p style="color: #475569; font-size: 15px; line-height: 1.6;">Hola <strong>{nombre_display}</strong>,</p>
+        <p style="color: #475569; font-size: 15px; line-height: 1.6;">Te confirmamos que tu cuenta de Argentum fue vinculada exitosamente al número de WhatsApp <strong>{telefono}</strong>.</p>
+        <p style="color: #475569; font-size: 15px; line-height: 1.6;">A partir de ahora podés registrar tus gastos e ingresos escribiéndole directamente a nuestro bot de WhatsApp.</p>
+        <div style="background-color: #f8fafc; border-left: 4px solid #0D2045; padding: 16px 20px; border-radius: 8px; margin: 20px 0; font-size: 14px; color: #475569;">
+            <strong>¿No fuiste vos?</strong> Si no realizaste esta vinculación, protegé tu cuenta cambiando tu contraseña y contactanos a <a href="mailto:soporte@miargentum.com" style="color: #2563eb;">soporte@miargentum.com</a>.
+        </div>
+        <p style="font-size: 12px; color: #94a3b8; margin-top: 24px;">Argentum — Gestión de finanzas personales</p>
+    </div>
+    """
+    return _enviar_email(destinatario, asunto, cuerpo, cuerpo_html)
+
+
+
