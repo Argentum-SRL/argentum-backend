@@ -7,3 +7,4 @@ media/
 tests/fixtures/*.pdf
 gitleaks-*.json
 scratch/
+scripts/backups/

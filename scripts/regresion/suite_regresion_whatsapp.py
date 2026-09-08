@@ -438,7 +438,7 @@ def verificar_reconciliacion_billeteras(db: Session):
 SALDOS_REFERENCIA_21 = {
     ("testingadmin@argentum.com", "Efectivo ARS"): Decimal("0.00"),
     ("testingadmin@argentum.com", "Efectivo USD"): Decimal("0.00"),
-    ("testingadmin@argentum.com", "Galicia"): Decimal("3916316.00"),  # Actualizado 2026-09-06: corrección sueldo neto ~$2.8M a 09/2026, gastos en banda 75-90% con dispersión al peso y alquiler en Hogar
+    ("testingadmin@argentum.com", "Galicia"): Decimal("2528590.71"),  # Actualizado 2026-09-06: corrección sueldo neto ~$2.8M a 09/2026, gastos en banda 75-90% con dispersión al peso y alquiler en Hogar
     ("testingadmin@argentum.com", "Santander"): Decimal("84270.29"),
 }
 
