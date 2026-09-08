@@ -210,7 +210,16 @@ def login(
         raise HTTPException(status_code=401, detail="El email o la contraseña no son correctos. Revisalos e intentá de nuevo.")
 
     if not user.email_verificado:
-        raise HTTPException(status_code=401, detail="Todavía no verificaste tu cuenta. Revisá tu email para activarla.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "EMAIL_NO_VERIFICADO",
+                    "message": "Todavía no verificaste tu cuenta. Revisá tu email para activarla.",
+                }
+            }
+        )
 
     if not user.password_hash:
         raise HTTPException(
@@ -397,21 +406,60 @@ def confirmar_token(
 # Verificación de email
 # ---------------------------------------------------------------------------
 
+_solicitudes_reenvio_email: dict[str, list[float]] = {}
+MAX_REENVIOS_EMAIL_POR_HORA = 5
+VENTANA_REENVIO_EMAIL_SEGUNDOS = 3600.0
+
+
+def _verificar_rate_limit_reenvio_email(email: str) -> bool:
+    ahora = time.time()
+    limite = ahora - VENTANA_REENVIO_EMAIL_SEGUNDOS
+    timestamps = [t for t in _solicitudes_reenvio_email.get(email, []) if t > limite]
+
+    if len(timestamps) >= MAX_REENVIOS_EMAIL_POR_HORA:
+        _solicitudes_reenvio_email[email] = timestamps
+        return False
+
+    timestamps.append(ahora)
+    _solicitudes_reenvio_email[email] = timestamps
+
+    if len(_solicitudes_reenvio_email) > 2000:
+        for k in list(_solicitudes_reenvio_email.keys()):
+            filtrados = [t for t in _solicitudes_reenvio_email[k] if t > limite]
+            if not filtrados:
+                del _solicitudes_reenvio_email[k]
+            else:
+                _solicitudes_reenvio_email[k] = filtrados
+
+    return True
+
+
 @router.post("/email/enviar-codigo")
 @limiter.limit("5/minute")
-def enviar_codigo_email(request: Request, body: EnviarCodigoEmailRequest, db: Session = Depends(get_db)):
-    """Reenvía el código de verificación de email."""
+def enviar_codigo_email(
+    request: Request,
+    body: EnviarCodigoEmailRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """
+    Reenvía el código de verificación de email sin requerir sesión activa.
+    Respuesta uniforme e idéntica exista o no el usuario, y también si ya está verificado.
+    Rate limit por IP (SlowAPI) y por email (en memoria).
+    """
     email_clean = body.email.strip().lower()
-    user = db.execute(select(Usuario).where(Usuario.email.ilike(email_clean))).scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="No encontramos una cuenta con esos datos.")
-    
-    if user.email_verificado:
-        raise HTTPException(status_code=400, detail="El email ya está verificado.")
 
-    generar_y_enviar_verificacion_email(email_clean, nombre=user.nombre)
-    
-    return {"detail": "Código enviado a tu casilla de correo."}
+    if not _verificar_rate_limit_reenvio_email(email_clean):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Demasiadas solicitudes de reenvío para este email. Por favor, esperá unos minutos.",
+        )
+
+    user = db.execute(select(Usuario).where(Usuario.email.ilike(email_clean))).scalar_one_or_none()
+    if user and not user.email_verificado:
+        background_tasks.add_task(generar_y_enviar_verificacion_email, email_clean, nombre=user.nombre)
+
+    return {"detail": "Si el correo está registrado y pendiente de verificación, te enviamos un código."}
 
 
 @router.get("/email/verificar-link")
