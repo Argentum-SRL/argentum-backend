@@ -17,7 +17,7 @@ from app.models.transaccion_recurrente import EstadoTransaccionRecurrente, TipoT
 from app.models.usuario import Moneda, Usuario
 from app.services.dashboard_service import get_ciclo_fechas
 from app.utils.fecha import hoy_argentina
-from app.utils.finanzas import ClasificacionGasto, ZERO, clasificar_gastos, deflactar_monto, es_gasto_consumo, gasto_ciclo, mad, mediana, percentil, posicion_relativa
+from app.utils.finanzas import ClasificacionGasto, StreamRecurrente, ZERO, clasificar_gastos, deflactar_monto, es_gasto_consumo, gasto_ciclo, mad, mediana, percentil, posicion_relativa
 
 
 CONFIDENCE_BY_CYCLES = {0: "sin_datos", 1: "inicial", 2: "baja", 3: "media"}
@@ -48,7 +48,11 @@ def _carga(db: Session, usuario: Usuario) -> dict[str, Any]:
     hoy = hoy_argentina()
     txs = db.execute(
         select(Transaccion)
-        .options(joinedload(Transaccion.categoria))
+        .options(
+            joinedload(Transaccion.categoria),
+            joinedload(Transaccion.subcategoria),
+            joinedload(Transaccion.billetera),
+        )
         .where(Transaccion.usuario_id == usuario.id, Transaccion.fecha <= hoy)
         .order_by(Transaccion.fecha)
     ).scalars().all()

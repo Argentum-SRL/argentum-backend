@@ -1,11 +1,11 @@
-from __future__ import annotations
-
+from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
+import difflib
 import re
-import unicodedata
 from typing import Any, Iterable
+import unicodedata
 
 from app.models.transaccion import EstadoVerificacionTransaccion, MetodoPago, TipoTransaccion
 from app.models.usuario import Moneda
@@ -24,11 +24,40 @@ class Deflactacion:
 
 
 @dataclass(frozen=True)
+class StreamRecurrente:
+    descripcion: str
+    categoria: str
+    billetera: str
+    frecuencia: str  # semanal, quincenal, bimensual, mensual, anual, desconocida
+    estado: str  # NUEVO, EN_DETECCION, MADURO, MUERTO
+    cantidad_ocurrencias: int
+    promedio_dias: Decimal
+    monto_mediano_deflactado: Decimal
+    ultimo_monto: Decimal
+    proxima_fecha_esperada: date | None
+    senal: str = "DECLARADO"  # DECLARADO, DESCRIPCION_SIMILAR, GEOMETRIA
+    categoria_id: Any = None
+    subcategoria_id: Any = None
+    billetera_id: Any = None
+    moneda: Moneda = Moneda.ARS
+    transacciones_ids: tuple[Any, ...] = ()
+
+    @property
+    def promedio_dias_entre_ocurrencias(self) -> Decimal:
+        return self.promedio_dias
+
+    @property
+    def proxima_fecha(self) -> date | None:
+        return self.proxima_fecha_esperada
+
+
+@dataclass(frozen=True)
 class ClasificacionGasto:
     comprometidos: tuple[Any, ...]
     recurrentes_detectados: tuple[Any, ...]
     variables: tuple[Any, ...]
     categorias_recurrentes: frozenset[Any]
+    streams: tuple[StreamRecurrente, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -234,6 +263,144 @@ def gasto_ciclo(
     return GastoCiclo(filas, nominal, deflactado, factor_medio)
 
 
+def _normalizar_descripcion(desc: str | None) -> str:
+    """Normaliza texto para comparacion difflib.
+
+    Elimina tildes, prefijos sinteticos del seed ([historico]), referencias de fechas,
+    indicadores de cuotas y numeros varios para aislar el nombre del comercio o servicio.
+    """
+    if not desc:
+        return ""
+    texto = unicodedata.normalize("NFKD", desc)
+    texto = "".join(c for c in texto if not unicodedata.combining(c)).casefold()
+    texto = re.sub(r"\[?\s*historico\s*\]?", "", texto)
+    texto = re.sub(r"\b\d{1,2}[/-]\d{2,4}\b", "", texto)
+    texto = re.sub(r"\b\d{4}[/-]\d{1,2}\b", "", texto)
+    texto = re.sub(r"\(?\s*cuota\s*\d+\s*/\s*\d+\s*\)?", "", texto)
+    texto = re.sub(r"\d+", "", texto)
+    texto = re.sub(r"[^a-z0-9]+", " ", texto).strip()
+    return texto
+
+
+def _distancia_circular_dias(d1: int, d2: int) -> int:
+    """Calcula la distancia minima entre dos dias del mes en anillo de 31 dias.
+
+    Por ejemplo, el dia 31 y el dia 1 estan a 1 dia de distancia, no a 30.
+    """
+    diff = abs(d1 - d2)
+    return min(diff, 31 - diff)
+
+
+def _proxima_fecha_esperada(ultima_fecha: date, frecuencia: str) -> date | None:
+    """Calcula la fecha de vencimiento o cobro esperada segun la frecuencia regular."""
+    if frecuencia == "semanal":
+        return ultima_fecha + timedelta(days=7)
+    elif frecuencia == "quincenal":
+        return ultima_fecha + timedelta(days=15)
+    elif frecuencia == "mensual":
+        anio = ultima_fecha.year + (1 if ultima_fecha.month == 12 else 0)
+        mes = 1 if ultima_fecha.month == 12 else ultima_fecha.month + 1
+        dia = min(ultima_fecha.day, 28 if mes == 2 else (30 if mes in (4, 6, 9, 11) else 31))
+        return date(anio, mes, dia)
+    elif frecuencia == "bimensual":
+        anio = ultima_fecha.year + ((ultima_fecha.month + 1) // 12)
+        mes = (ultima_fecha.month + 1) % 12 + 1
+        dia = min(ultima_fecha.day, 28 if mes == 2 else (30 if mes in (4, 6, 9, 11) else 31))
+        return date(anio, mes, dia)
+    elif frecuencia == "anual":
+        try:
+            return date(ultima_fecha.year + 1, ultima_fecha.month, ultima_fecha.day)
+        except ValueError:
+            return date(ultima_fecha.year + 1, ultima_fecha.month, 28)
+    return None
+
+
+def _inferir_frecuencia_y_estado(
+    fechas: list[date],
+    fecha_referencia: date,
+    total_txs_usuario: int,
+) -> tuple[str, str, Decimal, date | None]:
+    """Infiere la frecuencia y el estado del stream de acuerdo con las ventanas de tolerancia.
+
+    Frecuencias permitidas (conjunto cerrado):
+      - semanal, quincenal, bimensual, mensual, anual, desconocida.
+
+    Ventanas de tolerancia (IBM Research):
+      - semanal y quincenal: tolerancia de 2 dias (absorbe feriados y fines de semana).
+      - mensual y bimensual: tolerancia de 7 dias (absorbe meses de 28 a 31 dias).
+      - anual: tolerancia de 15 dias.
+
+    Estados del stream:
+      - NUEVO: una sola ocurrencia o frecuencia desconocida.
+      - EN_DETECCION: dos ocurrencias con cadencia compatible (o >= 3 si historial < 40 txs).
+      - MADURO: tres o mas ocurrencias con cadencia regular (para anual, dos alcanzan). Requiere >= 40 txs totales.
+      - MUERTO: estaba en deteccion o maduro y no aparecio en la fecha esperada mas la ventana de tolerancia.
+    """
+    n = len(fechas)
+    if n <= 1:
+        return "desconocida", "NUEVO", Decimal("0"), None
+
+    deltas = [(fechas[i + 1] - fechas[i]).days for i in range(n - 1)]
+    if any(d < 5 for d in deltas):
+        # Multiples ocurrencias en menos de 5 dias indican consumo variable agrupado
+        promedio_invalido = Decimal(sum(deltas)) / Decimal(len(deltas))
+        return "desconocida", "NUEVO", promedio_invalido.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), None
+
+    promedio_dias = (Decimal(sum(deltas)) / Decimal(len(deltas))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    frecuencia = "desconocida"
+    tolerancia = 7
+    if n == 2:
+        d = deltas[0]
+        if 5 <= d <= 9:
+            frecuencia = "semanal"
+            tolerancia = 2
+        elif 12 <= d <= 18:
+            frecuencia = "quincenal"
+            tolerancia = 2
+        elif 21 <= d <= 38:
+            frecuencia = "mensual"
+            tolerancia = 7
+        elif 53 <= d <= 67:
+            frecuencia = "bimensual"
+            tolerancia = 7
+        elif 350 <= d <= 380:
+            frecuencia = "anual"
+            tolerancia = 15
+    else:
+        # n >= 3
+        if 5 <= promedio_dias <= 9 and all(5 <= d <= 9 for d in deltas):
+            frecuencia = "semanal"
+            tolerancia = 2
+        elif 12 <= promedio_dias <= 18 and all(12 <= d <= 18 for d in deltas):
+            frecuencia = "quincenal"
+            tolerancia = 2
+        elif 21 <= promedio_dias <= 38 and all(21 <= d <= 38 for d in deltas):
+            frecuencia = "mensual"
+            tolerancia = 7
+        elif 53 <= promedio_dias <= 67 and all(53 <= d <= 67 for d in deltas):
+            frecuencia = "bimensual"
+            tolerancia = 7
+        elif 350 <= promedio_dias <= 380 and all(350 <= d <= 380 for d in deltas):
+            frecuencia = "anual"
+            tolerancia = 15
+
+    if frecuencia == "desconocida":
+        return "desconocida", "NUEVO", promedio_dias, None
+
+    proxima = _proxima_fecha_esperada(fechas[-1], frecuencia)
+    if proxima is not None and fecha_referencia > proxima + timedelta(days=tolerancia):
+        estado = "MUERTO"
+    elif frecuencia == "anual" and n >= 2:
+        estado = "MADURO" if total_txs_usuario >= 40 else "EN_DETECCION"
+    elif n >= 3:
+        estado = "MADURO" if total_txs_usuario >= 40 else "EN_DETECCION"
+    else:
+        estado = "EN_DETECCION"
+
+    return frecuencia, estado, promedio_dias, proxima
+
+
 def _es_recurrente_declarado(tx: Any) -> bool:
     return bool(getattr(tx, "es_recurrente", False) or getattr(tx, "recurrente_id", None))
 
@@ -244,64 +411,249 @@ def clasificar_gastos(
     ipc_records: Iterable[Any],
     fecha_destino: date,
     recurrentes_declarados: Iterable[Any] = (),
+    total_transacciones_usuario: int | None = None,
 ) -> ClasificacionGasto:
-    """Clasifica gastos con una sola regla compartida por perfil y proyeccion.
+    """Clasifica gastos mediante cascada de tres senales (Declarado, Similaridad, Geometria).
 
-    Un recurrente no declarado se agrupa por categoria, subcategoria, billetera
-    y firma textual de la descripcion; dentro de esa estructura se forman bandas
-    de monto deflactado con tolerancia del 20%. La banda debe aparecer una vez
-    por ciclo en al menos el 60% de los ciclos con datos y tener MAD <= 20%
-    de su mediana. Si aparece varias veces en el mismo ciclo, se considera variable.
+    Criterios y fuentes de umbrales:
+      1. SENAL DECLARADO:
+         - Certeza absoluta: suscripciones activas, cuotas y gastos con flag o ID recurrente.
+      2. SENAL DESCRIPCION SIMILAR:
+         - SequenceMatcher de difflib con ratio >= 0.75 sobre descripcion normalizada.
+           Este umbral proviene del trabajo de IBM Research en transacciones con historial corto,
+           tolerando numeros de factura, fechas y pequenas variaciones ortograficas.
+         - Requiere misma moneda y misma categoria.
+         - Si una descripcion ocurre multiples veces dentro de un mismo mes y no posee cadencia
+           semanal/quincenal, se clasifica como consumo variable recurrente (ej: supermercados).
+      3. SENAL GEOMETRIA SIN DESCRIPCION:
+         - Para gastos con descripcion vacia o sin match textual.
+         - Misma moneda y misma billetera (medio de pago consistente).
+         - Misma subcategoria (o misma categoria si ambas no tienen subcategoria).
+         - Distancia circular de dia del mes <= 7 dias (min(|d1 - d2|, 31 - |d1 - d2|) <= 7).
+         - Banda de monto deflactado relativo <= 20% (abs(m1 - m2) / max(m1, m2) <= 0.20).
+         - Filtro anti-falsos positivos: en cadencias mensuales/bimensuales, maximo 1 gasto por
+           mes en el stream, y exclusion si la categoria/subcategoria promedia >= 3 txs/mes.
+
+    Reglas de madurez y proyeccion:
+      - Solo los streams MADUROS (>= 3 ocurrencias regulares, o >= 2 para anual, y con usuario
+        teniendo al menos 40 transacciones de historial) ingresan en recurrentes_detectados.
+      - Los streams EN_DETECCION, NUEVO y MUERTO se exponen en streams pero sus transacciones
+        permanecen en variables para no comprometer indebidamente la proyeccion.
     """
-    txs = [tx for tx in transacciones if es_gasto_consumo(tx)]
-    ciclos_lista = list(ciclos)
-    if not txs or not ciclos_lista:
-        return ClasificacionGasto((), (), tuple(txs), frozenset())
+    txs_todos = list(transacciones)
+    total_txs = total_transacciones_usuario if total_transacciones_usuario is not None else len(txs_todos)
+    txs = [tx for tx in txs_todos if es_gasto_consumo(tx)]
+    if not txs:
+        return ClasificacionGasto(tuple(recurrentes_declarados), (), (), frozenset(), ())
 
-    por_estructura: dict[tuple[Any, Any, Any, str], list[tuple[int, Any, Decimal]]] = {}
-    for tx in txs:
-        ciclo_idx = next((idx for idx, (inicio, fin) in enumerate(ciclos_lista) if inicio <= tx.fecha <= fin), None)
-        if ciclo_idx is None:
+    ipc_lista = list(ipc_records)
+    deflactados: dict[Any, Decimal] = {
+        tx.id: deflactar_monto(tx.monto, tx.fecha, fecha_destino, ipc_lista, tx.moneda).monto
+        for tx in txs
+    }
+
+    asignadas: set[Any] = set()
+    streams: list[StreamRecurrente] = []
+
+    # 1. SENAL DECLARADO
+    txs_declaradas = [tx for tx in txs if _es_recurrente_declarado(tx)]
+    por_decl = defaultdict(list)
+    for tx in txs_declaradas:
+        k = getattr(tx, "recurrente_id", None) or tx.descripcion or "recurrente"
+        por_decl[k].append(tx)
+
+    for _, cluster in por_decl.items():
+        cluster_sorted = sorted(cluster, key=lambda x: x.fecha)
+        fechas = [x.fecha for x in cluster_sorted]
+        frec, est, avg_d, prox = _inferir_frecuencia_y_estado(fechas, fecha_destino, total_txs)
+        med_monto = mediana([deflactados[x.id] for x in cluster_sorted]) or ZERO
+        nombre_cat = getattr(cluster_sorted[-1].categoria, "nombre", None) or "Sin categoría"
+        nombre_bil = getattr(cluster_sorted[-1].billetera, "nombre", None) or "Sin billetera"
+        s = StreamRecurrente(
+            descripcion=cluster_sorted[-1].descripcion or "Gasto recurrente declarado",
+            categoria=nombre_cat,
+            billetera=nombre_bil,
+            frecuencia=frec,
+            estado=est,
+            cantidad_ocurrencias=len(cluster_sorted),
+            promedio_dias=avg_d,
+            monto_mediano_deflactado=med_monto,
+            ultimo_monto=cluster_sorted[-1].monto,
+            proxima_fecha_esperada=prox,
+            senal="DECLARADO",
+            categoria_id=cluster_sorted[-1].categoria_id,
+            subcategoria_id=getattr(cluster_sorted[-1], "subcategoria_id", None),
+            billetera_id=cluster_sorted[-1].billetera_id,
+            moneda=cluster_sorted[-1].moneda,
+            transacciones_ids=tuple(x.id for x in cluster_sorted),
+        )
+        streams.append(s)
+        asignadas.update(x.id for x in cluster_sorted)
+
+    # 2. SENAL DESCRIPCION SIMILAR (difflib SequenceMatcher >= 0.75)
+    pendientes_s2 = [tx for tx in txs if tx.id not in asignadas]
+    candidatos_s2 = [tx for tx in pendientes_s2 if _normalizar_descripcion(tx.descripcion)]
+    usadas_s2: set[Any] = set()
+
+    for tx in candidatos_s2:
+        if tx.id in usadas_s2:
             continue
-        firma = _firma_gasto(tx)[2]
-        if not firma:
-            continue
-        ajustado = deflactar_monto(tx.monto, tx.fecha, fecha_destino, ipc_records, tx.moneda).monto
-        grupo = (tx.categoria_id, getattr(tx, "subcategoria_id", None), tx.billetera_id, firma)
-        por_estructura.setdefault(grupo, []).append((ciclo_idx, tx, ajustado))
-
-    ciclos_disponibles = {ciclo_idx for ocurrencias in por_estructura.values() for ciclo_idx, _, _ in ocurrencias}
-    denominador_ciclos = Decimal(len(ciclos_disponibles) or len(ciclos_lista))
-
-    declaradas = {(getattr(item, "categoria_id", None), getattr(item, "moneda", None)) for item in recurrentes_declarados}
-    categorias_recurrentes: set[Any] = set()
-    recurrentes_ids: set[Any] = set()
-    for grupo, ocurrencias in por_estructura.items():
-        clusters: list[list[tuple[int, Any, Decimal]]] = []
-        for ocurrencia in sorted(ocurrencias, key=lambda item: item[2]):
-            destino = next((cluster for cluster in clusters if abs(ocurrencia[2] - (mediana([x[2] for x in cluster]) or ZERO)) <= (mediana([x[2] for x in cluster]) or ZERO) * Decimal("0.20")), None)
-            if destino is None:
-                clusters.append([ocurrencia])
-            else:
-                destino.append(ocurrencia)
-        for cluster in clusters:
-            por_ciclo: dict[int, list[tuple[int, Any, Decimal]]] = {}
-            for item in cluster:
-                por_ciclo.setdefault(item[0], []).append(item)
-            if any(len(items) > 1 for items in por_ciclo.values()):
+        d1 = _normalizar_descripcion(tx.descripcion)
+        cluster = [tx]
+        for otro in candidatos_s2:
+            if otro.id == tx.id or otro.id in usadas_s2:
                 continue
-            valores = [items[0][2] for items in por_ciclo.values()]
-            centro = mediana(valores)
-            dispersion = mad(valores)
-            presencia = Decimal(len(por_ciclo)) / denominador_ciclos
-            if centro is not None and presencia >= Decimal("0.60") and (dispersion or ZERO) <= center_or_zero(centro * Decimal("0.20")):
-                recurrentes_ids.update(item[1].id for item in cluster)
-                categorias_recurrentes.add(grupo[0])
+            if otro.moneda != tx.moneda or otro.categoria_id != tx.categoria_id:
+                continue
+            d2 = _normalizar_descripcion(otro.descripcion)
+            ratio = difflib.SequenceMatcher(None, d1, d2).ratio()
+            if ratio >= 0.75:
+                cluster.append(otro)
+
+        if len(cluster) >= 2:
+            for x in cluster:
+                usadas_s2.add(x.id)
+                asignadas.add(x.id)
+
+            cluster_sorted = sorted(cluster, key=lambda x: x.fecha)
+            por_mes = defaultdict(list)
+            for x in cluster_sorted:
+                por_mes[x.fecha.strftime("%Y-%m")].append(x)
+            max_mes = max(len(items) for items in por_mes.values())
+
+            fechas = [x.fecha for x in cluster_sorted]
+            frec, est, avg_d, prox = _inferir_frecuencia_y_estado(fechas, fecha_destino, total_txs)
+
+            # Si ocurre mas de una vez por mes y no es semanal ni quincenal, es consumo variable frecuente
+            if max_mes > 1 and frec not in ("semanal", "quincenal"):
+                continue
+
+            if frec != "desconocida" and est in ("EN_DETECCION", "MADURO", "MUERTO"):
+                med_monto = mediana([deflactados[x.id] for x in cluster_sorted]) or ZERO
+                nombre_cat = getattr(cluster_sorted[-1].categoria, "nombre", None) or "Sin categoría"
+                nombre_bil = getattr(cluster_sorted[-1].billetera, "nombre", None) or "Sin billetera"
+                s = StreamRecurrente(
+                    descripcion=cluster_sorted[-1].descripcion or d1,
+                    categoria=nombre_cat,
+                    billetera=nombre_bil,
+                    frecuencia=frec,
+                    estado=est,
+                    cantidad_ocurrencias=len(cluster_sorted),
+                    promedio_dias=avg_d,
+                    monto_mediano_deflactado=med_monto,
+                    ultimo_monto=cluster_sorted[-1].monto,
+                    proxima_fecha_esperada=prox,
+                    senal="DESCRIPCION_SIMILAR",
+                    categoria_id=cluster_sorted[-1].categoria_id,
+                    subcategoria_id=getattr(cluster_sorted[-1], "subcategoria_id", None),
+                    billetera_id=cluster_sorted[-1].billetera_id,
+                    moneda=cluster_sorted[-1].moneda,
+                    transacciones_ids=tuple(x.id for x in cluster_sorted),
+                )
+                streams.append(s)
+
+    # 3. SENAL GEOMETRIA SIN DESCRIPCION
+    pendientes_s3 = [tx for tx in txs if tx.id not in asignadas]
+    usadas_s3: set[Any] = set()
+
+    for tx in pendientes_s3:
+        if tx.id in usadas_s3:
+            continue
+        m1 = deflactados[tx.id]
+        cluster = [tx]
+        for otro in pendientes_s3:
+            if otro.id == tx.id or otro.id in usadas_s3:
+                continue
+            if otro.moneda != tx.moneda or otro.billetera_id != tx.billetera_id:
+                continue
+
+            sub1 = getattr(tx, "subcategoria_id", None)
+            sub2 = getattr(otro, "subcategoria_id", None)
+            if sub1 is not None and sub2 is not None:
+                if sub1 != sub2:
+                    continue
+            elif sub1 is None and sub2 is None:
+                if tx.categoria_id != otro.categoria_id:
+                    continue
+            else:
+                continue
+
+            # Distancia circular <= 7 dias
+            if _distancia_circular_dias(tx.fecha.day, otro.fecha.day) > 7:
+                continue
+
+            # Banda de monto deflactado <= 20%
+            m2 = deflactados[otro.id]
+            max_m = max(m1, m2)
+            if max_m > ZERO and abs(m1 - m2) / max_m <= Decimal("0.20"):
+                cluster.append(otro)
+
+        if len(cluster) >= 2:
+            cluster_sorted = sorted(cluster, key=lambda x: x.fecha)
+            por_mes = defaultdict(list)
+            for x in cluster_sorted:
+                por_mes[x.fecha.strftime("%Y-%m")].append(x)
+            max_mes = max(len(items) for items in por_mes.values())
+
+            fechas = [x.fecha for x in cluster_sorted]
+            frec, est, avg_d, prox = _inferir_frecuencia_y_estado(fechas, fecha_destino, total_txs)
+
+            if max_mes > 1 and frec not in ("semanal", "quincenal"):
+                continue
+
+            # Exclusion de subcategorias/categorias de alta frecuencia variable
+            sub_id = getattr(cluster_sorted[0], "subcategoria_id", None)
+            cat_id = cluster_sorted[0].categoria_id
+            if sub_id is not None:
+                txs_grupo = [t for t in txs if getattr(t, "subcategoria_id", None) == sub_id]
+            else:
+                txs_grupo = [t for t in txs if t.categoria_id == cat_id]
+
+            por_mes_global = defaultdict(list)
+            for t in txs_grupo:
+                por_mes_global[t.fecha.strftime("%Y-%m")].append(t)
+            meses_cluster = set(por_mes.keys())
+            max_global = max((len(por_mes_global[m]) for m in meses_cluster), default=0)
+            if max_global >= 3 and frec in ("mensual", "bimensual"):
+                continue
+
+            if frec != "desconocida" and est in ("EN_DETECCION", "MADURO", "MUERTO"):
+                med_monto = mediana([deflactados[x.id] for x in cluster_sorted]) or ZERO
+                nombre_sub = getattr(cluster_sorted[-1].subcategoria, "nombre", None) if getattr(cluster_sorted[-1], "subcategoria", None) else None
+                nombre_cat = getattr(cluster_sorted[-1].categoria, "nombre", None) if cluster_sorted[-1].categoria else "Sin categoría"
+                nombre_bil = getattr(cluster_sorted[-1].billetera, "nombre", None) or "Sin billetera"
+                descs_reales = [x.descripcion for x in cluster_sorted if x.descripcion and x.descripcion.strip()]
+                desc_rep = descs_reales[-1] if descs_reales else (nombre_sub or nombre_cat)
+                s = StreamRecurrente(
+                    descripcion=desc_rep,
+                    categoria=nombre_cat,
+                    billetera=nombre_bil,
+                    frecuencia=frec,
+                    estado=est,
+                    cantidad_ocurrencias=len(cluster_sorted),
+                    promedio_dias=avg_d,
+                    monto_mediano_deflactado=med_monto,
+                    ultimo_monto=cluster_sorted[-1].monto,
+                    proxima_fecha_esperada=prox,
+                    senal="GEOMETRIA",
+                    categoria_id=cluster_sorted[-1].categoria_id,
+                    subcategoria_id=getattr(cluster_sorted[-1], "subcategoria_id", None),
+                    billetera_id=cluster_sorted[-1].billetera_id,
+                    moneda=cluster_sorted[-1].moneda,
+                    transacciones_ids=tuple(x.id for x in cluster_sorted),
+                )
+                streams.append(s)
+                for x in cluster:
+                    usadas_s3.add(x.id)
+                    asignadas.add(x.id)
+
+    maduros_ids = {tx_id for s in streams if s.estado == "MADURO" for tx_id in s.transacciones_ids}
+    categorias_recurrentes = {s.categoria_id for s in streams if s.estado == "MADURO"}
 
     comprometidos = tuple(recurrentes_declarados)
-    recurrentes = tuple(tx for tx in txs if tx.id in recurrentes_ids and not _es_recurrente_declarado(tx))
+    recurrentes = tuple(tx for tx in txs if tx.id in maduros_ids and not _es_recurrente_declarado(tx))
     variables = tuple(tx for tx in txs if tx not in comprometidos and tx not in recurrentes)
-    return ClasificacionGasto(comprometidos, recurrentes, variables, frozenset(categorias_recurrentes))
+    return ClasificacionGasto(comprometidos, recurrentes, variables, frozenset(categorias_recurrentes), tuple(streams))
 
 
 def center_or_zero(value: Decimal | None) -> Decimal:
