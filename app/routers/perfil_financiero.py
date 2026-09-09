@@ -39,85 +39,39 @@ class PerfilFinancieroResponse(PerfilFinancieroRead):
 
 
 def construir_interpretaciones(perfil) -> dict:
-    from decimal import Decimal
-
-    # Helper function for tasa_ahorro
-    def interp_tasa_ahorro(val, coin):
-        if val is None:
-            return {"label": f"Sin datos de ingreso {coin}", "nivel": "sin_datos"}
-        elif val >= Decimal("0.20"):
-            return {"label": "Excelente", "nivel": "excelente"}
-        elif val >= Decimal("0.05"):
-            return {"label": "Bien", "nivel": "bien"}
-        elif val >= Decimal("0.00"):
-            return {"label": "Ajustado", "nivel": "moderado"}
-        else:
-            return {"label": "Déficit", "nivel": "critico"}
-
-    # Helper function for impulsividad
-    def interp_impulsividad(val, coin):
-        if val is None:
-            return {"label": f"Pocos datos {coin}", "nivel": "sin_datos"}
-        elif val <= 30:
-            return {"label": "Disciplinado", "nivel": "excelente"}
-        elif val <= 60:
-            return {"label": "Moderado", "nivel": "moderado"}
-        else:
-            return {"label": "Impulsivo", "nivel": "critico"}
-
-    # Helper function for ratio_cuotas
-    def interp_ratio_cuotas(val, coin):
-        if val is None:
-            return {"label": f"Sin datos {coin}", "nivel": "sin_datos"}
-        elif val <= Decimal("0.25"):
-            return {"label": "Manejable", "nivel": "excelente"}
-        elif val <= Decimal("0.40"):
-            return {"label": "Moderado", "nivel": "moderado"}
-        else:
-            return {"label": "Elevado", "nivel": "critico"}
-
-    # Helper function for porcentaje_suscripciones
-    def interp_porcentaje_suscripciones(val, coin):
-        if val is None:
-            return {"label": f"Sin datos de gasto {coin}", "nivel": "sin_datos"}
-        elif val <= Decimal("0.10"):
-            return {"label": "Bajo", "nivel": "excelente"}
-        elif val <= Decimal("0.20"):
-            return {"label": "Moderado", "nivel": "moderado"}
-        else:
-            return {"label": "Alto", "nivel": "critico"}
-
-    tasa_ahorro_ars = interp_tasa_ahorro(perfil.tasa_ahorro_ars, "ARS")
-    tasa_ahorro_usd = interp_tasa_ahorro(perfil.tasa_ahorro_usd, "USD")
-
-    score_impulsividad_ars = interp_impulsividad(perfil.score_impulsividad_ars, "ARS")
-    score_impulsividad_usd = interp_impulsividad(perfil.score_impulsividad_usd, "USD")
-
-    ratio_cuotas_ars = interp_ratio_cuotas(perfil.ratio_cuotas_ars, "ARS")
-    ratio_cuotas_usd = interp_ratio_cuotas(perfil.ratio_cuotas_usd, "USD")
-
-    porcentaje_suscripciones_ars = interp_porcentaje_suscripciones(perfil.porcentaje_suscripciones_ars, "ARS")
-    porcentaje_suscripciones_usd = interp_porcentaje_suscripciones(perfil.porcentaje_suscripciones_usd, "USD")
-
-    # 4. Cumplimiento presupuesto (global)
-    if perfil.cumplimiento_presupuesto is None:
-        cumplimiento_presupuesto = {"label": "Sin presupuestos", "nivel": "sin_datos"}
-    elif perfil.cumplimiento_presupuesto >= Decimal("0.80"):
-        cumplimiento_presupuesto = {"label": "Excelente", "nivel": "excelente"}
-    elif perfil.cumplimiento_presupuesto >= Decimal("0.50"):
-        cumplimiento_presupuesto = {"label": "Regular", "nivel": "moderado"}
+    """Construye descripciones neutrales sin juicios de valor, umbrales fijos ni inferencias de personalidad."""
+    # Tasa de ahorro
+    if perfil.tasa_ahorro_ars is None:
+        tasa_ahorro_ars = {"label": "Sin datos", "nivel": "sin_datos"}
     else:
-        cumplimiento_presupuesto = {"label": "Mejorar", "nivel": "critico"}
+        tasa_ahorro_ars = {"label": f"{round(perfil.tasa_ahorro_ars * 100)}% de tu ingreso", "nivel": "moderado"}
 
-    # 5. Consistencia registro (global)
+    tasa_ahorro_usd = {"label": "Sin datos USD", "nivel": "sin_datos"}
+
+    # Impulsividad (Eliminado)
+    score_impulsividad_ars = {"label": "No medido", "nivel": "sin_datos"}
+    score_impulsividad_usd = {"label": "No medido", "nivel": "sin_datos"}
+
+    # Gasto comprometido / ratio de cuotas
+    if perfil.ratio_cuotas_ars is None:
+        ratio_cuotas_ars = {"label": "Sin datos", "nivel": "sin_datos"}
+    else:
+        ratio_cuotas_ars = {"label": f"{round(perfil.ratio_cuotas_ars * 100)}% de tu ingreso", "nivel": "moderado"}
+
+    ratio_cuotas_usd = {"label": "Sin datos USD", "nivel": "sin_datos"}
+
+    # Suscripciones (subsumidas en compromisos)
+    porcentaje_suscripciones_ars = {"label": "En compromisos", "nivel": "sin_datos"}
+    porcentaje_suscripciones_usd = {"label": "En compromisos", "nivel": "sin_datos"}
+
+    # Cumplimiento presupuestos (Eliminado del perfil de salud financiera)
+    cumplimiento_presupuesto = {"label": "No aplicable", "nivel": "sin_datos"}
+
+    # Cobertura de registro
     if perfil.consistencia_registro is None:
         consistencia_registro = {"label": "Sin datos", "nivel": "sin_datos"}
-    elif perfil.consistencia_registro >= Decimal("0.80"):
-        consistencia_registro = {"label": "Constante", "nivel": "excelente"}
-    elif perfil.consistencia_registro >= Decimal("0.50"):
-        consistencia_registro = {"label": "Irregular", "nivel": "moderado"}
     else:
-        consistencia_registro = {"label": "Esporádico", "nivel": "critico"}
+        consistencia_registro = {"label": f"{round(perfil.consistencia_registro * 100)}% activo", "nivel": "moderado"}
 
     return {
         "tasa_ahorro_ars": tasa_ahorro_ars,

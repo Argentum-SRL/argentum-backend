@@ -336,14 +336,13 @@ def _calcular_y_persistir_perfil_sync(db: Session, usuario_id: UUID) -> PerfilFi
         db.add(perfil)
     perfil.tasa_ahorro_ars = nuevo["capacidad_ahorro"]
     perfil.tasa_ahorro_usd = None
-    volatilidad = nuevo["volatilidad_gasto_variable"]
-    perfil.score_impulsividad_ars = int((volatilidad * Decimal("100")).to_integral_value()) if volatilidad is not None else None
+    perfil.score_impulsividad_ars = None  # Eliminado: constructo conductual no validable
     perfil.score_impulsividad_usd = None
     perfil.ratio_cuotas_ars = nuevo["gasto_comprometido_ratio"]
     perfil.ratio_cuotas_usd = None
-    perfil.cumplimiento_presupuesto = _calcular_cumplimiento_presupuesto_sync(db, usuario_id, hoy_argentina() - timedelta(days=365))
-    perfil.consistencia_registro = nuevo["consistencia_registro"]
-    perfil.porcentaje_suscripciones_ars = nuevo["gasto_comprometido_ratio"]
+    perfil.cumplimiento_presupuesto = None  # Eliminado: métrica de uso de la app
+    perfil.consistencia_registro = nuevo["cobertura_registro"]
+    perfil.porcentaje_suscripciones_ars = None  # Integrado en gasto comprometido
     perfil.porcentaje_suscripciones_usd = None
     perfil.ultima_actualizacion = datetime.now(timezone.utc)
     db.commit()
@@ -357,8 +356,6 @@ def _obtener_perfil_sync(db: Session, usuario_id: UUID) -> PerfilFinanciero | No
     ).scalar_one_or_none()
 
     if perfil:
-        if not _validar_historial_minimo(db, usuario_id, None):
-            return None
         return perfil
 
     perfil = _calcular_y_persistir_perfil_sync(db, usuario_id)
@@ -488,40 +485,20 @@ def obtener_perfil(db: Session, usuario_id: UUID) -> PerfilFinanciero | None:
 
 
 def generar_texto_contexto_ia(perfil: PerfilFinanciero) -> str:
-    """Genera texto de perfil para el contexto IA, omitiendo campos NULL"""
+    """Genera texto de perfil para el contexto IA con métricas financieras objetivas y sin juicios de conducta."""
     lineas = []
     
-    # Tasa de ahorro
+    # Capacidad de ahorro
     if perfil.tasa_ahorro_ars is not None:
-        lineas.append(f"- Tasa de ahorro ARS: {float(perfil.tasa_ahorro_ars)*100:.1f}%")
-    if perfil.tasa_ahorro_usd is not None:
-        lineas.append(f"- Tasa de ahorro USD: {float(perfil.tasa_ahorro_usd)*100:.1f}%")
+        lineas.append(f"- Capacidad de ahorro típica ARS: {float(perfil.tasa_ahorro_ars)*100:.1f}%")
         
-    # Impulsividad
-    if perfil.score_impulsividad_ars is not None:
-        lineas.append(f"- Impulsividad ARS: {perfil.score_impulsividad_ars}/100")
-    if perfil.score_impulsividad_usd is not None:
-        lineas.append(f"- Impulsividad USD: {perfil.score_impulsividad_usd}/100")
-        
-    # Ratio cuotas
+    # Gasto comprometido sobre ingreso
     if perfil.ratio_cuotas_ars is not None:
-        lineas.append(f"- Carga de cuotas ARS: {float(perfil.ratio_cuotas_ars)*100:.1f}% del ingreso")
-    if perfil.ratio_cuotas_usd is not None:
-        lineas.append(f"- Carga de cuotas USD: {float(perfil.ratio_cuotas_usd)*100:.1f}% del ingreso")
+        lineas.append(f"- Gasto comprometido sobre ingreso ARS: {float(perfil.ratio_cuotas_ars)*100:.1f}%")
         
-    # Cumplimiento presupuesto
-    if perfil.cumplimiento_presupuesto is not None:
-        lineas.append(f"- Cumplimiento presupuestos: {float(perfil.cumplimiento_presupuesto)*100:.1f}%")
-        
-    # Consistencia de registro
+    # Cobertura de registro
     if perfil.consistencia_registro is not None:
-        lineas.append(f"- Consistencia de registro: {float(perfil.consistencia_registro)*100:.1f}% de días")
-        
-    # Porcentaje suscripciones
-    if perfil.porcentaje_suscripciones_ars is not None:
-        lineas.append(f"- Suscripciones ARS: {float(perfil.porcentaje_suscripciones_ars)*100:.1f}% del gasto")
-    if perfil.porcentaje_suscripciones_usd is not None:
-        lineas.append(f"- Suscripciones USD: {float(perfil.porcentaje_suscripciones_usd)*100:.1f}% del gasto")
+        lineas.append(f"- Cobertura de registro activo: {float(perfil.consistencia_registro)*100:.1f}%")
         
     if not lineas:
         return ""

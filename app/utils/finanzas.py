@@ -41,6 +41,7 @@ class StreamRecurrente:
     billetera_id: Any = None
     moneda: Moneda = Moneda.ARS
     transacciones_ids: tuple[Any, ...] = ()
+    clase: str = "HABITO"  # COMPROMISO, HABITO, VARIABLE
 
     @property
     def promedio_dias_entre_ocurrencias(self) -> Decimal:
@@ -54,10 +55,120 @@ class StreamRecurrente:
 @dataclass(frozen=True)
 class ClasificacionGasto:
     comprometidos: tuple[Any, ...]
-    recurrentes_detectados: tuple[Any, ...]
+    habitos: tuple[Any, ...]
     variables: tuple[Any, ...]
-    categorias_recurrentes: frozenset[Any]
+    categorias_recurrentes: frozenset[Any] = frozenset()
     streams: tuple[StreamRecurrente, ...] = ()
+    recurrentes_detectados: tuple[Any, ...] = ()
+
+    def __post_init__(self):
+        if not self.recurrentes_detectados and self.habitos:
+            object.__setattr__(self, "recurrentes_detectados", self.habitos)
+
+
+# ==============================================================================
+# MAPEO DE CATEGORÍAS Y SUBCATEGORÍAS ELEGIBLES PARA COMPROMISOS (CRITERIO CONTRACTUAL)
+# ==============================================================================
+# Un gasto es COMPROMISO si hay una contraparte y dejar de pagar tiene una consecuencia
+# jurídica, financiera o de servicio grave que trasciende el mero cese de consumo inmediato:
+# - Alquiler: desalojo por falta de pago / rescisión forzosa de locación.
+# - Expensas: demanda ejecutiva de cobro y eventual embargo de inmueble.
+# - Luz (Edenor, etc.): corte físico del suministro eléctrico esencial.
+# - Gas (Metrogas, etc.): corte del suministro de gas por red.
+# - Agua (AySA, etc.): corte o mora en servicio sanitario esencial.
+# - Internet y cable (Fibertel, etc.): corte de conectividad digital.
+# - Celular: suspensión de línea y eventual bloqueo de equipo/servicio.
+# - Seguros: suspensión o caducidad inmediata de la cobertura de póliza.
+# - Impuestos (en Servicios, ej. TGI/ABL): mora fiscal, multas y ejecución tributaria.
+# - Cuotas (en Educación): suspensión de regularidad académica y pérdida de matrícula.
+# - Obra social / Prepaga (en Salud): desafiliación y pérdida de cobertura médica de urgencia.
+# - Préstamos / Tarjeta de crédito (en Banco): mora punitoria, ejecución y reporte crediticio (Veraz/BCRA).
+#
+# Un gasto es HÁBITO si se repite con regularidad pero es elegible / discrecional.
+# Si el mes que viene no se realiza, no hay consecuencias jurídicas ni mora alguna:
+# - Delivery, salidas, peluquería/cuidado personal, verdulería, carnicería, combustible, transporte.
+# ==============================================================================
+
+SUBCATEGORIAS_COMPROMISO_ELEGIBLES: frozenset[str] = frozenset({
+    "alquiler",
+    "expensas",
+    "luz",
+    "gas",
+    "agua",
+    "internet y cable",
+    "celular",
+    "seguros",
+    "impuestos",
+    "cuotas",
+    "obra social / prepaga",
+    "prestamos",
+    "préstamos",
+    "tarjeta de credito",
+    "tarjeta de crédito",
+})
+
+CATEGORIAS_COMPROMISO_DIRECTAS: frozenset[str] = frozenset({
+    "servicios",
+    "comunicacion",
+    "comunicación",
+})
+
+
+def es_categoria_elegible_compromiso(
+    cat_nombre: str | None,
+    subcat_nombre: str | None,
+    descripcion: str | None = None,
+) -> bool:
+    """Evalúa si una categoría/subcategoría/concepto habilita la clasificación como COMPROMISO.
+
+    Aplica el criterio de consecuencia de impago.
+    Casos límite resueltos con evidencia:
+    - Hogar: conviven alquiler y muebles. Las subcategorías de Hogar (Muebles, Limpieza, Reparaciones)
+      NO son compromisos. Si la transacción no tiene subcategoría pero la descripción normalizada
+      refiere a 'alquiler' o 'expensa' (evidencia del seed histórico de testingadmin), habilita compromiso.
+    - Banco: 'impuestos' de banco (débitos/créditos) no son compromisos; 'impuestos' en Servicios (TGI/ABL) sí.
+    - Salud: Farmacia es hábito/variable; sólo 'Obra social / Prepaga' habilita compromiso.
+    - Educación: Idiomas y materiales son hábitos/variables; sólo 'Cuotas' habilita compromiso.
+    - Transporte: Combustible (YPF), peajes y SUBE son hábitos o variables; no compromisos.
+    - Indumentaria: Toda indumentaria es variable o hábito; sin contraparte contractual de impago.
+    """
+    sub_norm = _normalizar_descripcion(subcat_nombre)
+    cat_norm = _normalizar_descripcion(cat_nombre)
+    desc_norm = _normalizar_descripcion(descripcion)
+
+    if sub_norm:
+        if sub_norm in SUBCATEGORIAS_COMPROMISO_ELEGIBLES:
+            if sub_norm == "impuestos" and cat_norm == "banco":
+                return False
+            return True
+        return False
+
+    if cat_norm in CATEGORIAS_COMPROMISO_DIRECTAS:
+        return True
+
+    if cat_norm == "hogar":
+        if any(k in desc_norm for k in ("alquiler", "expensa")):
+            return True
+        return False
+
+    return False
+
+
+def monto_mensual_deflactado_stream(stream: StreamRecurrente) -> Decimal:
+    """Normaliza el monto mediano deflactado a frecuencia mensual estándar."""
+    m = stream.monto_mediano_deflactado
+    frec = stream.frecuencia
+    if frec == "mensual":
+        return m
+    elif frec == "quincenal":
+        return m * Decimal("2")
+    elif frec == "semanal":
+        return (m * Decimal("52") / Decimal("12")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    elif frec == "bimensual":
+        return (m / Decimal("2")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    elif frec == "anual":
+        return (m / Decimal("12")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return m
 
 
 @dataclass(frozen=True)
@@ -405,6 +516,78 @@ def _es_recurrente_declarado(tx: Any) -> bool:
     return bool(getattr(tx, "es_recurrente", False) or getattr(tx, "recurrente_id", None))
 
 
+def _determinar_clase_stream(
+    cluster_sorted: list[Any],
+    deflactados: dict[Any, Decimal],
+    ciclos_con_datos_usuario: list[tuple[date, date]],
+    estado: str,
+    cat_nombre: str | None,
+    subcat_nombre: str | None,
+    descripcion: str | None,
+    senal: str,
+) -> str:
+    """Aplica los criterios técnicos para clasificar un stream en COMPROMISO, HABITO o VARIABLE.
+
+    Criterios técnicos exactos:
+    - COMPROMISO si:
+      a) Es declarado (senal == "DECLARADO"): certeza, sin detección.
+      b) Es detectado Y cumple TODAS estas condiciones a la vez:
+         - Cae en categoría o subcategoría elegible (criterio contractual de consecuencia).
+         - Al menos 3 ocurrencias (len(cluster_sorted) >= 3).
+         - Estado MADURO (un compromiso solo puede estar MADURO; EN_DETECCION no es compromiso).
+         - El usuario tiene al menos 3 ciclos con datos (len(ciclos_con_datos_usuario) >= 3).
+         - Presencia en al menos el 80% de los ciclos con datos de su intervalo activo (>= 0.80).
+         - Estabilidad alta del monto deflactado: MAD / Mediana <= 0.10.
+    - HÁBITO si:
+      - Al menos 3 ocurrencias (len(cluster_sorted) >= 3).
+      - Presencia en al menos el 60% de los ciclos con datos de su intervalo activo (>= 0.60).
+      - Estado MADURO.
+      - No cumple condiciones de compromiso.
+    - VARIABLE:
+      - Todo lo demás.
+    """
+    if senal == "DECLARADO":
+        return "COMPROMISO"
+
+    ocurrencias = len(cluster_sorted)
+    if ocurrencias < 3:
+        return "VARIABLE"
+
+    # Presencia en ciclos con datos dentro del intervalo activo del stream
+    fechas = [x.fecha for x in cluster_sorted]
+    f_min, f_max = fechas[0], fechas[-1]
+    ciclos_span = [c for c in ciclos_con_datos_usuario if c[1] >= f_min and c[0] <= f_max]
+    ciclos_con_stream = [c for c in ciclos_span if any(c[0] <= tx.fecha <= c[1] for tx in cluster_sorted)]
+    presencia = Decimal(len(ciclos_con_stream)) / Decimal(len(ciclos_span)) if ciclos_span else ZERO
+
+    # Estabilidad del monto deflactado (MAD / Mediana <= 0.10)
+    montos = [deflactados[x.id] for x in cluster_sorted]
+    med = mediana(montos) or ZERO
+    d_mad = mad(montos) or ZERO
+    mad_ratio = (d_mad / med) if med > ZERO else Decimal("1")
+
+    total_ciclos_datos = len(ciclos_con_datos_usuario)
+    elegible = es_categoria_elegible_compromiso(cat_nombre, subcat_nombre, descripcion)
+    es_maduro = (estado == "MADURO")
+
+    es_compromiso = (
+        elegible
+        and es_maduro
+        and total_ciclos_datos >= 3
+        and ocurrencias >= 3
+        and presencia >= Decimal("0.80")
+        and mad_ratio <= Decimal("0.10")
+    )
+
+    if es_compromiso:
+        return "COMPROMISO"
+
+    if es_maduro and ocurrencias >= 3 and presencia >= Decimal("0.60"):
+        return "HABITO"
+
+    return "VARIABLE"
+
+
 def clasificar_gastos(
     transacciones: Iterable[Any],
     ciclos: Iterable[tuple[date, date]],
@@ -413,38 +596,22 @@ def clasificar_gastos(
     recurrentes_declarados: Iterable[Any] = (),
     total_transacciones_usuario: int | None = None,
 ) -> ClasificacionGasto:
-    """Clasifica gastos mediante cascada de tres senales (Declarado, Similaridad, Geometria).
+    """Clasifica gastos mediante cascada de tres señales y categorización contractual.
 
-    Criterios y fuentes de umbrales:
-      1. SENAL DECLARADO:
-         - Certeza absoluta: suscripciones activas, cuotas y gastos con flag o ID recurrente.
-      2. SENAL DESCRIPCION SIMILAR:
-         - SequenceMatcher de difflib con ratio >= 0.75 sobre descripcion normalizada.
-           Este umbral proviene del trabajo de IBM Research en transacciones con historial corto,
-           tolerando numeros de factura, fechas y pequenas variaciones ortograficas.
-         - Requiere misma moneda y misma categoria.
-         - Si una descripcion ocurre multiples veces dentro de un mismo mes y no posee cadencia
-           semanal/quincenal, se clasifica como consumo variable recurrente (ej: supermercados).
-      3. SENAL GEOMETRIA SIN DESCRIPCION:
-         - Para gastos con descripcion vacia o sin match textual.
-         - Misma moneda y misma billetera (medio de pago consistente).
-         - Misma subcategoria (o misma categoria si ambas no tienen subcategoria).
-         - Distancia circular de dia del mes <= 7 dias (min(|d1 - d2|, 31 - |d1 - d2|) <= 7).
-         - Banda de monto deflactado relativo <= 20% (abs(m1 - m2) / max(m1, m2) <= 0.20).
-         - Filtro anti-falsos positivos: en cadencias mensuales/bimensuales, maximo 1 gasto por
-           mes en el stream, y exclusion si la categoria/subcategoria promedia >= 3 txs/mes.
-
-    Reglas de madurez y proyeccion:
-      - Solo los streams MADUROS (>= 3 ocurrencias regulares, o >= 2 para anual, y con usuario
-        teniendo al menos 40 transacciones de historial) ingresan en recurrentes_detectados.
-      - Los streams EN_DETECCION, NUEVO y MUERTO se exponen en streams pero sus transacciones
-        permanecen en variables para no comprometer indebidamente la proyeccion.
+    Devuelve cuatro clases:
+      1. comprometidos: Certezas declaradas y gastos detectados con consecuencia jurídica grave.
+      2. habitos: Gastos regulares elegibles/discrecionales (>= 3 ocurrencias, >= 60% presencia).
+      3. variables: Consumo discrecional o aislado restante.
+      4. streams: Todos los streams detectados con su clase asignada (COMPROMISO, HABITO o VARIABLE).
     """
     txs_todos = list(transacciones)
     total_txs = total_transacciones_usuario if total_transacciones_usuario is not None else len(txs_todos)
     txs = [tx for tx in txs_todos if es_gasto_consumo(tx)]
     if not txs:
         return ClasificacionGasto(tuple(recurrentes_declarados), (), (), frozenset(), ())
+
+    ciclos_lista = list(ciclos)
+    ciclos_con_datos_usuario = [c for c in ciclos_lista if any(c[0] <= tx.fecha <= c[1] for tx in txs)]
 
     ipc_lista = list(ipc_records)
     deflactados: dict[Any, Decimal] = {
@@ -469,6 +636,10 @@ def clasificar_gastos(
         med_monto = mediana([deflactados[x.id] for x in cluster_sorted]) or ZERO
         nombre_cat = getattr(cluster_sorted[-1].categoria, "nombre", None) or "Sin categoría"
         nombre_bil = getattr(cluster_sorted[-1].billetera, "nombre", None) or "Sin billetera"
+        sub_nom = getattr(cluster_sorted[-1].subcategoria, "nombre", None) if getattr(cluster_sorted[-1], "subcategoria", None) else None
+        clase_stream = _determinar_clase_stream(
+            cluster_sorted, deflactados, ciclos_con_datos_usuario, est, nombre_cat, sub_nom, cluster_sorted[-1].descripcion, "DECLARADO"
+        )
         s = StreamRecurrente(
             descripcion=cluster_sorted[-1].descripcion or "Gasto recurrente declarado",
             categoria=nombre_cat,
@@ -486,6 +657,7 @@ def clasificar_gastos(
             billetera_id=cluster_sorted[-1].billetera_id,
             moneda=cluster_sorted[-1].moneda,
             transacciones_ids=tuple(x.id for x in cluster_sorted),
+            clase=clase_stream,
         )
         streams.append(s)
         asignadas.update(x.id for x in cluster_sorted)
@@ -532,8 +704,13 @@ def clasificar_gastos(
                 med_monto = mediana([deflactados[x.id] for x in cluster_sorted]) or ZERO
                 nombre_cat = getattr(cluster_sorted[-1].categoria, "nombre", None) or "Sin categoría"
                 nombre_bil = getattr(cluster_sorted[-1].billetera, "nombre", None) or "Sin billetera"
+                sub_nom = getattr(cluster_sorted[-1].subcategoria, "nombre", None) if getattr(cluster_sorted[-1], "subcategoria", None) else None
+                desc_final = cluster_sorted[-1].descripcion or d1
+                clase_stream = _determinar_clase_stream(
+                    cluster_sorted, deflactados, ciclos_con_datos_usuario, est, nombre_cat, sub_nom, desc_final, "DESCRIPCION_SIMILAR"
+                )
                 s = StreamRecurrente(
-                    descripcion=cluster_sorted[-1].descripcion or d1,
+                    descripcion=desc_final,
                     categoria=nombre_cat,
                     billetera=nombre_bil,
                     frecuencia=frec,
@@ -549,6 +726,7 @@ def clasificar_gastos(
                     billetera_id=cluster_sorted[-1].billetera_id,
                     moneda=cluster_sorted[-1].moneda,
                     transacciones_ids=tuple(x.id for x in cluster_sorted),
+                    clase=clase_stream,
                 )
                 streams.append(s)
 
@@ -624,6 +802,9 @@ def clasificar_gastos(
                 nombre_bil = getattr(cluster_sorted[-1].billetera, "nombre", None) or "Sin billetera"
                 descs_reales = [x.descripcion for x in cluster_sorted if x.descripcion and x.descripcion.strip()]
                 desc_rep = descs_reales[-1] if descs_reales else (nombre_sub or nombre_cat)
+                clase_stream = _determinar_clase_stream(
+                    cluster_sorted, deflactados, ciclos_con_datos_usuario, est, nombre_cat, nombre_sub, desc_rep, "GEOMETRIA"
+                )
                 s = StreamRecurrente(
                     descripcion=desc_rep,
                     categoria=nombre_cat,
@@ -641,19 +822,47 @@ def clasificar_gastos(
                     billetera_id=cluster_sorted[-1].billetera_id,
                     moneda=cluster_sorted[-1].moneda,
                     transacciones_ids=tuple(x.id for x in cluster_sorted),
+                    clase=clase_stream,
                 )
                 streams.append(s)
                 for x in cluster:
                     usadas_s3.add(x.id)
                     asignadas.add(x.id)
 
-    maduros_ids = {tx_id for s in streams if s.estado == "MADURO" for tx_id in s.transacciones_ids}
-    categorias_recurrentes = {s.categoria_id for s in streams if s.estado == "MADURO"}
+    compromiso_tx_ids = {
+        tx_id
+        for s in streams
+        if s.clase == "COMPROMISO"
+        for tx_id in s.transacciones_ids
+    }
+    habito_tx_ids = {
+        tx_id
+        for s in streams
+        if s.clase == "HABITO"
+        for tx_id in s.transacciones_ids
+    }
 
-    comprometidos = tuple(recurrentes_declarados)
-    recurrentes = tuple(tx for tx in txs if tx.id in maduros_ids and not _es_recurrente_declarado(tx))
-    variables = tuple(tx for tx in txs if tx not in comprometidos and tx not in recurrentes)
-    return ClasificacionGasto(comprometidos, recurrentes, variables, frozenset(categorias_recurrentes), tuple(streams))
+    # Transacciones declaradas siempre pertenecen a compromisos
+    declaradas_tx_ids = {tx.id for tx in txs if _es_recurrente_declarado(tx)}
+    compromiso_tx_ids.update(declaradas_tx_ids)
+
+    # Evitar solapamientos
+    habito_tx_ids.difference_update(compromiso_tx_ids)
+
+    categorias_recurrentes = {s.categoria_id for s in streams if s.clase in ("COMPROMISO", "HABITO")}
+
+    comprometidos = tuple(recurrentes_declarados) + tuple(tx for tx in txs if tx.id in compromiso_tx_ids)
+    habitos = tuple(tx for tx in txs if tx.id in habito_tx_ids)
+    variables = tuple(tx for tx in txs if tx.id not in compromiso_tx_ids and tx.id not in habito_tx_ids)
+
+    return ClasificacionGasto(
+        comprometidos=comprometidos,
+        habitos=habitos,
+        variables=variables,
+        categorias_recurrentes=frozenset(categorias_recurrentes),
+        streams=tuple(streams),
+        recurrentes_detectados=habitos,
+    )
 
 
 def center_or_zero(value: Decimal | None) -> Decimal:

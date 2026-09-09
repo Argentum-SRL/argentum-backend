@@ -49,6 +49,9 @@ class PerfilFinancieroRead(PerfilFinancieroBase):
 
 
 class PerfilNuevoRead(BaseModel):
+    datos_suficientes: bool = True
+    mensaje_insuficiente: str | None = None
+    calidad_registro_advertencia: str | None = None
     ciclos_con_datos: int
     ciclos_observados: int
     nivel_confianza: str
@@ -58,12 +61,19 @@ class PerfilNuevoRead(BaseModel):
     ingreso_actual_percentil: Decimal | None = None
     gasto_comprometido_ars: Decimal
     gasto_comprometido_ratio: Decimal | None = None
+    gasto_habitos_ars: Decimal | None = None
+    gasto_habitos_ratio: Decimal | None = None
     capacidad_ahorro: Decimal | None = None
+    capacidad_ahorro_min: Decimal | None = None
+    capacidad_ahorro_max: Decimal | None = None
     capacidad_ahorro_percentil: Decimal | None = None
+    gasto_tipico_ars: Decimal | None = None
+    saldo_disponible_ars: Decimal | None = None
     runway_meses: Decimal | None = None
     volatilidad_gasto_variable: Decimal | None = None
     gasto_actual_percentil: Decimal | None = None
     consistencia_registro: Decimal | None = None
+    interpretaciones_relativas: dict[str, str] = {}
     metodo: str
 
 
