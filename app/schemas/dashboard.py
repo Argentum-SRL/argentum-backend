@@ -154,6 +154,17 @@ class PesosProyeccion(BaseModel):
     ciclo_actual: float = Field(..., ge=0.0, le=1.0)
 
 
+class CalibracionAuditoria(BaseModel):
+    pasa_puerta: bool = Field(..., description="Indica si la proyección superó la prueba de calibración individual sobre ciclos pasados")
+    ciclos_evaluados: int = Field(..., ge=0, description="Cantidad de ciclos cerrados con proyección previa evaluados en backtest")
+    cobertura_50: Optional[float] = Field(default=None, description="Cobertura empírica observada en el intervalo al 50%")
+    cobertura_80: Optional[float] = Field(default=None, description="Cobertura empírica observada en el intervalo al 80%")
+    cobertura_95: Optional[float] = Field(default=None, description="Cobertura empírica observada en el intervalo al 95%")
+    ancho_medio_80_rel: Optional[float] = Field(default=None, description="Ancho relativo medio del intervalo al 80% respecto al gasto real")
+    motivo: Optional[str] = Field(default=None, description="Motivo de rechazo de calibración si no pasa la puerta")
+    mensaje: Optional[str] = Field(default=None, description="Explicación en lenguaje claro para el usuario")
+
+
 class ProyeccionMoneda(BaseModel):
     periodo: PeriodoProyeccion
     gasto_proyectado_total: float = Field(..., ge=0)
@@ -163,12 +174,17 @@ class ProyeccionMoneda(BaseModel):
     ingresos_proyectados: float = Field(..., ge=0)
     certezas: CertezasProyeccion
     desglose_por_categoria: List[ProyeccionCategoria]
-    nivel_confianza: Literal["alto", "medio", "bajo", "sin_datos", "inicial"]
+    nivel_confianza: Literal["alto", "medio", "bajo", "sin_datos", "inicial", "alta", "media", "baja"]
     ciclos_analizados: int = Field(..., ge=0)
     pesos: PesosProyeccion
     advertencias: List[str]
     datos_suficientes: bool
     clasificacion: Dict[str, int]
+    distribucion: Optional[Dict[str, float]] = None
+    intervalos: Optional[Dict[str, Dict[str, float]]] = None
+    descomposicion: Optional[Dict[str, float]] = None
+    mensaje_insuficiente: Optional[str] = None
+    calibracion: Optional[CalibracionAuditoria] = None
 
 
 class ProyeccionesResponse(BaseModel):

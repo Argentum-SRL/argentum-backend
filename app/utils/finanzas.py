@@ -867,3 +867,209 @@ def clasificar_gastos(
 
 def center_or_zero(value: Decimal | None) -> Decimal:
     return value if value is not None else ZERO
+
+
+def pinball_loss(y: Decimal, q: Decimal, tau: Decimal) -> Decimal:
+    """Calcula la pérdida pinball (quantile loss) para el cuantil tau y observación y.
+
+    L_tau(y, q) = max(tau * (y - q), (tau - 1) * (y - q)).
+    Es una regla de puntuación estrictamente propia (strictly proper scoring rule).
+    Averaged over a fine grid of taus, converges to Continuous Ranked Probability Score (CRPS).
+    """
+    diff = y - q
+    if diff >= ZERO:
+        return tau * diff
+    return (tau - ONE) * diff
+
+
+def estimar_gasto_diario_basico_robusto(
+    txs_variables: Iterable[Any],
+    dias_ciclo: int | Decimal,
+    destino: date,
+    ipc_records: Iterable[Any],
+    moneda: Moneda = Moneda.ARS,
+) -> tuple[Decimal, Decimal, Decimal]:
+    """Estima el gasto diario básico robusto retirando el decil superior solo cuando estadísticamente corresponde.
+
+    CRITERIO ESTADÍSTICO PARA APLICAR EL DESCARTE DEL DECIL SUPERIOR:
+    El descarte del decil superior (percentil 90) aísla compras aisladas de gran monto (shocks
+    esporádicos como electrodomésticos o pasajes) que distorsionan el ritmo diario estándar.
+    Solo tiene sentido estadístico si se cumplen dos condiciones medibles en los datos:
+      1. Tamaño de muestra suficiente: N >= 10 transacciones en el ciclo. Con menos de 10 datos,
+         descartar observaciones amputa artificialmente la distribución muestral.
+      2. Discontinuidad y shock extremo en la cola superior:
+         max(montos) >= 3.0 * mediana Y p90 >= 2.5 * mediana.
+         Si las transacciones tienen una distribución continua (como compras habituales de supermercado
+         o salidas de diferentes montos), el decil superior NO es un shock sino consumo normal de mayor
+         cuantía. Amputarlo eliminaría más del 30% del gasto legítimo del usuario (caso Manu).
+    Si no se cumplen ambas condiciones, todas las transacciones forman parte de la tasa base
+    y no se descarta ninguna observación (shock = []).
+
+    Retorna:
+      (tasa_diaria_base, total_base_deflactado, total_shock_deflactado)
+    """
+    dias = Decimal(str(dias_ciclo)) if dias_ciclo > ZERO else ONE
+    montos_deflactados = [
+        deflactar_monto(tx.monto, tx.fecha, destino, ipc_records, moneda).monto
+        for tx in txs_variables
+    ]
+    if not montos_deflactados:
+        return ZERO, ZERO, ZERO
+
+    n_tx = len(montos_deflactados)
+    med = mediana(montos_deflactados) or ZERO
+    max_m = max(montos_deflactados)
+
+    # Criterio estadístico: N >= 10 y shock extremo en la cola
+    aplica_descarte = False
+    p90 = None
+    if n_tx >= 10 and med > ZERO:
+        p90 = percentil(montos_deflactados, Decimal("0.90"))
+        if p90 is not None and max_m >= Decimal("3.0") * med and p90 >= Decimal("2.5") * med:
+            aplica_descarte = True
+
+    if aplica_descarte and p90 is not None:
+        base = [m for m in montos_deflactados if m < p90]
+        shock = [m for m in montos_deflactados if m >= p90]
+    else:
+        base = montos_deflactados
+        shock = []
+
+    total_base = sum(base, ZERO)
+    total_shock = sum(shock, ZERO)
+    tasa_diaria = (total_base / dias).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return tasa_diaria, total_base, total_shock
+
+
+def student_t_critical(df: int, level: str) -> Decimal:
+    """Valores críticos de la distribución t de Student para grados de libertad df = K - 1.
+
+    Nivel 95%: bilateral 0.05 (t_0.975).
+    Nivel 80%: bilateral 0.20 (t_0.90).
+    Nivel 50%: bilateral 0.50 (t_0.75).
+    """
+    if level == "95":
+        table = {
+            1: Decimal("12.706"), 2: Decimal("4.303"), 3: Decimal("3.182"),
+            4: Decimal("2.776"), 5: Decimal("2.571"), 6: Decimal("2.447"),
+            7: Decimal("2.365"), 8: Decimal("2.306"), 9: Decimal("2.262"),
+            10: Decimal("2.228"), 11: Decimal("2.201"),
+        }
+        return table.get(max(1, min(11, df)), Decimal("2.100"))
+    elif level == "80":
+        table = {
+            1: Decimal("3.078"), 2: Decimal("1.886"), 3: Decimal("1.638"),
+            4: Decimal("1.533"), 5: Decimal("1.476"), 6: Decimal("1.440"),
+            7: Decimal("1.415"), 8: Decimal("1.397"), 9: Decimal("1.383"),
+            10: Decimal("1.372"), 11: Decimal("1.363"),
+        }
+        return table.get(max(1, min(11, df)), Decimal("1.340"))
+    elif level == "50":
+        table = {
+            1: Decimal("1.000"), 2: Decimal("0.816"), 3: Decimal("0.765"),
+            4: Decimal("0.741"), 5: Decimal("0.727"), 6: Decimal("0.718"),
+            7: Decimal("0.711"), 8: Decimal("0.706"), 9: Decimal("0.703"),
+            10: Decimal("0.700"), 11: Decimal("0.697"),
+        }
+        return table.get(max(1, min(11, df)), Decimal("0.680"))
+    return Decimal("1.000")
+
+
+def weighted_quantile(
+    values: list[Decimal],
+    weights: list[Decimal],
+    tau: Decimal,
+) -> Decimal:
+    """Calcula el cuantil ponderado empírico tau (entre 0 y 1).
+
+    Ordena los valores y acumula el peso normalizado hasta alcanzar tau * sum(weights).
+    """
+    if not values:
+        return ZERO
+    paired = sorted(zip(values, weights), key=lambda x: x[0])
+    total_w = sum((w for _, w in paired), ZERO)
+    if total_w <= ZERO:
+        return paired[len(paired) // 2][0]
+    target_w = tau * total_w
+    cum_w = ZERO
+    for val, w in paired:
+        cum_w += w
+        if cum_w >= target_w:
+            return val
+    return paired[-1][0]
+
+
+# ==============================================================================
+# PUERTA DE CALIBRACIÓN INDIVIDUAL POR USUARIO
+# ==============================================================================
+# Umbrales estadísticos fundamentados para declarar una proyección probabilística:
+# 1. MINIMO_CICLOS_EVALUABLES_CALIBRACION (N >= 6):
+#    Cada ciclo evaluado es un ensayo de Bernoulli. Con N < 6, la resolución
+#    discreta (1/N) es >= 20% a 33% y el error estándar SE = sqrt(p*(1-p)/N) supera 0.16.
+#    Con N >= 6 (semestre de predicciones evaluadas), cada fallo representa <= 16.7%,
+#    permitiendo que 5/6 = 83.3% valide empíricamente el nivel nominal del 80%.
+# 2. UMBRAL_COBERTURA_MINIMA_80 (>= 0.80):
+#    Regla dura contra sub-cobertura. Sub-cobertura es el error costoso en finanzas
+#    personales (hace creer al usuario que tiene margen cuando no lo tiene).
+# 3. UMBRAL_ANCHO_MAXIMO_RELATIVO_80 (<= 1.00x del gasto típico):
+#    Un intervalo cuyo ancho supera el 100% del gasto habitual carece de nitidez (sharpness)
+#    y no brinda información operativa útil para la toma de decisiones presupuestarias.
+# ==============================================================================
+MINIMO_CICLOS_EVALUABLES_CALIBRACION = 6
+UMBRAL_COBERTURA_MINIMA_80 = Decimal("0.80")
+UMBRAL_ANCHO_MAXIMO_RELATIVO_80 = Decimal("1.00")
+NIVEL_EVALUADO_PUERTA = "80"
+
+
+def evaluar_puerta_calibracion(
+    ciclos_evaluados: int,
+    cobertura_80: Decimal | None,
+    ancho_medio_80_rel: Decimal | None,
+    ancho_ciclo_actual_rel: Decimal | None = None,
+) -> tuple[bool, str | None, str | None]:
+    """Evalúa si la proyección probabilística de un usuario está demostradamente calibrada e informativa.
+
+    Retorna:
+        (pasa_puerta: bool, motivo: str | None, mensaje_explicativo: str | None)
+
+    Motivos posibles de rechazo:
+        - 'pocos_ciclos': Menos de 6 ciclos cerrados con proyección previa evaluada en backtest.
+        - 'cobertura_insuficiente': Cobertura empírica observada al 80% inferior a 0.80 (sub-cobertura).
+        - 'intervalo_no_informativo': Ancho medio relativo > 1.00x del gasto real o rango actual excesivo.
+    """
+    if ciclos_evaluados < MINIMO_CICLOS_EVALUABLES_CALIBRACION:
+        mensaje = (
+            f"Tu historial cuenta con {ciclos_evaluados} ciclos evaluables (se requieren al menos "
+            f"{MINIMO_CICLOS_EVALUABLES_CALIBRACION} ciclos cerrados con proyección). Mostramos tus "
+            f"compromisos ciertos (cuotas y suscripciones). La proyección probabilística se activará "
+            f"cuando acumules suficiente historia para validar su calibración."
+        )
+        return False, "pocos_ciclos", mensaje
+
+    if cobertura_80 is None or cobertura_80 < UMBRAL_COBERTURA_MINIMA_80:
+        pct = round(float((cobertura_80 or ZERO) * Decimal("100")), 1)
+        mensaje = (
+            f"La proyección no superó la prueba de calibración sobre tu historial: cubrió el {pct}% "
+            f"de tus ciclos pasados frente al 80% mínimo requerido. Mostramos solo tus compromisos "
+            f"ciertos hasta que tu patrón de gasto se estabilice."
+        )
+        return False, "cobertura_insuficiente", mensaje
+
+    if ancho_medio_80_rel is not None and ancho_medio_80_rel > UMBRAL_ANCHO_MAXIMO_RELATIVO_80:
+        ancho_str = round(float(ancho_medio_80_rel), 1)
+        mensaje = (
+            f"La proyección no es suficientemente informativa: la dispersión de tus gastos genera "
+            f"un rango demasiado amplio ({ancho_str} veces tu gasto real). Mostramos tus compromisos "
+            f"ciertos para evitar darte una estimación engañosa."
+        )
+        return False, "intervalo_no_informativo", mensaje
+
+    if ancho_ciclo_actual_rel is not None and ancho_ciclo_actual_rel > UMBRAL_ANCHO_MAXIMO_RELATIVO_80:
+        mensaje = (
+            "La proyección para este ciclo no es suficientemente informativa: el rango probable "
+            "supera el 100% de tu gasto proyectado. Mostramos tus compromisos ciertos."
+        )
+        return False, "intervalo_no_informativo", mensaje
+
+    return True, None, None
+
