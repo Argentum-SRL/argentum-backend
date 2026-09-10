@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer
 
 
 class PerfilFinancieroBase(BaseModel):
@@ -21,6 +21,13 @@ class PerfilFinancieroBase(BaseModel):
     porcentaje_suscripciones_ars: Decimal | None = None
     porcentaje_suscripciones_usd: Decimal | None = None
     ultima_actualizacion: datetime | None = None
+
+    @field_serializer("*", mode="plain")
+    def serializar_decimales_a_float(self, v: Any) -> Any:
+        # Serializa Decimal a float para consumo JSON seguro en el frontend preservando Decimal en el backend
+        if isinstance(v, Decimal):
+            return float(v)
+        return v
 
 
 class PerfilFinancieroCreate(PerfilFinancieroBase):
@@ -76,6 +83,13 @@ class PerfilNuevoRead(BaseModel):
     interpretaciones_relativas: dict[str, str] = {}
     metodo: str
 
+    @field_serializer("*", mode="plain")
+    def serializar_decimales_a_float(self, v: Any) -> Any:
+        # Serializa Decimal a float para consumo JSON seguro en el frontend preservando Decimal en el backend
+        if isinstance(v, Decimal):
+            return float(v)
+        return v
+
 
 class HistorialPerfilFinancieroRead(BaseModel):
     id: UUID
@@ -93,5 +107,11 @@ class HistorialPerfilFinancieroRead(BaseModel):
     porcentaje_suscripciones_ars: Decimal | None = None
     porcentaje_suscripciones_usd: Decimal | None = None
     fecha_snapshot: datetime
+
+    @field_serializer("*", mode="plain")
+    def serializar_decimales_a_float(self, v: Any) -> Any:
+        if isinstance(v, Decimal):
+            return float(v)
+        return v
 
     model_config = ConfigDict(from_attributes=True)
