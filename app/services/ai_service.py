@@ -567,7 +567,9 @@ def construir_contexto_proyeccion(usuario: Usuario, db: Session) -> dict:
                 "advertencias": proyeccion["ars"].get("advertencias", []),
                 "dias_restantes": proyeccion["ars"].get("periodo", {}).get("dias_restantes"),
                 "certezas_total": proyeccion["ars"].get("certezas", {}).get("total"),
-                "datos_suficientes": proyeccion["ars"].get("datos_suficientes", True)
+                "datos_suficientes": proyeccion["ars"].get("datos_suficientes", True),
+                "pasa_puerta": (proyeccion["ars"].get("calibracion") or {}).get("pasa_puerta", False),
+                "mensaje": proyeccion["ars"].get("mensaje"),
             },
             "usd": {
                 "gasto_proyectado_total": proyeccion["usd"].get("gasto_proyectado_total"),
@@ -577,7 +579,9 @@ def construir_contexto_proyeccion(usuario: Usuario, db: Session) -> dict:
                 "advertencias": proyeccion["usd"].get("advertencias", []),
                 "dias_restantes": proyeccion["usd"].get("periodo", {}).get("dias_restantes"),
                 "certezas_total": proyeccion["usd"].get("certezas", {}).get("total"),
-                "datos_suficientes": proyeccion["usd"].get("datos_suficientes", True)
+                "datos_suficientes": proyeccion["usd"].get("datos_suficientes", True),
+                "pasa_puerta": (proyeccion["usd"].get("calibracion") or {}).get("pasa_puerta", False),
+                "mensaje": proyeccion["usd"].get("mensaje"),
             }
         }
     except Exception:

@@ -458,6 +458,28 @@ def _job_actualizar_ipc():
         db.close()
 
 
+def _job_recalcular_calibraciones():
+    """Tarea programada diaria: recalcula la calibración de proyección para todos los usuarios a las 04:00 ART."""
+    from app.services.calibracion_service import recalcular_calibraciones_todos
+    db = SessionLocal()
+    lock_adquirido = False
+    try:
+        if not intentar_tomar_lock_job(db, "_job_recalcular_calibraciones"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_recalcular_calibraciones",
+            )
+            return
+        lock_adquirido = True
+        recalcular_calibraciones_todos(SessionLocal)
+    except Exception:
+        logger.exception("Error en job _job_recalcular_calibraciones")
+    finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_recalcular_calibraciones")
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Crear el scheduler y registrar jobs aquí para evitar que se
@@ -466,177 +488,194 @@ async def lifespan(app: FastAPI):
     with ThreadPoolExecutor() as pool:
         await loop.run_in_executor(pool, init_full_db)
 
-    scheduler = AsyncIOScheduler(timezone="UTC")
-    scheduler.add_job(
-        _job_limpiar_tokens,
-        "interval",
-        hours=6,
-        id="limpiar_refresh_tokens",
-        misfire_grace_time=300,
-        max_instances=1,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _job_procesar_recurrentes,
-        "cron",
-        hour=0,
-        minute=5,
-        id="procesar_recurrentes",
-        misfire_grace_time=300,
-        max_instances=1,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _job_vencimientos_tarjetas,
-        "cron",
-        hour=6,
-        minute=0,
-        id="vencimientos_tarjetas",
-        misfire_grace_time=300,
-        max_instances=1,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _job_renovar_presupuestos,
-        "cron",
-        hour=0,
-        minute=15,
-        id="renovar_presupuestos",
-        misfire_grace_time=300,
-        max_instances=1,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _job_cobros_suscripciones,
-        "cron",
-        hour=0,
-        minute=20,
-        id="cobros_suscripciones",
-        misfire_grace_time=300,
-        max_instances=1,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        job_notificaciones_cuotas,
-        "cron",
-        hour=7,
-        minute=0,
-        id="notificaciones_cuotas",
-        misfire_grace_time=300,
-        max_instances=1,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        job_notificaciones_presupuestos,
-        "cron",
-        hour=7,
-        minute=5,
-        id="notificaciones_presupuestos",
-        misfire_grace_time=300,
-        max_instances=1,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        job_notificaciones_suscripciones,
-        "cron",
-        hour=7,
-        minute=10,
-        id="notificaciones_suscripciones",
-        misfire_grace_time=300,
-        max_instances=1,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        job_notificaciones_inactividad,
-        "cron",
-        hour=7,
-        minute=15,
-        id="notificaciones_inactividad",
-        misfire_grace_time=300,
-        max_instances=1,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        job_resumen_cierre_ciclo,
-        "cron",
-        hour=7,
-        minute=20,
-        id="resumen_cierre_ciclo",
-        misfire_grace_time=300,
-        max_instances=1,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        job_proyeccion_negativa,
-        "cron",
-        hour=7,
-        minute=25,
-        id="proyeccion_negativa",
-        misfire_grace_time=300,
-        max_instances=1,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        job_resumen_semanal,
-        "cron",
-        day_of_week="mon",
-        hour=8,
-        minute=0,
-        id="resumen_semanal",
-        misfire_grace_time=300,
-        max_instances=1,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        job_entrega_whatsapp_batched,
-        "cron",
-        minute="*",
-        id="entrega_whatsapp_batched",
-        misfire_grace_time=300,
-        max_instances=1,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _job_actualizar_perfiles,
-        "cron",
-        hour=2,
-        minute=0,
-        id="actualizar_perfiles_financieros",
-        misfire_grace_time=300,
-        max_instances=1,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _job_refresh_feriados,
-        "cron",
-        hour=3,
-        minute=0,
-        id="refresh_feriados_argentina",
-        misfire_grace_time=300,
-        max_instances=1,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _job_guardar_cotizaciones_diarias,
-        "cron",
-        hour=21,
-        minute=0,
-        id="guardar_cotizaciones_diarias",
-        misfire_grace_time=300,
-        max_instances=1,
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        _job_actualizar_ipc,
-        "cron",
-        hour=20,
-        minute=0,
-        id="actualizar_ipc_diario",
-        misfire_grace_time=300,
-        max_instances=1,
-        replace_existing=True,
-    )
-    scheduler.start()
+    scheduler = None
+    if settings.ENABLE_SCHEDULER:
+        from app.utils.fecha import TZ_ARGENTINA
+
+        scheduler = AsyncIOScheduler(timezone="UTC")
+        scheduler.add_job(
+            _job_limpiar_tokens,
+            "interval",
+            hours=6,
+            id="limpiar_refresh_tokens",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            _job_procesar_recurrentes,
+            "cron",
+            hour=0,
+            minute=5,
+            id="procesar_recurrentes",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            _job_vencimientos_tarjetas,
+            "cron",
+            hour=6,
+            minute=0,
+            id="vencimientos_tarjetas",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            _job_renovar_presupuestos,
+            "cron",
+            hour=0,
+            minute=15,
+            id="renovar_presupuestos",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            _job_cobros_suscripciones,
+            "cron",
+            hour=0,
+            minute=20,
+            id="cobros_suscripciones",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            job_notificaciones_cuotas,
+            "cron",
+            hour=7,
+            minute=0,
+            id="notificaciones_cuotas",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            job_notificaciones_presupuestos,
+            "cron",
+            hour=7,
+            minute=5,
+            id="notificaciones_presupuestos",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            job_notificaciones_suscripciones,
+            "cron",
+            hour=7,
+            minute=10,
+            id="notificaciones_suscripciones",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            job_notificaciones_inactividad,
+            "cron",
+            hour=7,
+            minute=15,
+            id="notificaciones_inactividad",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            job_resumen_cierre_ciclo,
+            "cron",
+            hour=7,
+            minute=20,
+            id="resumen_cierre_ciclo",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            job_proyeccion_negativa,
+            "cron",
+            hour=7,
+            minute=25,
+            id="proyeccion_negativa",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            job_resumen_semanal,
+            "cron",
+            day_of_week="mon",
+            hour=8,
+            minute=0,
+            id="resumen_semanal",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            job_entrega_whatsapp_batched,
+            "cron",
+            minute="*",
+            id="entrega_whatsapp_batched",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            _job_actualizar_perfiles,
+            "cron",
+            hour=2,
+            minute=0,
+            id="actualizar_perfiles_financieros",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            _job_refresh_feriados,
+            "cron",
+            hour=3,
+            minute=0,
+            id="refresh_feriados_argentina",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            _job_recalcular_calibraciones,
+            "cron",
+            hour=4,
+            minute=0,
+            timezone=TZ_ARGENTINA,
+            id="recalcular_calibraciones_nocturno",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            _job_guardar_cotizaciones_diarias,
+            "cron",
+            hour=21,
+            minute=0,
+            id="guardar_cotizaciones_diarias",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            _job_actualizar_ipc,
+            "cron",
+            hour=20,
+            minute=0,
+            id="actualizar_ipc_diario",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.start()
+    else:
+        logger.info("Scheduler desactivado por configuración (ENABLE_SCHEDULER=False). No se programan tareas automáticas.")
 
     # Pre-cargar feriados argentinos en cache y BD
     from app.services.dias_habiles_service import obtener_feriados_argentina
@@ -655,11 +694,16 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Excepción al precargar feriados para el año {anio}: {e}")
 
-    logger.info("Backend listo: servidor y tareas automáticas activas.")
+    if scheduler:
+        logger.info("Backend listo: servidor y tareas automáticas activas.")
+    else:
+        logger.info("Backend listo: servidor activo (scheduler apagado).")
     try:
         yield
     finally:
-        scheduler.shutdown(wait=False)
+        if scheduler:
+            scheduler.shutdown(wait=False)
+
 
 # ---------------------------------------------------------------------------
 # App

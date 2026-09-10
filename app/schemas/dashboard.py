@@ -146,6 +146,7 @@ class PeriodoProyeccion(BaseModel):
 class CertezasProyeccion(BaseModel):
     cuotas_restantes: float = Field(..., ge=0)
     suscripciones_restantes: float = Field(..., ge=0)
+    compromisos_restantes: float = Field(default=0.0, ge=0)
     total: float = Field(..., ge=0)
 
 
@@ -167,23 +168,24 @@ class CalibracionAuditoria(BaseModel):
 
 class ProyeccionMoneda(BaseModel):
     periodo: PeriodoProyeccion
-    gasto_proyectado_total: float = Field(..., ge=0)
-    rango: Dict[str, float]
-    rango_poco_informativo: bool
-    balance_proyectado: float
-    ingresos_proyectados: float = Field(..., ge=0)
+    gasto_proyectado_total: Optional[float] = Field(default=None, ge=0)
+    rango: Optional[Dict[str, float]] = None
+    rango_poco_informativo: Optional[bool] = None
+    balance_proyectado: Optional[float] = None
+    ingresos_proyectados: Optional[float] = Field(default=None, ge=0)
     certezas: CertezasProyeccion
-    desglose_por_categoria: List[ProyeccionCategoria]
-    nivel_confianza: Literal["alto", "medio", "bajo", "sin_datos", "inicial", "alta", "media", "baja"]
-    ciclos_analizados: int = Field(..., ge=0)
-    pesos: PesosProyeccion
-    advertencias: List[str]
-    datos_suficientes: bool
-    clasificacion: Dict[str, int]
+    desglose_por_categoria: Optional[List[ProyeccionCategoria]] = None
+    nivel_confianza: Optional[Literal["alto", "medio", "bajo", "sin_datos", "inicial", "alta", "media", "baja"]] = None
+    ciclos_analizados: Optional[int] = Field(default=0, ge=0)
+    pesos: Optional[PesosProyeccion] = None
+    advertencias: List[str] = Field(default_factory=list)
+    datos_suficientes: Optional[bool] = False
+    clasificacion: Optional[Dict[str, int]] = None
     distribucion: Optional[Dict[str, float]] = None
     intervalos: Optional[Dict[str, Dict[str, float]]] = None
-    descomposicion: Optional[Dict[str, float]] = None
+    descomposicion: Optional[Dict[str, Optional[float]]] = None
     mensaje_insuficiente: Optional[str] = None
+    mensaje: Optional[str] = None
     calibracion: Optional[CalibracionAuditoria] = None
 
 

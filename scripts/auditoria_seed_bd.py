@@ -1020,6 +1020,34 @@ def main():
         log(f"ERROR EN SECCIÓN R:\n{traceback.format_exc()}")
     log()
 
+    # --------------------------------------------------------------------------
+    # SECCIÓN S: CALIBRACIONES GUARDADAS (TABLA calibraciones_usuario)
+    # --------------------------------------------------------------------------
+    log("=== SECCIÓN S: CALIBRACIONES GUARDADAS (TABLA calibraciones_usuario) ===")
+    try:
+        with session_scope() as db:
+            from app.models.calibracion_usuario import CalibracionUsuario
+            calibs = db.execute(
+                select(CalibracionUsuario, Usuario.email)
+                .join(Usuario, CalibracionUsuario.usuario_id == Usuario.id)
+                .order_by(Usuario.email, CalibracionUsuario.moneda)
+            ).all()
+
+            if not calibs:
+                log("No hay registros en la tabla calibraciones_usuario.")
+            else:
+                log(f"Total registros: {len(calibs)}")
+                for c, email in calibs:
+                    log(
+                        f"Usuario: {email:<30} | Moneda: {c.moneda:<4} | Inicio ciclo: {c.inicio_ciclo.isoformat()} | "
+                        f"Pasa: {'SÍ' if c.pasa_puerta else 'NO':<2} | Motivo: {str(c.motivo):<25} | "
+                        f"Ciclos: {c.ciclos_evaluados:>2} | Fecha cálculo: {c.fecha_calculo.isoformat() if c.fecha_calculo else 'None'} | "
+                        f"Duración: {c.duracion_ms:>7.2f} ms"
+                    )
+    except Exception as e:
+        log(f"ERROR EN SECCIÓN S:\n{traceback.format_exc()}")
+    log()
+
     log("=" * 80)
     log("FIN DE LA AUDITORÍA DE SOLO LECTURA")
     log("=" * 80)

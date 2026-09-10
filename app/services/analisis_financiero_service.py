@@ -23,7 +23,8 @@ from app.utils.finanzas import (
     posicion_relativa, monto_mensual_deflactado_stream, pinball_loss,
     estimar_gasto_diario_basico_robusto, student_t_critical, weighted_quantile,
     evaluar_puerta_calibracion, MINIMO_CICLOS_EVALUABLES_CALIBRACION,
-    UMBRAL_COBERTURA_MINIMA_80, UMBRAL_ANCHO_MAXIMO_RELATIVO_80, NIVEL_EVALUADO_PUERTA
+    UMBRAL_COBERTURA_MINIMA_80, UMBRAL_ANCHO_MAXIMO_RELATIVO_80, NIVEL_EVALUADO_PUERTA,
+    _indice_por_mes
 )
 
 
@@ -63,7 +64,8 @@ def _carga(db: Session, usuario: Usuario, fecha_referencia: date | None = None) 
         .where(Transaccion.usuario_id == usuario.id, Transaccion.fecha <= hoy)
         .order_by(Transaccion.fecha)
     ).scalars().all()
-    ipc = db.execute(select(IPCCache).order_by(IPCCache.fecha_dato)).scalars().all()
+    ipc_records = db.execute(select(IPCCache).order_by(IPCCache.fecha_dato)).scalars().all()
+    ipc = _indice_por_mes(ipc_records)
     cuotas = db.execute(
         select(Cuota, GrupoCuotas)
         .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
@@ -88,16 +90,17 @@ def _tx_valido(tx: Any) -> bool:
     return tx.estado_verificacion in (None, EstadoVerificacionTransaccion.CONFIRMADA) and not tx.es_padre_cuotas
 
 
-def _suma_deflactada(txs: list[Any], ipc: list[Any], destino: date, moneda: Moneda, tipo: TipoTransaccion | None = None) -> Decimal:
+def _suma_deflactada(txs: list[Any], ipc: Any, destino: date, moneda: Moneda, tipo: TipoTransaccion | None = None) -> Decimal:
+    ipc_map = ipc if isinstance(ipc, dict) else _indice_por_mes(ipc)
     if tipo == TipoTransaccion.EGRESO:
-        return gasto_ciclo(txs, min((tx.fecha for tx in txs), default=destino), max((tx.fecha for tx in txs), default=destino), destino, ipc, moneda).deflactado
+        return gasto_ciclo(txs, min((tx.fecha for tx in txs), default=destino), max((tx.fecha for tx in txs), default=destino), destino, ipc_map, moneda).deflactado
     total = ZERO
     for tx in txs:
         if tx.moneda != moneda or not _tx_valido(tx) or (tipo is not None and tx.tipo != tipo):
             continue
         if tipo == TipoTransaccion.EGRESO and not es_gasto_consumo(tx):
             continue
-        ajuste = deflactar_monto(tx.monto, tx.fecha, destino, ipc, moneda)
+        ajuste = deflactar_monto(tx.monto, tx.fecha, destino, ipc_map, moneda)
         total += ajuste.monto
     return total
 
@@ -359,15 +362,16 @@ def calcular_perfil_nuevo(db: Session, usuario: Usuario, data: dict[str, Any] | 
     }
 
 
-def _historial_categorias(txs: list[Any], ciclos: list[tuple[date, date]], ipc: list[Any], destino: date, moneda: Moneda, clasificacion: ClasificacionGasto) -> dict[Any, list[Decimal]]:
+def _historial_categorias(txs: list[Any], ciclos: list[tuple[date, date]], ipc: Any, destino: date, moneda: Moneda, clasificacion: ClasificacionGasto) -> dict[Any, list[Decimal]]:
     resultado: dict[Any, list[Decimal]] = {}
+    ipc_map = ipc if isinstance(ipc, dict) else _indice_por_mes(ipc)
     variables = set(clasificacion.variables) | set(clasificacion.recurrentes_detectados)
     for inicio, fin in ciclos:
         por_cat: dict[Any, Decimal] = {}
         for tx in txs:
             if tx not in variables or tx.moneda != moneda or not (inicio <= tx.fecha <= fin):
                 continue
-            valor = deflactar_monto(tx.monto, tx.fecha, destino, ipc, moneda).monto
+            valor = deflactar_monto(tx.monto, tx.fecha, destino, ipc_map, moneda).monto
             por_cat[tx.categoria_id] = por_cat.get(tx.categoria_id, ZERO) + valor
         for cat, valor in por_cat.items():
             resultado.setdefault(cat, []).append(valor)
@@ -674,6 +678,8 @@ def calcular_proyeccion_nueva(
             if any(c_ini <= tx.fecha <= c_fin and tx.moneda == moneda for tx in data["txs"])
         ]
         cant_ciclos_datos = len(ciclos_con_datos_moneda)
+        cerrados_con_datos = [c for c in ciclos_con_datos_moneda if c[1] < hoy]
+        cant_ciclos_cerrados = len(cerrados_con_datos)
 
         # Puerta de la escalera de historia
         datos_suficientes, nivel_confianza, mensaje_insuficiente = evaluar_escalera_historia(cant_ciclos_datos)
@@ -759,16 +765,64 @@ def calcular_proyeccion_nueva(
 
         # ----------------------------------------------------------------------
         # EVALUACIÓN DE LA PUERTA DE CALIBRACIÓN INDIVIDUAL POR USUARIO
+        # (Lectura de fila guardada; el backtest nunca corre dentro del pedido)
         # ----------------------------------------------------------------------
         calib: dict[str, Any] | None = None
         if ciclo_evaluado is None:
-            calib = evaluar_calibracion_usuario(data, usuario, moneda, compromiso_tx_ids)
+            if cant_ciclos_cerrados < MINIMO_CICLOS_EVALUABLES_CALIBRACION:
+                calib = {
+                    "pasa_puerta": False,
+                    "ciclos_evaluados": cant_ciclos_cerrados,
+                    "cobertura_50": None,
+                    "cobertura_80": None,
+                    "cobertura_95": None,
+                    "ancho_medio_80_rel": None,
+                    "motivo": "pocos_ciclos",
+                    "mensaje": (
+                        f"Tu historial cuenta con {cant_ciclos_cerrados} ciclos evaluables (se requieren al menos "
+                        f"{MINIMO_CICLOS_EVALUABLES_CALIBRACION} ciclos cerrados con proyección). Mostramos tus "
+                        f"compromisos ciertos (cuotas y suscripciones). La proyección probabilística se activará "
+                        f"cuando acumules suficiente historia para validar su calibración."
+                    ),
+                    "detalles": [],
+                }
+            else:
+                from app.models.calibracion_usuario import CalibracionUsuario
+                moneda_str = moneda.value if hasattr(moneda, "value") else str(moneda)
+                fila_calib = db.query(CalibracionUsuario).filter(
+                    CalibracionUsuario.usuario_id == usuario.id,
+                    CalibracionUsuario.moneda == moneda_str,
+                ).first()
+
+                if fila_calib and fila_calib.inicio_ciclo == inicio:
+                    calib = {
+                        "pasa_puerta": fila_calib.pasa_puerta,
+                        "ciclos_evaluados": fila_calib.ciclos_evaluados,
+                        "cobertura_50": float(fila_calib.cobertura_50) if fila_calib.cobertura_50 is not None else None,
+                        "cobertura_80": float(fila_calib.cobertura_80) if fila_calib.cobertura_80 is not None else None,
+                        "cobertura_95": float(fila_calib.cobertura_95) if fila_calib.cobertura_95 is not None else None,
+                        "ancho_medio_80_rel": float(fila_calib.ancho_medio_80_rel) if fila_calib.ancho_medio_80_rel is not None else None,
+                        "motivo": fila_calib.motivo,
+                        "mensaje": fila_calib.mensaje,
+                        "detalles": fila_calib.detalles or [],
+                    }
+                else:
+                    calib = {
+                        "pasa_puerta": False,
+                        "ciclos_evaluados": cant_ciclos_cerrados,
+                        "cobertura_50": None,
+                        "cobertura_80": None,
+                        "cobertura_95": None,
+                        "ancho_medio_80_rel": None,
+                        "motivo": "calibracion_pendiente",
+                        "mensaje": "La proyección se está preparando. Mostramos tus compromisos ciertos hasta que se complete la calibración.",
+                        "detalles": [],
+                    }
 
         ciclos_con_variable = [v for v in vars_por_ciclo if v > ZERO]
         no_pasa_puerta = (calib is not None and not calib["pasa_puerta"])
         if not datos_suficientes or len(ciclos_con_variable) < 3 or no_pasa_puerta:
-            # Caso no calibrado o datos insuficientes: solo se muestra lo CIERTO + lo ya ocurrido.
-            total_sin_historia = cierto_total + recurrente_ya_ocurrido + var_actual
+            # Caso no calibrado o puerta cerrada: solo periodo, certezas, calibración y mensaje; lo demás en null.
             mensaje_cierre = (
                 (calib["mensaje"] if calib else None)
                 or mensaje_insuficiente
@@ -778,73 +832,125 @@ def calcular_proyeccion_nueva(
             if mensaje_cierre not in advertencias_salida:
                 advertencias_salida.append(mensaje_cierre)
 
-            categorias = []
-            for cat_id, monto in actuales_por_cat.items():
-                cat_nom = next((getattr(tx.categoria, "nombre", None) for tx in data["txs"] if tx.categoria_id == cat_id), "Sin categoría")
-                categorias.append({
-                    "categoria_id": str(cat_id) if cat_id else None,
-                    "categoria_nombre": cat_nom,
-                    "gasto_actual_ciclo": float(monto),
-                    "promedio_historico": float(monto),
-                    "proyectado": float(monto),
-                    "rango_piso": float(monto),
-                    "rango_techo": float(monto),
-                    "fuera_de_patron": False,
-                })
-
-            ingreso_actual = _suma_deflactada([tx for tx in data["txs"] if inicio <= tx.fecha <= hoy], data["ipc"], hoy, moneda, TipoTransaccion.INGRESO)
-            resultado[moneda.value.lower()] = {
-                "periodo": {
-                    "fecha_inicio": inicio.isoformat(),
-                    "fecha_fin": fin.isoformat(),
-                    "dias_transcurridos": int(dias_transcurridos),
-                    "dias_restantes": int(dias_restantes),
-                    "dias_totales": int(dias_totales),
-                },
-                "gasto_proyectado_total": float(total_sin_historia),
-                "rango": {
-                    "piso": float(total_sin_historia),
-                    "central": float(total_sin_historia),
-                    "techo": float(total_sin_historia),
-                },
-                "rango_poco_informativo": False,
-                "balance_proyectado": float(ingreso_actual - total_sin_historia),
-                "ingresos_proyectados": float(ingreso_actual),
-                "certezas": {
-                    "cuotas_restantes": float(cuotas_pendientes),
-                    "suscripciones_restantes": float(subs_pendientes),
-                    "total": float(cierto_total),
-                },
-                "desglose_por_categoria": categorias,
-                "nivel_confianza": nivel_confianza,
-                "ciclos_analizados": cant_ciclos_datos,
-                "pesos": {"historial": 1.0, "ciclo_actual": 0.0},
-                "advertencias": advertencias_salida,
-                "datos_suficientes": False,
-                "clasificacion": {
-                    "comprometidos": len(clasificacion.comprometidos),
-                    "recurrentes_detectados": len(clasificacion.recurrentes_detectados),
-                    "variables": len(clasificacion.variables),
-                },
-                "distribucion": None,
-                "intervalos": None,
-                "descomposicion": {
-                    "cierto": float(cierto_total),
-                    "recurrente_ya_ocurrido": float(recurrente_ya_ocurrido),
-                    "variable_proyectado": float(var_actual),
-                },
-                "mensaje_insuficiente": mensaje_cierre,
-                "calibracion": {
-                    "pasa_puerta": calib["pasa_puerta"] if calib else False,
-                    "ciclos_evaluados": calib["ciclos_evaluados"] if calib else 0,
-                    "cobertura_50": calib["cobertura_50"] if calib else None,
-                    "cobertura_80": calib["cobertura_80"] if calib else None,
-                    "cobertura_95": calib["cobertura_95"] if calib else None,
-                    "ancho_medio_80_rel": calib["ancho_medio_80_rel"] if calib else None,
-                    "motivo": calib["motivo"] if calib else "pocos_ciclos",
+            # Si es ciclo_evaluado (backtest), mantenemos el valor numérico para que el backtest funcione idéntico
+            if ciclo_evaluado is not None:
+                total_sin_historia = cierto_total + recurrente_ya_ocurrido + var_actual
+                categorias = []
+                for cat_id, monto in actuales_por_cat.items():
+                    cat_nom = next((getattr(tx.categoria, "nombre", None) for tx in data["txs"] if tx.categoria_id == cat_id), "Sin categoría")
+                    categorias.append({
+                        "categoria_id": str(cat_id) if cat_id else None,
+                        "categoria_nombre": cat_nom,
+                        "gasto_actual_ciclo": float(monto),
+                        "promedio_historico": float(monto),
+                        "proyectado": float(monto),
+                        "rango_piso": float(monto),
+                        "rango_techo": float(monto),
+                        "fuera_de_patron": False,
+                    })
+                ingreso_actual = _suma_deflactada([tx for tx in data["txs"] if inicio <= tx.fecha <= hoy], data["ipc"], hoy, moneda, TipoTransaccion.INGRESO)
+                resultado[moneda.value.lower()] = {
+                    "periodo": {
+                        "fecha_inicio": inicio.isoformat(),
+                        "fecha_fin": fin.isoformat(),
+                        "dias_transcurridos": int(dias_transcurridos),
+                        "dias_restantes": int(dias_restantes),
+                        "dias_totales": int(dias_totales),
+                    },
+                    "gasto_proyectado_total": float(total_sin_historia),
+                    "rango": {
+                        "piso": float(total_sin_historia),
+                        "central": float(total_sin_historia),
+                        "techo": float(total_sin_historia),
+                    },
+                    "rango_poco_informativo": False,
+                    "balance_proyectado": float(ingreso_actual - total_sin_historia),
+                    "ingresos_proyectados": float(ingreso_actual),
+                    "certezas": {
+                        "cuotas_restantes": float(cuotas_pendientes),
+                        "suscripciones_restantes": float(subs_pendientes),
+                        "compromisos_restantes": float(compr_maduros_pendientes),
+                        "total": float(cierto_total),
+                    },
+                    "desglose_por_categoria": categorias,
+                    "nivel_confianza": nivel_confianza,
+                    "ciclos_analizados": cant_ciclos_datos,
+                    "pesos": {"historial": 1.0, "ciclo_actual": 0.0},
+                    "advertencias": advertencias_salida,
+                    "datos_suficientes": False,
+                    "clasificacion": {
+                        "comprometidos": len(clasificacion.comprometidos),
+                        "recurrentes_detectados": len(clasificacion.recurrentes_detectados),
+                        "variables": len(clasificacion.variables),
+                    },
+                    "distribucion": None,
+                    "intervalos": None,
+                    "descomposicion": {
+                        "cierto": float(cierto_total),
+                        "recurrente_ya_ocurrido": float(recurrente_ya_ocurrido),
+                        "variable_proyectado": float(var_actual),
+                    },
+                    "mensaje_insuficiente": mensaje_cierre,
                     "mensaje": mensaje_cierre,
-                } if calib else None,
-            }
+                    "calibracion": {
+                        "pasa_puerta": calib["pasa_puerta"] if calib else False,
+                        "ciclos_evaluados": calib["ciclos_evaluados"] if calib else 0,
+                        "cobertura_50": calib["cobertura_50"] if calib else None,
+                        "cobertura_80": calib["cobertura_80"] if calib else None,
+                        "cobertura_95": calib["cobertura_95"] if calib else None,
+                        "ancho_medio_80_rel": calib["ancho_medio_80_rel"] if calib else None,
+                        "motivo": calib["motivo"] if calib else "pocos_ciclos",
+                        "mensaje": mensaje_cierre,
+                    } if calib else None,
+                }
+            else:
+                # Con la puerta cerrada, por cualquier motivo, la API devuelve solo periodo, certezas, calibración y mensaje; lo demás en null.
+                resultado[moneda.value.lower()] = {
+                    "periodo": {
+                        "fecha_inicio": inicio.isoformat(),
+                        "fecha_fin": fin.isoformat(),
+                        "dias_transcurridos": int(dias_transcurridos),
+                        "dias_restantes": int(dias_restantes),
+                        "dias_totales": int(dias_totales),
+                    },
+                    "gasto_proyectado_total": None,
+                    "rango": None,
+                    "rango_poco_informativo": None,
+                    "balance_proyectado": None,
+                    "ingresos_proyectados": None,
+                    "certezas": {
+                        "cuotas_restantes": float(cuotas_pendientes),
+                        "suscripciones_restantes": float(subs_pendientes),
+                        "compromisos_restantes": float(compr_maduros_pendientes),
+                        "total": float(cierto_total),
+                    },
+                    "desglose_por_categoria": None,
+                    "nivel_confianza": nivel_confianza,
+                    "ciclos_analizados": cant_ciclos_datos,
+                    "pesos": None,
+                    "advertencias": advertencias_salida,
+                    "datos_suficientes": False,
+                    "clasificacion": None,
+                    "distribucion": None,
+                    "intervalos": None,
+                    "descomposicion": {
+                        "cierto": float(cierto_total),
+                        "recurrente_ya_ocurrido": float(recurrente_ya_ocurrido),
+                        "variable_proyectado": None,
+                    },
+                    "mensaje_insuficiente": mensaje_cierre,
+                    "mensaje": mensaje_cierre,
+                    "calibracion": {
+                        "pasa_puerta": calib["pasa_puerta"] if calib else False,
+                        "ciclos_evaluados": calib["ciclos_evaluados"] if calib else 0,
+                        "cobertura_50": calib["cobertura_50"] if calib else None,
+                        "cobertura_80": calib["cobertura_80"] if calib else None,
+                        "cobertura_95": calib["cobertura_95"] if calib else None,
+                        "ancho_medio_80_rel": calib["ancho_medio_80_rel"] if calib else None,
+                        "motivo": calib["motivo"] if calib else "pocos_ciclos",
+                        "mensaje": mensaje_cierre,
+                    } if calib else None,
+                }
             continue
 
         # Proyección probabilística para datos suficientes (>= 3 ciclos con gastos variables y puerta superada)
@@ -882,73 +988,124 @@ def calcular_proyeccion_nueva(
             if msg_no_disp not in advertencias_sin_disp:
                 advertencias_sin_disp.append(msg_no_disp)
 
-            categorias = []
-            for cat_id, monto in actuales_por_cat.items():
-                cat_nom = next((getattr(tx.categoria, "nombre", None) for tx in data["txs"] if tx.categoria_id == cat_id), "Sin categoría")
-                categorias.append({
-                    "categoria_id": str(cat_id) if cat_id else None,
-                    "categoria_nombre": cat_nom,
-                    "gasto_actual_ciclo": float(monto),
-                    "promedio_historico": float(monto),
-                    "proyectado": float(monto),
-                    "rango_piso": float(monto),
-                    "rango_techo": float(monto),
-                    "fuera_de_patron": False,
-                })
+            if ciclo_evaluado is not None:
+                categorias = []
+                for cat_id, monto in actuales_por_cat.items():
+                    cat_nom = next((getattr(tx.categoria, "nombre", None) for tx in data["txs"] if tx.categoria_id == cat_id), "Sin categoría")
+                    categorias.append({
+                        "categoria_id": str(cat_id) if cat_id else None,
+                        "categoria_nombre": cat_nom,
+                        "gasto_actual_ciclo": float(monto),
+                        "promedio_historico": float(monto),
+                        "proyectado": float(monto),
+                        "rango_piso": float(monto),
+                        "rango_techo": float(monto),
+                        "fuera_de_patron": False,
+                    })
 
-            ingreso_actual = _suma_deflactada([tx for tx in data["txs"] if inicio <= tx.fecha <= hoy], data["ipc"], hoy, moneda, TipoTransaccion.INGRESO)
-            resultado[moneda.value.lower()] = {
-                "periodo": {
-                    "fecha_inicio": inicio.isoformat(),
-                    "fecha_fin": fin.isoformat(),
-                    "dias_transcurridos": int(dias_transcurridos),
-                    "dias_restantes": int(dias_restantes),
-                    "dias_totales": int(dias_totales),
-                },
-                "gasto_proyectado_total": float(total_sin_disp),
-                "rango": {
-                    "piso": float(total_sin_disp),
-                    "central": float(total_sin_disp),
-                    "techo": float(total_sin_disp),
-                },
-                "rango_poco_informativo": False,
-                "balance_proyectado": float(ingreso_actual - total_sin_disp),
-                "ingresos_proyectados": float(ingreso_actual),
-                "certezas": {
-                    "cuotas_restantes": float(cuotas_pendientes),
-                    "suscripciones_restantes": float(subs_pendientes),
-                    "total": float(cierto_total),
-                },
-                "desglose_por_categoria": categorias,
-                "nivel_confianza": nivel_confianza,
-                "ciclos_analizados": cant_ciclos_datos,
-                "pesos": {"historial": 1.0, "ciclo_actual": 0.0},
-                "advertencias": advertencias_sin_disp,
-                "datos_suficientes": False,
-                "clasificacion": {
-                    "comprometidos": len(clasificacion.comprometidos),
-                    "recurrentes_detectados": len(clasificacion.recurrentes_detectados),
-                    "variables": len(clasificacion.variables),
-                },
-                "distribucion": None,
-                "intervalos": None,
-                "descomposicion": {
-                    "cierto": float(cierto_total),
-                    "recurrente_ya_ocurrido": float(recurrente_ya_ocurrido),
-                    "variable_proyectado": float(var_actual),
-                },
-                "mensaje_insuficiente": msg_no_disp,
-                "calibracion": {
-                    "pasa_puerta": calib["pasa_puerta"] if calib else False,
-                    "ciclos_evaluados": calib["ciclos_evaluados"] if calib else 0,
-                    "cobertura_50": calib["cobertura_50"] if calib else None,
-                    "cobertura_80": calib["cobertura_80"] if calib else None,
-                    "cobertura_95": calib["cobertura_95"] if calib else None,
-                    "ancho_medio_80_rel": calib["ancho_medio_80_rel"] if calib else None,
-                    "motivo": "intervalo_no_informativo",
+                ingreso_actual = _suma_deflactada([tx for tx in data["txs"] if inicio <= tx.fecha <= hoy], data["ipc"], hoy, moneda, TipoTransaccion.INGRESO)
+                resultado[moneda.value.lower()] = {
+                    "periodo": {
+                        "fecha_inicio": inicio.isoformat(),
+                        "fecha_fin": fin.isoformat(),
+                        "dias_transcurridos": int(dias_transcurridos),
+                        "dias_restantes": int(dias_restantes),
+                        "dias_totales": int(dias_totales),
+                    },
+                    "gasto_proyectado_total": float(total_sin_disp),
+                    "rango": {
+                        "piso": float(total_sin_disp),
+                        "central": float(total_sin_disp),
+                        "techo": float(total_sin_disp),
+                    },
+                    "rango_poco_informativo": False,
+                    "balance_proyectado": float(ingreso_actual - total_sin_disp),
+                    "ingresos_proyectados": float(ingreso_actual),
+                    "certezas": {
+                        "cuotas_restantes": float(cuotas_pendientes),
+                        "suscripciones_restantes": float(subs_pendientes),
+                        "compromisos_restantes": float(compr_maduros_pendientes),
+                        "total": float(cierto_total),
+                    },
+                    "desglose_por_categoria": categorias,
+                    "nivel_confianza": nivel_confianza,
+                    "ciclos_analizados": cant_ciclos_datos,
+                    "pesos": {"historial": 1.0, "ciclo_actual": 0.0},
+                    "advertencias": advertencias_sin_disp,
+                    "datos_suficientes": False,
+                    "clasificacion": {
+                        "comprometidos": len(clasificacion.comprometidos),
+                        "recurrentes_detectados": len(clasificacion.recurrentes_detectados),
+                        "variables": len(clasificacion.variables),
+                    },
+                    "distribucion": None,
+                    "intervalos": None,
+                    "descomposicion": {
+                        "cierto": float(cierto_total),
+                        "recurrente_ya_ocurrido": float(recurrente_ya_ocurrido),
+                        "variable_proyectado": float(var_actual),
+                    },
+                    "mensaje_insuficiente": msg_no_disp,
                     "mensaje": msg_no_disp,
-                } if calib else None,
-            }
+                    "calibracion": {
+                        "pasa_puerta": calib["pasa_puerta"] if calib else False,
+                        "ciclos_evaluados": calib["ciclos_evaluados"] if calib else 0,
+                        "cobertura_50": calib["cobertura_50"] if calib else None,
+                        "cobertura_80": calib["cobertura_80"] if calib else None,
+                        "cobertura_95": calib["cobertura_95"] if calib else None,
+                        "ancho_medio_80_rel": calib["ancho_medio_80_rel"] if calib else None,
+                        "motivo": "intervalo_no_informativo",
+                        "mensaje": msg_no_disp,
+                    } if calib else None,
+                }
+            else:
+                # Puerta cerrada con la API: solo periodo, certezas, calibración y mensaje; lo demás en null
+                resultado[moneda.value.lower()] = {
+                    "periodo": {
+                        "fecha_inicio": inicio.isoformat(),
+                        "fecha_fin": fin.isoformat(),
+                        "dias_transcurridos": int(dias_transcurridos),
+                        "dias_restantes": int(dias_restantes),
+                        "dias_totales": int(dias_totales),
+                    },
+                    "gasto_proyectado_total": None,
+                    "rango": None,
+                    "rango_poco_informativo": None,
+                    "balance_proyectado": None,
+                    "ingresos_proyectados": None,
+                    "certezas": {
+                        "cuotas_restantes": float(cuotas_pendientes),
+                        "suscripciones_restantes": float(subs_pendientes),
+                        "compromisos_restantes": float(compr_maduros_pendientes),
+                        "total": float(cierto_total),
+                    },
+                    "desglose_por_categoria": None,
+                    "nivel_confianza": nivel_confianza,
+                    "ciclos_analizados": cant_ciclos_datos,
+                    "pesos": None,
+                    "advertencias": advertencias_sin_disp,
+                    "datos_suficientes": False,
+                    "clasificacion": None,
+                    "distribucion": None,
+                    "intervalos": None,
+                    "descomposicion": {
+                        "cierto": float(cierto_total),
+                        "recurrente_ya_ocurrido": float(recurrente_ya_ocurrido),
+                        "variable_proyectado": None,
+                    },
+                    "mensaje_insuficiente": msg_no_disp,
+                    "mensaje": msg_no_disp,
+                    "calibracion": {
+                        "pasa_puerta": False,
+                        "ciclos_evaluados": calib["ciclos_evaluados"] if calib else 0,
+                        "cobertura_50": calib["cobertura_50"] if calib else None,
+                        "cobertura_80": calib["cobertura_80"] if calib else None,
+                        "cobertura_95": calib["cobertura_95"] if calib else None,
+                        "ancho_medio_80_rel": calib["ancho_medio_80_rel"] if calib else None,
+                        "motivo": "intervalo_no_informativo",
+                        "mensaje": msg_no_disp,
+                    } if calib else None,
+                }
             continue
 
         df = max(1, K - 1)
@@ -980,7 +1137,6 @@ def calcular_proyeccion_nueva(
         ancho_actual_80 = q90 - q10
         ancho_actual_rel = (ancho_actual_80 / q50) if q50 > ZERO else ZERO
         if ciclo_evaluado is None and ancho_actual_rel > UMBRAL_ANCHO_MAXIMO_RELATIVO_80:
-            total_sin_info = cierto_total + recurrente_ya_ocurrido + var_actual
             msg_no_info = (
                 "La proyección para este ciclo no es suficientemente informativa: el rango probable "
                 "supera el 100% de tu gasto proyectado. Mostramos tus compromisos ciertos."
@@ -989,21 +1145,7 @@ def calcular_proyeccion_nueva(
             if msg_no_info not in advertencias_salida:
                 advertencias_salida.append(msg_no_info)
 
-            categorias = []
-            for cat_id, monto in actuales_por_cat.items():
-                cat_nom = next((getattr(tx.categoria, "nombre", None) for tx in data["txs"] if tx.categoria_id == cat_id), "Sin categoría")
-                categorias.append({
-                    "categoria_id": str(cat_id) if cat_id else None,
-                    "categoria_nombre": cat_nom,
-                    "gasto_actual_ciclo": float(monto),
-                    "promedio_historico": float(monto),
-                    "proyectado": float(monto),
-                    "rango_piso": float(monto),
-                    "rango_techo": float(monto),
-                    "fuera_de_patron": False,
-                })
-
-            ingreso_actual = _suma_deflactada([tx for tx in data["txs"] if inicio <= tx.fecha <= hoy], data["ipc"], hoy, moneda, TipoTransaccion.INGRESO)
+            # Puerta cerrada con la API: solo periodo, certezas, calibración y mensaje; lo demás en null
             resultado[moneda.value.lower()] = {
                 "periodo": {
                     "fecha_inicio": inicio.isoformat(),
@@ -1012,39 +1154,33 @@ def calcular_proyeccion_nueva(
                     "dias_restantes": int(dias_restantes),
                     "dias_totales": int(dias_totales),
                 },
-                "gasto_proyectado_total": float(total_sin_info),
-                "rango": {
-                    "piso": float(total_sin_info),
-                    "central": float(total_sin_info),
-                    "techo": float(total_sin_info),
-                },
+                "gasto_proyectado_total": None,
+                "rango": None,
                 "rango_poco_informativo": True,
-                "balance_proyectado": float(ingreso_actual - total_sin_info),
-                "ingresos_proyectados": float(ingreso_actual),
+                "balance_proyectado": None,
+                "ingresos_proyectados": None,
                 "certezas": {
                     "cuotas_restantes": float(cuotas_pendientes),
                     "suscripciones_restantes": float(subs_pendientes),
+                    "compromisos_restantes": float(compr_maduros_pendientes),
                     "total": float(cierto_total),
                 },
-                "desglose_por_categoria": categorias,
+                "desglose_por_categoria": None,
                 "nivel_confianza": nivel_confianza,
                 "ciclos_analizados": cant_ciclos_datos,
-                "pesos": {"historial": 1.0, "ciclo_actual": 0.0},
+                "pesos": None,
                 "advertencias": advertencias_salida,
                 "datos_suficientes": False,
-                "clasificacion": {
-                    "comprometidos": len(clasificacion.comprometidos),
-                    "recurrentes_detectados": len(clasificacion.recurrentes_detectados),
-                    "variables": len(clasificacion.variables),
-                },
+                "clasificacion": None,
                 "distribucion": None,
                 "intervalos": None,
                 "descomposicion": {
                     "cierto": float(cierto_total),
                     "recurrente_ya_ocurrido": float(recurrente_ya_ocurrido),
-                    "variable_proyectado": float(var_actual),
+                    "variable_proyectado": None,
                 },
                 "mensaje_insuficiente": msg_no_info,
+                "mensaje": msg_no_info,
                 "calibracion": {
                     "pasa_puerta": False,
                     "ciclos_evaluados": calib["ciclos_evaluados"] if calib else 0,
@@ -1131,6 +1267,7 @@ def calcular_proyeccion_nueva(
             "certezas": {
                 "cuotas_restantes": float(cuotas_pendientes),
                 "suscripciones_restantes": float(subs_pendientes),
+                "compromisos_restantes": float(compr_maduros_pendientes),
                 "total": float(cierto_total),
             },
             "desglose_por_categoria": categorias,
@@ -1152,6 +1289,7 @@ def calcular_proyeccion_nueva(
                 "variable_proyectado": float(med_var),
             },
             "mensaje_insuficiente": None,
+            "mensaje": None,
             "calibracion": {
                 "pasa_puerta": True,
                 "ciclos_evaluados": calib["ciclos_evaluados"] if calib else 0,
@@ -1241,7 +1379,7 @@ def backtest_probabilistico_ciclo(
     - Error absoluto medio del valor central.
     """
     inicio, fin = get_ciclo_fechas(usuario, fecha_ciclo)
-    ipc = db.execute(select(IPCCache).order_by(IPCCache.fecha_dato)).scalars().all()
+    ipc = _indice_por_mes(db.execute(select(IPCCache).order_by(IPCCache.fecha_dato)).scalars().all())
 
     # Transacciones completas para obtener el gasto real del ciclo evaluado
     txs_eval = db.execute(

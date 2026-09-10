@@ -929,8 +929,10 @@ def _job_proyeccion_negativa(db_session_factory):
                 for moneda_key, moneda_label, simbolo in [("ars", "pesos", "$"), ("usd", "dólares", "US$")]:
                     proj = proyecciones.get(moneda_key)
                     if proj and proj.get("datos_suficientes") is True:
-                        balance = proj.get("balance_proyectado", 0.0)
-                        if balance < 0:
+                        calib = proj.get("calibracion") or {}
+                        pasa_puerta = calib.get("pasa_puerta") is True
+                        balance = proj.get("balance_proyectado")
+                        if pasa_puerta and balance is not None and balance < 0:
                             if moneda_key == "ars":
                                 mensaje = f"¡Atención! Estimamos que tu saldo en pesos va a terminar este ciclo en negativo por {simbolo}{abs(balance):,.0f}. Te sugerimos revisar tus gastos."
                             else:

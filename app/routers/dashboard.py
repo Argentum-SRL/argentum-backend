@@ -1,13 +1,14 @@
 import uuid
 from datetime import date
 from typing import Any, List
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.models.usuario import Usuario
 from app.services import dashboard_service, proyeccion_service
+from app.services.calibracion_service import disparar_calibracion_a_demanda
 from app.schemas.dashboard import (
     DashboardResumenResponse,
     ResumenCompletoResponse,
@@ -123,13 +124,20 @@ def get_cotizacion(
 
 @router.get("/proyeccion", response_model=ProyeccionesResponse)
 def get_proyeccion(
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ) -> Any:
     """
     Retorna la proyección financiera para el ciclo actual.
+    Si la calibración está pendiente, programa su cálculo en segundo plano.
     """
-    return proyeccion_service.calcular_proyeccion(db, current_user)
+    res = proyeccion_service.calcular_proyeccion(db, current_user)
+    ars_calib = (res.get("ars") or {}).get("calibracion") or {}
+    usd_calib = (res.get("usd") or {}).get("calibracion") or {}
+    if ars_calib.get("motivo") == "calibracion_pendiente" or usd_calib.get("motivo") == "calibracion_pendiente":
+        disparar_calibracion_a_demanda(background_tasks, current_user.id)
+    return res
 
 
 @router.get("/categorias/{categoria_id}/subcategorias", response_model=List[SubcategoriaGastoResponse])

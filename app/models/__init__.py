@@ -30,6 +30,7 @@ from app.models.feriado import FeriadoAR
 from app.models.evento_actualizacion import EventoActualizacion
 from app.models.cotizacion_dolar import CotizacionDolar
 from app.models.saldo_arrastrado import SaldoArrastradoTarjeta, PagoSaldoArrastrado, EstadoSaldoArrastrado
+from app.models.calibracion_usuario import CalibracionUsuario
 
 __all__ = [
     "Usuario",
@@ -66,6 +67,8 @@ __all__ = [
     "FeriadoAR",
     "EventoActualizacion",
     "CotizacionDolar",
+    "CalibracionUsuario",
 ]
+
 
 

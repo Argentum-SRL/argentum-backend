@@ -195,7 +195,9 @@ def _mes(value: date | datetime | str) -> str:
     return str(value)[:7]
 
 
-def _indice_por_mes(ipc_records: Iterable[Any]) -> dict[str, Decimal]:
+def _indice_por_mes(ipc_records: Iterable[Any] | dict[str, Decimal]) -> dict[str, Decimal]:
+    if isinstance(ipc_records, dict):
+        return ipc_records
     return {
         record.fecha_dato: Decimal(str(record.indice_acumulado))
         for record in ipc_records
@@ -207,7 +209,7 @@ def deflactar_monto(
     monto: Decimal,
     fecha_origen: date | datetime | str,
     fecha_destino: date | datetime | str,
-    ipc_records: Iterable[Any],
+    ipc_records: Iterable[Any] | dict[str, Decimal],
     moneda: Moneda = Moneda.ARS,
 ) -> Deflactacion:
     """Lleva ARS a pesos de la fecha destino usando el indice acumulado del IPC.
@@ -218,7 +220,7 @@ def deflactar_monto(
     if moneda != Moneda.ARS:
         return Deflactacion(monto=monto, aplicada=False, motivo="moneda_no_ARS")
 
-    indices = _indice_por_mes(ipc_records)
+    indices = ipc_records if isinstance(ipc_records, dict) else _indice_por_mes(ipc_records)
     if not indices:
         return Deflactacion(monto=monto, aplicada=False, motivo="serie_IPC_vacia")
 
@@ -366,8 +368,9 @@ def gasto_ciclo(
     nominal = sum((tx.monto for tx in filas), ZERO)
     deflactado = ZERO
     factores = []
+    ipc_map = ipc_records if isinstance(ipc_records, dict) else _indice_por_mes(ipc_records)
     for tx in filas:
-        ajuste = deflactar_monto(tx.monto, tx.fecha, fecha_destino, ipc_records, moneda)
+        ajuste = deflactar_monto(tx.monto, tx.fecha, fecha_destino, ipc_map, moneda)
         deflactado += ajuste.monto
         factores.append(ajuste.factor)
     factor_medio = sum(factores, ZERO) / Decimal(len(factores)) if factores else ONE
@@ -613,9 +616,9 @@ def clasificar_gastos(
     ciclos_lista = list(ciclos)
     ciclos_con_datos_usuario = [c for c in ciclos_lista if any(c[0] <= tx.fecha <= c[1] for tx in txs)]
 
-    ipc_lista = list(ipc_records)
+    ipc_map = ipc_records if isinstance(ipc_records, dict) else _indice_por_mes(ipc_records)
     deflactados: dict[Any, Decimal] = {
-        tx.id: deflactar_monto(tx.monto, tx.fecha, fecha_destino, ipc_lista, tx.moneda).monto
+        tx.id: deflactar_monto(tx.monto, tx.fecha, fecha_destino, ipc_map, tx.moneda).monto
         for tx in txs
     }
 
@@ -909,8 +912,9 @@ def estimar_gasto_diario_basico_robusto(
       (tasa_diaria_base, total_base_deflactado, total_shock_deflactado)
     """
     dias = Decimal(str(dias_ciclo)) if dias_ciclo > ZERO else ONE
+    ipc_map = ipc_records if isinstance(ipc_records, dict) else _indice_por_mes(ipc_records)
     montos_deflactados = [
-        deflactar_monto(tx.monto, tx.fecha, destino, ipc_records, moneda).monto
+        deflactar_monto(tx.monto, tx.fecha, destino, ipc_map, moneda).monto
         for tx in txs_variables
     ]
     if not montos_deflactados:

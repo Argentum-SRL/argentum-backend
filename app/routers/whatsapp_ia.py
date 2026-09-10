@@ -7089,38 +7089,58 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
 
                     # Pesos
                     p_ars = proyeccion["ars"]
-                    balance_ars = p_ars.get("balance_proyectado", 0)
+                    calib_ars = p_ars.get("calibracion") or {}
+                    pasa_ars = calib_ars.get("pasa_puerta") is True
+                    balance_ars = p_ars.get("balance_proyectado")
                     dias_rest = p_ars.get("periodo", {}).get("dias_restantes", 0)
                     confianza_ars = p_ars.get("nivel_confianza", "bajo")
                     advertencias_ars = p_ars.get("advertencias", [])
+                    certezas_ars = p_ars.get("certezas") or {}
+                    total_certezas_ars = certezas_ars.get("total", 0.0)
 
                     # Dolares
                     p_usd = proyeccion["usd"]
-                    balance_usd = p_usd.get("balance_proyectado", 0)
+                    calib_usd = p_usd.get("calibracion") or {}
+                    pasa_usd = calib_usd.get("pasa_puerta") is True
+                    balance_usd = p_usd.get("balance_proyectado")
                     confianza_usd = p_usd.get("nivel_confianza", "bajo")
                     advertencias_usd = p_usd.get("advertencias", [])
+                    certezas_usd = p_usd.get("certezas") or {}
+                    total_certezas_usd = certezas_usd.get("total", 0.0)
 
-                    if confianza_ars == "bajo":
+                    if not pasa_ars or balance_ars is None:
+                        msg_cierre = p_ars.get("mensaje") or (advertencias_ars[0] if advertencias_ars else "Mostramos tus compromisos ciertos.")
+                        if total_certezas_ars > 0:
+                            msg = f"{msg_cierre} Tenés compromisos ciertos pendientes por {_fmt(total_certezas_ars)} ({dias_rest} días restantes)."
+                        else:
+                            msg = f"{msg_cierre} ({dias_rest} días restantes)."
+                    elif confianza_ars == "bajo":
                         msg = "Todavía no tenés suficiente historial para una proyección confiable en pesos."
                     elif balance_ars >= 0:
                         msg = f"Si seguís así en pesos, terminás el ciclo con aproximadamente {_fmt(balance_ars)} disponibles ({dias_rest} días restantes)."
                     else:
                         msg = f"Ojo — si seguís así en pesos, terminarías el ciclo con {_fmt(abs(balance_ars))} en rojo ({dias_rest} días restantes)."
 
-                    if advertencias_ars:
+                    if pasa_ars and advertencias_ars:
                         msg += f" {advertencias_ars[0]}"
 
                     # USD
-                    tiene_usd = (p_usd.get("gasto_proyectado_total", 0) > 0 or p_usd.get("ingresos_proyectados", 0) > 0)
+                    gasto_proy_usd = p_usd.get("gasto_proyectado_total") or 0.0
+                    ingresos_proy_usd = p_usd.get("ingresos_proyectados") or 0.0
+                    tiene_usd = (gasto_proy_usd > 0 or ingresos_proy_usd > 0 or total_certezas_usd > 0)
                     if tiene_usd:
-                        if confianza_usd == "bajo":
+                        if not pasa_usd or balance_usd is None:
+                            msg_cierre_usd = p_usd.get("mensaje") or (advertencias_usd[0] if advertencias_usd else "")
+                            if msg_cierre_usd:
+                                msg += f" En dólares: {msg_cierre_usd}"
+                        elif confianza_usd == "bajo":
                             msg += " Aún no tenés historial suficiente para una proyección en dólares."
                         elif balance_usd >= 0:
                             msg += f" En dólares, terminarías con aproximadamente {_fmt(balance_usd, Moneda.USD)}."
                         else:
                             msg += f" Ojo: en dólares terminarías con {_fmt(abs(balance_usd), Moneda.USD)} en rojo."
 
-                        if advertencias_usd:
+                        if pasa_usd and advertencias_usd:
                             msg += f" {advertencias_usd[0]}"
 
                     resultado_ia["respuesta_usuario"] = msg

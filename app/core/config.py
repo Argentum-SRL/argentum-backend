@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     # Environment
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
+    ENABLE_SCHEDULER: bool = True
 
     @model_validator(mode="after")
     def validate_urls(self):
