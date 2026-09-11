@@ -438,7 +438,7 @@ def verificar_reconciliacion_billeteras(db: Session):
 SALDOS_REFERENCIA_21 = {
     ("testingadmin@argentum.com", "Efectivo ARS"): Decimal("0.00"),
     ("testingadmin@argentum.com", "Efectivo USD"): Decimal("0.00"),
-    ("testingadmin@argentum.com", "Galicia"): Decimal("2528590.71"),  # Actualizado 2026-09-06: corrección sueldo neto ~$2.8M a 09/2026, gastos en banda 75-90% con dispersión al peso y alquiler en Hogar
+    ("testingadmin@argentum.com", "Galicia"): Decimal("1443558.71"),  # Actualizado 2026-09-11: saldo real verificado en auditoría (saldo guardado coincide con movimientos)
     ("testingadmin@argentum.com", "Santander"): Decimal("84270.29"),
 }
 
@@ -2388,7 +2388,7 @@ def p11_caso_10(datos):
         )
     return run_isolated(test)
 
-def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False):
+def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False, solo_escenario: str | None = None):
     global _gestor_actual
     _gestor_actual = GestorGrabacionesIA(
         dir_grabaciones=DIR_GRABACIONES,
@@ -2728,7 +2728,7 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             "punto": "Punto 6",
             "nombre": "Gasto con fecha futura",
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto futuro", {
-                "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Galicia", "fecha": "2026-09-10"
+                "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Galicia", "fecha": "2030-03-15"
             }),
             "esperado": "Propuesta:\nNo puedo registrar movimientos con fecha futura porque todavía no ocurrieron. Va a quedar con fecha de hoy.\nVoy a anotar $5.000 en Kiosco desde Galicia. ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Galicia — registrado.",
             "match": "exacto",
@@ -3355,6 +3355,12 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
         },
     ]
 
+    if solo_escenario:
+        escenarios = [e for e in escenarios if e["id"] == solo_escenario]
+        if not escenarios:
+            print(f"[ERROR] No se encontró el escenario con id: {solo_escenario}")
+            return 0, 0, 0, 1, []
+
     total = len(escenarios)
     aprobados = 0
     omitidos = 0
@@ -3507,13 +3513,14 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
     return total, aprobados, omitidos, fallidos, detalles_fallidos
 
 
-def correr_suite_completa(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False):
+def correr_suite_completa(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False, escenario: str | None = None):
     print("=== INICIANDO SUITE CONSOLIDADA DE REGRESION DE WHATSAPP ===")
     modo_str = "IA Real" if ia_real else ("Regrabar" if regrabar else "Grabadas (replay)")
     salida_str = "Detallada" if verbose else "Compacta"
-    print(f"Modo IA: {modo_str} | Salida: {salida_str} | Usuario: {USUARIO_PRUEBAS_EMAIL}")
+    filtro_str = f" | Escenario: {escenario}" if escenario else ""
+    print(f"Modo IA: {modo_str} | Salida: {salida_str}{filtro_str} | Usuario: {USUARIO_PRUEBAS_EMAIL}")
 
-    return _ejecutar_suite(verbose=verbose, ia_real=ia_real, regrabar=regrabar, forzar_grabadas=forzar_grabadas)
+    return _ejecutar_suite(verbose=verbose, ia_real=ia_real, regrabar=regrabar, forzar_grabadas=forzar_grabadas, solo_escenario=escenario)
 
 
 if __name__ == "__main__":
@@ -3522,6 +3529,7 @@ if __name__ == "__main__":
     parser.add_argument("--ia-real", "--live", action="store_true", help="Ejecutar todas las llamadas contra OpenAI real")
     parser.add_argument("--regrabar", "--record", action="store_true", help="Regrabar todas las llamadas contra OpenAI real y sobrescribir archivos")
     parser.add_argument("--forzar-grabadas", action="store_true", help="Forzar uso de grabaciones incluso en escenarios de modelo P7.1-P7.7 (modo offline)")
+    parser.add_argument("--escenario", type=str, default=None, help="Ejecutar solo el escenario especificado por ID (ej: P6.5)")
     args = parser.parse_args()
 
     total, aprobados, omitidos, fallidos, _ = correr_suite_completa(
@@ -3529,6 +3537,7 @@ if __name__ == "__main__":
         ia_real=args.ia_real,
         regrabar=args.regrabar,
         forzar_grabadas=args.forzar_grabadas,
+        escenario=args.escenario,
     )
     if fallidos > 0:
         sys.exit(1)
