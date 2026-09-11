@@ -478,8 +478,17 @@ def _job_entrega_whatsapp_batched(db_session_factory):
 
         logger.info("Job entrega_whatsapp_batched completado")
 
-    except Exception:
+    except Exception as e:
         logger.exception("Error en _job_entrega_whatsapp_batched")
+        try:
+            from app.services.alerta_service import enviar_alerta_admin
+            enviar_alerta_admin(
+                asunto="[Argentum] Falló el job _job_entrega_whatsapp_batched",
+                cuerpo=f"Error en job _job_entrega_whatsapp_batched: {e}",
+                clave="job:_job_entrega_whatsapp_batched",
+            )
+        except Exception as alerta_err:
+            logger.error("Error enviando alerta para _job_entrega_whatsapp_batched: %s", alerta_err)
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_entrega_whatsapp_batched")

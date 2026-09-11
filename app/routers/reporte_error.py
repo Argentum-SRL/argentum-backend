@@ -32,4 +32,20 @@ async def reportar_error_frontend(
         usuario_id=str(current_user.id) if current_user else None,
         client_ip=request.client.host if request.client else None,
     )
+    try:
+        from app.services.alerta_service import enviar_alerta_admin
+        asunto = "[Argentum] Error reportado por frontend"
+        cuerpo = (
+            f"Error reportado desde el frontend:\n\n"
+            f"Mensaje: {reporte.mensaje}\n"
+            f"Ruta: {reporte.ruta or 'No especificada'}\n"
+            f"Componente: {reporte.componente or 'No especificado'}\n"
+            f"Usuario ID: {current_user.id if current_user else 'Anónimo'}\n"
+            f"User Agent: {reporte.user_agent or request.headers.get('user-agent') or 'No especificado'}\n\n"
+            f"Stack trace:\n{reporte.stack or 'No disponible'}"
+        )
+        clave = f"frontend:{reporte.ruta or 'general'}"
+        enviar_alerta_admin(asunto=asunto, cuerpo=cuerpo, clave=clave)
+    except Exception as alerta_err:
+        logger.error("Error al enviar alerta admin desde reporte-error: %s", alerta_err)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -262,8 +262,17 @@ def _job_vencimientos_tarjetas():
         lock_adquirido = True
         procesar_vencimientos_tarjetas(db)
         logger.info("Job de vencimientos de tarjetas ejecutado.")
-    except Exception:
+    except Exception as e:
         logger.exception("Error en job vencimientos_tarjetas")
+        try:
+            from app.services.alerta_service import enviar_alerta_admin
+            enviar_alerta_admin(
+                asunto="[Argentum] Falló el job _job_vencimientos_tarjetas",
+                cuerpo=f"Error en job _job_vencimientos_tarjetas: {e}",
+                clave="job:_job_vencimientos_tarjetas",
+            )
+        except Exception as alerta_err:
+            logger.error("Error enviando alerta para job vencimientos_tarjetas: %s", alerta_err)
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_vencimientos_tarjetas")
@@ -331,7 +340,19 @@ def job_notificaciones_inactividad():
 
 
 def job_entrega_whatsapp_batched():
-    _job_entrega_whatsapp_batched(SessionLocal)
+    try:
+        _job_entrega_whatsapp_batched(SessionLocal)
+    except Exception as e:
+        logger.exception("Error en job_entrega_whatsapp_batched")
+        try:
+            from app.services.alerta_service import enviar_alerta_admin
+            enviar_alerta_admin(
+                asunto="[Argentum] Falló el job _job_entrega_whatsapp_batched",
+                cuerpo=f"Error en job _job_entrega_whatsapp_batched: {e}",
+                clave="job:_job_entrega_whatsapp_batched",
+            )
+        except Exception as alerta_err:
+            logger.error("Error enviando alerta para job entrega_whatsapp_batched: %s", alerta_err)
 
 
 def job_resumen_cierre_ciclo():
@@ -472,8 +493,17 @@ def _job_recalcular_calibraciones():
             return
         lock_adquirido = True
         recalcular_calibraciones_todos(SessionLocal)
-    except Exception:
+    except Exception as e:
         logger.exception("Error en job _job_recalcular_calibraciones")
+        try:
+            from app.services.alerta_service import enviar_alerta_admin
+            enviar_alerta_admin(
+                asunto="[Argentum] Falló el job _job_recalcular_calibraciones",
+                cuerpo=f"Error en job _job_recalcular_calibraciones: {e}",
+                clave="job:_job_recalcular_calibraciones",
+            )
+        except Exception as alerta_err:
+            logger.error("Error enviando alerta para job recalcular_calibraciones: %s", alerta_err)
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_recalcular_calibraciones")
@@ -807,6 +837,12 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    if isinstance(exc, StarletteHTTPException):
+        if exc.status_code in (401, 404, 422) or exc.status_code < 500:
+            return await http_exception_handler(request, exc)
+    if isinstance(exc, RequestValidationError):
+        return await validation_exception_handler(request, exc)
+
     logger.exception(
         "Error no manejado",
         extra={
@@ -814,6 +850,28 @@ async def global_exception_handler(request: Request, exc: Exception):
             "method": request.method,
         }
     )
+
+    try:
+        import traceback
+        from app.services.alerta_service import enviar_alerta_admin
+
+        tipo_exc = type(exc).__name__
+        tb_lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
+        tb_resumen = "".join(tb_lines[:15]) if len(tb_lines) > 15 else "".join(tb_lines)
+
+        asunto = f"[Argentum] Error 500 en {request.url.path}"
+        cuerpo = (
+            f"Error 500 no manejado:\n\n"
+            f"Ruta: {request.method} {request.url.path}\n"
+            f"Tipo de excepción: {tipo_exc}\n"
+            f"Detalle: {str(exc)}\n\n"
+            f"Traceback:\n{tb_resumen}"
+        )
+        clave = f"500:{request.url.path}"
+        enviar_alerta_admin(asunto=asunto, cuerpo=cuerpo, clave=clave)
+    except Exception as alerta_err:
+        logger.error("Error al procesar alerta para excepción 500: %s", alerta_err)
+
     return JSONResponse(
         status_code=500,
         content={
