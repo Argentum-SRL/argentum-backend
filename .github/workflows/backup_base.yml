@@ -1,0 +1,222 @@
+# ==============================================================================
+# WORKFLOW DE BACKUP AUTOMÁTICO DIARIO Y RESTAURACIÓN DE PRUEBA - ARGENTUM
+# ==============================================================================
+#
+# CÓMO RESTAURAR UN BACKUP DESDE UN ARTIFACT:
+# -------------------------------------------
+# 1. Descargar el artifact del backup (ej: 'argentum-db-backup-2026-09-11_080000')
+#    desde la pestaña 'Actions' de GitHub.
+#    El archivo descargado será un zip que contiene: 'argentum_backup_2026-09-11_080000.dump.gpg'.
+#
+# 2. Descifrar el archivo usando gpg y la passphrase configurada en el secret BACKUP_PASSPHRASE:
+#    gpg --decrypt --output argentum_backup.dump argentum_backup_2026-09-11_080000.dump.gpg
+#
+# 3. Restaurar en la base de datos destino:
+#    - Para restaurar en una base limpia o nueva (esquema public limpio):
+#      pg_restore --dbname="postgresql://usuario:pass@host:5432/dbname" \
+#                 --no-owner --no-acl --exit-on-error \
+#                 argentum_backup.dump
+#
+#    - Para sobreescribir un esquema public existente en una base ya en funcionamiento:
+#      pg_restore --dbname="postgresql://usuario:pass@host:5432/dbname" \
+#                 --no-owner --no-acl --clean --if-exists \
+#                 argentum_backup.dump
+#
+# NOTA OPERATIVA:
+# Asegúrese de que la base destino cuente con las extensiones 'uuid-ossp' y 'pgcrypto'
+# creadas previamente si se restaura en un Postgres estándar (CREATE EXTENSION IF NOT EXISTS ...).
+# ==============================================================================
+
+name: Backup Base de Produccion
+
+on:
+  schedule:
+    # Todos los días a las 08:00 UTC (05:00 ART)
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    name: Backup diario, verificación y cifrado
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: argentum_restore_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: restore_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Instalar cliente PostgreSQL 17
+        run: |
+          sudo install -d /etc/apt/keyrings
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/keyrings/postgresql.gpg
+          echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+
+      - name: Verificar versiones de cliente y servidor
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          echo "=== VERSION CLIENTE POSTGRES ==="
+          pg_dump --version
+          psql --version
+          echo "=== VERSION SERVIDOR POSTGRES ==="
+          psql -d "$BACKUP_DATABASE_URL" -t -A -c "SELECT version();"
+
+      - name: Generar pg_dump de esquemas de la aplicación
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          BACKUP_DATE=$(date -u +'%Y-%m-%d_%H%M%S')
+          DUMP_FILE="argentum_backup_${BACKUP_DATE}.dump"
+          ENCRYPTED_FILE="${DUMP_FILE}.gpg"
+
+          echo "BACKUP_DATE=${BACKUP_DATE}" >> $GITHUB_ENV
+          echo "DUMP_FILE=${DUMP_FILE}" >> $GITHUB_ENV
+          echo "ENCRYPTED_FILE=${ENCRYPTED_FILE}" >> $GITHUB_ENV
+
+          echo "Ejecutando pg_dump en formato custom sobre esquema public..."
+          pg_dump --dbname="$BACKUP_DATABASE_URL" \
+            -Fc --no-owner --no-acl -n public \
+            -f "$DUMP_FILE"
+
+          echo "Dump generado localmente."
+          ls -lh "$DUMP_FILE"
+
+      - name: Restaurar en Postgres 17 temporal y verificar consistencia
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          echo "Preparando extensiones y entorno en Postgres temporal..."
+          PGPASSWORD=restore_test_password psql -h localhost -p 5432 -U postgres -d argentum_restore_test -v ON_ERROR_STOP=1 << 'EOF'
+          CREATE EXTENSION IF NOT EXISTS "uuid-ossp" SCHEMA pg_catalog;
+          CREATE EXTENSION IF NOT EXISTS "pgcrypto" SCHEMA pg_catalog;
+          DROP SCHEMA IF EXISTS public CASCADE;
+          EOF
+
+          echo "Restaurando backup en Postgres temporal..."
+          PGPASSWORD=restore_test_password pg_restore \
+            -h localhost -p 5432 -U postgres -d argentum_restore_test \
+            --no-owner --no-acl --exit-on-error \
+            "$DUMP_FILE"
+
+          echo "Restauración técnica exitosa. Comparando esquemas y conteos..."
+          python3 - << 'EOF'
+          import os
+          import subprocess
+          import sys
+
+          backup_url = os.environ["BACKUP_DATABASE_URL"]
+
+          test_env = os.environ.copy()
+          test_env["PGHOST"] = "localhost"
+          test_env["PGPORT"] = "5432"
+          test_env["PGUSER"] = "postgres"
+          test_env["PGPASSWORD"] = "restore_test_password"
+          test_env["PGDATABASE"] = "argentum_restore_test"
+
+          def run_query_prod(sql):
+              result = subprocess.run(
+                  ["psql", "-d", backup_url, "-t", "-A", "-c", sql],
+                  capture_output=True,
+                  text=True,
+                  check=True
+              )
+              return result.stdout.strip()
+
+          def run_query_test(sql):
+              result = subprocess.run(
+                  ["psql", "-t", "-A", "-c", sql],
+                  env=test_env,
+                  capture_output=True,
+                  text=True,
+                  check=True
+              )
+              return result.stdout.strip()
+
+          tables_sql = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name;"
+          prod_tables = [t.strip() for t in run_query_prod(tables_sql).splitlines() if t.strip()]
+          test_tables = [t.strip() for t in run_query_test(tables_sql).splitlines() if t.strip()]
+
+          print(f"\nTablas encontradas en Producción: {len(prod_tables)}")
+          print(f"Tablas encontradas en Restauración: {len(test_tables)}\n")
+
+          missing_tables = set(prod_tables) - set(test_tables)
+          if missing_tables:
+              print(f"ERROR CRÍTICO: Faltan tablas en la restauración: {missing_tables}")
+              sys.exit(1)
+
+          print(f"{'TABLA':<35} | {'PRODUCCIÓN':<12} | {'RESTAURADA':<12} | {'ESTADO'}")
+          print("-" * 75)
+
+          has_error = False
+          for table in prod_tables:
+              count_sql = f'SELECT count(*) FROM public."{table}";'
+              c_prod = int(run_query_prod(count_sql))
+              c_test = int(run_query_test(count_sql))
+              
+              if table == "usuarios":
+                  if c_prod != c_test:
+                      status = f"ERROR (mismatch usuarios: {c_prod} vs {c_test})"
+                      has_error = True
+                  else:
+                      status = "OK"
+              elif table == "transacciones":
+                  if c_prod != c_test:
+                      status = f"DIFERENCIA ({c_prod} vs {c_test} - concurrencia permitida)"
+                  else:
+                      status = "OK"
+              else:
+                  if c_prod != c_test:
+                      status = f"DIFERENCIA ({c_prod} vs {c_test})"
+                  else:
+                      status = "OK"
+                      
+              print(f"{table:<35} | {c_prod:<12} | {c_test:<12} | {status}")
+
+          print("-" * 75)
+
+          if has_error:
+              print("\nERROR CRÍTICO: No coincide la cantidad de usuarios entre producción y la restauración.")
+              sys.exit(1)
+
+          print("\nVerificación de consistencia y restauración completada con éxito.")
+          EOF
+
+      - name: Cifrar backup con GPG y eliminar archivo plano
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          echo "Cifrando dump con GPG AES256..."
+          printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --symmetric --cipher-algo AES256 \
+            -o "$ENCRYPTED_FILE" "$DUMP_FILE"
+
+          # Eliminar inmediatamente el archivo sin cifrar
+          rm -f "$DUMP_FILE"
+
+          echo "=== TAMAÑO DEL BACKUP CIFRADO ==="
+          ls -lh "$ENCRYPTED_FILE"
+          du -h "$ENCRYPTED_FILE"
+
+      - name: Subir backup cifrado como artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: argentum-db-backup-${{ env.BACKUP_DATE }}
+          path: ${{ env.ENCRYPTED_FILE }}
+          retention-days: 30
+          if-no-files-found: error
