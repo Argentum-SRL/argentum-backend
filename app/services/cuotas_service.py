@@ -66,7 +66,7 @@ def crear_cuotas(
             monto=monto_actual,
             moneda=transaccion_padre.moneda,
             fecha=fecha_cuota,
-            descripcion=f"{transaccion_padre.descripcion} (Cuota {i}/{cantidad_cuotas})".strip() if transaccion_padre.descripcion else f"Cuota {i}/{cantidad_cuotas}",
+            descripcion=(f"{transaccion_padre.descripcion.strip()} (Cuota {i}/{cantidad_cuotas})" if transaccion_padre.descripcion and transaccion_padre.descripcion.strip() else f"Cuota {i}/{cantidad_cuotas}"),
             categoria_id=transaccion_padre.categoria_id,
             subcategoria_id=transaccion_padre.subcategoria_id,
             metodo_pago=transaccion_padre.metodo_pago,
@@ -206,7 +206,7 @@ def prepagar_grupo(
         monto=monto_total_pendiente,
         moneda=grupo.moneda,
         fecha=hoy_argentina(),
-        descripcion=f"Prepago de {len(cuotas_pendientes)} cuotas restantes: {grupo.descripcion}",
+        descripcion=(f"Prepago de {len(cuotas_pendientes)} cuotas restantes: {grupo.descripcion.strip()}" if grupo.descripcion and grupo.descripcion.strip() else f"Prepago de {len(cuotas_pendientes)} cuotas restantes"),
         categoria_id=categoria_id if categoria_id else (grupo.transaccion_padre.categoria_id if grupo.transaccion_padre else None),
         subcategoria_id=(grupo.transaccion_padre.subcategoria_id if grupo.transaccion_padre else None),
         metodo_pago=MetodoPago.DEBITO,
@@ -292,19 +292,23 @@ def actualizar_grupo(
     hoy = hoy_argentina()
 
     if data.descripcion is not None:
-        grupo.descripcion = data.descripcion
+        desc_clean = data.descripcion.strip()
+        grupo.descripcion = desc_clean
         if grupo.transaccion_padre:
-            grupo.transaccion_padre.descripcion = data.descripcion
+            grupo.transaccion_padre.descripcion = desc_clean
 
         for c in grupo.cuotas:
             tx_hija = c.transaccion
             if tx_hija:
-                if " (Cuota" in tx_hija.descripcion:
-                    parts = tx_hija.descripcion.split(" (Cuota")
-                    suffix = " (Cuota" + parts[-1]
-                    tx_hija.descripcion = f"{data.descripcion}{suffix}"
+                if desc_clean:
+                    if " (Cuota" in tx_hija.descripcion:
+                        parts = tx_hija.descripcion.split(" (Cuota")
+                        suffix = f" (Cuota{parts[-1]}"
+                        tx_hija.descripcion = f"{desc_clean}{suffix}"
+                    else:
+                        tx_hija.descripcion = f"{desc_clean} (Cuota {c.numero_cuota}/{grupo.cantidad_cuotas})"
                 else:
-                    tx_hija.descripcion = f"{data.descripcion} (Cuota {c.numero_cuota}/{grupo.cantidad_cuotas})"
+                    tx_hija.descripcion = f"Cuota {c.numero_cuota}/{grupo.cantidad_cuotas}"
 
     if data.categoria_id is not None:
         if grupo.transaccion_padre:

@@ -30,7 +30,7 @@ class GrupoCuotasResumen(BaseModel):
 
 class GrupoCuotasUpdate(BaseModel):
     monto_total_nuevo: DecimalJSON | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
-    descripcion: str | None = Field(default=None, min_length=1, max_length=300)
+    descripcion: str | None = Field(default=None, max_length=300)
     categoria_id: UUID | None = None
     subcategoria_id: UUID | None = None
 
@@ -38,8 +38,5 @@ class GrupoCuotasUpdate(BaseModel):
     @classmethod
     def validar_desc(cls, v: str | None) -> str | None:
         if v is not None:
-            clean = v.strip()
-            if not clean:
-                raise ValueError("La descripción no puede estar vacía.")
-            return clean
+            return v.strip()
         return v

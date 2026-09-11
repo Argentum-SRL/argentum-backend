@@ -36,10 +36,7 @@ class TransaccionCruda(BaseModel):
     @field_validator('descripcion')
     @classmethod
     def validar_descripcion(cls, v: str) -> str:
-        v_clean = v.strip()
-        if not v_clean:
-            raise ValueError('La descripción de la transacción no puede estar vacía')
-        return v_clean
+        return v.strip() if v else ""
 
     @field_validator('moneda')
     @classmethod
