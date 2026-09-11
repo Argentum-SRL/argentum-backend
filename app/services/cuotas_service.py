@@ -42,8 +42,8 @@ def crear_cuotas(
         tarjeta = db.get(TarjetaCredito, t_id)
     dia_nominal = tarjeta.dia_vencimiento if tarjeta else primer_vencimiento.day
 
-    # Empezamos desde la cuota_inicial hasta la total
-    for i in range(cuota_inicial, cantidad_cuotas + 1):
+    # Empezamos desde 1 hasta cantidad_cuotas para registrar todas las cuotas
+    for i in range(1, cantidad_cuotas + 1):
         if i == cuota_inicial:
             fecha_cuota = primer_vencimiento
         else:
@@ -59,7 +59,7 @@ def crear_cuotas(
         else:
             monto_actual = monto_base
             
-        # 1. Crear la transacción hija (el movimiento de dinero futuro)
+        # 1. Crear la transacción hija (el movimiento de dinero futuro o retroactivo)
         hija = Transaccion(
             usuario_id=usuario_id,
             tipo=transaccion_padre.tipo,
@@ -82,17 +82,22 @@ def crear_cuotas(
         db.add(hija)
         db.flush()
 
+        es_anterior = (i < cuota_inicial)
         # 2. Crear el registro de la cuota vinculada al grupo
         cuota_reg = Cuota(
             grupo_id=grupo.id,
             transaccion_id=hija.id,
             numero_cuota=i,
             monto_proyectado=monto_actual,
+            monto_real=monto_actual if es_anterior else None,
             fecha_vencimiento=fecha_cuota,
-            pagada=False
+            pagada=es_anterior
         )
         db.add(cuota_reg)
         cuotas.append(cuota_reg)
+
+    if grupo and cuotas:
+        grupo.primer_vencimiento = cuotas[0].fecha_vencimiento
         
     return cuotas
 

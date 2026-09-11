@@ -217,6 +217,7 @@ class RegisterRequest(BaseModel):
     telefono: str | None = None
     password: str
     acepta_terminos: bool = True
+    turnstile_token: str | None = None
 
     @field_validator("nombre")
     @classmethod

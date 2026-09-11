@@ -15,7 +15,11 @@ from app.models.cuota import Cuota
 from app.models.tarjeta_credito import TarjetaCredito
 from app.models.saldo_arrastrado import SaldoArrastradoTarjeta, PagoSaldoArrastrado, EstadoSaldoArrastrado
 from app.schemas.transaccion import TransaccionCreate, TransaccionUpdate
-from app.services.tarjeta_service import calcular_primer_vencimiento, _tabla_saldo_arrastrado_existe
+from app.services.tarjeta_service import (
+    calcular_primer_vencimiento,
+    calcular_fecha_vencimiento_proximo,
+    _tabla_saldo_arrastrado_existe,
+)
 from app.services import cuotas_service, presupuesto_service
 from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
@@ -289,9 +293,12 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, co
         if data.metodo_pago == MetodoPago.CREDITO and data.tarjeta_id:
             tarjeta = _validar_tarjeta(db, data.tarjeta_id, usuario_id)
             proximo_resumen = data.info_cuotas.proximo_resumen if data.info_cuotas else False
-            primer_vencimiento = calcular_primer_vencimiento(
-                data.fecha, tarjeta.dia_cierre, tarjeta.dia_vencimiento, proximo_resumen
-            )
+            if data.info_cuotas and data.info_cuotas.cuota_inicial > 1:
+                primer_vencimiento = calcular_fecha_vencimiento_proximo(tarjeta, data.fecha)
+            else:
+                primer_vencimiento = calcular_primer_vencimiento(
+                    data.fecha, tarjeta.dia_cierre, tarjeta.dia_vencimiento, proximo_resumen
+                )
         elif data.primer_vencimiento_manual:
             primer_vencimiento = data.primer_vencimiento_manual
         else:

@@ -782,6 +782,17 @@ def procesar_mensaje(
         "error": True,
     }
 
+    if len(mensaje) > 1500:
+        return {
+            "intent": "desconocido",
+            "entidades": {},
+            "confianza": 0.0,
+            "slot_filling": False,
+            "datos_faltantes": [],
+            "respuesta_usuario": "El mensaje es muy largo (máximo 1500 caracteres). Por favor mandalo más resumido.",
+            "error": True,
+        }
+
     try:
         contexto = construir_contexto_financiero(usuario, db)
         

@@ -4417,17 +4417,57 @@ def _descargar_medio_meta(media_id: str) -> tuple[bytes | None, str | None]:
         return None, None
 
 
-def _transcribir_audio(media_id: str, media_content_type: str = "audio/ogg") -> str | None:
+def _obtener_duracion_audio_bytes(audio_bytes: bytes, content_type: str = "") -> float | None:
+    """Intenta calcular la duración en segundos del audio a partir de sus bytes."""
+    if not audio_bytes:
+        return None
+    try:
+        if audio_bytes.startswith(b"RIFF") and b"WAVE" in audio_bytes[:16]:
+            import wave
+            import io
+            with wave.open(io.BytesIO(audio_bytes), "rb") as wav:
+                framerate = wav.getframerate()
+                if framerate > 0:
+                    return wav.getnframes() / float(framerate)
+        if audio_bytes.startswith(b"OggS"):
+            import struct
+            idx = audio_bytes.rfind(b"OggS")
+            if idx != -1 and idx + 14 <= len(audio_bytes):
+                granule_pos = struct.unpack("<Q", audio_bytes[idx + 6:idx + 14])[0]
+                if granule_pos > 0:
+                    return granule_pos / 48000.0
+    except Exception:
+        pass
+    return None
+
+
+def _transcribir_audio(
+    media_id: str,
+    media_content_type: str = "audio/ogg",
+    duracion_maxima_segundos: int = 120,
+    max_bytes: int = 8 * 1024 * 1024,
+) -> tuple[str | None, str | None]:
     """
     Descarga un audio de Meta Cloud API en dos pasos y lo transcribe con Whisper.
-    Retorna el texto transcripto o None si falla.
+    Si el tamaño supera max_bytes (8 MB), no llama a Whisper y retorna (None, "TAMANO_EXCEDIDO").
+    Si la duración supera duracion_maxima_segundos, no llama a Whisper y retorna (None, "DURACION_EXCEDIDA").
+    Retorna (texto_transcripto, None) o (None, motivo_error).
     """
     try:
         audio_bytes, mime = _descargar_medio_meta(media_id)
         if not audio_bytes:
-            return None
+            return None, "DESCARGA_FALLIDA"
+
+        if len(audio_bytes) > max_bytes:
+            logger.warning("whatsapp_audio_tamano_bytes_excedido", bytes_length=len(audio_bytes), max_bytes=max_bytes)
+            return None, "TAMANO_EXCEDIDO"
 
         content_type = mime or media_content_type or "audio/ogg"
+
+        duracion_detectada = _obtener_duracion_audio_bytes(audio_bytes, content_type)
+        if duracion_detectada is not None and duracion_detectada > duracion_maxima_segundos:
+            logger.warning("whatsapp_audio_duracion_bytes_excedida", duracion=duracion_detectada)
+            return None, "DURACION_EXCEDIDA"
 
         # Determinar extensión según content type
         ext_map = {
@@ -4458,23 +4498,24 @@ def _transcribir_audio(media_id: str, media_content_type: str = "audio/ogg") -> 
                     file=audio_file,
                     language="es",
                 )
-            return transcripcion.text
+            return transcripcion.text, None
         finally:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
     except Exception:
         logger.exception("Error al transcribir audio de WhatsApp")
-        return None
+        return None, "ERROR_TRANSCRIPCION"
 
 
 def _extraer_transaccion_de_imagen(
-    media_id: str, media_content_type: str = "image/jpeg", usuario_nombre: str = ""
-) -> str | None:
+    media_id: str, media_content_type: str = "image/jpeg", usuario_nombre: str = "", max_bytes: int = 5 * 1024 * 1024
+) -> tuple[str | None, str | None]:
     """
     Descarga una imagen de Meta Cloud API en dos pasos y usa GPT-4o Vision para extraer
     información de un ticket, factura o comprobante.
-    Retorna una descripción en texto de lo que encontró, o None si falla.
+    Si el tamaño supera max_bytes (5 MB), no llama a Vision y retorna (None, "TAMANO_EXCEDIDO").
+    Retorna (descripcion, None) o (None, motivo_error).
     """
     import base64
 
@@ -4489,7 +4530,11 @@ def _extraer_transaccion_de_imagen(
     try:
         image_bytes, mime = _descargar_medio_meta(media_id)
         if not image_bytes:
-            return None
+            return None, "DESCARGA_FALLIDA"
+
+        if len(image_bytes) > max_bytes:
+            logger.warning("whatsapp_imagen_tamano_bytes_excedido", bytes_length=len(image_bytes), max_bytes=max_bytes)
+            return None, "TAMANO_EXCEDIDO"
 
         content_type = mime or media_content_type or "image/jpeg"
         if ";" in content_type:
@@ -4552,14 +4597,14 @@ def _extraer_transaccion_de_imagen(
 
         resultado = vision_response.choices[0].message.content
         if not resultado or resultado.strip() == "NO_IDENTIFICADO":
-            return None
+            return None, "NO_IDENTIFICADO"
 
         logger.info(f"Imagen analizada: '{resultado[:100]}'")
-        return resultado.strip()
+        return resultado.strip(), None
 
     except Exception:
         logger.exception("Error al analizar imagen de WhatsApp")
-        return None
+        return None, "ERROR_VISION"
 
 
 @router.get("/webhook", response_class=PlainTextResponse)
@@ -4781,12 +4826,26 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
 
                 if media_id:
                     t_media_start = time.perf_counter()
-                    transcripcion = _transcribir_audio(media_id, mime_type)
+                    transcripcion, error_audio = _transcribir_audio(media_id, mime_type, duracion_maxima_segundos=120)
                     t_media_end = time.perf_counter()
                     logger.info(
                         "[LATENCIA][MEDIA-AUDIO] Transcripción Whisper: %.2fs",
                         t_media_end - t_media_start,
                     )
+
+                    if error_audio == "DURACION_EXCEDIDA":
+                        enviar_whatsapp(
+                            from_number,
+                            "El audio es muy largo (máximo 2 minutos). Por favor mandá un audio más corto o escribí el gasto en texto.",
+                        )
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+                    if error_audio == "TAMANO_EXCEDIDO":
+                        enviar_whatsapp(
+                            from_number,
+                            "El audio es muy pesado (máximo 8 MB). Por favor mandá un audio más corto o escribí el gasto en texto.",
+                        )
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
                     if transcripcion:
                         mensaje_texto = transcripcion
@@ -4813,14 +4872,21 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
 
                 if media_id:
                     t_media_start = time.perf_counter()
-                    descripcion_imagen = _extraer_transaccion_de_imagen(
-                        media_id, mime_type, nombre_usuario
+                    descripcion_imagen, error_img = _extraer_transaccion_de_imagen(
+                        media_id, mime_type, nombre_usuario, max_bytes=5 * 1024 * 1024
                     )
                     t_media_end = time.perf_counter()
                     logger.info(
                         "[LATENCIA][MEDIA-IMAGEN] Análisis GPT-4o Vision: %.2fs",
                         t_media_end - t_media_start,
                     )
+
+                    if error_img == "TAMANO_EXCEDIDO":
+                        enviar_whatsapp(
+                            from_number,
+                            "La imagen es muy pesada (máximo 5 MB). Por favor mandá una foto más liviana.",
+                        )
+                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
 
                     if descripcion_imagen:
                         mensaje_texto = descripcion_imagen
@@ -4844,6 +4910,15 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     from_number,
                     "No entendí bien lo que quisiste decir. Podés contarme qué gastaste, por ejemplo: *Almuerzo $1.500*",
                 )
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+
+            if len(mensaje_texto) > 1500:
+                logger.warning("whatsapp_texto_limite_caracteres_superado", longitud=len(mensaje_texto))
+                enviar_whatsapp(
+                    from_number,
+                    "El mensaje es muy largo (máximo 1500 caracteres). Por favor mandalo más resumido.",
+                )
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
             # 0. Chequeo determinístico de pedido de pago de resumen de tarjeta (Tarea 7)
             if _es_pedido_pago_resumen(mensaje_texto):
                 msg_pago_resumen = "El pago del resumen de la tarjeta se gestiona desde la web de Argentum. No se puede realizar por WhatsApp."

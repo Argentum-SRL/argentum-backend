@@ -82,6 +82,7 @@ from app.services import whatsapp_service
 from app.services.whatsapp_service import (
     generar_codigo_vinculacion,
 )
+from app.services.turnstile_service import verificar_turnstile_token
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +139,13 @@ def register(request: Request, user_in: RegisterRequest, background_tasks: Backg
     Registra un usuario con email/password.
     No devuelve tokens: primero debe verificar email y luego teléfono.
     """
+    ip_origen = request.client.host if request.client else None
+    if not user_in.turnstile_token or not verificar_turnstile_token(user_in.turnstile_token, ip_origen):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La verificación de seguridad (captcha) falló o es inválida. Por favor, intentá de nuevo.",
+        )
+
     email_clean = user_in.email.strip().lower()
     tel_clean = user_in.telefono.strip() if user_in.telefono else None
     tel_norm = normalizar_telefono_ar(tel_clean) if tel_clean else None
