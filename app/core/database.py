@@ -8,12 +8,17 @@ from app.core.config import settings
 db_query_duration_var: contextvars.ContextVar[list[float] | None] = contextvars.ContextVar("db_query_duration_var", default=None)
 db_logger = structlog.get_logger("database")
 
+connect_args = {}
+if settings.DATABASE_URL.lower().startswith("postgres"):
+    connect_args["options"] = "-csearch_path=public"
+
 engine = create_engine(
     settings.DATABASE_URL,
     pool_size=20,
     max_overflow=40,
     pool_recycle=3600,
-    pool_pre_ping=True
+    pool_pre_ping=True,
+    connect_args=connect_args,
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

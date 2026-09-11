@@ -1,6 +1,6 @@
 from logging.config import fileConfig
 
-from sqlalchemy import pool, create_engine
+from sqlalchemy import pool, create_engine, text
 from alembic import context
 
 from app.core.config import settings
@@ -19,20 +19,43 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    context.configure(
-        url=settings.DATABASE_URL,
-        target_metadata=target_metadata,
-        literal_binds=True,
-        dialect_opts={"paramstyle": "named"},
-    )
+    is_postgres = settings.DATABASE_URL.lower().startswith("postgres")
+    context_kwargs = {
+        "url": settings.DATABASE_URL,
+        "target_metadata": target_metadata,
+        "literal_binds": True,
+        "dialect_opts": {"paramstyle": "named"},
+    }
+    if is_postgres:
+        context_kwargs["version_table_schema"] = "public"
+
+    context.configure(**context_kwargs)
     with context.begin_transaction():
         context.run_migrations()
 
 
 def run_migrations_online() -> None:
-    connectable = create_engine(settings.DATABASE_URL, poolclass=pool.NullPool)
+    is_postgres = settings.DATABASE_URL.lower().startswith("postgres")
+    connect_args = {}
+    if is_postgres:
+        connect_args["options"] = "-csearch_path=public"
+
+    connectable = create_engine(
+        settings.DATABASE_URL,
+        poolclass=pool.NullPool,
+        connect_args=connect_args,
+    )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context_kwargs = {
+            "connection": connection,
+            "target_metadata": target_metadata,
+        }
+        if is_postgres or connection.dialect.name == "postgresql":
+            connection.execute(text("SET search_path TO public"))
+            connection.commit()
+            context_kwargs["version_table_schema"] = "public"
+
+        context.configure(**context_kwargs)
         with context.begin_transaction():
             context.run_migrations()
 
