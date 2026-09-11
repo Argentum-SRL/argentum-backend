@@ -66,16 +66,21 @@ jobs:
           echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
           sudo apt-get install -y postgresql-client-17
+          echo "/usr/lib/postgresql/17/bin" >> $GITHUB_PATH
 
       - name: Verificar versiones de cliente y servidor
         env:
           BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
         run: |
+          if [ -z "$BACKUP_DATABASE_URL" ]; then
+            echo "ERROR: El secret BACKUP_DATABASE_URL no está configurado."
+            exit 1
+          fi
           echo "=== VERSION CLIENTE POSTGRES ==="
           /usr/lib/postgresql/17/bin/pg_dump --version
-          psql --version
+          /usr/lib/postgresql/17/bin/psql --version
           echo "=== VERSION SERVIDOR POSTGRES ==="
-          psql -d "$BACKUP_DATABASE_URL" -t -A -c "SELECT version();"
+          /usr/lib/postgresql/17/bin/psql -d "$BACKUP_DATABASE_URL" -t -A -c "SELECT version();"
 
       - name: Generar pg_dump de esquemas de la aplicación
         env:
@@ -105,14 +110,13 @@ jobs:
           BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
         run: |
           echo "Preparando extensiones y entorno en Postgres temporal..."
-          PGPASSWORD=restore_test_password psql -h localhost -p 5432 -U postgres -d argentum_restore_test -v ON_ERROR_STOP=1 << 'EOF'
+          PGPASSWORD=restore_test_password /usr/lib/postgresql/17/bin/psql -h localhost -p 5432 -U postgres -d argentum_restore_test -v ON_ERROR_STOP=1 << 'EOF'
           CREATE EXTENSION IF NOT EXISTS "uuid-ossp" SCHEMA pg_catalog;
-          CREATE EXTENSION IF NOT EXISTS "pgcrypto" SCHEMA pg_catalog;
           DROP SCHEMA IF EXISTS public CASCADE;
           EOF
 
           echo "Restaurando backup en Postgres temporal..."
-          PGPASSWORD=restore_test_password pg_restore \
+          PGPASSWORD=restore_test_password /usr/lib/postgresql/17/bin/pg_restore \
             -h localhost -p 5432 -U postgres -d argentum_restore_test \
             --no-owner --no-acl --exit-on-error \
             "$DUMP_FILE"
@@ -136,9 +140,11 @@ jobs:
               result = subprocess.run(
                   ["psql", "-d", backup_url, "-t", "-A", "-c", sql],
                   capture_output=True,
-                  text=True,
-                  check=True
+                  text=True
               )
+              if result.returncode != 0:
+                  print(f"Error consultando producción: {result.stderr}", file=sys.stderr)
+                  sys.exit(result.returncode)
               return result.stdout.strip()
 
           def run_query_test(sql):
@@ -146,14 +152,20 @@ jobs:
                   ["psql", "-t", "-A", "-c", sql],
                   env=test_env,
                   capture_output=True,
-                  text=True,
-                  check=True
+                  text=True
               )
+              if result.returncode != 0:
+                  print(f"Error consultando base temporal: {result.stderr}", file=sys.stderr)
+                  sys.exit(result.returncode)
               return result.stdout.strip()
 
           tables_sql = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name;"
           prod_tables = [t.strip() for t in run_query_prod(tables_sql).splitlines() if t.strip()]
           test_tables = [t.strip() for t in run_query_test(tables_sql).splitlines() if t.strip()]
+
+          if not prod_tables:
+              print("ERROR CRÍTICO: No se encontraron tablas en el esquema public de producción.")
+              sys.exit(1)
 
           print(f"\nTablas encontradas en Producción: {len(prod_tables)}")
           print(f"Tablas encontradas en Restauración: {len(test_tables)}\n")
@@ -204,6 +216,10 @@ jobs:
         env:
           BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
         run: |
+          if [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "ERROR: El secret BACKUP_PASSPHRASE no está configurado."
+            exit 1
+          fi
           echo "Cifrando dump con GPG AES256..."
           printf '%s' "$BACKUP_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
             --symmetric --cipher-algo AES256 \
