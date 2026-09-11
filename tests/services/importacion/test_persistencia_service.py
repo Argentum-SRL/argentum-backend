@@ -339,12 +339,12 @@ def test_importar_cuota_intermedia_sin_grupo_previo(db):
     ).first()
     assert grupo is not None
     
-    # Dado que cuota_inicial = 3, sólo deben haberse generado las cuotas: 3, 4, 5 y 6 (4 cuotas en total)
+    # Dado que cuota_inicial = 3, se generan las 6 cuotas completas, con las anteriores pagadas
     cuotas = db.query(Cuota).filter(Cuota.grupo_id == grupo.id).all()
-    assert len(cuotas) == 4
+    assert len(cuotas) == 6
     
     numeros_cuota = {c.numero_cuota for c in cuotas}
-    assert numeros_cuota == {3, 4, 5, 6}
+    assert numeros_cuota == {1, 2, 3, 4, 5, 6}
     
     # Cuota 3 debe estar pagada y confirmada
     cuota_3 = next(c for c in cuotas if c.numero_cuota == 3)
@@ -390,7 +390,9 @@ def test_importar_cuota_intermedia_con_grupo_existente(db):
     grupo_inicial = db.query(GrupoCuotas).first()
     assert grupo_inicial is not None
     cuotas_iniciales = db.query(Cuota).filter(Cuota.grupo_id == grupo_inicial.id).all()
-    assert len(cuotas_iniciales) == 4
+    assert len(cuotas_iniciales) == 6
+    numeros_cuota = {c.numero_cuota for c in cuotas_iniciales}
+    assert numeros_cuota == {1, 2, 3, 4, 5, 6}
     
     cuota_4_inicial = next(c for c in cuotas_iniciales if c.numero_cuota == 4)
     assert cuota_4_inicial.pagada is False

@@ -42,6 +42,22 @@ def mapear_grupo_resumen(db: Session, grupo: GrupoCuotas) -> dict:
     total_pendiente = sum(c.monto_proyectado for c in pendientes)
     
     tarjeta_nombre = grupo.tarjeta.nombre if grupo.tarjeta else None
+
+    categoria_id = None
+    subcategoria_id = None
+    if pendientes:
+        pendientes_sorted = sorted(pendientes, key=lambda c: c.numero_cuota)
+        if pendientes_sorted[0].transaccion:
+            categoria_id = pendientes_sorted[0].transaccion.categoria_id
+            subcategoria_id = pendientes_sorted[0].transaccion.subcategoria_id
+    elif pagadas:
+        pagadas_sorted = sorted(pagadas, key=lambda c: c.numero_cuota)
+        if pagadas_sorted[-1].transaccion:
+            categoria_id = pagadas_sorted[-1].transaccion.categoria_id
+            subcategoria_id = pagadas_sorted[-1].transaccion.subcategoria_id
+    elif grupo.transaccion_padre:
+        categoria_id = grupo.transaccion_padre.categoria_id
+        subcategoria_id = grupo.transaccion_padre.subcategoria_id
     
     return {
         "id": grupo.id,
@@ -61,7 +77,9 @@ def mapear_grupo_resumen(db: Session, grupo: GrupoCuotas) -> dict:
         "transaccion_padre_id": grupo.transaccion_padre_id,
         "tiene_interes": grupo.tiene_interes,
         "tasa_interes": grupo.tasa_interes,
-        "estado": grupo.estado.value if hasattr(grupo.estado, "value") else str(grupo.estado)
+        "estado": grupo.estado.value if hasattr(grupo.estado, "value") else str(grupo.estado),
+        "categoria_id": categoria_id,
+        "subcategoria_id": subcategoria_id
     }
 
 @router.get("", response_model=list[GrupoCuotasResumen])
@@ -113,74 +131,8 @@ def update_grupo_cuotas(
     if not grupo:
         raise HTTPException(status_code=404, detail="No encontramos ese grupo de cuotas.")
         
-    hoy = _hoy_argentina()
-    
-    if data.descripcion is not None:
-        grupo.descripcion = data.descripcion
-        if grupo.transaccion_padre:
-            grupo.transaccion_padre.descripcion = data.descripcion
-            
-        for c in grupo.cuotas:
-            tx_hija = c.transaccion
-            if tx_hija:
-                if " (Cuota" in tx_hija.descripcion:
-                    parts = tx_hija.descripcion.split(" (Cuota")
-                    suffix = " (Cuota" + parts[-1]
-                    tx_hija.descripcion = f"{data.descripcion}{suffix}"
-                else:
-                    tx_hija.descripcion = f"{data.descripcion} (Cuota {c.numero_cuota}/{grupo.cantidad_cuotas})"
-                    
-    if data.monto_total_nuevo is not None:
-        pagadas = [c for c in grupo.cuotas if c.pagada]
-        pendientes = [c for c in grupo.cuotas if not c.pagada]
-        
-        total_ya_pagado = sum(c.monto_proyectado for c in pagadas)
-        monto_pendiente = data.monto_total_nuevo - total_ya_pagado
-        
-        if monto_pendiente <= 0:
-            raise HTTPException(
-                status_code=400,
-                detail="El monto nuevo es menor o igual a lo que ya pagaste. No podés reducir el monto a menos de lo ya abonado."
-            )
-            
-        cantidad_pendientes = len(pendientes)
-        if cantidad_pendientes == 0:
-            raise HTTPException(
-                status_code=400,
-                detail="Ya pagaste todas las cuotas. No hay nada que ajustar."
-            )
-            
-        nuevo_monto_base = round(monto_pendiente / cantidad_pendientes, 2)
-        total_con_base = nuevo_monto_base * cantidad_pendientes
-        diferencia = monto_pendiente - total_con_base
-        
-        pendientes_ordenadas = sorted(pendientes, key=lambda c: c.numero_cuota)
-        
-        for idx, c in enumerate(pendientes_ordenadas):
-            is_last = (idx == len(pendientes_ordenadas) - 1)
-            monto_actual_cuota = nuevo_monto_base + diferencia if is_last else nuevo_monto_base
-            
-            old_monto = c.monto_proyectado
-            c.monto_proyectado = monto_actual_cuota
-            
-            tx_hija = c.transaccion
-            if tx_hija:
-                if tx_hija.metodo_pago != MetodoPago.CREDITO:
-                    if tx_hija.fecha <= hoy and tx_hija.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE:
-                        billetera = db.get(Billetera, tx_hija.billetera_id)
-                        if billetera:
-                            if tx_hija.tipo == TipoTransaccion.INGRESO:
-                                billetera.saldo_actual = billetera.saldo_actual - old_monto + monto_actual_cuota
-                            else:
-                                billetera.saldo_actual = billetera.saldo_actual + old_monto - monto_actual_cuota
-                                
-                tx_hija.monto = monto_actual_cuota
-                
-        grupo.monto_total = data.monto_total_nuevo
-        grupo.total_financiado = data.monto_total_nuevo
-        
-    db.commit()
-    db.refresh(grupo)
+    from app.services.cuotas_service import actualizar_grupo
+    grupo = actualizar_grupo(db, grupo, data)
     
     return mapear_grupo_resumen(db, grupo)
 

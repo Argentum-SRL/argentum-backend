@@ -23,12 +23,16 @@ class GrupoCuotasResumen(BaseModel):
     tiene_interes: bool
     tasa_interes: DecimalJSON | None = None
     estado: str = "activo"
+    categoria_id: UUID | None = None
+    subcategoria_id: UUID | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 class GrupoCuotasUpdate(BaseModel):
     monto_total_nuevo: DecimalJSON | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
     descripcion: str | None = Field(default=None, min_length=1, max_length=300)
+    categoria_id: UUID | None = None
+    subcategoria_id: UUID | None = None
 
     @field_validator("descripcion")
     @classmethod

@@ -279,3 +279,93 @@ def prepagar_grupo(
     # 12. Retornar el grupo actualizado
     return grupo
 
+
+def actualizar_grupo(
+    db: Session,
+    grupo: GrupoCuotas,
+    data: any,
+) -> GrupoCuotas:
+    from fastapi import HTTPException
+    from app.models.billetera import Billetera
+    from app.models.transaccion import MetodoPago, EstadoVerificacionTransaccion
+
+    hoy = hoy_argentina()
+
+    if data.descripcion is not None:
+        grupo.descripcion = data.descripcion
+        if grupo.transaccion_padre:
+            grupo.transaccion_padre.descripcion = data.descripcion
+
+        for c in grupo.cuotas:
+            tx_hija = c.transaccion
+            if tx_hija:
+                if " (Cuota" in tx_hija.descripcion:
+                    parts = tx_hija.descripcion.split(" (Cuota")
+                    suffix = " (Cuota" + parts[-1]
+                    tx_hija.descripcion = f"{data.descripcion}{suffix}"
+                else:
+                    tx_hija.descripcion = f"{data.descripcion} (Cuota {c.numero_cuota}/{grupo.cantidad_cuotas})"
+
+    if data.categoria_id is not None:
+        if grupo.transaccion_padre:
+            grupo.transaccion_padre.categoria_id = data.categoria_id
+            grupo.transaccion_padre.subcategoria_id = data.subcategoria_id
+
+        for c in grupo.cuotas:
+            if not c.pagada and c.transaccion:
+                c.transaccion.categoria_id = data.categoria_id
+                c.transaccion.subcategoria_id = data.subcategoria_id
+
+    if data.monto_total_nuevo is not None:
+        pagadas = [c for c in grupo.cuotas if c.pagada]
+        pendientes = [c for c in grupo.cuotas if not c.pagada]
+
+        total_ya_pagado = sum(c.monto_proyectado for c in pagadas)
+        monto_pendiente = data.monto_total_nuevo - total_ya_pagado
+
+        if monto_pendiente <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="El monto nuevo es menor o igual a lo que ya pagaste. No podés reducir el monto a menos de lo ya abonado."
+            )
+
+        cantidad_pendientes = len(pendientes)
+        if cantidad_pendientes == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Ya pagaste todas las cuotas. No hay nada que ajustar."
+            )
+
+        nuevo_monto_base = round(monto_pendiente / cantidad_pendientes, 2)
+        total_con_base = nuevo_monto_base * cantidad_pendientes
+        diferencia = monto_pendiente - total_con_base
+
+        pendientes_ordenadas = sorted(pendientes, key=lambda c: c.numero_cuota)
+
+        for idx, c in enumerate(pendientes_ordenadas):
+            is_last = (idx == len(pendientes_ordenadas) - 1)
+            monto_actual_cuota = nuevo_monto_base + diferencia if is_last else nuevo_monto_base
+
+            old_monto = c.monto_proyectado
+            c.monto_proyectado = monto_actual_cuota
+
+            tx_hija = c.transaccion
+            if tx_hija:
+                if tx_hija.metodo_pago != MetodoPago.CREDITO:
+                    if tx_hija.fecha <= hoy and tx_hija.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE:
+                        billetera = db.get(Billetera, tx_hija.billetera_id)
+                        if billetera:
+                            if tx_hija.tipo == TipoTransaccion.INGRESO:
+                                billetera.saldo_actual = billetera.saldo_actual - old_monto + monto_actual_cuota
+                            else:
+                                billetera.saldo_actual = billetera.saldo_actual + old_monto - monto_actual_cuota
+
+                tx_hija.monto = monto_actual_cuota
+
+        grupo.monto_total = data.monto_total_nuevo
+        grupo.total_financiado = data.monto_total_nuevo
+
+    db.commit()
+    db.refresh(grupo)
+    return grupo
+
