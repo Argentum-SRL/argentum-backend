@@ -7,11 +7,12 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.usuario import Moneda
+from app.schemas.tipos import DecimalJSON
 
 
 class HistorialSuscripcionBase(BaseModel):
     suscripcion_id: UUID
-    monto: Decimal = Field(..., gt=0, max_digits=15, decimal_places=2)
+    monto: DecimalJSON = Field(..., gt=0, max_digits=15, decimal_places=2)
     moneda: Moneda
     vigente_desde: date
 
@@ -30,7 +31,7 @@ class HistorialSuscripcionCreate(HistorialSuscripcionBase):
 
 
 class HistorialSuscripcionUpdate(BaseModel):
-    monto: Decimal | None = Field(None, gt=0, max_digits=15, decimal_places=2)
+    monto: DecimalJSON | None = Field(None, gt=0, max_digits=15, decimal_places=2)
     moneda: Moneda | None = None
     vigente_desde: date | None = None
 

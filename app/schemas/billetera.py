@@ -8,14 +8,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.billetera import EstadoBilletera
 from app.models.usuario import Moneda
+from app.schemas.tipos import DecimalJSON
 
 
 class BilleteraBase(BaseModel):
     usuario_id: UUID | None = None
     nombre: str = Field(..., min_length=1, max_length=100)
     moneda: Moneda
-    saldo_actual: Decimal = Field(default=Decimal("0"), decimal_places=2, max_digits=15)
-    saldo_inicial: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=2, max_digits=15)
+    saldo_actual: DecimalJSON = Field(default=Decimal("0"), decimal_places=2, max_digits=15)
+    saldo_inicial: DecimalJSON = Field(default=Decimal("0"), ge=0, decimal_places=2, max_digits=15)
     es_principal: bool = False
     es_efectivo: bool = False
     estado: EstadoBilletera = EstadoBilletera.ACTIVA

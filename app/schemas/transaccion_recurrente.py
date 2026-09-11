@@ -12,11 +12,12 @@ from app.models.transaccion_recurrente import (
     TipoTransaccionRecurrente,
 )
 from app.models.usuario import Moneda
+from app.schemas.tipos import DecimalJSON
 
 
 class TransaccionRecurrenteBase(BaseModel):
     tipo: TipoTransaccionRecurrente
-    monto: Decimal = Field(..., gt=0, max_digits=15, decimal_places=2, description="Monto mayor a 0")
+    monto: DecimalJSON = Field(..., gt=0, max_digits=15, decimal_places=2, description="Monto mayor a 0")
     moneda: Moneda
     descripcion: str = Field(default="", max_length=300)
     categoria_id: UUID
@@ -33,7 +34,7 @@ class TransaccionRecurrenteCreate(TransaccionRecurrenteBase):
 
 class TransaccionRecurrenteUpdate(BaseModel):
     tipo: TipoTransaccionRecurrente | None = None
-    monto: Decimal | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
+    monto: DecimalJSON | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
     moneda: Moneda | None = None
     descripcion: str | None = None
     categoria_id: UUID | None = None

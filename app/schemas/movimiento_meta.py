@@ -10,13 +10,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.models.movimiento_meta import TipoMovimientoMeta
 from app.models.usuario import Moneda
 from app.schemas.billetera import BilleteraRead
+from app.schemas.tipos import DecimalJSON
 
 
 class MovimientoMetaBase(BaseModel):
     tipo: TipoMovimientoMeta
-    monto: Decimal = Field(..., gt=Decimal("0"), le=Decimal("9999999999999.99"))
+    monto: DecimalJSON = Field(..., gt=Decimal("0"), le=Decimal("9999999999999.99"))
     moneda_movimiento: Moneda
-    cotizacion_usada: Decimal | None = Field(default=None, gt=Decimal("0"), le=Decimal("9999999.9999"))
+    cotizacion_usada: DecimalJSON | None = Field(default=None, gt=Decimal("0"), le=Decimal("9999999.9999"))
     tipo_dolar_usado: str | None = Field(default=None, max_length=30)
     billetera_id: UUID
     fecha: date
@@ -55,9 +56,9 @@ class MovimientoMetaCreate(MovimientoMetaBase):
 
 class MovimientoMetaUpdate(BaseModel):
     tipo: TipoMovimientoMeta | None = None
-    monto: Decimal | None = Field(default=None, gt=Decimal("0"), le=Decimal("9999999999999.99"))
+    monto: DecimalJSON | None = Field(default=None, gt=Decimal("0"), le=Decimal("9999999999999.99"))
     moneda_movimiento: Moneda | None = None
-    cotizacion_usada: Decimal | None = Field(default=None, gt=Decimal("0"), le=Decimal("9999999.9999"))
+    cotizacion_usada: DecimalJSON | None = Field(default=None, gt=Decimal("0"), le=Decimal("9999999.9999"))
     tipo_dolar_usado: str | None = Field(default=None, max_length=30)
     billetera_id: UUID | None = None
     fecha: date | None = None

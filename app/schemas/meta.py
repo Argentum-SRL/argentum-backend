@@ -10,13 +10,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.models.meta import EstadoMeta
 from app.models.usuario import Moneda
 from app.schemas.movimiento_meta import MovimientoMetaRead
+from app.schemas.tipos import DecimalJSON
 
 
 class MetaBase(BaseModel):
     nombre: str = Field(..., min_length=1, max_length=100)
-    monto_objetivo: Decimal = Field(..., gt=Decimal("0"), le=Decimal("9999999999999.99"))
+    monto_objetivo: DecimalJSON = Field(..., gt=Decimal("0"), le=Decimal("9999999999999.99"))
     moneda: Moneda
-    monto_actual: Decimal = Field(default=Decimal("0"), ge=Decimal("0"), le=Decimal("9999999999999.99"))
+    monto_actual: DecimalJSON = Field(default=Decimal("0"), ge=Decimal("0"), le=Decimal("9999999999999.99"))
     fecha_limite: date | None = None
     color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
     nota: str | None = Field(default=None, max_length=1000)
@@ -54,7 +55,7 @@ class MetaCreate(MetaBase):
 
 class MetaUpdate(BaseModel):
     nombre: str | None = Field(default=None, min_length=1, max_length=100)
-    monto_objetivo: Decimal | None = Field(default=None, gt=Decimal("0"), le=Decimal("9999999999999.99"))
+    monto_objetivo: DecimalJSON | None = Field(default=None, gt=Decimal("0"), le=Decimal("9999999999999.99"))
     moneda: Moneda | None = None
     fecha_limite: date | None = None
     color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")

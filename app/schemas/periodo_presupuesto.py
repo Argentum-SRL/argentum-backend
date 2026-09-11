@@ -6,13 +6,15 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from app.schemas.tipos import DecimalJSON
+
 
 class PeriodoPresupuestoBase(BaseModel):
     presupuesto_id: UUID
     fecha_inicio: date
     fecha_fin: date
-    monto_limite: Decimal
-    monto_usado: Decimal = Decimal("0")
+    monto_limite: DecimalJSON
+    monto_usado: DecimalJSON = Decimal("0")
     superado: bool = False
 
 
@@ -23,8 +25,8 @@ class PeriodoPresupuestoCreate(PeriodoPresupuestoBase):
 class PeriodoPresupuestoUpdate(BaseModel):
     fecha_inicio: date | None = None
     fecha_fin: date | None = None
-    monto_limite: Decimal | None = None
-    monto_usado: Decimal | None = None
+    monto_limite: DecimalJSON | None = None
+    monto_usado: DecimalJSON | None = None
     superado: bool | None = None
 
 

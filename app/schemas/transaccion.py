@@ -14,14 +14,15 @@ from app.models.transaccion import (
 )
 from app.models.usuario import Moneda
 from app.schemas.subcategoria import SubcategoriaRead
+from app.schemas.tipos import DecimalJSON
 
 
 class InfoCuotas(BaseModel):
     cantidad_cuotas: int = Field(ge=1, le=120, description="Cantidad total de cuotas (1 a 120)")
     cuota_inicial: int = Field(default=1, ge=1, le=120, description="Número de cuota inicial")
     tiene_interes: bool = False
-    tasa_interes: Decimal | None = Field(default=None, ge=0, le=1000, description="Tasa de interés mensual %")
-    monto_total: Decimal = Field(gt=0, max_digits=15, decimal_places=2, description="Monto base total")
+    tasa_interes: DecimalJSON | None = Field(default=None, ge=0, le=1000, description="Tasa de interés mensual %")
+    monto_total: DecimalJSON = Field(gt=0, max_digits=15, decimal_places=2, description="Monto base total")
     proximo_resumen: bool = False
 
     @model_validator(mode="after")
@@ -37,7 +38,7 @@ class InfoCuotas(BaseModel):
 
 class TransaccionBase(BaseModel):
     tipo: TipoTransaccion
-    monto: Decimal = Field(gt=0, max_digits=15, decimal_places=2, description="Monto mayor a 0")
+    monto: DecimalJSON = Field(gt=0, max_digits=15, decimal_places=2, description="Monto mayor a 0")
     moneda: Moneda
     fecha: date
     descripcion: str = Field(default="", max_length=300)
@@ -56,9 +57,9 @@ class TransaccionBase(BaseModel):
     estado_verificacion: EstadoVerificacionTransaccion | None = None
     pago_resumen_vencimiento: date | None = None
     # Campos de trazabilidad de conversión multimoneda (Etapa 2 y 3C)
-    monto_original: Decimal | None = None
+    monto_original: DecimalJSON | None = None
     moneda_original: Moneda | None = None
-    cotizacion_aplicada: Decimal | None = None
+    cotizacion_aplicada: DecimalJSON | None = None
     tipo_dolar_usado: str | None = None
     pago_origen_id: UUID | None = None
     suscripcion_id: UUID | None = None
@@ -76,7 +77,7 @@ class TransaccionCreate(TransaccionBase):
 
 class TransaccionUpdate(BaseModel):
     tipo: TipoTransaccion | None = None
-    monto: Decimal | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
+    monto: DecimalJSON | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
     moneda: Moneda | None = None
     fecha: date | None = None
     descripcion: str | None = Field(default=None, max_length=300)

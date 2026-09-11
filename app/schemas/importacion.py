@@ -3,6 +3,8 @@ from decimal import Decimal
 from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.tipos import DecimalJSON
+
 
 class ProcesarResumenResponse(BaseModel):
     """Respuesta para el endpoint de procesamiento de resumen."""
@@ -19,7 +21,7 @@ class TransaccionPreview(BaseModel):
     """Estructura de una transacción parseada enriquecida con información de duplicados."""
     fecha: date
     descripcion: str
-    monto: Decimal
+    monto: DecimalJSON
     moneda: str
     cuota_actual: int | None = None
     cuota_total: int | None = None

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.usuario import Moneda
 from app.models.presupuesto import PeriodoPresupuestoTipo, RenovacionPresupuesto
+from app.schemas.tipos import DecimalJSON
 
 
 class PresupuestoCategoriaInput(BaseModel):
@@ -30,7 +31,7 @@ class PresupuestoCategoriaInput(BaseModel):
 
 class PresupuestoCreate(BaseModel):
     nombre: str = Field(..., min_length=1, max_length=100)
-    monto: Decimal = Field(..., gt=0, le=Decimal("999999999999.99"))
+    monto: DecimalJSON = Field(..., gt=0, le=Decimal("999999999999.99"))
     moneda: Moneda
     periodo: PeriodoPresupuestoTipo
     renovacion: RenovacionPresupuesto
@@ -73,7 +74,7 @@ class PresupuestoCreate(BaseModel):
 
 class PresupuestoUpdate(BaseModel):
     nombre: Optional[str] = Field(None, max_length=100)
-    monto: Optional[Decimal] = Field(None, gt=0, le=Decimal("999999999999.99"))
+    monto: Optional[DecimalJSON] = Field(None, gt=0, le=Decimal("999999999999.99"))
     moneda: Optional[Moneda] = None
     periodo: Optional[PeriodoPresupuestoTipo] = None
     renovacion: Optional[RenovacionPresupuesto] = None
@@ -130,14 +131,14 @@ class PeriodoPresupuestoResponse(BaseModel):
     presupuesto_id: UUID
     fecha_inicio: date
     fecha_fin: date
-    monto_limite: Decimal
-    monto_usado: Decimal
+    monto_limite: DecimalJSON
+    monto_usado: DecimalJSON
     superado: bool
     porcentaje_usado: float
     dias_restantes: int
-    monto_propio: Decimal = Decimal("0")
-    monto_convertido: Decimal = Decimal("0")
-    monto_sin_cotizacion: Decimal = Decimal("0")
+    monto_propio: DecimalJSON = Decimal("0")
+    monto_convertido: DecimalJSON = Decimal("0")
+    monto_sin_cotizacion: DecimalJSON = Decimal("0")
     moneda_sin_cotizacion: Optional[str] = None
 
     @model_validator(mode="before")
@@ -159,7 +160,7 @@ class PresupuestoResponse(BaseModel):
     id: UUID
     usuario_id: UUID
     nombre: str
-    monto: Decimal
+    monto: DecimalJSON
     moneda: str
     periodo: str
     renovacion: str

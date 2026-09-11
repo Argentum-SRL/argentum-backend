@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.models.conversacion_wpp import TipoMensajeWpp
+from app.schemas.tipos import DecimalJSON
 
 
 class ConversacionWppBase(BaseModel):
@@ -19,7 +20,7 @@ class ConversacionWppBase(BaseModel):
     intent_detectado: str | None = None
     entidades: dict[str, Any] | None = None
     accion_ejecutada: str | None = None
-    confianza: Decimal | None = None
+    confianza: DecimalJSON | None = None
     slot_filling_activo: bool = False
     slot_filling_estado: dict[str, Any] | None = None
 
@@ -58,7 +59,7 @@ class ConversacionWppUpdate(BaseModel):
     intent_detectado: str | None = None
     entidades: dict[str, Any] | None = None
     accion_ejecutada: str | None = None
-    confianza: Decimal | None = None
+    confianza: DecimalJSON | None = None
     slot_filling_activo: bool | None = None
     slot_filling_estado: dict[str, Any] | None = None
 

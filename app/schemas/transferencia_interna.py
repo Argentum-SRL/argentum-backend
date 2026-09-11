@@ -9,19 +9,20 @@ from dateutil.relativedelta import relativedelta
 
 from app.models.usuario import Moneda
 from app.utils.fecha import hoy_argentina
+from app.schemas.tipos import DecimalJSON
 
 
 class TransferenciaInternaCreate(BaseModel):
     """Schema para crear una transferencia interna. No incluye usuario_id (se obtiene del token de autenticación)."""
     billetera_origen_id: UUID
     billetera_destino_id: UUID
-    monto: Decimal = Field(..., gt=0, decimal_places=2, max_digits=15, description="Monto mayor a 0 con hasta 2 decimales (monto que sale de origen)")
+    monto: DecimalJSON = Field(..., gt=0, decimal_places=2, max_digits=15, description="Monto mayor a 0 con hasta 2 decimales (monto que sale de origen)")
     moneda: Moneda = Field(..., description="Moneda de origen")
-    monto_origen: Decimal | None = Field(default=None, gt=0, decimal_places=2, max_digits=15)
-    monto_destino: Decimal | None = Field(default=None, gt=0, decimal_places=2, max_digits=15, description="Monto que entra a la billetera de destino")
+    monto_origen: DecimalJSON | None = Field(default=None, gt=0, decimal_places=2, max_digits=15)
+    monto_destino: DecimalJSON | None = Field(default=None, gt=0, decimal_places=2, max_digits=15, description="Monto que entra a la billetera de destino")
     moneda_origen: Moneda | None = None
     moneda_destino: Moneda | None = None
-    monto_comision: Decimal | None = Field(default=None, gt=0, decimal_places=2, max_digits=15, description="Comisión opcional de la operación")
+    monto_comision: DecimalJSON | None = Field(default=None, gt=0, decimal_places=2, max_digits=15, description="Comisión opcional de la operación")
     moneda_comision: Moneda | None = None
     fecha: date
     notas: str | None = Field(default=None, max_length=300)
@@ -70,15 +71,15 @@ class TransferenciaInternaRead(BaseModel):
     id: UUID
     billetera_origen_id: UUID
     billetera_destino_id: UUID
-    monto: Decimal
+    monto: DecimalJSON
     moneda: Moneda
-    monto_origen: Decimal | None = None
-    monto_destino: Decimal | None = None
+    monto_origen: DecimalJSON | None = None
+    monto_destino: DecimalJSON | None = None
     moneda_origen: Moneda | None = None
     moneda_destino: Moneda | None = None
-    cotizacion: Decimal | None = None
+    cotizacion: DecimalJSON | None = None
     transaccion_comision_id: UUID | None = None
-    monto_comision: Decimal | None = None
+    monto_comision: DecimalJSON | None = None
     moneda_comision: Moneda | None = None
     fecha: date
     notas: str | None
@@ -91,14 +92,14 @@ class TransferenciaInternaUpdate(BaseModel):
     """Schema para actualizar una transferencia (actualmente no se usa, pero se mantiene para futuras extensiones)."""
     billetera_origen_id: UUID | None = None
     billetera_destino_id: UUID | None = None
-    monto: Decimal | None = Field(default=None, gt=0, decimal_places=2, max_digits=15)
+    monto: DecimalJSON | None = Field(default=None, gt=0, decimal_places=2, max_digits=15)
     moneda: Moneda | None = None
-    monto_origen: Decimal | None = Field(default=None, gt=0, decimal_places=2, max_digits=15)
-    monto_destino: Decimal | None = Field(default=None, gt=0, decimal_places=2, max_digits=15)
+    monto_origen: DecimalJSON | None = Field(default=None, gt=0, decimal_places=2, max_digits=15)
+    monto_destino: DecimalJSON | None = Field(default=None, gt=0, decimal_places=2, max_digits=15)
     moneda_origen: Moneda | None = None
     moneda_destino: Moneda | None = None
-    cotizacion: Decimal | None = None
-    monto_comision: Decimal | None = Field(default=None, gt=0, decimal_places=2, max_digits=15)
+    cotizacion: DecimalJSON | None = None
+    monto_comision: DecimalJSON | None = Field(default=None, gt=0, decimal_places=2, max_digits=15)
     moneda_comision: Moneda | None = None
     fecha: date | None = None
     notas: str | None = Field(default=None, max_length=300)

@@ -5,9 +5,11 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing import List, Optional
 
+from app.schemas.tipos import DecimalJSON
+
 class HistorialSuscripcionResponse(BaseModel):
     id: UUID
-    monto: Decimal
+    monto: DecimalJSON
     moneda: str
     vigente_desde: date
     fecha_creacion: datetime
@@ -34,7 +36,7 @@ class SuscripcionBase(BaseModel):
         return s
 
 class SuscripcionCreate(SuscripcionBase):
-    monto: Decimal = Field(..., gt=0, max_digits=15, decimal_places=2)
+    monto: DecimalJSON = Field(..., gt=0, max_digits=15, decimal_places=2)
     moneda: str = Field(default='ARS', pattern="^(ARS|USD)$")
     vigente_desde: Optional[date] = None
 
@@ -62,7 +64,7 @@ class SuscripcionUpdate(BaseModel):
     billetera_id: Optional[UUID] = None
     tarjeta_id: Optional[UUID] = None
     estado: Optional[str] = Field(None, pattern="^(activa|pausada|cancelada)$")
-    monto: Optional[Decimal] = Field(None, gt=0, max_digits=15, decimal_places=2)
+    monto: Optional[DecimalJSON] = Field(None, gt=0, max_digits=15, decimal_places=2)
     moneda: Optional[str] = Field(None, pattern="^(ARS|USD)$")
     vigente_desde: Optional[date] = None
 
@@ -95,7 +97,7 @@ class SuscripcionUpdate(BaseModel):
         return self
 
 class ActualizarPrecioRequest(BaseModel):
-    monto: Decimal = Field(..., gt=0, max_digits=15, decimal_places=2)
+    monto: DecimalJSON = Field(..., gt=0, max_digits=15, decimal_places=2)
     moneda: str = Field(..., pattern="^(ARS|USD)$")
     vigente_desde: date
 
@@ -115,10 +117,10 @@ class SuscripcionResponse(SuscripcionBase):
     fecha_creacion: datetime
     precio_actual: Optional[HistorialSuscripcionResponse] = None
     historial_precios: List[HistorialSuscripcionResponse] = []
-    costo_mensual_equivalente: Optional[Decimal] = None
+    costo_mensual_equivalente: Optional[DecimalJSON] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 class TotalMensualResponse(BaseModel):
-    total_ars: Decimal
-    total_usd: Decimal
+    total_ars: DecimalJSON
+    total_usd: DecimalJSON
