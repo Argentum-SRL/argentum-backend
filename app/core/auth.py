@@ -42,25 +42,29 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 
-def _refresh_secret_hash(secret: str) -> str:
+def _refresh_verifier_hash(verifier: str) -> str:
     return hmac.new(
         settings.SECRET_KEY.encode("utf-8"),
-        secret.encode("utf-8"),
+        verifier.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
+
+
+# Alias para retrocompatibilidad
+_refresh_secret_hash = _refresh_verifier_hash
 
 
 def _parse_refresh_token(refresh_token_plain: str) -> tuple[str | None, str | None]:
     if "." not in refresh_token_plain:
         return None, None
-    token_id, secret = refresh_token_plain.split(".", 1)
-    if not token_id or not secret:
+    token_id, verifier = refresh_token_plain.split(".", 1)
+    if not token_id or not verifier:
         return None, None
-    return token_id, secret
+    return token_id, verifier
 
 
-def _refresh_token_matches(secret: str, token_hash: str) -> bool:
-    return hmac.compare_digest(_refresh_secret_hash(secret), token_hash)
+def _refresh_token_matches(verifier: str, token_hash: str) -> bool:
+    return hmac.compare_digest(_refresh_verifier_hash(verifier), token_hash)
 
 
 # ---------------------------------------------------------------------------
@@ -107,10 +111,10 @@ def crear_refresh_token(
     hacer_commit: bool = True,
 ) -> str:
     token_id = secrets.token_urlsafe(16)
-    token_secret = secrets.token_urlsafe(48)
+    token_verifier = secrets.token_urlsafe(48)
 
-    token_plain = f"{token_id}.{token_secret}"
-    token_hash = _refresh_secret_hash(token_secret)
+    token_plain = f"{token_id}.{token_verifier}"
+    token_hash = _refresh_verifier_hash(token_verifier)
 
     expiracion = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
@@ -132,9 +136,9 @@ def crear_refresh_token(
 
 def _buscar_refresh_token(token_plain: str, db: Session) -> RefreshToken:
     ahora = datetime.now(timezone.utc)
-    token_id, secret = _parse_refresh_token(token_plain)
+    token_id, verifier = _parse_refresh_token(token_plain)
 
-    if not token_id or not secret:
+    if not token_id or not verifier:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token inválido",
@@ -148,7 +152,7 @@ def _buscar_refresh_token(token_plain: str, db: Session) -> RefreshToken:
         )
     ).scalar_one_or_none()
 
-    if rt and _refresh_token_matches(secret, rt.token_hash):
+    if rt and _refresh_token_matches(verifier, rt.token_hash):
         usuario = db.execute(select(Usuario).where(Usuario.id == rt.usuario_id)).scalar_one_or_none()
         if usuario and usuario.tokens_revocados_at and rt.fecha_creacion < usuario.tokens_revocados_at:
             rt.revocado = True
@@ -193,9 +197,9 @@ def renovar_tokens(
 
 def revocar_refresh_token(token_plain: str, db: Session) -> None:
     ahora = datetime.now(timezone.utc)
-    token_id, secret = _parse_refresh_token(token_plain)
+    token_id, verifier = _parse_refresh_token(token_plain)
 
-    if not token_id or not secret:
+    if not token_id or not verifier:
         return
 
     rt = db.execute(
@@ -206,7 +210,7 @@ def revocar_refresh_token(token_plain: str, db: Session) -> None:
         )
     ).scalar_one_or_none()
 
-    if rt and _refresh_token_matches(secret, rt.token_hash):
+    if rt and _refresh_token_matches(verifier, rt.token_hash):
         rt.revocado = True
         db.commit()
 

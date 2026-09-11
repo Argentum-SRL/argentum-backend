@@ -475,16 +475,22 @@ def verificar_email_link(email: str, codigo: str, request: Request, db: Session 
     email_clean = email.strip().lower()
     ok, error = verificar_codigo_email(email_clean, codigo.strip())
     if not ok:
-        error_msg = urllib.parse.quote(error or "Este enlace de verificación no es válido o expiró.")
+        query_params = urllib.parse.urlencode({
+            "email": email_clean,
+            "error": error or "Este enlace de verificación no es válido o expiró.",
+        })
         return RedirectResponse(
-            url=f"{settings.FRONTEND_URL}/auth/verificar-email?email={email_clean}&error={error_msg}"
+            url=f"{settings.FRONTEND_URL}/auth/verificar-email?" + query_params
         )
 
     user = db.execute(select(Usuario).where(Usuario.email.ilike(email_clean))).scalar_one_or_none()
     if not user:
-        error_msg = urllib.parse.quote("No encontramos una cuenta con esos datos.")
+        query_params = urllib.parse.urlencode({
+            "email": email_clean,
+            "error": "No encontramos una cuenta con esos datos.",
+        })
         return RedirectResponse(
-            url=f"{settings.FRONTEND_URL}/auth/verificar-email?email={email_clean}&error={error_msg}"
+            url=f"{settings.FRONTEND_URL}/auth/verificar-email?" + query_params
         )
 
     user.email_verificado = True
@@ -497,7 +503,11 @@ def verificar_email_link(email: str, codigo: str, request: Request, db: Session 
     if not user.telefono_verificado:
         target_url = f"{settings.FRONTEND_URL}/auth/verificar-telefono?modoVerificacion=true"
     else:
-        target_url = f"{settings.FRONTEND_URL}/auth/verificar-email?email={user.email}&verificado=true"
+        query_params = urllib.parse.urlencode({
+            "email": user.email,
+            "verificado": "true",
+        })
+        target_url = f"{settings.FRONTEND_URL}/auth/verificar-email?" + query_params
 
     redirect_resp = RedirectResponse(url=target_url, status_code=303)
     setear_cookies_auth(redirect_resp, access, refresh, settings)

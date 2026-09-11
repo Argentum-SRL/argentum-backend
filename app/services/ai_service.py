@@ -45,7 +45,7 @@ def extraer_concepto_mensaje(mensaje: str | None, tipo: str = "egreso") -> str:
     texto = mensaje.strip()
     # Quitar signos monetarios y números
     texto = re.sub(r"[\$€£]\s*[\d\.,]+", "", texto)
-    texto = re.sub(r"\b\d+[\.,]?\d*\b", "", texto)
+    texto = re.sub(r"\b\d+(?:[\.,]\d+)?\b", "", texto)
     texto = re.sub(r"\b(k|lucas?|palos?)\b", "", texto, flags=re.IGNORECASE)
 
     # Quitar menciones de billeteras y métodos de pago
@@ -82,7 +82,7 @@ def sanitizar_descripcion(desc: str | None, mensaje_original: str | None = None,
         limpio = desc.strip(" \"'.,")
         # Quitar montos tipo $5000 o 5000 que se hayan colado
         limpio = re.sub(r"[\$€£]\s*[\d\.,]+", "", limpio)
-        limpio = re.sub(r"\b\d+[\.,]?\d*\b", "", limpio)
+        limpio = re.sub(r"\b\d+(?:[\.,]\d+)?\b", "", limpio)
         limpio = re.sub(r"\s+", " ", limpio).strip(" ,.-")
         limpio = re.sub(r"^(?:el|la|los|las|un|una|unos|unas)\s+", "", limpio, flags=re.IGNORECASE).strip()
         if len(limpio) >= 2:
