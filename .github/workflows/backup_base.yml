@@ -175,8 +175,8 @@ jobs:
               print(f"ERROR CRÍTICO: Faltan tablas en la restauración: {missing_tables}")
               sys.exit(1)
 
-          print(f"{'TABLA':<35} | {'PRODUCCIÓN':<12} | {'RESTAURADA':<12} | {'ESTADO'}")
-          print("-" * 75)
+          print(f"{'TABLA':<35} | {'ESTADO DE CONSISTENCIA'}")
+          print("-" * 65)
 
           has_error = False
           for table in prod_tables:
@@ -186,24 +186,24 @@ jobs:
               
               if table == "usuarios":
                   if c_prod != c_test:
-                      status = f"ERROR (mismatch usuarios: {c_prod} vs {c_test})"
+                      status = "ERROR (mismatch en tabla usuarios)"
                       has_error = True
                   else:
-                      status = "OK"
+                      status = "OK (exact match)"
               elif table == "transacciones":
                   if c_prod != c_test:
-                      status = f"DIFERENCIA ({c_prod} vs {c_test} - concurrencia permitida)"
+                      status = "DIFERENCIA ACEPTADA (concurrencia en transacciones)"
                   else:
-                      status = "OK"
+                      status = "OK (exact match)"
               else:
                   if c_prod != c_test:
-                      status = f"DIFERENCIA ({c_prod} vs {c_test})"
+                      status = "DIFERENCIA (concurrencia durante dump)"
                   else:
-                      status = "OK"
+                      status = "OK (exact match)"
                       
-              print(f"{table:<35} | {c_prod:<12} | {c_test:<12} | {status}")
+              print(f"{table:<35} | {status}")
 
-          print("-" * 75)
+          print("-" * 65)
 
           if has_error:
               print("\nERROR CRÍTICO: No coincide la cantidad de usuarios entre producción y la restauración.")
@@ -232,10 +232,10 @@ jobs:
           ls -lh "$ENCRYPTED_FILE"
           du -h "$ENCRYPTED_FILE"
 
-      - name: Subir backup cifrado como artifact
+      - name: Subir backup cifrado como artifact (retención mínima de 3 días)
         uses: actions/upload-artifact@v4
         with:
           name: argentum-db-backup-${{ env.BACKUP_DATE }}
           path: ${{ env.ENCRYPTED_FILE }}
-          retention-days: 30
+          retention-days: 3
           if-no-files-found: error

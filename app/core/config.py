@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     WHATSAPP_BUSINESS_ACCOUNT_ID: str = ""
     WHATSAPP_APP_SECRET: str = ""
     WHATSAPP_VERIFY_TOKEN: str = ""
+    WHATSAPP_BOT_NUMBER: str = ""
 
     # Google
     GOOGLE_CLIENT_ID: str = ""

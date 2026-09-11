@@ -34,8 +34,8 @@ N° de Socio 099-0123456-0-1
 CONSUMIDOR FINAL
 Vencimiento actual : 03-Jun-26
 Debitaremos de su c.ahorro 4455667788 el importe
-DNI 12.345.678
-JUAN PEREZ
+DNI 23.456.789
+MARIA LOPEZ
 """
     texto_sanitizado = sanitizar_texto_pdf(texto_simulado)
     
@@ -44,11 +44,11 @@ JUAN PEREZ
     assert "30-71234567-9" not in texto_sanitizado
     assert "099-0123456-0-1" not in texto_sanitizado
     assert "4455667788" not in texto_sanitizado
-    assert "12.345.678" not in texto_sanitizado
+    assert "23.456.789" not in texto_sanitizado
     
     # Verificar que preserva nombres e información funcional
     assert "GOMEZ CARLOS" in texto_sanitizado
-    assert "JUAN PEREZ" in texto_sanitizado
+    assert "MARIA LOPEZ" in texto_sanitizado
     assert "MASTERCARD BLACK" in texto_sanitizado
 
 
@@ -82,7 +82,7 @@ CUIT Entidad 30-71234567-9
 01425 CAPITAL FEDERAL MASTERCARD BLACK
 N° de Socio 099-0123456-0-1
 05-May-26 PAGO CAJERO/INTERNET -150000,00
-13-May-26 MOD*TIENDABNA 01/24 09555 70445,86
+13-May-26 ELECTRO TIENDA 01/24 09555 70445,86
 19-May-26 COMPRA EN USD -10,00
 21-May-26 IMPUESTO DE SELLOS 1.270,91
 """
@@ -91,7 +91,7 @@ N° de Socio 099-0123456-0-1
         "transacciones": [
             {
                 "fecha": "2026-05-13",
-                "descripcion": "MOD*TIENDABNA",
+                "descripcion": "ELECTRO TIENDA",
                 "monto": 70445.86,
                 "moneda": "ARS",
                 "cuota_actual": 1,
@@ -167,7 +167,7 @@ N° de Socio 099-0123456-0-1
         assert len(res.transacciones) == 3
         
         # Cuota
-        t_cuota = next(t for t in res.transacciones if t.descripcion == "MOD*TIENDABNA")
+        t_cuota = next(t for t in res.transacciones if t.descripcion == "ELECTRO TIENDA")
         assert t_cuota.monto == Decimal("70445.86")
         assert t_cuota.cuota_actual == 1
         assert t_cuota.cuota_total == 24

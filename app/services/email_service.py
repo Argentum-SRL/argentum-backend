@@ -71,8 +71,8 @@ def _obtener_nombre_usuario(email: str) -> str:
 
 def _enviar_email(destinatario: str, asunto: str, cuerpo: str, cuerpo_html: str = None) -> bool:
     if not settings.RESEND_API_KEY:
-        logger.warning("⚠️ RESEND_API_KEY no configurada — email para %s: %s", destinatario, cuerpo)
-        logger.info("EMAIL (modo desarrollo) para=%s asunto=%s cuerpo=%s", destinatario, asunto, cuerpo)
+        logger.warning("⚠️ RESEND_API_KEY no configurada — email simulado para %s con asunto: '%s'", destinatario, asunto)
+        logger.debug("EMAIL (modo desarrollo) para=%s asunto=%s", destinatario, asunto)
         return True
 
     payload = {

@@ -217,10 +217,13 @@ def verificar_antiguedad_grabaciones(dir_grabaciones: str, prompt_file: str) -> 
 
 
 def verificar_grabaciones_sin_datos_personales(dir_grabaciones: str) -> tuple[bool, list[str]]:
-    patrones_prohibidos = [
-        "angie", "sintetico2", "usuario5", "manuel", "albano", "pavia",
-        "usuario4", "formoso"
-    ]
+    patrones_env = os.environ.get("WPP_PATRONES_PROHIBIDOS")
+    if patrones_env:
+        patrones_prohibidos = [p.strip().lower() for p in patrones_env.split(",") if p.strip()]
+    else:
+        patrones_prohibidos = [
+            "password", "secret", "token", "tarjeta", "dni", "cuit", "cvu", "cbu"
+        ]
     hallazgos = []
     if not os.path.exists(dir_grabaciones):
         return True, []
@@ -351,12 +354,13 @@ def obtener_saldos_21(db: Session):
 
 # Baseline documentado de diferencias aceptadas en reconciliación.
 # Proviene del alta histórica de datos (junio 2026), donde las billeteras
-# Galicia de usuario5 tienen saldo_inicial en 0
+# Galicia del usuario de pruebas tienen saldo_inicial en 0
 # pero sus movimientos bancarios acumulados difieren en -$800.941 respecto al saldo guardado.
 # (testingadmin@argentum.com reconcilia con diff=0.00 tras el enriquecimiento histórico del 2026-09-05).
 # La suite fallará si aparece una diferencia NUEVA o si alguna de estas cambia.
+_reconciliacion_baseline_email = os.environ.get("RECONCILIACION_BASELINE_EMAIL", "usuario5@argentum.test")
 DIFERENCIAS_RECONCILIACION_BASELINE = {
-    ("usuario5@argentum.test", "Galicia"): Decimal("-800941.00"),
+    (_reconciliacion_baseline_email, "Galicia"): Decimal("-800941.00"),
 }
 
 def verificar_reconciliacion_billeteras(db: Session):

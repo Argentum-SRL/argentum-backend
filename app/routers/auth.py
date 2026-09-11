@@ -697,7 +697,7 @@ def solicitar_codigo_vinculacion(
         )
 
     codigo, expiracion_ts = whatsapp_service.generar_codigo_vinculacion(current_user.id)
-    numero_bot = getattr(settings, "WHATSAPP_BOT_NUMBER", None) or "5491100000000"
+    numero_bot = settings.WHATSAPP_BOT_NUMBER or "5491100000000"
     texto_precargado = f"Hola, quiero vincular mi cuenta de Argentum. Codigo: {codigo}"
     link_whatsapp = f"https://wa.me/{numero_bot}?text={quote(texto_precargado)}"
     expiracion_dt = datetime.fromtimestamp(expiracion_ts, tz=timezone.utc)

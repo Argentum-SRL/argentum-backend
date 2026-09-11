@@ -31,15 +31,19 @@ def run_verificaciones():
         print(f"FastAPI app instancia cargada exitosamente: {app.title} v{app.version}")
 
         # 5.4 Dashboard de los 6 usuarios
-        print("\n=== 5.4 DASHBOARD DE LOS 6 USUARIOS ===")
-        emails = [
-            "usuario5@argentum.test",
-            "usuario2@argentum.test",
-            "usuario4@argentum.test",
-            "usuario1@argentum.test",
-            "usuario7@argentum.test",
-            "testingadmin@argentum.com",
-        ]
+        print("\n=== 5.4 DASHBOARD DE LOS USUARIOS ===")
+        emails_env = os.environ.get("VERIFICAR_EMAILS")
+        if emails_env:
+            emails = [e.strip() for e in emails_env.split(",") if e.strip()]
+        else:
+            emails = [
+                "usuario1@argentum.test",
+                "usuario2@argentum.test",
+                "usuario3@argentum.test",
+                "usuario4@argentum.test",
+                "usuario5@argentum.test",
+                "testingadmin@argentum.test",
+            ]
         for email in emails:
             u = db.query(Usuario).filter(Usuario.email == email).first()
             if not u:

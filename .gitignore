@@ -1,10 +1,51 @@
+# Environment variables and secrets
 .env
+.env.*
+*.env
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cert
+
+# Database dumps, backups and exports
+*.sql
+*.dump
+*.backup
+*.bak
+backups/
+scripts/backups/
+*.sqlite
+*.sqlite3
+*.db
+
+# Logs and runtime artifacts
+*.log
+logs/
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Python virtualenv and cache
 venv/
+.venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Operating system and IDE
 .DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Media and fixtures
 media/
 tests/fixtures/*.pdf
-gitleaks-*.json
+tests/fixtures/*.csv
+tests/fixtures/*.xlsx
 scratch/
-scripts/backups/
+gitleaks-*.json
+

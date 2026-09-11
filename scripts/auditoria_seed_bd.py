@@ -182,15 +182,19 @@ def main():
     # SECCIÓN A: CANARIO
     # --------------------------------------------------------------------------
     log("=== SECCIÓN A: CANARIO DE USUARIOS ===")
-    usuarios_esperados = {
-        "usuario1@argentum.test",
-        "usuario2@argentum.test",
-        "usuario3@argentum.test",
-        "usuario4@argentum.test",
-        "usuario5@argentum.test",
-        "usuario6@argentum.test",
-        "testingadmin@argentum.com",
-    }
+    canario_env = os.environ.get("CANARIO_USUARIOS_EMAILS")
+    if canario_env:
+        usuarios_esperados = {e.strip() for e in canario_env.split(",") if e.strip()}
+    else:
+        usuarios_esperados = {
+            "usuario1@argentum.test",
+            "usuario2@argentum.test",
+            "usuario3@argentum.test",
+            "usuario4@argentum.test",
+            "usuario5@argentum.test",
+            "usuario6@argentum.test",
+            "testingadmin@argentum.test",
+        }
     try:
         with session_scope() as db:
             users = db.execute(select(Usuario).order_by(Usuario.email)).scalars().all()

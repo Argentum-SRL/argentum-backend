@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.database import get_db
+from app.core.limiter import limiter
 from app.models.usuario import Usuario
 from app.schemas.tools import InstallmentConvenienceRequest, CanAffordRequest, CanAffordResponse, FinancialContextResponse
 from app.services import tools_service
@@ -40,7 +41,9 @@ def get_current_ipc_endpoint(
 
 
 @router.post("/installment-convenience")
+@limiter.limit("30/minute")
 def calculate_convenience_endpoint(
+    request: Request,
     body: InstallmentConvenienceRequest,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
@@ -71,7 +74,9 @@ def get_financial_context_endpoint(
 
 
 @router.post("/can-afford", response_model=CanAffordResponse)
+@limiter.limit("30/minute")
 def can_afford_endpoint(
+    request: Request,
     body: CanAffordRequest,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
