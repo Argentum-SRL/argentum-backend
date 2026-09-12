@@ -211,6 +211,62 @@ def _buscar_grupo_cuotas(
     return None
 
 
+def _buscar_grupo_cuotas_por_estructura(
+    db: Session,
+    usuario_id: any,
+    tarjeta_id: any,
+    cantidad_cuotas: int,
+    cuota_actual: int,
+    monto: Decimal
+) -> GrupoCuotas | None:
+    """
+    Busca un grupo de cuotas existente mediante coincidencia estructural unívoca.
+    
+    Criterio de búsqueda:
+        - Mismo usuario (usuario_id)
+        - Misma tarjeta (tarjeta_id)
+        - Misma cantidad total de cuotas (cantidad_cuotas)
+        - Grupo en estado ACTIVO
+        - Contiene una Cuota con:
+            - numero_cuota == cuota_actual importada
+            - pagada == False
+            - monto_proyectado dentro de un 5% de tolerancia respecto al monto importado
+            
+    Regla de decisión:
+        - Si la búsqueda arroja exactamente UN grupo candidato, se retorna dicho grupo para su vinculación.
+        - Si arroja cero o más de un candidato (ambigüedad), retorna None para permitir el fallback
+          al comportamiento por descripción y evitar vincular arbitrariamente entre compras similares.
+    """
+    u_id = PyUUID(usuario_id) if isinstance(usuario_id, str) else usuario_id
+    t_id = PyUUID(tarjeta_id) if isinstance(tarjeta_id, str) else tarjeta_id
+
+    monto_abs = abs(Decimal(str(monto)))
+    tolerancia = monto_abs * Decimal("0.05")
+    monto_min = monto_abs - tolerancia
+    monto_max = monto_abs + tolerancia
+
+    stmt = (
+        select(GrupoCuotas)
+        .join(Cuota, Cuota.grupo_id == GrupoCuotas.id)
+        .where(
+            GrupoCuotas.usuario_id == u_id,
+            GrupoCuotas.tarjeta_id == t_id,
+            GrupoCuotas.cantidad_cuotas == cantidad_cuotas,
+            GrupoCuotas.estado == EstadoGrupoCuotas.ACTIVO,
+            Cuota.numero_cuota == cuota_actual,
+            Cuota.pagada == False,
+            Cuota.monto_proyectado >= monto_min,
+            Cuota.monto_proyectado <= monto_max
+        )
+    )
+    candidatos = db.execute(stmt).scalars().unique().all()
+
+    if len(candidatos) == 1:
+        return candidatos[0]
+
+    return None
+
+
 def importar_transacciones_resumen(
     db: Session,
     usuario_id: any,
@@ -486,14 +542,25 @@ def importar_transacciones_resumen(
                 else:
                     total_cuotas = cruda.cuota_total if cruda.cuota_total else cruda.cuota_actual
                     
-                    # Buscar si ya existe el plan de financiamiento cargado anteriormente
-                    grupo_existente = _buscar_grupo_cuotas(
+                    # 1. Búsqueda por estructura unívoca previa a la de descripción
+                    grupo_existente = _buscar_grupo_cuotas_por_estructura(
                         db=db,
                         usuario_id=u_id,
                         tarjeta_id=t_id,
-                        descripcion=cruda.descripcion,
-                        cantidad_cuotas=total_cuotas
+                        cantidad_cuotas=total_cuotas,
+                        cuota_actual=cruda.cuota_actual,
+                        monto=monto_round
                     )
+
+                    # 2. Si no hubo match único por estructura (0 o >1), caer a búsqueda por descripción
+                    if not grupo_existente:
+                        grupo_existente = _buscar_grupo_cuotas(
+                            db=db,
+                            usuario_id=u_id,
+                            tarjeta_id=t_id,
+                            descripcion=cruda.descripcion,
+                            cantidad_cuotas=total_cuotas
+                        )
                     
                     if grupo_existente:
                         # Si existe, buscamos la cuota que corresponde a la cuota actual en el resumen
