@@ -1763,10 +1763,51 @@ def _registrar_item_batch(
     return tx, None
 
 
+def _entidades_completas(entidades: dict | None) -> bool:
+    """
+    Evalúa si un diccionario de entidades contiene todos los datos requeridos
+    para registrar la transacción directamente sin necesidad de recurrir a conv_previa.
+    """
+    if not entidades or not isinstance(entidades, dict):
+        return False
+    monto = entidades.get("monto")
+    if monto is None:
+        return False
+    try:
+        if Decimal(str(monto)) <= 0:
+            return False
+    except Exception:
+        return False
+
+    tiene_billetera = bool(
+        entidades.get("billetera")
+        or entidades.get("billetera_origen")
+        or entidades.get("billetera_destino")
+        or entidades.get("tarjeta_id")
+        or entidades.get("tarjeta")
+    )
+    if not tiene_billetera:
+        return False
+
+    datos_faltantes = entidades.get("datos_faltantes") or []
+    for df in datos_faltantes:
+        if df in ("billetera_origen", "billetera") and not (entidades.get("billetera_origen") or entidades.get("billetera")):
+            return False
+        if df in ("billetera_destino", "billetera") and not (entidades.get("billetera_destino") or entidades.get("billetera")):
+            return False
+        if df == "monto" and entidades.get("monto") is None:
+            return False
+        if df in ("tarjeta", "tarjeta_id") and not (entidades.get("tarjeta") or entidades.get("tarjeta_id")):
+            return False
+
+    return True
+
+
 def _confirmar_propuesta_transaccion(
     usuario: Usuario,
     db: Session,
     propuesta_id: UUID | None = None,
+    entidades_actuales: dict | None = None,
 ) -> tuple[Transaccion | None, str, bool]:
     """
     Ejecuta la confirmación de una propuesta pendiente con bloqueo de fila estricto (with_for_update).
@@ -1841,7 +1882,10 @@ def _confirmar_propuesta_transaccion(
 
         return tx_pend, msg_resp, False
 
-    # 2. Buscar conversación previa con datos de transacción pendiente con BLOQUEO DE FILA ESTRICTO
+    # 2. Determinar si las entidades del turno actual vienen completas
+    usar_entidades_actuales = _entidades_completas(entidades_actuales)
+
+    # 3. Buscar conversación previa con datos de transacción pendiente con BLOQUEO DE FILA ESTRICTO
     stmt_conv = (
         select(ConversacionWpp)
         .where(
@@ -1860,7 +1904,7 @@ def _confirmar_propuesta_transaccion(
         stmt_conv.order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc()).with_for_update()
     ).scalars().first()
 
-    if not conv_previa:
+    if not conv_previa and not usar_entidades_actuales:
         # Verificar si la propuesta acaba de ser ejecutada por otra llamada concurrente
         limite_reciente = datetime.now(timezone.utc) - timedelta(minutes=10)
         candidatas = db.execute(
@@ -1891,7 +1935,11 @@ def _confirmar_propuesta_transaccion(
         else:
             return None, "No tenés ninguna operación pendiente para confirmar.", False
 
-    entidades = conv_previa.entidades or {}
+    if usar_entidades_actuales:
+        entidades = dict(entidades_actuales)  # type: ignore
+    else:
+        entidades = conv_previa.entidades or {} if conv_previa else {}
+
     monto = entidades.get("monto")
     if monto is None:
         return None, "No pude procesar la operación.", False
@@ -1918,7 +1966,7 @@ def _confirmar_propuesta_transaccion(
             billeteras_todas,
             tarjetas_todas,
             db,
-            mensaje_original=conv_previa.mensaje_usuario,
+            mensaje_original=conv_previa.mensaje_usuario if conv_previa else None,
         )
         if tx_0:
             txs_registradas.append(tx_0)
@@ -1934,7 +1982,7 @@ def _confirmar_propuesta_transaccion(
                     billeteras_todas,
                     tarjetas_todas,
                     db,
-                    mensaje_original=conv_previa.mensaje_usuario,
+                    mensaje_original=conv_previa.mensaje_usuario if conv_previa else None,
                 )
                 if tx_ad:
                     txs_registradas.append(tx_ad)
@@ -1945,7 +1993,8 @@ def _confirmar_propuesta_transaccion(
         if not txs_registradas:
             return None, "No se pudo registrar ningún movimiento.", False
 
-        conv_previa.accion_ejecutada = f"lote:{','.join(str(t.id) for t in txs_registradas)}"
+        if conv_previa:
+            conv_previa.accion_ejecutada = f"lote:{','.join(str(t.id) for t in txs_registradas)}"
         emitir_evento_actualizacion(db, usuario.id, "transacciones")
         emitir_evento_actualizacion(db, usuario.id, "billeteras")
         if any(t.metodo_pago == MetodoPago.CREDITO for t in txs_registradas):
@@ -2032,7 +2081,8 @@ def _confirmar_propuesta_transaccion(
             if b_chk and b_chk.saldo_actual < 0:
                 msg_resp += f"\nLa billetera quedó en negativo."
 
-        conv_previa.accion_ejecutada = f"lote:{','.join(str(t.id) for t in txs_registradas)}"
+        if conv_previa:
+            conv_previa.accion_ejecutada = f"lote:{','.join(str(t.id) for t in txs_registradas)}"
         emitir_evento_actualizacion(db, usuario.id, "transacciones")
         emitir_evento_actualizacion(db, usuario.id, "billeteras")
         db.commit()
@@ -2093,7 +2143,8 @@ def _confirmar_propuesta_transaccion(
             commit=False,
         )
 
-        conv_previa.accion_ejecutada = str(transaccion.id)
+        if conv_previa:
+            conv_previa.accion_ejecutada = str(transaccion.id)
         emitir_evento_actualizacion(db, usuario.id, "transacciones")
         emitir_evento_actualizacion(db, usuario.id, "tarjetas")
         db.commit()
@@ -2174,6 +2225,7 @@ def _confirmar_propuesta_transaccion(
         es_padre_cuotas=False,
     )
     db.add(transaccion)
+    db.flush()
 
     if transaccion.tipo == TipoTransaccion.INGRESO:
         billetera.saldo_actual += monto_decimal
@@ -2193,7 +2245,8 @@ def _confirmar_propuesta_transaccion(
                     descartadas.append(motivo)
 
     # Marcar la conversación previa como ejecutada
-    conv_previa.accion_ejecutada = str(transaccion.id)
+    if conv_previa:
+        conv_previa.accion_ejecutada = str(transaccion.id)
     emitir_evento_actualizacion(db, usuario.id, "transacciones")
     emitir_evento_actualizacion(db, usuario.id, "billeteras")
     db.flush()
@@ -2226,7 +2279,7 @@ def _confirmar_propuesta_transaccion(
         if transaccion.subcategoria_id:
             subcat = db.execute(select(Subcategoria).where(Subcategoria.id == transaccion.subcategoria_id)).scalars().first()
             subcat_nombre = subcat.nombre if subcat else None
-        nombre_categoria_display = subcat_nombre or cat_nombre or "Otros"
+        nombre_categoria_display = subcat_nombre or cat_nombre or _nombre_corto_categoria(entidades.get("categoria")) or "Otros"
 
         fecha_nat = _formatear_fecha_natural(transaccion.fecha)
         fecha_disp = f" ({fecha_nat})" if fecha_nat else ""
@@ -4327,7 +4380,9 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                     return str(tx.id)
                 return None
 
-            tx, msg_resp, ya_conf = _confirmar_propuesta_transaccion(usuario, db)
+            tx, msg_resp, ya_conf = _confirmar_propuesta_transaccion(
+                usuario, db, entidades_actuales=resultado_ia.get("entidades")
+            )
             resultado_ia["_mensaje_confirmacion_directo"] = msg_resp
             if tx:
                 return str(tx.id)
