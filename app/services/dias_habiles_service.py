@@ -244,7 +244,7 @@ async def asegurar_feriados_cargados() -> None:
     y año actual + 1 estén persistidos y en cache.
     """
     hoy = hoy_argentina()
-    anios = [hoy.year, hoy.year + 1]
+    anios = [hoy.year - 1, hoy.year, hoy.year + 1]
 
     for anio in anios:
         try:

@@ -711,7 +711,7 @@ async def lifespan(app: FastAPI):
     from app.services.dias_habiles_service import obtener_feriados_argentina
     from app.utils.fecha import hoy_argentina
     anio_actual = hoy_argentina().year
-    for anio in (anio_actual, anio_actual + 1):
+    for anio in (anio_actual - 1, anio_actual, anio_actual + 1):
         try:
             feriados = await obtener_feriados_argentina(anio)
             if not feriados:

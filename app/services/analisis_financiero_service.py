@@ -287,9 +287,12 @@ def calcular_perfil_nuevo(db: Session, usuario: Usuario, data: dict[str, Any] | 
 
     # Runway / Cobertura líquida (Pilar Ahorrar)
     from app.models.billetera import Billetera
+    from app.models.meta import Meta
     saldo_ars = sum((b.saldo_actual for b in db.execute(select(Billetera).where(Billetera.usuario_id == usuario.id, Billetera.moneda == Moneda.ARS)).scalars()), ZERO)
+    saldo_metas_ars = sum((m.monto_actual for m in db.execute(select(Meta).where(Meta.usuario_id == usuario.id, Meta.moneda == Moneda.ARS)).scalars()), ZERO)
+    saldo_runway_ars = saldo_ars + saldo_metas_ars
     if datos_suficientes and gasto_tipico and gasto_tipico > ZERO:
-        runway = max(ZERO, saldo_ars / gasto_tipico)
+        runway = max(ZERO, saldo_runway_ars / gasto_tipico)
     else:
         runway = None
 
@@ -320,7 +323,7 @@ def calcular_perfil_nuevo(db: Session, usuario: Usuario, data: dict[str, Any] | 
         interp_relativas["gasto_habitos"] = f"Representa el {pct_hab}% de tu ingreso típico mensual (${habitos:,.0f} / mes en consumos habituales elegibles)."
 
     if runway is not None:
-        interp_relativas["runway"] = f"Tu liquidez actual (${saldo_ars:,.0f}) cubre {runway:.1f} meses de tu gasto típico mensual deflactado (${gasto_tipico:,.0f}/mes)."
+        interp_relativas["runway"] = f"Tu liquidez actual (${saldo_runway_ars:,.0f}) cubre {runway:.1f} meses de tu gasto típico mensual deflactado (${gasto_tipico:,.0f}/mes)."
 
     if volatilidad is not None:
         pct_vol = round(volatilidad * Decimal("100"), 1)
