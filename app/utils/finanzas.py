@@ -609,7 +609,12 @@ def clasificar_gastos(
     """
     txs_todos = list(transacciones)
     total_txs = total_transacciones_usuario if total_transacciones_usuario is not None else len(txs_todos)
-    txs = [tx for tx in txs_todos if es_gasto_consumo(tx)]
+    txs = [
+        tx for tx in txs_todos
+        if es_gasto_consumo(tx)
+        and not getattr(tx, "es_cuota_hija", False)
+        and not getattr(tx, "es_padre_cuotas", False)
+    ]
     if not txs:
         return ClasificacionGasto(tuple(recurrentes_declarados), (), (), frozenset(), ())
 
