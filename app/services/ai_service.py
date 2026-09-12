@@ -298,8 +298,8 @@ REGLAS DE CLASIFICACIÓN DE INTENTS:
 - "puse X", "metí X", "deposité X" SIN contexto claro → slot_filling=true, preguntá "¿Fue un gasto, ingreso o transferencia?"
 - "cuánta plata tengo", "cuánto tengo", "mi saldo" → consultar_saldo
 - "cómo voy", "cómo estoy este mes" → consultar_balance
-- Consultas de gastos o totales por un concepto, comercio o categoría específica (ej: "cuánto gasté en pizza", "cuánto gasté en el super", "cuánto se me fue en salidas") NO están soportadas → intent="desconocido", confianza=1.0, slot_filling=false.
-- "llego a fin de mes", "me alcanza", "cuánto me queda" → consultar_proyeccion
+- Consultas de gastos o totales por un concepto, comercio, categoría específica o por un período de tiempo (ej: "cuánto gasté en pizza", "cuánto gasté en el super", "cuánto se me fue en salidas", "cuánto gasté hoy", "cuánto gasté ayer", "cuánto llevo esta semana", "cuánto gasté este mes", "cuánto llevo gastado esta semana") NO están soportadas → intent="desconocido", confianza=1.0, slot_filling=false.
+- "llego a fin de mes", "me alcanza", "cuánto me queda", "cómo viene mi proyección", "cómo viene mi proyección este mes" → consultar_proyeccion
 - "cancelar", "no importa", "dejá", "olvidalo" → cancelar
 - "sí", "dale", "confirmá", "ok", "va" → confirmar
 
