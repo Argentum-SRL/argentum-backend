@@ -763,6 +763,10 @@ if settings.ENVIRONMENT == "development":
         "http://localhost:5173", "http://localhost:3000", "http://localhost:5174",
         "http://127.0.0.1:5173", "http://127.0.0.1:3000", "http://127.0.0.1:5174"
     ])
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestTimingMiddleware)
+app.add_middleware(TimeoutMiddleware, timeout=30.0)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
@@ -770,10 +774,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(RequestTimingMiddleware)
-app.add_middleware(TimeoutMiddleware, timeout=30.0)
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 
 
 @app.exception_handler(RateLimitExceeded)
