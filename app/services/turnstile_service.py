@@ -30,8 +30,6 @@ def verificar_turnstile_token(token: str | None, remote_ip: str | None = None) -
             "secret": secret_key,
             "response": token.strip(),
         }
-        if remote_ip:
-            data["remoteip"] = remote_ip
 
         with httpx.Client(timeout=10.0) as client:
             resp = client.post(TURNSTILE_VERIFY_URL, data=data)
