@@ -132,9 +132,19 @@ def update_grupo_cuotas(
         raise HTTPException(status_code=404, detail="No encontramos ese grupo de cuotas.")
         
     from app.services.cuotas_service import actualizar_grupo
-    grupo = actualizar_grupo(db, grupo, data)
+    actualizar_grupo(db, grupo, data)
+
+    grupo_actualizado = db.execute(
+        select(GrupoCuotas)
+        .options(
+            selectinload(GrupoCuotas.cuotas).joinedload(Cuota.transaccion),
+            joinedload(GrupoCuotas.transaccion_padre),
+            joinedload(GrupoCuotas.tarjeta)
+        )
+        .where(GrupoCuotas.id == grupo_id, GrupoCuotas.usuario_id == current_user.id)
+    ).scalar_one()
     
-    return mapear_grupo_resumen(db, grupo)
+    return mapear_grupo_resumen(db, grupo_actualizado)
 
 @router.delete("/{grupo_id}")
 def delete_grupo_cuotas(

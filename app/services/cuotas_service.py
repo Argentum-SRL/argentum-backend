@@ -5,6 +5,7 @@ from dateutil.relativedelta import relativedelta
 from app.models.cuota import Cuota
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion
 from app.models.grupo_cuotas import GrupoCuotas
+from app.schemas.grupos_cuotas import GrupoCuotasUpdate
 from app.services import presupuesto_service
 from app.utils.fecha import hoy_argentina
 
@@ -16,7 +17,8 @@ def crear_cuotas(
     primer_vencimiento: date,
     monto_cuota: Decimal,
     usuario_id: str,
-    cuota_inicial: int = 1
+    cuota_inicial: int = 1,
+    desde_cuota: int = 1
 ) -> list[Cuota]:
     """
     Crea las transacciones hijas y los registros de cuotas para un grupo.
@@ -42,8 +44,8 @@ def crear_cuotas(
         tarjeta = db.get(TarjetaCredito, t_id)
     dia_nominal = tarjeta.dia_vencimiento if tarjeta else primer_vencimiento.day
 
-    # Empezamos desde 1 hasta cantidad_cuotas para registrar todas las cuotas
-    for i in range(1, cantidad_cuotas + 1):
+    # Empezamos desde desde_cuota hasta cantidad_cuotas para registrar las cuotas requeridas
+    for i in range(desde_cuota, cantidad_cuotas + 1):
         if i == cuota_inicial:
             fecha_cuota = primer_vencimiento
         else:
@@ -96,7 +98,7 @@ def crear_cuotas(
         db.add(cuota_reg)
         cuotas.append(cuota_reg)
 
-    if grupo and cuotas:
+    if grupo and cuotas and desde_cuota == 1:
         grupo.primer_vencimiento = cuotas[0].fecha_vencimiento
         
     return cuotas
@@ -280,16 +282,163 @@ def prepagar_grupo(
     return grupo
 
 
+def _eliminar_cuota_pendiente(db: Session, cuota: Cuota) -> None:
+    """
+    Elimina una cuota pendiente puntual y su transacción hija asociada,
+    revirtiendo el impacto presupuestario si correspondiera.
+    Exclusiva de actualización de grupos: no altera saldos de billetera ni el resto del grupo.
+    """
+    if cuota.pagada:
+        return
+
+    tx_hija = cuota.transaccion or (db.get(Transaccion, cuota.transaccion_id) if cuota.transaccion_id else None)
+    if tx_hija:
+        try:
+            presupuesto_service.registrar_impacto_presupuesto(db, tx_hija, revertir=True)
+        except Exception:
+            pass
+
+    db.delete(cuota)
+    db.flush()
+
+    if tx_hija:
+        db.delete(tx_hija)
+        db.flush()
+
+
 def actualizar_grupo(
     db: Session,
     grupo: GrupoCuotas,
-    data: any,
+    data: GrupoCuotasUpdate,
 ) -> GrupoCuotas:
     from fastapi import HTTPException
+    from sqlalchemy import select
     from app.models.billetera import Billetera
-    from app.models.transaccion import MetodoPago, EstadoVerificacionTransaccion
+    from app.models.tarjeta_credito import TarjetaCredito
+    from app.models.transaccion import MetodoPago, EstadoVerificacionTransaccion, TipoTransaccion
 
     hoy = hoy_argentina()
+    usuario_id = grupo.usuario_id
+
+    cambia_tarjeta_o_fecha = (
+        data.tarjeta_id is not None or
+        data.billetera_id is not None or
+        data.fecha_referencia is not None
+    )
+
+    if cambia_tarjeta_o_fecha:
+        cuotas_pagadas = [c for c in grupo.cuotas if c.pagada]
+        n_pagadas = len(cuotas_pagadas)
+
+        if n_pagadas == grupo.cantidad_cuotas:
+            raise HTTPException(
+                status_code=400,
+                detail="Esta compra ya está completamente pagada, no se puede editar tarjeta ni fecha."
+            )
+
+        # Validar tarjeta si fue provista
+        tarjeta = None
+        if data.tarjeta_id is not None:
+            tarjeta = db.execute(
+                select(TarjetaCredito).where(
+                    TarjetaCredito.id == data.tarjeta_id,
+                    TarjetaCredito.usuario_id == usuario_id
+                )
+            ).scalar_one_or_none()
+            if not tarjeta:
+                raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+        elif grupo.tarjeta_id:
+            tarjeta = db.execute(
+                select(TarjetaCredito).where(
+                    TarjetaCredito.id == grupo.tarjeta_id,
+                    TarjetaCredito.usuario_id == usuario_id
+                )
+            ).scalar_one_or_none()
+
+        # Validar billetera si fue provista
+        billetera_final_id = None
+        if data.billetera_id is not None:
+            billetera = db.execute(
+                select(Billetera).where(
+                    Billetera.id == data.billetera_id,
+                    Billetera.usuario_id == usuario_id
+                )
+            ).scalar_one_or_none()
+            if not billetera:
+                raise HTTPException(status_code=404, detail="Billetera no encontrada")
+            if tarjeta is not None and billetera.id != tarjeta.billetera_id:
+                raise HTTPException(status_code=400, detail="La billetera no coincide con la tarjeta seleccionada.")
+            billetera_final_id = billetera.id
+        else:
+            if tarjeta is not None:
+                billetera_final_id = tarjeta.billetera_id
+            elif grupo.transaccion_padre:
+                billetera_final_id = grupo.transaccion_padre.billetera_id
+
+        # Validar monto_total_nuevo antes de mutaciones si vino junto
+        if data.monto_total_nuevo is not None:
+            total_ya_pagado = sum(c.monto_proyectado for c in cuotas_pagadas)
+            if data.monto_total_nuevo - total_ya_pagado <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="El monto nuevo es menor o igual a lo que ya pagaste. No podés reducir el monto a menos de lo ya abonado."
+                )
+
+        fecha_ref = data.fecha_referencia or hoy
+
+        # Calcular fecha del próximo vencimiento
+        if tarjeta is not None:
+            from app.services.tarjeta_service import calcular_fecha_vencimiento_proximo, calcular_primer_vencimiento
+            if n_pagadas > 0:
+                proximo_venc = calcular_fecha_vencimiento_proximo(tarjeta, fecha_ref)
+            else:
+                proximo_venc = calcular_primer_vencimiento(fecha_ref, tarjeta.dia_cierre, tarjeta.dia_vencimiento)
+        else:
+            proximo_venc = fecha_ref + relativedelta(months=1)
+
+        # Borrar cuotas pendientes y sus transacciones hijas usando la función local
+        cuotas_pendientes = [c for c in list(grupo.cuotas) if not c.pagada]
+        for c in cuotas_pendientes:
+            _eliminar_cuota_pendiente(db, c)
+        db.flush()
+        db.expire(grupo, ["cuotas"])
+
+        # Actualizar grupo y transaccion_padre
+        if tarjeta is not None:
+            grupo.tarjeta_id = tarjeta.id
+        elif data.tarjeta_id is not None:
+            grupo.tarjeta_id = None
+
+        if grupo.transaccion_padre:
+            if tarjeta is not None:
+                grupo.transaccion_padre.tarjeta_id = tarjeta.id
+            elif data.tarjeta_id is not None:
+                grupo.transaccion_padre.tarjeta_id = None
+
+            if billetera_final_id is not None:
+                grupo.transaccion_padre.billetera_id = billetera_final_id
+
+            if data.fecha_referencia is not None:
+                grupo.transaccion_padre.fecha = data.fecha_referencia
+            else:
+                grupo.transaccion_padre.fecha = fecha_ref
+        db.flush()
+
+        # Regenerar cuotas desde n_pagadas + 1 hasta cantidad_cuotas
+        monto_cuota = (grupo.total_financiado / grupo.cantidad_cuotas) if grupo.cantidad_cuotas else Decimal("0.00")
+        crear_cuotas(
+            db=db,
+            transaccion_padre=grupo.transaccion_padre,
+            grupo=grupo,
+            cantidad_cuotas=grupo.cantidad_cuotas,
+            primer_vencimiento=proximo_venc,
+            monto_cuota=monto_cuota,
+            usuario_id=str(usuario_id),
+            cuota_inicial=n_pagadas + 1,
+            desde_cuota=n_pagadas + 1
+        )
+        db.flush()
+        db.expire(grupo, ["cuotas"])
 
     if data.descripcion is not None:
         desc_clean = data.descripcion.strip()
@@ -368,8 +517,11 @@ def actualizar_grupo(
 
         grupo.monto_total = data.monto_total_nuevo
         grupo.total_financiado = data.monto_total_nuevo
+        if grupo.transaccion_padre:
+            grupo.transaccion_padre.monto = data.monto_total_nuevo
 
     db.commit()
+    db.expire_all()
     db.refresh(grupo)
     return grupo
 

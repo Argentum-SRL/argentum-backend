@@ -33,6 +33,9 @@ class GrupoCuotasUpdate(BaseModel):
     descripcion: str | None = Field(default=None, max_length=300)
     categoria_id: UUID | None = None
     subcategoria_id: UUID | None = None
+    tarjeta_id: UUID | None = None
+    billetera_id: UUID | None = None
+    fecha_referencia: date | None = None
 
     @field_validator("descripcion")
     @classmethod
