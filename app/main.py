@@ -757,22 +757,12 @@ app.state.limiter = limiter
 #   3. RequestTimingMiddleware
 #   4. SecurityHeadersMiddleware
 #   5. CORSMiddleware  ← último registrado = primero en ejecutar
-_origins = [
-    settings.FRONTEND_URL.rstrip("/"),
-    "https://miargentum.com",
-    "https://www.miargentum.com",
-]
+_origins = [settings.FRONTEND_URL]
 if settings.ENVIRONMENT == "development":
     _origins.extend([
         "http://localhost:5173", "http://localhost:3000", "http://localhost:5174",
         "http://127.0.0.1:5173", "http://127.0.0.1:3000", "http://127.0.0.1:5174"
     ])
-_origins = list(dict.fromkeys([o for o in _origins if o]))
-
-app.add_middleware(GZipMiddleware, minimum_size=1000)
-app.add_middleware(TimeoutMiddleware, timeout=30.0)
-app.add_middleware(RequestTimingMiddleware)
-app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
@@ -780,6 +770,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestTimingMiddleware)
+app.add_middleware(TimeoutMiddleware, timeout=30.0)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 @app.exception_handler(RateLimitExceeded)
