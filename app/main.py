@@ -757,7 +757,14 @@ app.state.limiter = limiter
 #   3. RequestTimingMiddleware
 #   4. SecurityHeadersMiddleware
 #   5. CORSMiddleware  ← último registrado = primero en ejecutar
-_origins = [settings.FRONTEND_URL]
+_frontend_url = settings.FRONTEND_URL.rstrip("/")
+_origins = [_frontend_url]
+if _frontend_url.startswith("https://"):
+    if "://www." in _frontend_url:
+        _origins.append(_frontend_url.replace("://www.", "://"))
+    else:
+        _origins.append(_frontend_url.replace("://", "://www."))
+
 if settings.ENVIRONMENT == "development":
     _origins.extend([
         "http://localhost:5173", "http://localhost:3000", "http://localhost:5174",
