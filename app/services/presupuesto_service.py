@@ -696,7 +696,10 @@ def verificar_alertas_presupuesto(db: Session, presupuesto: Presupuesto, periodo
         usuario = db.get(Usuario, presupuesto.usuario_id)
         if usuario and usuario.telefono:
             try:
-                enviar_mensaje_whatsapp(usuario.telefono, mensaje)
+                enviado = enviar_mensaje_whatsapp(usuario.telefono, mensaje)
+                if enviado:
+                    notif.enviada_whatsapp = True
+                    db.commit()
             except Exception:
                 logger.warning("Error al enviar notificación de presupuesto por WhatsApp", exc_info=True)
 
