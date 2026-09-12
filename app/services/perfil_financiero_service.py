@@ -66,6 +66,7 @@ def _calcular_tasa_ahorro_sync_moneda(db: Session, usuario_id: UUID, fecha_inici
                 Transaccion.estado_verificacion.is_(None)
             ),
             Transaccion.es_padre_cuotas == False,
+            Transaccion.pago_resumen_vencimiento.is_(None),
             Transaccion.fecha >= fecha_inicio,
             Transaccion.fecha <= hoy
         )
@@ -105,6 +106,7 @@ def _calcular_score_impulsividad_sync_moneda(db: Session, usuario_id: UUID, fech
                 Transaccion.estado_verificacion.is_(None)
             ),
             Transaccion.es_padre_cuotas == False,
+            Transaccion.pago_resumen_vencimiento.is_(None),
             Transaccion.fecha >= fecha_inicio,
             Transaccion.fecha <= hoy
         )
@@ -178,6 +180,7 @@ def _calcular_ratio_cuotas_sync_moneda(db: Session, usuario_id: UUID, fecha_inic
                 Transaccion.estado_verificacion.is_(None)
             ),
             Transaccion.es_padre_cuotas == False,
+            Transaccion.pago_resumen_vencimiento.is_(None),
             Transaccion.fecha >= fecha_inicio,
             Transaccion.fecha <= hoy
         )
@@ -303,6 +306,7 @@ def _calcular_porcentaje_suscripciones_sync_moneda(db: Session, usuario_id: UUID
                 Transaccion.estado_verificacion.is_(None)
             ),
             Transaccion.es_padre_cuotas == False,
+            Transaccion.pago_resumen_vencimiento.is_(None),
             Transaccion.fecha >= fecha_inicio,
             Transaccion.fecha <= hoy
         )

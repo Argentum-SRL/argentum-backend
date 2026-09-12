@@ -99,6 +99,7 @@ def _preparar_datos_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
                     Transaccion.usuario_id == usuario.id,
                     Transaccion.tipo == TipoTransaccion.EGRESO,
                     Transaccion.es_padre_cuotas == False,
+                    Transaccion.pago_resumen_vencimiento.is_(None),
                     Transaccion.movimiento_meta_id.is_(None),
                     or_(
                         Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
@@ -133,6 +134,7 @@ def _preparar_datos_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
                 Transaccion.fecha <= fecha_tope_actual,
                 Transaccion.tipo == TipoTransaccion.EGRESO,
                 Transaccion.es_padre_cuotas == False,
+                Transaccion.pago_resumen_vencimiento.is_(None),
                 Transaccion.movimiento_meta_id.is_(None),
                 or_(
                     Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
