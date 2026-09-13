@@ -27,8 +27,9 @@ jobs:
         env:
           NEW_URL: ${{ secrets.NEW_DATABASE_URL }}
         run: |
-          psql "$NEW_URL" -c 'create extension if not exists "uuid-ossp";'
-          psql "$NEW_URL" -c 'create extension if not exists pgcrypto;'
+          psql "$NEW_URL" -c 'drop schema if exists public cascade;'
+          psql "$NEW_URL" -c 'create extension if not exists "uuid-ossp" schema pg_catalog;'
+          psql "$NEW_URL" -c 'create extension if not exists pgcrypto schema pg_catalog;'
 
       - name: Dump desde Supabase y Restore en Railway
         env:
