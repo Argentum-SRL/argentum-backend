@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import date
 from sqlalchemy.orm import Session
 from dateutil.relativedelta import relativedelta
@@ -8,6 +8,43 @@ from app.models.grupo_cuotas import GrupoCuotas
 from app.schemas.grupos_cuotas import GrupoCuotasUpdate
 from app.services import presupuesto_service
 from app.utils.fecha import hoy_argentina
+from app.core.constants import IVA_INTERESES
+
+
+def calcular_tasas_cuotas(tasa_interes: Decimal | float | None) -> dict[str, Decimal] | None:
+    """
+    Calcula TNA, TEA y CFT estimado a partir de la tasa_interes mensual nominal (%) de una compra en cuotas.
+
+    Fórmulas:
+      - tasa_mensual = tasa_interes / 100
+      - TNA = tasa_mensual * 12
+      - TEA = (1 + tasa_mensual)^12 - 1
+      - CFT estimado = (1 + tasa_mensual * (1 + IVA_INTERESES))^12 - 1
+
+    Los valores se expresan en porcentaje (%) redondeados a 2 decimales para compatibilidad
+    con la representación financiera del sistema.
+    """
+    if tasa_interes is None:
+        return None
+    try:
+        ti = Decimal(str(tasa_interes))
+    except Exception:
+        return None
+
+    if ti <= Decimal("0"):
+        return None
+
+    tasa_mensual = ti / Decimal("100")
+    tna = (tasa_mensual * Decimal("12") * Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    tea = (((Decimal("1") + tasa_mensual) ** 12 - Decimal("1")) * Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    cft_estimado = (((Decimal("1") + tasa_mensual * (Decimal("1") + IVA_INTERESES)) ** 12 - Decimal("1")) * Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    return {
+        "tna": tna,
+        "tea": tea,
+        "cft_estimado": cft_estimado,
+    }
+
 
 def crear_cuotas(
     db: Session,

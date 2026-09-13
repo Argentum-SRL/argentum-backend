@@ -12,3 +12,7 @@ CATEGORIAS_SISTEMA: FrozenSet[str] = frozenset({"Ahorro"})
 MAX_MONTO_INTEGRIDAD: Decimal = Decimal("1000000000000")
 MAX_MONTO_FLOAT: float = 1_000_000_000_000.0
 
+# Constantes de configuración financiera e impositiva
+PERCEPCION_MONEDA_EXTRANJERA: Decimal = Decimal("30.00")
+IVA_INTERESES: Decimal = Decimal("0.21")
+

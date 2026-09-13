@@ -22,6 +22,9 @@ class GrupoCuotasResumen(BaseModel):
     transaccion_padre_id: UUID
     tiene_interes: bool
     tasa_interes: DecimalJSON | None = None
+    tna: DecimalJSON | None = None
+    tea: DecimalJSON | None = None
+    cft_estimado: DecimalJSON | None = None
     estado: str = "activo"
     categoria_id: UUID | None = None
     subcategoria_id: UUID | None = None

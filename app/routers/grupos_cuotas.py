@@ -14,6 +14,7 @@ from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificac
 from app.models.billetera import Billetera
 from app.schemas.grupos_cuotas import GrupoCuotasResumen, GrupoCuotasUpdate
 from app.services.transaccion_service import _hoy_argentina
+from app.services.cuotas_service import calcular_tasas_cuotas
 
 router = APIRouter(prefix="/grupos-cuotas", tags=["grupos_cuotas"])
 
@@ -58,7 +59,17 @@ def mapear_grupo_resumen(db: Session, grupo: GrupoCuotas) -> dict:
     elif grupo.transaccion_padre:
         categoria_id = grupo.transaccion_padre.categoria_id
         subcategoria_id = grupo.transaccion_padre.subcategoria_id
-    
+
+    tna = None
+    tea = None
+    cft_estimado = None
+    if grupo.tiene_interes and grupo.tasa_interes is not None:
+        tasas = calcular_tasas_cuotas(grupo.tasa_interes)
+        if tasas:
+            tna = tasas["tna"]
+            tea = tasas["tea"]
+            cft_estimado = tasas["cft_estimado"]
+
     return {
         "id": grupo.id,
         "descripcion": grupo.descripcion,
@@ -77,6 +88,9 @@ def mapear_grupo_resumen(db: Session, grupo: GrupoCuotas) -> dict:
         "transaccion_padre_id": grupo.transaccion_padre_id,
         "tiene_interes": grupo.tiene_interes,
         "tasa_interes": grupo.tasa_interes,
+        "tna": tna,
+        "tea": tea,
+        "cft_estimado": cft_estimado,
         "estado": grupo.estado.value if hasattr(grupo.estado, "value") else str(grupo.estado),
         "categoria_id": categoria_id,
         "subcategoria_id": subcategoria_id
