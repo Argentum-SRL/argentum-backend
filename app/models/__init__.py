@@ -31,6 +31,8 @@ from app.models.evento_actualizacion import EventoActualizacion
 from app.models.cotizacion_dolar import CotizacionDolar
 from app.models.saldo_arrastrado import SaldoArrastradoTarjeta, PagoSaldoArrastrado, EstadoSaldoArrastrado
 from app.models.calibracion_usuario import CalibracionUsuario
+from app.models.codigo_verificacion import CodigoVerificacion
+from app.models.rate_limit import RateLimit
 
 __all__ = [
     "Usuario",
@@ -68,6 +70,8 @@ __all__ = [
     "EventoActualizacion",
     "CotizacionDolar",
     "CalibracionUsuario",
+    "CodigoVerificacion",
+    "RateLimit",
 ]
 
 

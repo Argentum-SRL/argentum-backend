@@ -29,26 +29,19 @@ CODIGO_EXPIRACION_SEGUNDOS = 15 * 60  # 15 minutos
 MAX_INTENTOS = 3
 
 
+from datetime import datetime, timezone, timedelta
+from uuid import uuid4
+from sqlalchemy import select, update
+from app.core.database import SessionLocal
+from app.models.codigo_verificacion import CodigoVerificacion
+
+
 @dataclass
 class EntradaCodigo:
     codigo: str
     expiracion: float
     intentos_fallidos: int = field(default=0)
 
-
-_verificacion_cache: dict[str, EntradaCodigo] = {}
-_recuperacion_cache: dict[str, EntradaCodigo] = {}
-
-
-# ---------------------------------------------------------------------------
-# Helpers privados
-# ---------------------------------------------------------------------------
-
-def _limpiar(cache: dict) -> None:
-    ahora = time.time()
-    expirados = [k for k, v in cache.items() if v.expiracion <= ahora]
-    for k in expirados:
-        del cache[k]
 
 
 def _generar_codigo() -> str:
@@ -118,39 +111,77 @@ def _enviar_email(destinatario: str, asunto: str, cuerpo: str, cuerpo_html: str 
 # ---------------------------------------------------------------------------
 
 def guardar_codigo_verificacion_email(email: str, codigo: str) -> None:
-    _limpiar(_verificacion_cache)
-    _verificacion_cache[email] = EntradaCodigo(
-        codigo=codigo,
-        expiracion=time.time() + CODIGO_EXPIRACION_SEGUNDOS,
-    )
+    identificador = email.strip().lower()
+    ahora = datetime.now(timezone.utc)
+    expiracion = ahora + timedelta(seconds=CODIGO_EXPIRACION_SEGUNDOS)
+    with SessionLocal() as db:
+        db.execute(
+            update(CodigoVerificacion)
+            .where(
+                CodigoVerificacion.tipo == "verificacion_email",
+                CodigoVerificacion.identificador == identificador,
+                CodigoVerificacion.consumido == False,
+            )
+            .values(consumido=True, consumido_en=ahora)
+        )
+        nuevo = CodigoVerificacion(
+            id=uuid4(),
+            tipo="verificacion_email",
+            identificador=identificador,
+            codigo=codigo,
+            expiracion=expiracion,
+            intentos_fallidos=0,
+            max_intentos=MAX_INTENTOS,
+            creado_en=ahora,
+            consumido=False,
+        )
+        db.add(nuevo)
+        db.commit()
 
 
 def verificar_codigo_email(email: str, codigo: str) -> tuple[bool, str | None]:
     """
-    Verifica el código de email. Devuelve (ok, mensaje_error).
+    Verifica el código de email en Postgres. Devuelve (ok, mensaje_error).
     Si ok=True el código se invalida (uso único).
     """
-    _limpiar(_verificacion_cache)
+    identificador = email.strip().lower()
+    ahora = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        entrada = db.execute(
+            select(CodigoVerificacion)
+            .where(
+                CodigoVerificacion.tipo == "verificacion_email",
+                CodigoVerificacion.identificador == identificador,
+                CodigoVerificacion.consumido == False,
+            )
+            .order_by(CodigoVerificacion.creado_en.desc())
+        ).scalar_one_or_none()
 
-    entrada = _verificacion_cache.get(email)
-    if not entrada:
-        return False, "El código ya expiró. Pedí uno nuevo."
+        if not entrada:
+            return False, "El código ya expiró. Pedí uno nuevo."
 
-    if time.time() > entrada.expiracion:
-        del _verificacion_cache[email]
-        return False, "El código ya expiró. Pedí uno nuevo."
+        if ahora > entrada.expiracion:
+            entrada.consumido = True
+            entrada.consumido_en = ahora
+            db.commit()
+            return False, "El código ya expiró. Pedí uno nuevo."
 
-    if entrada.codigo != codigo:
-        entrada.intentos_fallidos += 1
-        restantes = MAX_INTENTOS - entrada.intentos_fallidos
-        if restantes <= 0:
-            del _verificacion_cache[email]
-            return False, "Demasiados intentos fallidos. Pedí un código nuevo."
-        return False, f"Código incorrecto. Te quedan {restantes} intento{'s' if restantes != 1 else ''}."
+        if entrada.codigo != codigo:
+            entrada.intentos_fallidos += 1
+            restantes = entrada.max_intentos - entrada.intentos_fallidos
+            if restantes <= 0:
+                entrada.consumido = True
+                entrada.consumido_en = ahora
+                db.commit()
+                return False, "Demasiados intentos fallidos. Pedí un código nuevo."
+            db.commit()
+            return False, f"Código incorrecto. Te quedan {restantes} intento{'s' if restantes != 1 else ''}."
 
-    # Éxito: borrar de la memoria y devolver OK
-    del _verificacion_cache[email]
-    return True, None
+        # Éxito: marcar consumido y devolver OK
+        entrada.consumido = True
+        entrada.consumido_en = ahora
+        db.commit()
+        return True, None
 
 
 def enviar_email_verificacion(destinatario: str, codigo: str, nombre: str | None = None) -> bool:
@@ -204,43 +235,81 @@ def generar_codigo_recuperacion() -> str:
 
 
 def guardar_codigo_recuperacion(email: str, codigo: str) -> None:
-    _limpiar(_recuperacion_cache)
-    _recuperacion_cache[email] = EntradaCodigo(
-        codigo=codigo,
-        expiracion=time.time() + CODIGO_EXPIRACION_SEGUNDOS,
-    )
+    identificador = email.strip().lower()
+    ahora = datetime.now(timezone.utc)
+    expiracion = ahora + timedelta(seconds=CODIGO_EXPIRACION_SEGUNDOS)
+    with SessionLocal() as db:
+        db.execute(
+            update(CodigoVerificacion)
+            .where(
+                CodigoVerificacion.tipo == "recuperacion_password",
+                CodigoVerificacion.identificador == identificador,
+                CodigoVerificacion.consumido == False,
+            )
+            .values(consumido=True, consumido_en=ahora)
+        )
+        nuevo = CodigoVerificacion(
+            id=uuid4(),
+            tipo="recuperacion_password",
+            identificador=identificador,
+            codigo=codigo,
+            expiracion=expiracion,
+            intentos_fallidos=0,
+            max_intentos=MAX_INTENTOS,
+            creado_en=ahora,
+            consumido=False,
+        )
+        db.add(nuevo)
+        db.commit()
 
 
 def verificar_codigo_recuperacion(email: str, codigo: str) -> bool:
     """
-    Verifica el código de recuperación.
-    Uso único: si es correcto, se borra.
+    Verifica el código de recuperación en Postgres.
+    Uso único: si es correcto, se marca como consumido.
     """
     from fastapi import HTTPException
 
-    _limpiar(_recuperacion_cache)
-
-    entrada = _recuperacion_cache.get(email)
-    if not entrada:
-        return False
-
-    if time.time() > entrada.expiracion:
-        del _recuperacion_cache[email]
-        return False
-
-    if entrada.codigo != codigo:
-        entrada.intentos_fallidos += 1
-        if entrada.intentos_fallidos >= MAX_INTENTOS:
-            del _recuperacion_cache[email]
-            raise HTTPException(
-                status_code=400,
-                detail="El código de verificación ya no es válido. Por favor, solicitá un código nuevo."
+    identificador = email.strip().lower()
+    ahora = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        entrada = db.execute(
+            select(CodigoVerificacion)
+            .where(
+                CodigoVerificacion.tipo == "recuperacion_password",
+                CodigoVerificacion.identificador == identificador,
+                CodigoVerificacion.consumido == False,
             )
-        return False
+            .order_by(CodigoVerificacion.creado_en.desc())
+        ).scalar_one_or_none()
 
-    # Éxito: borrar y devolver OK
-    del _recuperacion_cache[email]
-    return True
+        if not entrada:
+            return False
+
+        if ahora > entrada.expiracion:
+            entrada.consumido = True
+            entrada.consumido_en = ahora
+            db.commit()
+            return False
+
+        if entrada.codigo != codigo:
+            entrada.intentos_fallidos += 1
+            if entrada.intentos_fallidos >= entrada.max_intentos:
+                entrada.consumido = True
+                entrada.consumido_en = ahora
+                db.commit()
+                raise HTTPException(
+                    status_code=400,
+                    detail="El código de verificación ya no es válido. Por favor, solicitá un código nuevo."
+                )
+            db.commit()
+            return False
+
+        # Éxito: marcar consumido y devolver OK
+        entrada.consumido = True
+        entrada.consumido_en = ahora
+        db.commit()
+        return True
 
 
 def enviar_email_recuperacion(destinatario: str, codigo: str) -> bool:

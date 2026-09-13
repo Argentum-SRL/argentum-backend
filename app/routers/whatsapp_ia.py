@@ -64,6 +64,7 @@ from app.services.whatsapp_service import (
     buscar_codigo_vinculacion,
     consumir_codigo_vinculacion,
 )
+from app.services.rate_limit_service import verificar_rate_limit
 from app.utils.telefono import normalizar_telefono_ar
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion, FrecuenciaSuscripcion
 from app.models.historial_suscripcion import HistorialSuscripcion
@@ -302,36 +303,20 @@ PREFIJOS_CORRECCION = [
     r"^a\s+",
 ]
 
-_cooldown_no_registrados: dict[str, datetime] = {}
 COOLDOWN_MINUTOS_NO_REGISTRADO = 15
 
 
-def _purgar_cooldown_vencido() -> None:
-    if len(_cooldown_no_registrados) < 1000:
-        return
-    ahora = datetime.now(timezone.utc)
-    vencidos = [
-        tel for tel, ts in _cooldown_no_registrados.items()
-        if (ahora - ts) >= timedelta(minutes=COOLDOWN_MINUTOS_NO_REGISTRADO)
-    ]
-    for tel in vencidos:
-        del _cooldown_no_registrados[tel]
-
-
 def _debe_responder_no_registrado(telefono_normalizado: str) -> bool:
-    _purgar_cooldown_vencido()
-    ahora = datetime.now(timezone.utc)
-    ultimo_envio = _cooldown_no_registrados.get(telefono_normalizado)
-    if ultimo_envio and (ahora - ultimo_envio) < timedelta(minutes=COOLDOWN_MINUTOS_NO_REGISTRADO):
-        return False
-    _cooldown_no_registrados[telefono_normalizado] = ahora
-    return True
+    permitido, _, _ = verificar_rate_limit(
+        accion="cooldown_no_registrado",
+        identificador=telefono_normalizado,
+        max_intentos=1,
+        ventana_segundos=COOLDOWN_MINUTOS_NO_REGISTRADO * 60,
+    )
+    return permitido
 
 
-# Rate limiting para usuarios verificados (protección contra ráfagas y costos de OpenAI)
-_historial_mensajes_registrados: dict[str, list[float]] = {}
-_historial_medios_registrados: dict[str, list[float]] = {}
-
+# Rate limiting para usuarios verificados (protección contra ráfagas y costos de OpenAI en Postgres)
 MAX_MENSAJES_POR_MINUTO_REGISTRADO = 12
 MAX_MEDIOS_POR_MINUTO_REGISTRADO = 4
 VENTANA_RATE_LIMIT_WPP_SEGUNDOS = 60
@@ -339,47 +324,29 @@ VENTANA_RATE_LIMIT_WPP_SEGUNDOS = 60
 
 def _verificar_rate_limit_registrado(telefono_norm: str, es_medio: bool = False) -> tuple[bool, str | None]:
     """
-    Verifica si el usuario registrado superó el límite de mensajes o medios por minuto.
+    Verifica si el usuario registrado superó el límite de mensajes o medios por minuto en Postgres.
     Retorna (permitido, motivo_error_o_none).
     """
-    ahora = time.time()
-    limite_tiempo = ahora - VENTANA_RATE_LIMIT_WPP_SEGUNDOS
-
     # 1. Chequeo de ráfaga de medios (audios / imágenes a Whisper / Vision)
     if es_medio:
-        timestamps_medios = _historial_medios_registrados.get(telefono_norm, [])
-        timestamps_medios = [t for t in timestamps_medios if t > limite_tiempo]
-        if len(timestamps_medios) >= MAX_MEDIOS_POR_MINUTO_REGISTRADO:
-            _historial_medios_registrados[telefono_norm] = timestamps_medios
+        permitido_medio, _, _ = verificar_rate_limit(
+            accion="medios_registrados",
+            identificador=telefono_norm,
+            max_intentos=MAX_MEDIOS_POR_MINUTO_REGISTRADO,
+            ventana_segundos=VENTANA_RATE_LIMIT_WPP_SEGUNDOS,
+        )
+        if not permitido_medio:
             return False, "Estás enviando muchos audios o comprobantes seguidos. Por favor, esperá un minuto antes de enviar otro."
-        timestamps_medios.append(ahora)
-        _historial_medios_registrados[telefono_norm] = timestamps_medios
 
     # 2. Chequeo de mensajes totales por minuto
-    timestamps_msg = _historial_mensajes_registrados.get(telefono_norm, [])
-    timestamps_msg = [t for t in timestamps_msg if t > limite_tiempo]
-    if len(timestamps_msg) >= MAX_MENSAJES_POR_MINUTO_REGISTRADO:
-        _historial_mensajes_registrados[telefono_norm] = timestamps_msg
+    permitido_msg, _, _ = verificar_rate_limit(
+        accion="mensajes_registrados",
+        identificador=telefono_norm,
+        max_intentos=MAX_MENSAJES_POR_MINUTO_REGISTRADO,
+        ventana_segundos=VENTANA_RATE_LIMIT_WPP_SEGUNDOS,
+    )
+    if not permitido_msg:
         return False, "Estás enviando muchos mensajes seguidos. Por favor, esperá un momento antes de volver a escribir."
-    timestamps_msg.append(ahora)
-    _historial_mensajes_registrados[telefono_norm] = timestamps_msg
-
-    # Purgar periódicamente si los diccionarios crecen demasiado
-    if len(_historial_mensajes_registrados) > 2000:
-        for tel in list(_historial_mensajes_registrados.keys()):
-            filtrados = [t for t in _historial_mensajes_registrados[tel] if t > limite_tiempo]
-            if not filtrados:
-                del _historial_mensajes_registrados[tel]
-            else:
-                _historial_mensajes_registrados[tel] = filtrados
-
-    if len(_historial_medios_registrados) > 2000:
-        for tel in list(_historial_medios_registrados.keys()):
-            filtrados = [t for t in _historial_medios_registrados[tel] if t > limite_tiempo]
-            if not filtrados:
-                del _historial_medios_registrados[tel]
-            else:
-                _historial_medios_registrados[tel] = filtrados
 
     return True, None
 

@@ -44,6 +44,7 @@ logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 import time
 from app.core.database import SessionLocal, db_query_duration_var
 from app.core.auth import limpiar_tokens_expirados
+from app.services.rate_limit_service import limpiar_codigos_y_rate_limits_expirados
 from app.core.job_lock import intentar_tomar_lock_job, liberar_lock_job
 import structlog
 
@@ -203,7 +204,7 @@ class RequestTimingMiddleware:
                     )
 
 def _job_limpiar_tokens():
-    """Tarea programada: elimina refresh tokens viejos cada 6 horas."""
+    """Tarea programada: elimina refresh tokens, códigos de verificación y rate limits viejos cada 6 horas."""
     db = SessionLocal()
     lock_adquirido = False
     try:
@@ -217,6 +218,14 @@ def _job_limpiar_tokens():
         eliminados = limpiar_tokens_expirados(db)
         if eliminados:
             logger.info("Refresh tokens eliminados: %s", eliminados)
+
+        res_limpieza = limpiar_codigos_y_rate_limits_expirados(db)
+        if res_limpieza["codigos_verificacion_eliminados"] or res_limpieza["rate_limits_eliminados"]:
+            logger.info(
+                "Filas vencidas eliminadas: %s códigos, %s rate limits",
+                res_limpieza["codigos_verificacion_eliminados"],
+                res_limpieza["rate_limits_eliminados"],
+            )
     except Exception:
         logger.exception("Error en job limpiar_tokens")
     finally:

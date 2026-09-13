@@ -31,6 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.limiter import limiter
+from app.services.rate_limit_service import verificar_rate_limit
 
 from app.core.auth import (
     crear_access_token,
@@ -414,32 +415,19 @@ def confirmar_token(
 # Verificación de email
 # ---------------------------------------------------------------------------
 
-_solicitudes_reenvio_email: dict[str, list[float]] = {}
 MAX_REENVIOS_EMAIL_POR_HORA = 5
 VENTANA_REENVIO_EMAIL_SEGUNDOS = 3600.0
 
 
-def _verificar_rate_limit_reenvio_email(email: str) -> bool:
-    ahora = time.time()
-    limite = ahora - VENTANA_REENVIO_EMAIL_SEGUNDOS
-    timestamps = [t for t in _solicitudes_reenvio_email.get(email, []) if t > limite]
-
-    if len(timestamps) >= MAX_REENVIOS_EMAIL_POR_HORA:
-        _solicitudes_reenvio_email[email] = timestamps
-        return False
-
-    timestamps.append(ahora)
-    _solicitudes_reenvio_email[email] = timestamps
-
-    if len(_solicitudes_reenvio_email) > 2000:
-        for k in list(_solicitudes_reenvio_email.keys()):
-            filtrados = [t for t in _solicitudes_reenvio_email[k] if t > limite]
-            if not filtrados:
-                del _solicitudes_reenvio_email[k]
-            else:
-                _solicitudes_reenvio_email[k] = filtrados
-
-    return True
+def _verificar_rate_limit_reenvio_email(email: str, db: Session | None = None) -> bool:
+    permitido, _, _ = verificar_rate_limit(
+        accion="reenvio_email",
+        identificador=email.strip().lower(),
+        max_intentos=MAX_REENVIOS_EMAIL_POR_HORA,
+        ventana_segundos=int(VENTANA_REENVIO_EMAIL_SEGUNDOS),
+        db=db,
+    )
+    return permitido
 
 
 @router.post("/email/enviar-codigo")
@@ -670,32 +658,19 @@ def login_google(
 # Teléfono (WhatsApp) — Nuevo Flujo de Vinculación
 # ---------------------------------------------------------------------------
 
-_solicitudes_codigo_vinculacion: dict[str, list[float]] = {}
 MAX_CODIGOS_VINCULACION_POR_HORA = 5
 VENTANA_CODIGO_VINCULACION_SEGUNDOS = 60 * 60  # 1 hora
 
 
-def _verificar_rate_limit_codigo_vinculacion(usuario_id: str) -> bool:
-    ahora = time.time()
-    limite = ahora - VENTANA_CODIGO_VINCULACION_SEGUNDOS
-    timestamps = [t for t in _solicitudes_codigo_vinculacion.get(usuario_id, []) if t > limite]
-
-    if len(timestamps) >= MAX_CODIGOS_VINCULACION_POR_HORA:
-        _solicitudes_codigo_vinculacion[usuario_id] = timestamps
-        return False
-
-    timestamps.append(ahora)
-    _solicitudes_codigo_vinculacion[usuario_id] = timestamps
-
-    if len(_solicitudes_codigo_vinculacion) > 2000:
-        for k in list(_solicitudes_codigo_vinculacion.keys()):
-            filtrados = [t for t in _solicitudes_codigo_vinculacion[k] if t > limite]
-            if not filtrados:
-                del _solicitudes_codigo_vinculacion[k]
-            else:
-                _solicitudes_codigo_vinculacion[k] = filtrados
-
-    return True
+def _verificar_rate_limit_codigo_vinculacion(usuario_id: str, db: Session | None = None) -> bool:
+    permitido, _, _ = verificar_rate_limit(
+        accion="codigo_vinculacion",
+        identificador=str(usuario_id),
+        max_intentos=MAX_CODIGOS_VINCULACION_POR_HORA,
+        ventana_segundos=int(VENTANA_CODIGO_VINCULACION_SEGUNDOS),
+        db=db,
+    )
+    return permitido
 
 
 @router.post("/telefono/solicitar-vinculacion", response_model=CodigoVinculacionResponse)

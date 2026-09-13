@@ -35,6 +35,12 @@ def _enmascarar_otp_en_mensaje(mensaje: str | None) -> str:
     return re.sub(r"\b\d{4,8}\b", "***", mensaje)
 
 
+from datetime import datetime, timezone, timedelta
+from uuid import uuid4
+from sqlalchemy import select, update
+from app.core.database import SessionLocal
+from app.models.codigo_verificacion import CodigoVerificacion
+
 CARACTERES_CODIGO_VINCULACION = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # Sin O, 0, I, 1, L (32 caracteres alfanuméricos)
 EXPIRACION_VINCULACION_SEGUNDOS = 15 * 60  # 15 minutos
 
@@ -47,77 +53,86 @@ class EntradaCodigoVinculacion:
     creado_en: float
 
 
-_codigos_vinculacion: dict[str, EntradaCodigoVinculacion] = {}
-_usuario_a_codigo_vinculacion: dict[str, str] = {}
-_codigos_vencidos_recientes: dict[str, float] = {}
-
-
-def _limpiar_codigos_vinculacion_expirados() -> None:
-    ahora = time.time()
-    expirados = [c for c, v in _codigos_vinculacion.items() if v.expiracion <= ahora]
-    for c in expirados:
-        entrada = _codigos_vinculacion.pop(c, None)
-        if entrada:
-            _codigos_vencidos_recientes[c] = ahora
-            if _usuario_a_codigo_vinculacion.get(entrada.usuario_id) == c:
-                _usuario_a_codigo_vinculacion.pop(entrada.usuario_id, None)
-
-    # Purgar códigos vencidos registrados hace más de 1 hora
-    antiguos = [c for c, t in _codigos_vencidos_recientes.items() if ahora - t > 3600]
-    for c in antiguos:
-        _codigos_vencidos_recientes.pop(c, None)
-
-
 def generar_codigo_vinculacion(usuario_id: str | int) -> tuple[str, float]:
     """
     Genera un código de 6 caracteres alfanuméricos en mayúscula, sin caracteres ambiguos.
     Invalida cualquier código previo generado por el usuario.
+    Persiste en la tabla codigos_verificacion de Postgres.
     Retorna (codigo, expiracion_timestamp).
     """
-    _limpiar_codigos_vinculacion_expirados()
     uid_str = str(usuario_id)
+    ahora = datetime.now(timezone.utc)
+    expiracion = ahora + timedelta(seconds=EXPIRACION_VINCULACION_SEGUNDOS)
 
-    # Invalidar código previo del mismo usuario si existe
-    codigo_previo = _usuario_a_codigo_vinculacion.get(uid_str)
-    if codigo_previo:
-        _codigos_vinculacion.pop(codigo_previo, None)
-        _usuario_a_codigo_vinculacion.pop(uid_str, None)
+    with SessionLocal() as db:
+        # Invalidar cualquier código previo activo del mismo usuario
+        db.execute(
+            update(CodigoVerificacion)
+            .where(
+                CodigoVerificacion.tipo == "vinculacion_whatsapp",
+                CodigoVerificacion.identificador == uid_str,
+                CodigoVerificacion.consumido == False,
+            )
+            .values(consumido=True, consumido_en=ahora)
+        )
 
-    # Generar código único de 6 caracteres
-    for _ in range(20):
-        candidato = "".join(random.choices(CARACTERES_CODIGO_VINCULACION, k=6))
-        if candidato not in _codigos_vinculacion:
-            codigo = candidato
-            break
-    else:
-        codigo = "".join(random.choices(CARACTERES_CODIGO_VINCULACION, k=6))
+        # Generar código único de 6 caracteres
+        for _ in range(20):
+            candidato = "".join(random.choices(CARACTERES_CODIGO_VINCULACION, k=6))
+            existe = db.execute(
+                select(CodigoVerificacion.id)
+                .where(
+                    CodigoVerificacion.tipo == "vinculacion_whatsapp",
+                    CodigoVerificacion.codigo == candidato,
+                    CodigoVerificacion.consumido == False,
+                    CodigoVerificacion.expiracion > ahora,
+                )
+            ).first()
+            if not existe:
+                codigo = candidato
+                break
+        else:
+            codigo = "".join(random.choices(CARACTERES_CODIGO_VINCULACION, k=6))
 
-    expiracion = time.time() + EXPIRACION_VINCULACION_SEGUNDOS
-    entrada = EntradaCodigoVinculacion(
-        usuario_id=uid_str,
-        codigo=codigo,
-        expiracion=expiracion,
-        creado_en=time.time(),
-    )
-    _codigos_vinculacion[codigo] = entrada
-    _usuario_a_codigo_vinculacion[uid_str] = codigo
-    return codigo, expiracion
+        nuevo = CodigoVerificacion(
+            id=uuid4(),
+            tipo="vinculacion_whatsapp",
+            identificador=uid_str,
+            codigo=codigo,
+            expiracion=expiracion,
+            intentos_fallidos=0,
+            max_intentos=MAX_INTENTOS,
+            creado_en=ahora,
+            consumido=False,
+        )
+        db.add(nuevo)
+        db.commit()
+
+    return codigo, expiracion.timestamp()
 
 
 def consumir_codigo_vinculacion(codigo: str) -> None:
-    """Invalida inmediatamente el código consumido para asegurar uso único."""
+    """Invalida inmediatamente el código consumido en Postgres para asegurar uso único."""
     cod = codigo.strip().upper()
-    entrada = _codigos_vinculacion.pop(cod, None)
-    if entrada and _usuario_a_codigo_vinculacion.get(entrada.usuario_id) == cod:
-        _usuario_a_codigo_vinculacion.pop(entrada.usuario_id, None)
-    _codigos_vencidos_recientes.pop(cod, None)
+    ahora = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        db.execute(
+            update(CodigoVerificacion)
+            .where(
+                CodigoVerificacion.tipo == "vinculacion_whatsapp",
+                CodigoVerificacion.codigo == cod,
+                CodigoVerificacion.consumido == False,
+            )
+            .values(consumido=True, consumido_en=ahora)
+        )
+        db.commit()
 
 
 def buscar_codigo_vinculacion(
     mensaje_texto: str,
 ) -> tuple[str | None, EntradaCodigoVinculacion | None, bool]:
     """
-    Busca de manera tolerante un código de vinculación en el mensaje de texto entrante.
+    Busca de manera tolerante un código de vinculación en el mensaje de texto entrante consultando Postgres.
     Tolerancia:
     - Insensible a mayúsculas/minúsculas.
     - Ignora espacios, guiones y signos de puntuación alrededor o dentro del código.
@@ -128,39 +143,55 @@ def buscar_codigo_vinculacion(
     if not mensaje_texto:
         return None, None, False
 
-    _limpiar_codigos_vinculacion_expirados()
-
     texto_upper = mensaje_texto.upper()
     texto_compacto = re.sub(r"[^A-Z0-9]", "", texto_upper)
+    ahora = datetime.now(timezone.utc)
+    hace_dos_horas = ahora - timedelta(hours=2)
 
-    # 1. Coincidencia directa con códigos activos en memoria
-    for codigo_activo, entrada in list(_codigos_vinculacion.items()):
-        if codigo_activo in texto_compacto:
-            if time.time() <= entrada.expiracion:
-                return codigo_activo, entrada, False
-            return codigo_activo, None, True
+    with SessionLocal() as db:
+        # Códigos no consumidos generados en las últimas 2 horas
+        filas = db.execute(
+            select(CodigoVerificacion)
+            .where(
+                CodigoVerificacion.tipo == "vinculacion_whatsapp",
+                CodigoVerificacion.consumido == False,
+                CodigoVerificacion.creado_en >= hace_dos_horas,
+            )
+        ).scalars().all()
 
-    # 2. Coincidencia con códigos vencidos recientemente
-    for codigo_vencido in list(_codigos_vencidos_recientes.keys()):
-        if codigo_vencido in texto_compacto:
-            return codigo_vencido, None, True
+        # 1. Coincidencia directa con códigos activos o recientemente vencidos
+        for entrada in filas:
+            if entrada.codigo in texto_compacto:
+                if ahora <= entrada.expiracion:
+                    ent = EntradaCodigoVinculacion(
+                        usuario_id=entrada.identificador,
+                        codigo=entrada.codigo,
+                        expiracion=entrada.expiracion.timestamp(),
+                        creado_en=entrada.creado_en.timestamp(),
+                    )
+                    return entrada.codigo, ent, False
+                return entrada.codigo, None, True
 
-    # 3. Detección por patrón explícito: Codigo / Código / Cod
-    match_prefijo = re.search(
-        r"(?:codigo|código|cod)\s*[:=]?\s*([A-Z0-9\s\-]{6,12})",
-        texto_upper,
-    )
-    if match_prefijo:
-        cand = re.sub(r"[^A-Z0-9]", "", match_prefijo.group(1))[:6]
-        if len(cand) == 6:
-            if cand in _codigos_vinculacion:
-                ent = _codigos_vinculacion[cand]
-                if time.time() <= ent.expiracion:
-                    return cand, ent, False
+        # 2. Detección por patrón explícito: Codigo / Código / Cod
+        match_prefijo = re.search(
+            r"(?:codigo|código|cod)\s*[:=]?\s*([A-Z0-9\s\-]{6,12})",
+            texto_upper,
+        )
+        if match_prefijo:
+            cand = re.sub(r"[^A-Z0-9]", "", match_prefijo.group(1))[:6]
+            if len(cand) == 6:
+                for entrada in filas:
+                    if entrada.codigo == cand:
+                        if ahora <= entrada.expiracion:
+                            ent = EntradaCodigoVinculacion(
+                                usuario_id=entrada.identificador,
+                                codigo=entrada.codigo,
+                                expiracion=entrada.expiracion.timestamp(),
+                                creado_en=entrada.creado_en.timestamp(),
+                            )
+                            return cand, ent, False
+                        return cand, None, True
                 return cand, None, True
-            if cand in _codigos_vencidos_recientes:
-                return cand, None, True
-            return cand, None, True
 
     return None, None, False
 
