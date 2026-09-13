@@ -45,7 +45,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17
+        image: postgres:18
         env:
           POSTGRES_DB: argentum_restore_test
           POSTGRES_USER: postgres
@@ -59,14 +59,14 @@ jobs:
           --health-retries 5
 
     steps:
-      - name: Instalar cliente PostgreSQL 17
+      - name: Instalar cliente PostgreSQL 18
         run: |
           sudo install -d /etc/apt/keyrings
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/keyrings/postgresql.gpg
           echo "deb [signed-by=/etc/apt/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
-          sudo apt-get install -y postgresql-client-17
-          echo "/usr/lib/postgresql/17/bin" >> $GITHUB_PATH
+          sudo apt-get install -y postgresql-client-18
+          echo "/usr/lib/postgresql/18/bin" >> $GITHUB_PATH
 
       - name: Verificar versiones de cliente y servidor
         env:
@@ -77,10 +77,10 @@ jobs:
             exit 1
           fi
           echo "=== VERSION CLIENTE POSTGRES ==="
-          /usr/lib/postgresql/17/bin/pg_dump --version
-          /usr/lib/postgresql/17/bin/psql --version
+          /usr/lib/postgresql/18/bin/pg_dump --version
+          /usr/lib/postgresql/18/bin/psql --version
           echo "=== VERSION SERVIDOR POSTGRES ==="
-          /usr/lib/postgresql/17/bin/psql -d "$BACKUP_DATABASE_URL" -t -A -c "SELECT version();"
+          /usr/lib/postgresql/18/bin/psql -d "$BACKUP_DATABASE_URL" -t -A -c "SELECT version();"
 
       - name: Generar pg_dump de esquemas de la aplicación
         env:
@@ -95,28 +95,28 @@ jobs:
           echo "ENCRYPTED_FILE=${ENCRYPTED_FILE}" >> $GITHUB_ENV
 
           echo "Verificando versión de pg_dump:"
-          /usr/lib/postgresql/17/bin/pg_dump --version
+          /usr/lib/postgresql/18/bin/pg_dump --version
 
           echo "Ejecutando pg_dump en formato custom sobre esquema public..."
-          /usr/lib/postgresql/17/bin/pg_dump --dbname="$BACKUP_DATABASE_URL" \
+          /usr/lib/postgresql/18/bin/pg_dump --dbname="$BACKUP_DATABASE_URL" \
             -Fc --no-owner --no-acl -n public \
             -f "$DUMP_FILE"
 
           echo "Dump generado localmente."
           ls -lh "$DUMP_FILE"
 
-      - name: Restaurar en Postgres 17 temporal y verificar consistencia
+      - name: Restaurar en Postgres 18 temporal y verificar consistencia
         env:
           BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
         run: |
           echo "Preparando extensiones y entorno en Postgres temporal..."
-          PGPASSWORD=restore_test_password /usr/lib/postgresql/17/bin/psql -h localhost -p 5432 -U postgres -d argentum_restore_test -v ON_ERROR_STOP=1 << 'EOF'
+          PGPASSWORD=restore_test_password /usr/lib/postgresql/18/bin/psql -h localhost -p 5432 -U postgres -d argentum_restore_test -v ON_ERROR_STOP=1 << 'EOF'
           CREATE EXTENSION IF NOT EXISTS "uuid-ossp" SCHEMA pg_catalog;
           DROP SCHEMA IF EXISTS public CASCADE;
           EOF
 
           echo "Restaurando backup en Postgres temporal..."
-          PGPASSWORD=restore_test_password /usr/lib/postgresql/17/bin/pg_restore \
+          PGPASSWORD=restore_test_password /usr/lib/postgresql/18/bin/pg_restore \
             -h localhost -p 5432 -U postgres -d argentum_restore_test \
             --no-owner --no-acl --exit-on-error \
             "$DUMP_FILE"
