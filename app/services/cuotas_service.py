@@ -306,6 +306,77 @@ def _eliminar_cuota_pendiente(db: Session, cuota: Cuota) -> None:
         db.flush()
 
 
+def eliminar_cuota_individual(db: Session, usuario_id: any, transaccion_id: any) -> None:
+    """
+    Elimina exclusivamente una cuota pendiente puntual y su transacción hija asociada,
+    sin tocar el resto del grupo ni recalcular fechas o montos.
+    Valida estrictamente que pagada == False.
+    Si era la única cuota pendiente que quedaba en el grupo, el grupo pasa a EstadoGrupoCuotas.COMPLETADO.
+    """
+    from fastapi import HTTPException
+    from sqlalchemy import select
+    from app.models.grupo_cuotas import GrupoCuotas, EstadoGrupoCuotas
+
+    # 1. Buscar si se envió transaccion_id de la cuota hija
+    tx = db.execute(
+        select(Transaccion).where(
+            Transaccion.id == transaccion_id,
+            Transaccion.usuario_id == usuario_id
+        )
+    ).scalar_one_or_none()
+
+    cuota = None
+    if tx:
+        if not tx.es_cuota_hija:
+            raise HTTPException(status_code=400, detail="La transacción indicada no es una cuota.")
+        cuota = db.execute(
+            select(Cuota).where(Cuota.transaccion_id == tx.id)
+        ).scalar_one_or_none()
+    else:
+        # Por si se envió directamente el id de la cuota
+        cuota = db.execute(
+            select(Cuota).join(GrupoCuotas).where(
+                Cuota.id == transaccion_id,
+                GrupoCuotas.usuario_id == usuario_id
+            )
+        ).scalar_one_or_none()
+
+    if not cuota:
+        raise HTTPException(status_code=404, detail="No encontramos esa cuota.")
+
+    # 2. Validación estricta: Solo se puede borrar con pagada=False
+    if cuota.pagada:
+        raise HTTPException(
+            status_code=400,
+            detail="No se puede borrar una cuota que ya fue pagada."
+        )
+
+    grupo = db.execute(
+        select(GrupoCuotas).where(
+            GrupoCuotas.id == cuota.grupo_id,
+            GrupoCuotas.usuario_id == usuario_id
+        )
+    ).scalar_one_or_none()
+
+    if not grupo:
+        raise HTTPException(status_code=404, detail="No encontramos el grupo de cuotas.")
+
+    # 3. Borrar la cuota pendiente puntual y su transacción hija reusando la función existente
+    _eliminar_cuota_pendiente(db, cuota)
+    db.flush()
+
+    # 4. Verificar cuotas restantes del grupo
+    cuotas_restantes = db.execute(
+        select(Cuota).where(Cuota.grupo_id == grupo.id)
+    ).scalars().all()
+
+    cuotas_pendientes = [c for c in cuotas_restantes if not c.pagada]
+    if not cuotas_pendientes:
+        grupo.estado = EstadoGrupoCuotas.COMPLETADO
+
+    db.commit()
+
+
 def actualizar_grupo(
     db: Session,
     grupo: GrupoCuotas,

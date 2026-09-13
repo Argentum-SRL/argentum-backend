@@ -130,6 +130,20 @@ def delete_transaccion(
     return
 
 
+@router.delete("/{transaccion_id}/cuota", status_code=status.HTTP_204_NO_CONTENT)
+def delete_cuota_individual(
+    transaccion_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    """
+    Elimina exclusivamente una cuota pendiente individual sin tocar el resto del grupo.
+    """
+    from app.services.cuotas_service import eliminar_cuota_individual
+    eliminar_cuota_individual(db, current_user.id, transaccion_id)
+    return
+
+
 @router.post("/{transaccion_id}/confirmar", response_model=TransaccionRead)
 def confirmar_transaccion(
     transaccion_id: UUID,
