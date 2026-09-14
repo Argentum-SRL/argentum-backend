@@ -172,9 +172,9 @@ def actualizar_password(
 
     if usuario.telefono:
         try:
-            from app.services.whatsapp_service import enviar_whatsapp
-            from app.models.notificacion import MENSAJE_CAMBIO_CONTRASENA
-            if enviar_whatsapp(usuario.telefono, MENSAJE_CAMBIO_CONTRASENA):
+            from app.services.whatsapp_service import enviar_whatsapp_template
+            from app.models.notificacion import TEMPLATE_CAMBIO_CONTRASENA, TEMPLATE_CAMBIO_CONTRASENA_LANG
+            if enviar_whatsapp_template(usuario.telefono, TEMPLATE_CAMBIO_CONTRASENA, TEMPLATE_CAMBIO_CONTRASENA_LANG):
                 if notif:
                     notif.enviada_whatsapp = True
                     db.commit()

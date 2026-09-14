@@ -322,6 +322,123 @@ def enviar_mensaje_whatsapp(telefono: str, mensaje: str) -> bool:
     return enviar_whatsapp(telefono, mensaje)
 
 
+def enviar_whatsapp_template(
+    numero: str,
+    template_name: str,
+    language_code: str,
+    componentes: list | None = None,
+) -> bool:
+    """
+    Envía un mensaje de plantilla por WhatsApp usando Meta WhatsApp Cloud API (Graph API).
+    Incluye 3 reintentos con backoff exponencial ante timeouts o errores 5xx de Meta.
+    """
+    to_whatsapp = formatear_numero_whatsapp(numero)
+
+    if not settings.WHATSAPP_ACCESS_TOKEN or not settings.WHATSAPP_PHONE_NUMBER_ID:
+        logger.warning(
+            "WhatsApp / Meta API no configurado; mensaje template simulado para %s",
+            _enmascarar_telefono(numero),
+        )
+        if settings.ENVIRONMENT == "development":
+            logger.info(
+                "[WHATSAPP-DEV] to=%s template=%s lang=%s",
+                _enmascarar_telefono(to_whatsapp),
+                template_name,
+                language_code,
+            )
+        return True
+
+    url = f"https://graph.facebook.com/v21.0/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to_whatsapp,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {"code": language_code},
+            "components": componentes or [],
+        },
+    }
+
+    max_intentos = 3
+    backoff = 0.5
+
+    for intento in range(1, max_intentos + 1):
+        try:
+            logger.debug(
+                "Enviando WhatsApp template vía Meta (intento %d/%d) a %s (template: %s)",
+                intento,
+                max_intentos,
+                _enmascarar_telefono(to_whatsapp),
+                template_name,
+            )
+            with httpx.Client(timeout=15) as client:
+                response = client.post(url, headers=headers, json=payload)
+
+                if response.is_success:
+                    res_json = response.json()
+                    msg_id = (
+                        res_json.get("messages", [{}])[0].get("id", "N/A")
+                        if res_json.get("messages")
+                        else "N/A"
+                    )
+                    logger.info(
+                        "WhatsApp template enviado exitosamente a %s vía Meta. Message ID: %s",
+                        _enmascarar_telefono(to_whatsapp),
+                        msg_id,
+                    )
+                    return True
+
+                # Si es error 4xx de cliente (bad request, auth error, template no aprobado, etc.), no reintentar
+                if 400 <= response.status_code < 500:
+                    logger.error(
+                        "Error de cliente al enviar WhatsApp template a %s (HTTP %d): %s",
+                        _enmascarar_telefono(to_whatsapp),
+                        response.status_code,
+                        response.text,
+                    )
+                    return False
+
+                # Error 5xx del servidor de Meta
+                logger.warning(
+                    "Error de servidor de Meta al enviar WhatsApp template a %s (HTTP %d): %s. Reintentando...",
+                    _enmascarar_telefono(to_whatsapp),
+                    response.status_code,
+                    response.text,
+                )
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            logger.warning(
+                "Timeout o error de red al enviar WhatsApp template a %s (intento %d/%d): %s",
+                _enmascarar_telefono(to_whatsapp),
+                intento,
+                max_intentos,
+                exc,
+            )
+        except Exception as exc:
+            logger.error(
+                "Error inesperado al enviar WhatsApp template a %s: %s",
+                _enmascarar_telefono(to_whatsapp),
+                exc,
+            )
+            return False
+
+        if intento < max_intentos:
+            time.sleep(backoff)
+            backoff *= 2
+
+    logger.error(
+        "Fallaron todos los intentos (%d) para enviar WhatsApp template a %s",
+        max_intentos,
+        _enmascarar_telefono(to_whatsapp),
+    )
+    return False
+
+
+
 def marcar_leido_y_escribiendo(wamid: str) -> bool:
     """
     Marca un mensaje como leído y activa el indicador de escribiendo en Meta WhatsApp Cloud API.
