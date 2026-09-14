@@ -17,7 +17,7 @@ from uuid import UUID
 
 import httpx
 import anyio
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -63,6 +63,7 @@ from app.services.whatsapp_service import (
     enviar_whatsapp,
     buscar_codigo_vinculacion,
     consumir_codigo_vinculacion,
+    marcar_leido_y_escribiendo,
 )
 from app.services.rate_limit_service import verificar_rate_limit
 from app.utils.telefono import normalizar_telefono_ar
@@ -4507,23 +4508,18 @@ def _transcribir_audio(
                 ext = v
                 break
 
-        # Guardar en archivo temporal y transcribir
-        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-            tmp.write(audio_bytes)
-            tmp_path = tmp.name
-
+        # Transcribir pasando tupla (filename, bytes, content_type) directamente en memoria
         try:
             client_oai = get_openai_client()
-            with open(tmp_path, "rb") as audio_file:
-                transcripcion = client_oai.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    language="es",
-                )
+            transcripcion = client_oai.audio.transcriptions.create(
+                model="whisper-1",
+                file=(f"audio{ext}", audio_bytes, content_type),
+                language="es",
+            )
             return transcripcion.text, None
-        finally:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+        except Exception:
+            logger.exception("Error al transcribir audio de WhatsApp con OpenAI")
+            return None, "ERROR_TRANSCRIPCION"
 
     except Exception:
         logger.exception("Error al transcribir audio de WhatsApp")
@@ -4650,31 +4646,34 @@ async def verify_webhook(request: Request) -> PlainTextResponse:
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Parámetros inválidos")
 
 
-def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> PlainTextResponse:
+def _preprocesar_webhook_whatsapp_sync(
+    body_bytes: bytes, t_inicio: float
+) -> tuple[PlainTextResponse, dict | None]:
     """
-    Procesa el webhook de WhatsApp de forma síncrona dentro del worker thread de AnyIO.
-    Administra su propia sesión de base de datos de corta duración con SessionLocal.
+    Parte A (rápida): parsea el payload, extrae identificadores y persiste el wamid
+    de forma idempotente en su propia sesión de BD. Retorna inmediatamente el 200 OK y
+    los datos necesarios para que la Parte B corra en background.
     """
     try:
         payload = json.loads(body_bytes.decode("utf-8")) if body_bytes else {}
     except Exception:
         logger.warning("Error al decodificar JSON del webhook")
-        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK), None
 
     # Extraer mensajes del payload de Meta
     entries = payload.get("entry", [])
     if not entries:
-        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK), None
 
     changes = entries[0].get("changes", [])
     if not changes:
-        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK), None
 
     value = changes[0].get("value", {})
     messages = value.get("messages", [])
     if not messages:
         # Eventos de estado (sent, delivered, read, etc.)
-        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK), None
 
     msg = messages[0]
     wamid = msg.get("id")
@@ -4691,7 +4690,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
 
             if wamid_existente:
                 logger.info("whatsapp_wamid_duplicado_ignorado", wamid=wamid, from_number=from_number)
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK), None
 
             try:
                 registro_wamid = MensajeWhatsappProcesado(
@@ -4704,11 +4703,43 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
             except IntegrityError:
                 db.rollback()
                 logger.info("whatsapp_wamid_concurrente_duplicado_ignorado", wamid=wamid)
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK), None
             except Exception as e:
                 db.rollback()
                 logger.error("whatsapp_error_registro_wamid", wamid=wamid, error=str(e))
+    finally:
+        db.close()
 
+    t_ack = time.perf_counter() - t_inicio
+    logger.info("[LATENCIA][WEBHOOK_ACK] Ack HTTP 200 retornado en: %.2fs", t_ack)
+
+    datos_mensaje = {
+        "msg": msg,
+        "wamid": wamid,
+        "from_number": from_number,
+        "msg_type": msg_type,
+        "t_inicio": t_inicio,
+    }
+    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK), datos_mensaje
+
+
+def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
+    """
+    Parte B (background): ejecutada vía BackgroundTasks con su propia sesión de BD.
+    Incluye feedback visual (leído + reacción ⏳), transcripción/visión, IA, guardado y envío.
+    """
+    msg = datos_mensaje["msg"]
+    wamid = datos_mensaje.get("wamid")
+    from_number = datos_mensaje.get("from_number", "")
+    msg_type = datos_mensaje.get("msg_type", "text")
+    t_inicio = datos_mensaje.get("t_inicio", time.perf_counter())
+
+    # Feedback visual temprano: marcar como leído y mostrar escribiendo
+    if wamid:
+        marcar_leido_y_escribiendo(wamid)
+
+    db = SessionLocal()
+    try:
         try:
             # 2.1 Detección del código de vinculación ANTES de resolver usuario o cooldown
             if msg_type == "text":
@@ -4721,7 +4752,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                             from_number,
                             "El código de vinculación expiró. Por favor solicitá un código nuevo desde la app.",
                         )
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                     # Código activo encontrado -> Consumir para asegurar un solo uso
                     consumir_codigo_vinculacion(codigo_vinc)
@@ -4736,7 +4767,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
 
                     if not usuario_dueno:
                         logger.error("whatsapp_vinculacion_usuario_inexistente", usuario_id=entrada_vinc.usuario_id)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                     # 3.2 Si el número ya pertenece a otro usuario: no vincular, responder y salir
                     otro_usuario = db.execute(
@@ -4758,7 +4789,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                             from_number,
                             "Ese número de teléfono ya está asociado a otra cuenta de Argentum.",
                         )
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                     # 3.3 Si ya tenía otro número verificado, avisar al número viejo por WhatsApp
                     tel_viejo = usuario_dueno.telefono
@@ -4800,7 +4831,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         logger.error("Error al enviar email de confirmación de vinculación: %s", e)
 
                     logger.info("whatsapp_vinculacion_exitosa", usuario_id=str(usuario_dueno.id), telefono=from_number)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
             usuario = _buscar_usuario_por_telefono(from_number, db)
             if not usuario:
@@ -4813,7 +4844,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 )
                 if debe_responder:
                     enviar_whatsapp(from_number, "No encontramos tu cuenta. Registrate en miargentum.com")
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                return
 
             # Rate limit para usuario registrado (evaluado antes de llamar a Whisper, GPT-4o Vision o ai_service)
             es_medio = (msg_type in ("audio", "image"))
@@ -4827,7 +4858,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 )
                 if motivo_rate_limit:
                     enviar_whatsapp(from_number, motivo_rate_limit)
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                return
 
             logger.info(
                 "whatsapp_mensaje_recibido",
@@ -4860,14 +4891,14 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                             from_number,
                             "El audio es muy largo (máximo 2 minutos). Por favor mandá un audio más corto o escribí el gasto en texto.",
                         )
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                     if error_audio == "TAMANO_EXCEDIDO":
                         enviar_whatsapp(
                             from_number,
                             "El audio es muy pesado (máximo 8 MB). Por favor mandá un audio más corto o escribí el gasto en texto.",
                         )
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                     if transcripcion:
                         mensaje_texto = transcripcion
@@ -4879,12 +4910,12 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         enviar_whatsapp(
                             from_number, "No pude escuchar el audio. Mandame el mensaje en texto."
                         )
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
                 else:
                     enviar_whatsapp(
                         from_number, "No pude escuchar el audio. Mandame el mensaje en texto."
                     )
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
             elif msg_type == "image":
                 image_obj = msg.get("image", {})
@@ -4908,7 +4939,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                             from_number,
                             "La imagen es muy pesada (máximo 5 MB). Por favor mandá una foto más liviana.",
                         )
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                     if descripcion_imagen:
                         mensaje_texto = descripcion_imagen
@@ -4920,19 +4951,19 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         enviar_whatsapp(
                             from_number, "No pude leer el comprobante. Mandame los datos en texto."
                         )
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
                 else:
                     enviar_whatsapp(
                         from_number, "No pude leer el comprobante. Mandame los datos en texto."
                     )
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
             if not mensaje_texto:
                 enviar_whatsapp(
                     from_number,
                     "No entendí bien lo que quisiste decir. Podés contarme qué gastaste, por ejemplo: *Almuerzo $1.500*",
                 )
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                return
 
             if len(mensaje_texto) > 1500:
                 logger.warning("whatsapp_texto_limite_caracteres_superado", longitud=len(mensaje_texto))
@@ -4940,7 +4971,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     from_number,
                     "El mensaje es muy largo (máximo 1500 caracteres). Por favor mandalo más resumido.",
                 )
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                return
             # 0. Chequeo determinístico de pedido de pago de resumen de tarjeta (Tarea 7)
             if _es_pedido_pago_resumen(mensaje_texto):
                 msg_pago_resumen = "El pago del resumen de la tarjeta se gestiona desde la web de Argentum. No se puede realizar por WhatsApp."
@@ -4961,7 +4992,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 db.add(nueva_conv)
                 db.commit()
                 enviar_whatsapp(from_number, msg_pago_resumen)
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                return
 
             # 1. Chequeo determinístico de saludo rioplatense (Tarea 4)
             if _es_saludo(mensaje_texto):
@@ -5007,7 +5038,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 db.add(nueva_conv)
                 db.commit()
                 enviar_whatsapp(from_number, msg_saludo)
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                return
 
             # 2. Si hay una propuesta pendiente y el usuario menciona una billetera, corregirla determinísticamente
             # Evaluado antes de cancelación para que "no, fue en Mercado Pago" o "no fue en galicia" corrijan y no cancelen
@@ -5020,7 +5051,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 if es_corr:
                     if err_moneda:
                         enviar_whatsapp(from_number, err_moneda)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
                     if len(cands) > 1:
                         tipo_prop = propuesta_pendiente.entidades.get("tipo", "egreso")
                         menu = _generar_menu_billeteras(cands, tipo=tipo_prop)
@@ -5032,7 +5063,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         }
                         db.commit()
                         enviar_whatsapp(from_number, f"¿A cuál te referís?\n{menu}")
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
                     if b_nueva:
                         tipo_prop = propuesta_pendiente.entidades.get("tipo", "egreso")
                         clave_bill = "billetera_destino" if tipo_prop == "ingreso" else "billetera_origen"
@@ -5067,7 +5098,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         db.add(nueva_conv)
                         db.commit()
                         enviar_whatsapp(from_number, nuevo_msg)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
             # 3. Chequeo determinístico de cancelación (Tarea 5)
             if _es_cancelacion(mensaje_texto):
@@ -5127,7 +5158,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 db.add(nueva_conv)
                 db.commit()
                 enviar_whatsapp(from_number, msg_cancel)
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                return
 
             # 3. Chequeo de respuesta a verificación de duplicado o lote pendiente
             conv_activa_dup = _buscar_slot_filling_activo(usuario.id, db)
@@ -5156,7 +5187,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         db.add(nueva_conv)
                         db.commit()
                         enviar_whatsapp(from_number, msg_confirm)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                     elif _es_descarte_duplicado(mensaje_texto):
                         conv_activa_dup.slot_filling_activo = False
@@ -5179,7 +5210,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         db.add(nueva_conv)
                         db.commit()
                         enviar_whatsapp(from_number, msg_desc)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                 elif tipo_flujo == "verificacion_lote_duplicado":
                     if _es_confirmacion_lote_ambos(mensaje_texto):
@@ -5204,7 +5235,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         db.add(nueva_conv)
                         db.commit()
                         enviar_whatsapp(from_number, msg_confirm)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                     elif _es_confirmacion_lote_uno_solo(mensaje_texto):
                         entidades_pend = dict(conv_activa_dup.slot_filling_estado)
@@ -5229,7 +5260,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         db.add(nueva_conv)
                         db.commit()
                         enviar_whatsapp(from_number, msg_confirm)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                     elif _es_descarte_duplicado(mensaje_texto):
                         conv_activa_dup.slot_filling_activo = False
@@ -5252,7 +5283,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         db.add(nueva_conv)
                         db.commit()
                         enviar_whatsapp(from_number, msg_desc)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                 elif tipo_flujo == "verificacion_duplicado_suscripcion":
                     if _es_confirmacion_gasto_aparte(mensaje_texto):
@@ -5277,7 +5308,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         db.add(nueva_conv)
                         db.commit()
                         enviar_whatsapp(from_number, msg_confirm)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                     elif _es_cancelacion(mensaje_texto) or _es_descarte_duplicado(mensaje_texto):
                         conv_activa_dup.slot_filling_activo = False
@@ -5300,7 +5331,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         db.add(nueva_conv)
                         db.commit()
                         enviar_whatsapp(from_number, msg_desc)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                 elif tipo_flujo == "ambiguedad_suscripcion":
                     norm_amb = normalizar_texto(mensaje_texto)
@@ -5321,7 +5352,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         }
                         db.commit()
                         enviar_whatsapp(from_number, msg_frec)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                     elif any(w in norm_amb for w in ["gasto", "unico", "único", "gasto unico", "es un gasto"]):
                         msg_monto = f"¿Cuánto gastaste en {srv_nom}?"
@@ -5332,7 +5363,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         }
                         db.commit()
                         enviar_whatsapp(from_number, msg_monto)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                 elif tipo_flujo == "crear_suscripcion_frecuencia":
                     frec = _extraer_frecuencia_mencionada(mensaje_texto)
@@ -5385,17 +5416,17 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                             db.add(nueva_conv)
                             db.commit()
                             enviar_whatsapp(from_number, propuesta_msg)
-                            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                            return
                         else:
                             msg_monto = f"¿Cuánto pagás por {srv_nom}?"
                             conv_activa_dup.slot_filling_estado["frecuencia"] = frec
                             conv_activa_dup.slot_filling_estado["tipo_flujo"] = "crear_suscripcion_monto"
                             db.commit()
                             enviar_whatsapp(from_number, msg_monto)
-                            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                            return
                     else:
                         enviar_whatsapp(from_number, "Por favor elegí una frecuencia: mensual, bimestral, trimestral, semestral o anual.")
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                 elif tipo_flujo == "duplicado_suscripcion_existente":
                     norm_dup = normalizar_texto(mensaje_texto)
@@ -5448,7 +5479,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         db.add(nueva_conv)
                         db.commit()
                         enviar_whatsapp(from_number, propuesta_msg)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
                     else:
                         conv_activa_dup.slot_filling_activo = False
                         conv_activa_dup.accion_ejecutada = "cancelada"
@@ -5470,7 +5501,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         db.add(nueva_conv)
                         db.commit()
                         enviar_whatsapp(from_number, msg_desc)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
             # 4. Chequeo determinístico de confirmación con bloqueo de concurrencia (Tarea 2)
             if _es_confirmacion(mensaje_texto):
@@ -5495,7 +5526,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, msg_confirm)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
                 # Prioridad 2: propuesta de corregir pendiente
                 prop_corregir = _buscar_propuesta_corregir_pendiente(usuario.id, db)
@@ -5518,7 +5549,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, msg_confirm)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
                 # Prioridad 2.5: propuesta de transferir fondos pendiente
                 prop_transfer = _buscar_propuesta_transferencia_pendiente(usuario.id, db)
@@ -5541,7 +5572,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, msg_confirm)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
                 # Prioridad 2.6: propuesta de dar de baja suscripción pendiente
                 prop_baja = _buscar_propuesta_baja_suscripcion_pendiente(usuario.id, db)
@@ -5564,7 +5595,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, msg_confirm)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
                 # Prioridad 2.7: propuesta de cambio de precio de suscripción pendiente
                 prop_cp = _buscar_propuesta_cambio_precio_pendiente(usuario.id, db)
@@ -5587,7 +5618,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, msg_confirm)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
                 # Prioridad 2.8: propuesta de alta de suscripción pendiente
                 prop_sub = _buscar_propuesta_suscripcion_pendiente(usuario.id, db)
@@ -5610,7 +5641,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, msg_confirm)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
                 # Prioridad 3: propuesta de registrar movimiento
                 tx_creada, msg_confirm, ya_conf = _confirmar_propuesta_transaccion(usuario, db)
@@ -5639,7 +5670,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 db.add(nueva_conv)
                 db.commit()
                 enviar_whatsapp(from_number, msg_confirm)
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                return
 
             # 4. Buscar conversación activa previa con slot_filling dentro del plazo (Tarea 2)
             conv_activa = _buscar_slot_filling_activo(usuario.id, db)
@@ -5670,7 +5701,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, msg_vencida)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
             estado_previo = (
                 dict(conv_activa.slot_filling_estado)
@@ -5701,7 +5732,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         enviar_whatsapp(
                             from_number, f"Opción inválida. Elegí un número del 1 al {max_opciones}."
                         )
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
                 else:
                     # Probar si el texto es el nombre de una billetera (5.3)
                     b_match, cands = resolver_billetera_cascada(mensaje_limpio, billeteras_activas)
@@ -5711,7 +5742,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     elif len(cands) > 1:
                         menu_acotado = _generar_menu_billeteras(cands, tipo=tipo_mov)
                         enviar_whatsapp(from_number, f"¿A cuál te referís?\n{menu_acotado}")
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
                     else:
                         # Verificar si nombró billetera de otra moneda (7.4)
                         todas = _obtener_billeteras_activas(usuario.id, db)
@@ -5724,7 +5755,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                                 from_number,
                                 f"No podés usar una billetera en {nom_otra} para un movimiento en {nom_mov}.\n{menu}"
                             )
-                            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                            return
 
                 if es_seleccion and billetera_elegida:
                     if estado_previo_bill.get("tipo_flujo") == "lote_slot_filling":
@@ -5777,7 +5808,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                             db.add(nueva_conv)
                             db.commit()
                             enviar_whatsapp(from_number, pregunta_sgte)
-                            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                            return
 
                         # Todas las operaciones del lote quedaron resueltas
                         ops_todas = estado_previo_bill.get("operaciones", [])
@@ -5825,7 +5856,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         db.add(nueva_conv)
                         db.commit()
                         enviar_whatsapp(from_number, propuesta_msg)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                     clave_bill = "billetera_destino" if tipo_mov == "ingreso" else "billetera_origen"
                     clave_otra = "billetera_origen" if tipo_mov == "ingreso" else "billetera_destino"
@@ -5912,7 +5943,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, propuesta_msg)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
             # 5.1 Si hay pregunta de tarjeta pendiente activa
             if conv_activa and conv_activa.slot_filling_estado and any("tarjeta" in d for d in conv_activa.slot_filling_estado.get("datos_faltantes", [])):
@@ -5935,7 +5966,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         es_sel = True
                     else:
                         enviar_whatsapp(from_number, f"Opción inválida. Elegí un número del 1 al {len(tarjetas_opciones)}.")
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
                 else:
                     t_match, cands = resolver_tarjeta_cascada(mensaje_limpio, tarjetas_opciones)
                     if t_match:
@@ -5944,11 +5975,11 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     elif len(cands) > 1:
                         menu = _generar_menu_tarjetas(cands)
                         enviar_whatsapp(from_number, f"¿A cuál te referís?\n{menu}")
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
                     else:
                         menu = _generar_menu_tarjetas(tarjetas_opciones)
                         enviar_whatsapp(from_number, f"No encontré esa tarjeta entre las tuyas.\n\n{menu}")
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                 if es_sel and tarjeta_elegida:
                     cant_cuotas = int(estado_prev_tarj.get("cantidad_cuotas", 1))
@@ -5991,7 +6022,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, propuesta_msg)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
             # 5.2 Si hay aclaración de cuotas pendiente activa ("¿Los $80.000 son el total o el valor de cada cuota?")
             if conv_activa and conv_activa.slot_filling_estado and any("aclarar_cuotas" in d for d in conv_activa.slot_filling_estado.get("datos_faltantes", [])):
@@ -6002,7 +6033,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
 
                 if not es_total and not es_por_cuota:
                     enviar_whatsapp(from_number, "Por favor decime si ese monto es 'el total' o 'por cuota'.")
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
                 monto_base = Decimal(str(estado_prev_cuotas["monto"]))
                 cant_cuotas = int(estado_prev_cuotas.get("cantidad_cuotas", 1))
@@ -6063,7 +6094,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, propuesta_msg)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
             # 7. Si el mensaje es únicamente un número sin pregunta pendiente
             if mensaje_texto.strip().isdigit() and not (conv_activa and conv_activa.slot_filling_activo) and not estado_previo:
@@ -6088,7 +6119,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 )
                 db.add(nueva_conv)
                 db.commit()
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                return
 
             # 7.5 Detección determinística de deshacer (Tarea 2)
             if _es_pedido_deshacer(mensaje_texto):
@@ -6126,7 +6157,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, msg_undo_resp)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
                 # Hay movimiento para deshacer: armar propuesta de confirmación
                 msg_propuesta_undo = _construir_propuesta_deshacer(tx_last, db)
@@ -6153,7 +6184,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 db.add(nueva_conv)
                 db.commit()
                 enviar_whatsapp(from_number, msg_propuesta_undo)
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                return
 
             # 7.6 Detección determinística de corregir (Tarea 3)
             tx_last_corr, motivo_corr = _buscar_ultimo_movimiento_whatsapp(usuario.id, db)
@@ -6180,7 +6211,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         db.add(nueva_conv)
                         db.commit()
                         enviar_whatsapp(from_number, err_corr)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                     if cambios:
                         msg_propuesta_corr = _construir_propuesta_corregir(tx_last_corr, cambios, db)
@@ -6201,7 +6232,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         db.add(nueva_conv)
                         db.commit()
                         enviar_whatsapp(from_number, msg_propuesta_corr)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
             else:
                 if _parece_intento_correccion(mensaje_texto):
                     if motivo_corr == "PLAZO_VENCIDO":
@@ -6228,7 +6259,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, msg_resp)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
             # 7.7 Detección determinística de transferencias / cajero / dólares (Punto 9B)
             es_tr, estado_tr, ents_tr, resp_tr = _interpretar_transferencia(
                 mensaje_texto, usuario, db, estado_previo=estado_previo
@@ -6252,7 +6283,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, resp_tr)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
                 elif estado_tr == "slot_filling":
                     if conv_activa:
@@ -6275,7 +6306,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, resp_tr)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
                 elif estado_tr == "propuesta":
                     if conv_activa:
@@ -6298,7 +6329,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, resp_tr)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
             # 7.8 Detección determinística de consultas de suscripciones (Tarea 7)
             if _es_consulta_suscripciones(mensaje_texto):
@@ -6320,7 +6351,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 db.add(nueva_conv)
                 db.commit()
                 enviar_whatsapp(from_number, msg_resp)
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                return
 
             # 7.9 Detección determinística de baja de suscripciones (Tarea 5)
             es_baja, srv_baja = _es_pedido_baja_suscripcion(mensaje_texto)
@@ -6346,7 +6377,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, msg_resp)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
                 pv = suscripcion_service.obtener_precio_vigente(db, sub_candidata.id)
                 m_val = pv.monto if pv else Decimal("0")
@@ -6372,7 +6403,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 db.add(nueva_conv)
                 db.commit()
                 enviar_whatsapp(from_number, msg_propuesta)
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                return
 
             # 7.10 Detección determinística de cambio de precio de suscripción (Tarea 6)
             es_cp, srv_cp, nuevo_precio = _es_cambio_precio_suscripcion(mensaje_texto)
@@ -6398,7 +6429,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     db.add(nueva_conv)
                     db.commit()
                     enviar_whatsapp(from_number, msg_resp)
-                    return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                    return
 
                 pv = suscripcion_service.obtener_precio_vigente(db, sub_candidata.id)
                 m_ant = pv.monto if pv else Decimal("0")
@@ -6430,7 +6461,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 db.add(nueva_conv)
                 db.commit()
                 enviar_whatsapp(from_number, msg_propuesta)
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                return
 
             # 7.11 Detección determinística de ambigüedad suscripción vs gasto suelto (Tarea 3.4)
             es_amb, srv_amb = _detectar_ambiguedad_suscripcion(mensaje_texto)
@@ -6453,7 +6484,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 db.add(nueva_conv)
                 db.commit()
                 enviar_whatsapp(from_number, msg_pregunta)
-                return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                return
 
             # 7.12 Detección determinística de alta de suscripción (Tarea 4)
             if _es_intento_alta_suscripcion(mensaje_texto):
@@ -6496,7 +6527,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         db.add(nueva_conv)
                         db.commit()
                         enviar_whatsapp(from_number, msg_aviso)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                     # Verificar frecuencia (Tarea 4.3)
                     frecuencia = _extraer_frecuencia_mencionada(mensaje_texto)
@@ -6534,7 +6565,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         db.add(nueva_conv)
                         db.commit()
                         enviar_whatsapp(from_number, msg_frec)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
                     if monto_sub is not None:
                         # Todo listo para proponer suscripción (Tarea 4.6)
@@ -6578,7 +6609,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                         db.add(nueva_conv)
                         db.commit()
                         enviar_whatsapp(from_number, propuesta_msg)
-                        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+                        return
 
             # 8. Procesamiento normal de IA
             t_ia_start = time.perf_counter()
@@ -7547,7 +7578,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                 t_total,
             )
 
-            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+            return
 
         except Exception as e:
             db.rollback()
@@ -7559,20 +7590,32 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
                     )
             except Exception:
                 logger.exception("Error al enviar mensaje de fallback")
-            return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK)
+            return
 
     finally:
         db.close()
 
 
+def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> PlainTextResponse:
+    """
+    Wrapper de compatibilidad para suites de regresión que ejecutan de forma síncrona.
+    """
+    resp, datos_mensaje = _preprocesar_webhook_whatsapp_sync(body_bytes, t_inicio)
+    if datos_mensaje:
+        _procesar_mensaje_whatsapp_background(datos_mensaje)
+    return resp
+
+
 @router.post("/webhook", response_class=PlainTextResponse)
 async def whatsapp_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
 ) -> PlainTextResponse:
     """
     Webhook de WhatsApp Cloud API (Meta Graph API).
-    Valida firma HMAC-SHA256 en el event loop y delega el procesamiento síncrono
-    pesado (I/O de DB, OpenAI y Meta Graph API) al threadpool de AnyIO.
+    Valida firma HMAC-SHA256 en el event loop, ejecuta la deduplicación de forma síncrona
+    en thread worker (Parte A) respondiendo inmediatamente HTTP 200, y delega el procesamiento
+    pesado de IA, transcripción y envío (Parte B) a BackgroundTasks.
     """
     t_inicio = time.perf_counter()
     body_bytes = await request.body()
@@ -7607,7 +7650,12 @@ async def whatsapp_webhook(
             detail="Firma inválida",
         )
 
-    return await anyio.to_thread.run_sync(_procesar_webhook_whatsapp_sync, body_bytes, t_inicio)
+    resp, datos_mensaje = await anyio.to_thread.run_sync(
+        _preprocesar_webhook_whatsapp_sync, body_bytes, t_inicio
+    )
+    if datos_mensaje:
+        background_tasks.add_task(_procesar_mensaje_whatsapp_background, datos_mensaje)
+    return resp
 
 
 class TestIAMessageRequest(BaseModel):

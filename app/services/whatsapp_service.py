@@ -320,3 +320,34 @@ def enviar_whatsapp(numero: str, mensaje: str) -> bool:
 def enviar_mensaje_whatsapp(telefono: str, mensaje: str) -> bool:
     """Alias de compatibilidad."""
     return enviar_whatsapp(telefono, mensaje)
+
+
+def marcar_leido_y_escribiendo(wamid: str) -> bool:
+    """
+    Marca un mensaje como leído y activa el indicador de escribiendo en Meta WhatsApp Cloud API.
+    """
+    if not wamid or not isinstance(wamid, str) or not wamid.startswith("wamid."):
+        return False
+    if not settings.WHATSAPP_ACCESS_TOKEN or not settings.WHATSAPP_PHONE_NUMBER_ID:
+        return False
+
+    url = f"https://graph.facebook.com/v21.0/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "status": "read",
+        "message_id": wamid,
+        "typing_indicator": {"type": "text"},
+    }
+
+    try:
+        with httpx.Client(timeout=3) as client:
+            res = client.post(url, headers=headers, json=payload)
+            return res.is_success
+    except Exception as exc:
+        logger.warning("Error al marcar mensaje %s como leído y escribiendo: %s", wamid, exc)
+        return False
+
