@@ -36,7 +36,7 @@ class ConversacionWpp(Base):
     mensaje_bot: Mapped[str] = mapped_column(Text, nullable=False)
     intent_detectado: Mapped[str | None] = mapped_column(String(100), nullable=True)
     entidades: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    accion_ejecutada: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    accion_ejecutada: Mapped[str | None] = mapped_column(Text, nullable=True)
     confianza: Mapped[Decimal | None] = mapped_column(Numeric(4, 3), nullable=True)
     slot_filling_activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     slot_filling_estado: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
