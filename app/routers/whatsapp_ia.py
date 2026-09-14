@@ -4672,7 +4672,42 @@ def _preprocesar_webhook_whatsapp_sync(
     value = changes[0].get("value", {})
     messages = value.get("messages", [])
     if not messages:
-        # Eventos de estado (sent, delivered, read, etc.)
+        # Eventos de estado (sent, delivered, read, failed, etc.)
+        statuses = value.get("statuses")
+        logger.info(
+            "whatsapp_webhook_status_event",
+            statuses=statuses,
+            value=value,
+        )
+        if statuses and isinstance(statuses, list):
+            for st in statuses:
+                if isinstance(st, dict) and st.get("status") == "failed":
+                    errors = st.get("errors", [])
+                    if errors and isinstance(errors, list):
+                        for err in errors:
+                            if isinstance(err, dict):
+                                logger.warning(
+                                    "whatsapp_message_status_failed",
+                                    wamid=st.get("id"),
+                                    recipient_id=st.get("recipient_id"),
+                                    code=err.get("code"),
+                                    title=err.get("title"),
+                                    error_details=err,
+                                )
+                            else:
+                                logger.warning(
+                                    "whatsapp_message_status_failed",
+                                    wamid=st.get("id"),
+                                    recipient_id=st.get("recipient_id"),
+                                    error_details=err,
+                                )
+                    else:
+                        logger.warning(
+                            "whatsapp_message_status_failed",
+                            wamid=st.get("id"),
+                            recipient_id=st.get("recipient_id"),
+                            status_details=st,
+                        )
         return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK), None
 
     msg = messages[0]
