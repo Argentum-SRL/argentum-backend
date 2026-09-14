@@ -849,28 +849,27 @@ def procesar_mensaje(
         model_name = getattr(settings, "OPENAI_MODEL", "gpt-4o-mini-2024-07-18")
         schema_format = _construir_schema_estricto(db)
 
-        # 1. Intento primario con Structured Outputs (strict: true) con reintento ante fallos de conexión de red
+        # Intento con Structured Outputs (strict: true), con fallback a json_object si falla por error no-conexión,
+        # y reintento (máximo 2 intentos totales) ÚNICAMENTE ante fallos de conexión de red o timeout.
         response = None
-        for intento in range(3):
+        for intento in range(2):
             try:
-                response = client.chat.completions.create(
-                    model=model_name,
-                    messages=messages_openai,
-                    temperature=0.1,
-                    max_tokens=2000,
-                    response_format=schema_format,
-                )
-                break
-            except Exception as e_strict:
-                err_str = str(e_strict).lower()
-                if ("connection" in err_str or "getaddrinfo" in err_str or "timeout" in err_str) and intento < 2:
-                    time.sleep(1.0)
-                    continue
-                logger.warning(
-                    "Fallo en Structured Outputs OpenAI (%s). Reintentando con json_object como fallback.",
-                    e_strict,
-                )
                 try:
+                    response = client.chat.completions.create(
+                        model=model_name,
+                        messages=messages_openai,
+                        temperature=0.1,
+                        max_tokens=2000,
+                        response_format=schema_format,
+                    )
+                except Exception as e_strict:
+                    err_strict_str = str(e_strict).lower()
+                    if "connection" in err_strict_str or "getaddrinfo" in err_strict_str or "timeout" in err_strict_str:
+                        raise
+                    logger.warning(
+                        "Fallo en Structured Outputs OpenAI (%s). Reintentando con json_object como fallback.",
+                        e_strict,
+                    )
                     response = client.chat.completions.create(
                         model=model_name,
                         messages=messages_openai,
@@ -878,13 +877,21 @@ def procesar_mensaje(
                         max_tokens=2000,
                         response_format={"type": "json_object"},
                     )
-                    break
-                except Exception as e_fallback:
-                    err_fb = str(e_fallback).lower()
-                    if ("connection" in err_fb or "getaddrinfo" in err_fb or "timeout" in err_fb) and intento < 2:
-                        time.sleep(1.0)
-                        continue
-                    raise e_fallback
+                break
+            except Exception as e_call:
+                err_call_str = str(e_call).lower()
+                if ("connection" in err_call_str or "getaddrinfo" in err_call_str or "timeout" in err_call_str) and intento < 1:
+                    time.sleep(1.0)
+                    continue
+                raise
+
+        if response.choices and response.choices[0].finish_reason == "length":
+            longitud_ultimo = len(messages_openai[-1]["content"]) if messages_openai and "content" in messages_openai[-1] else 0
+            logger.error(
+                f"Respuesta de OpenAI cortada por límite de tokens (finish_reason='{response.choices[0].finish_reason}'). "
+                f"Longitud último mensaje enviado: {longitud_ultimo} caracteres."
+            )
+            return fallback_res
 
         content = response.choices[0].message.content
         if settings.ENVIRONMENT == "production":
