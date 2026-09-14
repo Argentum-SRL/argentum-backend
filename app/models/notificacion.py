@@ -38,6 +38,12 @@ class TipoNotificacion(str, enum.Enum):
     PROYECCION_NEGATIVA = "PROYECCION_NEGATIVA"
 
 
+MENSAJE_CAMBIO_CONTRASENA = (
+    "Tu contraseña de Argentum fue actualizada. Si no fuiste vos, "
+    "cambiala de inmediato desde https://miargentum.com/auth/recuperar-password"
+)
+
+
 class Notificacion(Base):
     __tablename__ = "notificaciones"
 

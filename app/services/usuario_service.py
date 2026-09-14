@@ -153,21 +153,33 @@ def actualizar_password(
     db.commit()
 
 
+    notif = None
     try:
         from app.services.notificacion_service import crear_notificacion
-        from app.models.notificacion import TipoNotificacion, NivelNotificacion
-        crear_notificacion(
+        from app.models.notificacion import TipoNotificacion, NivelNotificacion, MENSAJE_CAMBIO_CONTRASENA
+        notif = crear_notificacion(
             db=db,
             usuario_id=usuario.id,
             tipo=TipoNotificacion.CAMBIO_CONTRASENA,
             nivel=NivelNotificacion.CRITICA,
-            mensaje="Tu contraseña fue actualizada. Si no fuiste vos, contactanos de inmediato.",
+            mensaje=MENSAJE_CAMBIO_CONTRASENA,
             canal_web=True,
             canal_whatsapp=True,
             canal_email=False,
         )
     except Exception:
         pass
+
+    if usuario.telefono:
+        try:
+            from app.services.whatsapp_service import enviar_whatsapp
+            from app.models.notificacion import MENSAJE_CAMBIO_CONTRASENA
+            if enviar_whatsapp(usuario.telefono, MENSAJE_CAMBIO_CONTRASENA):
+                if notif:
+                    notif.enviada_whatsapp = True
+                    db.commit()
+        except Exception as e:
+            logger.error("Error al enviar WhatsApp de cambio de contraseña: %s", e)
     
     try:
         from app.services.notificacion_email_service import (
