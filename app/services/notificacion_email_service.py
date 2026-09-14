@@ -34,6 +34,7 @@ def enviar_email_notificacion(
         "subject": asunto,
         "html": cuerpo_html,
         "text": cuerpo_texto,
+        "reply_to": "srlargentum@gmail.com",
     }
 
     try:

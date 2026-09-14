@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
-    SMTP_FROM: str = "Argentum <email@de.la.app>"
+    SMTP_FROM: str = "Argentum <srlargentum@gmail.com>"
 
     # Resend API
     RESEND_API_KEY: str = ""
