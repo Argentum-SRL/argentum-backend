@@ -64,6 +64,7 @@ from app.services.whatsapp_service import (
     buscar_codigo_vinculacion,
     consumir_codigo_vinculacion,
     marcar_leido_y_escribiendo,
+    get_meta_http_client,
 )
 from app.services.rate_limit_service import verificar_rate_limit
 from app.utils.telefono import normalizar_telefono_ar
@@ -4418,23 +4419,23 @@ def _descargar_medio_meta(media_id: str) -> tuple[bytes | None, str | None]:
 
     headers = {"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"}
     try:
-        with httpx.Client(timeout=30, follow_redirects=True) as client:
-            # Paso 1: Consultar metadata del medio para obtener la URL de descarga
-            meta_url = f"https://graph.facebook.com/v21.0/{media_id}"
-            res_meta = client.get(meta_url, headers=headers)
-            res_meta.raise_for_status()
-            data = res_meta.json()
-            download_url = data.get("url")
-            mime_type = data.get("mime_type")
+        client = get_meta_http_client()
+        # Paso 1: Consultar metadata del medio para obtener la URL de descarga
+        meta_url = f"https://graph.facebook.com/v21.0/{media_id}"
+        res_meta = client.get(meta_url, headers=headers, timeout=30, follow_redirects=True)
+        res_meta.raise_for_status()
+        data = res_meta.json()
+        download_url = data.get("url")
+        mime_type = data.get("mime_type")
 
-            if not download_url:
-                logger.error("Meta Graph API no devolvió URL de descarga para media_id %s", media_id)
-                return None, None
+        if not download_url:
+            logger.error("Meta Graph API no devolvió URL de descarga para media_id %s", media_id)
+            return None, None
 
-            # Paso 2: Descargar el contenido binario con el Bearer token
-            res_media = client.get(download_url, headers=headers)
-            res_media.raise_for_status()
-            return res_media.content, mime_type
+        # Paso 2: Descargar el contenido binario con el Bearer token
+        res_media = client.get(download_url, headers=headers, timeout=30, follow_redirects=True)
+        res_media.raise_for_status()
+        return res_media.content, mime_type
     except Exception as e:
         logger.exception("Error al descargar medio de Meta (media_id=%s): %s", media_id, e)
         return None, None

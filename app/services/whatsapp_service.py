@@ -14,6 +14,16 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+_meta_http_client: httpx.Client | None = None
+
+
+def get_meta_http_client() -> httpx.Client:
+    global _meta_http_client
+    if _meta_http_client is None:
+        _meta_http_client = httpx.Client()
+    return _meta_http_client
+
+
 CODIGO_EXPIRACION_SEGUNDOS = 10 * 60  # 10 minutos
 MAX_INTENTOS = 3
 
@@ -263,40 +273,40 @@ def enviar_whatsapp(numero: str, mensaje: str) -> bool:
                 max_intentos,
                 _enmascarar_telefono(to_whatsapp),
             )
-            with httpx.Client(timeout=15) as client:
-                response = client.post(url, headers=headers, json=payload)
+            client = get_meta_http_client()
+            response = client.post(url, headers=headers, json=payload, timeout=15)
 
-                if response.is_success:
-                    res_json = response.json()
-                    msg_id = (
-                        res_json.get("messages", [{}])[0].get("id", "N/A")
-                        if res_json.get("messages")
-                        else "N/A"
-                    )
-                    logger.info(
-                        "WhatsApp enviado exitosamente a %s vía Meta. Message ID: %s",
-                        _enmascarar_telefono(to_whatsapp),
-                        msg_id,
-                    )
-                    return True
+            if response.is_success:
+                res_json = response.json()
+                msg_id = (
+                    res_json.get("messages", [{}])[0].get("id", "N/A")
+                    if res_json.get("messages")
+                    else "N/A"
+                )
+                logger.info(
+                    "WhatsApp enviado exitosamente a %s vía Meta. Message ID: %s",
+                    _enmascarar_telefono(to_whatsapp),
+                    msg_id,
+                )
+                return True
 
-                # Si es error 4xx de cliente (bad request, auth error, etc.), no reintentar
-                if 400 <= response.status_code < 500:
-                    logger.error(
-                        "Error de cliente al enviar WhatsApp a %s (HTTP %d): %s",
-                        _enmascarar_telefono(to_whatsapp),
-                        response.status_code,
-                        response.text,
-                    )
-                    return False
-
-                # Error 5xx del servidor de Meta
-                logger.warning(
-                    "Error de servidor de Meta al enviar WhatsApp a %s (HTTP %d): %s. Reintentando...",
+            # Si es error 4xx de cliente (bad request, auth error, etc.), no reintentar
+            if 400 <= response.status_code < 500:
+                logger.error(
+                    "Error de cliente al enviar WhatsApp a %s (HTTP %d): %s",
                     _enmascarar_telefono(to_whatsapp),
                     response.status_code,
                     response.text,
                 )
+                return False
+
+            # Error 5xx del servidor de Meta
+            logger.warning(
+                "Error de servidor de Meta al enviar WhatsApp a %s (HTTP %d): %s. Reintentando...",
+                _enmascarar_telefono(to_whatsapp),
+                response.status_code,
+                response.text,
+            )
         except (httpx.TimeoutException, httpx.NetworkError) as exc:
             logger.warning(
                 "Timeout o error de red al enviar WhatsApp a %s (intento %d/%d): %s",
@@ -376,40 +386,40 @@ def enviar_whatsapp_template(
                 _enmascarar_telefono(to_whatsapp),
                 template_name,
             )
-            with httpx.Client(timeout=15) as client:
-                response = client.post(url, headers=headers, json=payload)
+            client = get_meta_http_client()
+            response = client.post(url, headers=headers, json=payload, timeout=15)
 
-                if response.is_success:
-                    res_json = response.json()
-                    msg_id = (
-                        res_json.get("messages", [{}])[0].get("id", "N/A")
-                        if res_json.get("messages")
-                        else "N/A"
-                    )
-                    logger.info(
-                        "WhatsApp template enviado exitosamente a %s vía Meta. Message ID: %s",
-                        _enmascarar_telefono(to_whatsapp),
-                        msg_id,
-                    )
-                    return True
+            if response.is_success:
+                res_json = response.json()
+                msg_id = (
+                    res_json.get("messages", [{}])[0].get("id", "N/A")
+                    if res_json.get("messages")
+                    else "N/A"
+                )
+                logger.info(
+                    "WhatsApp template enviado exitosamente a %s vía Meta. Message ID: %s",
+                    _enmascarar_telefono(to_whatsapp),
+                    msg_id,
+                )
+                return True
 
-                # Si es error 4xx de cliente (bad request, auth error, template no aprobado, etc.), no reintentar
-                if 400 <= response.status_code < 500:
-                    logger.error(
-                        "Error de cliente al enviar WhatsApp template a %s (HTTP %d): %s",
-                        _enmascarar_telefono(to_whatsapp),
-                        response.status_code,
-                        response.text,
-                    )
-                    return False
-
-                # Error 5xx del servidor de Meta
-                logger.warning(
-                    "Error de servidor de Meta al enviar WhatsApp template a %s (HTTP %d): %s. Reintentando...",
+            # Si es error 4xx de cliente (bad request, auth error, template no aprobado, etc.), no reintentar
+            if 400 <= response.status_code < 500:
+                logger.error(
+                    "Error de cliente al enviar WhatsApp template a %s (HTTP %d): %s",
                     _enmascarar_telefono(to_whatsapp),
                     response.status_code,
                     response.text,
                 )
+                return False
+
+            # Error 5xx del servidor de Meta
+            logger.warning(
+                "Error de servidor de Meta al enviar WhatsApp template a %s (HTTP %d): %s. Reintentando...",
+                _enmascarar_telefono(to_whatsapp),
+                response.status_code,
+                response.text,
+            )
         except (httpx.TimeoutException, httpx.NetworkError) as exc:
             logger.warning(
                 "Timeout o error de red al enviar WhatsApp template a %s (intento %d/%d): %s",
@@ -461,9 +471,9 @@ def marcar_leido_y_escribiendo(wamid: str) -> bool:
     }
 
     try:
-        with httpx.Client(timeout=3) as client:
-            res = client.post(url, headers=headers, json=payload)
-            return res.is_success
+        client = get_meta_http_client()
+        res = client.post(url, headers=headers, json=payload, timeout=3)
+        return res.is_success
     except Exception as exc:
         logger.warning("Error al marcar mensaje %s como leído y escribiendo: %s", wamid, exc)
         return False
