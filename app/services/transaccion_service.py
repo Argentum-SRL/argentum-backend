@@ -535,7 +535,7 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
     return transaccion
 
 
-def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID):
+def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, commit: bool = True):
     transaccion = obtener_transaccion(db, usuario_id, transaccion_id)
     
     # Manejo de cascada para cuotas
@@ -594,7 +594,10 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID):
                 db.execute(delete(Transaccion).where(Transaccion.id.in_(id_hijas)))
             db.execute(delete(Transaccion).where(Transaccion.id == id_padre))
             
-            db.commit()
+            if commit:
+                db.commit()
+            else:
+                db.flush()
             return {"detail": "Grupo de cuotas eliminado exitosamente"}
 
     # Revertir impacto en metas si es una transacción vinculada a una meta
@@ -721,7 +724,10 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID):
     presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=True)
 
     db.delete(transaccion)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
     return {"detail": "Transacción eliminada exitosamente"}
 

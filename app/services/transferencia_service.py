@@ -34,7 +34,7 @@ def obtener_transferencia(db: Session, usuario_id: UUID, transferencia_id: UUID)
     return tr
 
 
-def crear_transferencia(db: Session, usuario_id: UUID, data: TransferenciaInternaCreate) -> TransferenciaInterna:
+def crear_transferencia(db: Session, usuario_id: UUID, data: TransferenciaInternaCreate, commit: bool = True) -> TransferenciaInterna:
     # 1. Validar billeteras
     b_origen = db.execute(
         select(Billetera).where(Billetera.id == data.billetera_origen_id, Billetera.usuario_id == usuario_id)
@@ -208,19 +208,22 @@ def crear_transferencia(db: Session, usuario_id: UUID, data: TransferenciaIntern
     b_destino.saldo_actual += monto_destino
 
     db.add(nueva_tr)
-    db.commit()
-    db.refresh(nueva_tr)
+    if commit:
+        db.commit()
+        db.refresh(nueva_tr)
+    else:
+        db.flush()
     return nueva_tr
 
 
-def eliminar_transferencia(db: Session, usuario_id: UUID, transferencia_id: UUID):
+def eliminar_transferencia(db: Session, usuario_id: UUID, transferencia_id: UUID, commit: bool = True):
     tr = obtener_transferencia(db, usuario_id, transferencia_id)
 
     # Si tenía comisión vinculada, revertir y eliminar la transacción de gasto de comisión
     if tr.transaccion_comision_id:
         try:
             from app.services import transaccion_service
-            transaccion_service.eliminar_transaccion(db, usuario_id, tr.transaccion_comision_id)
+            transaccion_service.eliminar_transaccion(db, usuario_id, tr.transaccion_comision_id, commit=False)
         except HTTPException as e:
             if e.status_code != 404:
                 logger.error(f"Error al revertir comisión {tr.transaccion_comision_id} de transferencia {tr.id}: {e}")
@@ -249,5 +252,8 @@ def eliminar_transferencia(db: Session, usuario_id: UUID, transferencia_id: UUID
     b_destino.saldo_actual -= monto_destino
 
     db.delete(tr)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return {"detail": "Transferencia eliminada exitosamente"}

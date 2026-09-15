@@ -2410,12 +2410,16 @@ def _confirmar_propuesta_transferencia(
     )
 
     try:
-        tr = transferencia_service.crear_transferencia(db, usuario.id, data_tr)
+        tr = transferencia_service.crear_transferencia(db, usuario.id, data_tr, commit=False)
+        conv_previa.accion_ejecutada = f"transferencia:{tr.id}"
+        db.commit()
     except HTTPException as exc:
+        db.rollback()
         return None, str(exc.detail), False
-
-    conv_previa.accion_ejecutada = f"transferencia:{tr.id}"
-    db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"Error al confirmar transferencia: {exc}")
+        return None, "Hubo un problema al procesar la transferencia.", False
 
     b_origen = db.get(Billetera, b_orig_id)
     b_destino = db.get(Billetera, b_dest_id)
@@ -3365,12 +3369,17 @@ def _confirmar_propuesta_deshacer(
             db.commit()
             return None, "El movimiento ya fue eliminado.", False
         cant_eliminados = len(txs)
-        for t in txs:
-            eliminar_transaccion(db, usuario.id, t.id)
-        conv_undo.accion_ejecutada = f"deshecho:lote:{','.join(str(x) for x in lote_uuids)}"
-        emitir_evento_actualizacion(db, usuario.id, "transacciones")
-        emitir_evento_actualizacion(db, usuario.id, "billeteras")
-        db.commit()
+        try:
+            for t in txs:
+                eliminar_transaccion(db, usuario.id, t.id, commit=False)
+            conv_undo.accion_ejecutada = f"deshecho:lote:{','.join(str(x) for x in lote_uuids)}"
+            emitir_evento_actualizacion(db, usuario.id, "transacciones")
+            emitir_evento_actualizacion(db, usuario.id, "billeteras")
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error al eliminar lote de transacciones: {e}")
+            return None, "Hubo un problema al eliminar el lote, no se borró nada, intentá de nuevo.", False
         return txs[0], f"Listo, {cant_eliminados} movimientos eliminados.", False
 
     tr_id_str = entidades.get("transferencia_id")
@@ -3387,12 +3396,16 @@ def _confirmar_propuesta_deshacer(
             db.commit()
             return None, "El movimiento ya fue eliminado.", False
 
-        transferencia_service.eliminar_transferencia(db, usuario.id, tr.id)
-
-        conv_undo.accion_ejecutada = f"deshecho:{tr_id}"
-        emitir_evento_actualizacion(db, usuario.id, "transferencias")
-        emitir_evento_actualizacion(db, usuario.id, "billeteras")
-        db.commit()
+        try:
+            transferencia_service.eliminar_transferencia(db, usuario.id, tr.id, commit=False)
+            conv_undo.accion_ejecutada = f"deshecho:{tr_id}"
+            emitir_evento_actualizacion(db, usuario.id, "transferencias")
+            emitir_evento_actualizacion(db, usuario.id, "billeteras")
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error al anular transferencia {tr_id}: {e}")
+            return None, "Hubo un problema al anular la transferencia, no se modificó nada.", False
 
         return tr, "Listo, movimiento eliminado.", False
 
@@ -3412,12 +3425,16 @@ def _confirmar_propuesta_deshacer(
         db.commit()
         return None, "El movimiento ya fue eliminado.", False
 
-    eliminar_transaccion(db, usuario.id, tx.id)
-
-    conv_undo.accion_ejecutada = f"deshecho:{tx_id}"
-    emitir_evento_actualizacion(db, usuario.id, "transacciones")
-    emitir_evento_actualizacion(db, usuario.id, "billeteras")
-    db.commit()
+    try:
+        eliminar_transaccion(db, usuario.id, tx.id, commit=False)
+        conv_undo.accion_ejecutada = f"deshecho:{tx_id}"
+        emitir_evento_actualizacion(db, usuario.id, "transacciones")
+        emitir_evento_actualizacion(db, usuario.id, "billeteras")
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error al anular transacción {tx_id}: {e}")
+        return None, "Hubo un problema al anular el movimiento, no se modificó nada.", False
 
     return tx, "Listo, movimiento eliminado.", False
 
