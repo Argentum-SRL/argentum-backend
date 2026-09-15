@@ -3542,7 +3542,7 @@ def _detectar_correccion_ultimo_movimiento(
     if _es_saludo(mensaje) or _es_confirmacion(mensaje) or _es_cancelacion(mensaje) or _es_pedido_deshacer(mensaje):
         return False, {}, None
 
-    verbos_op_nueva = r"^(?:gaste|pague|compre|cargue|cobre|ingrese|transferi|meti|puse)\b"
+    verbos_op_nueva = r"^(?:gaste|pague|compre|cargue|cobre|ingrese|transferi|meti|puse|pase|saque|extraje|retire|vendi|dolarice|mande|movi)\b"
     if re.search(verbos_op_nueva, norm):
         return False, {}, None
 
