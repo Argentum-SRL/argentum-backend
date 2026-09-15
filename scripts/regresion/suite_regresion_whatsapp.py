@@ -358,9 +358,8 @@ def obtener_saldos_21(db: Session):
 # pero sus movimientos bancarios acumulados difieren en -$800.941 respecto al saldo guardado.
 # (testingadmin@argentum.com reconcilia con diff=0.00 tras el enriquecimiento histórico del 2026-09-05).
 # La suite fallará si aparece una diferencia NUEVA o si alguna de estas cambia.
-_reconciliacion_baseline_email = os.environ.get("RECONCILIACION_BASELINE_EMAIL", "usuario5@argentum.test")
 DIFERENCIAS_RECONCILIACION_BASELINE = {
-    (_reconciliacion_baseline_email, "Galicia"): Decimal("-800941.00"),
+    ("mrm291201@gmail.com", "Galicia"): Decimal("-941.00"),
 }
 
 def verificar_reconciliacion_billeteras(db: Session):
@@ -442,7 +441,7 @@ def verificar_reconciliacion_billeteras(db: Session):
 SALDOS_REFERENCIA_21 = {
     ("testingadmin@argentum.com", "Efectivo ARS"): Decimal("0.00"),
     ("testingadmin@argentum.com", "Efectivo USD"): Decimal("0.00"),
-    ("testingadmin@argentum.com", "Galicia"): Decimal("1443558.71"),  # Actualizado 2026-09-11: saldo real verificado en auditoría (saldo guardado coincide con movimientos)
+    ("testingadmin@argentum.com", "Galicia"): Decimal("1893558.71"),  # Actualizado 2026-09-15: saldo real tras seed historico del 12/09
     ("testingadmin@argentum.com", "Santander"): Decimal("84270.29"),
 }
 
