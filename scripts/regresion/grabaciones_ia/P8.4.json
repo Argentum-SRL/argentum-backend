@@ -1,6 +1,6 @@
 {
   "escenario_id": "P8.4",
-  "fecha_grabacion": "2026-09-05T18:36:59.921353+00:00",
+  "fecha_grabacion": "2026-09-15T14:43:01.228349+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -30,9 +30,11 @@
           "transacciones_adicionales": []
         },
         "confianza": 0.9,
-        "slot_filling": false,
-        "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $30.000 en Supermercado. ¿Va?"
+        "slot_filling": true,
+        "datos_faltantes": [
+          "billetera"
+        ],
+        "respuesta_usuario": "¿Desde qué billetera registramos el gasto de $30.000 en Supermercado?"
       }
     }
   ]

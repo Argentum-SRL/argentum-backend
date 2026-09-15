@@ -1,6 +1,6 @@
 {
   "escenario_id": "P5.1",
-  "fecha_grabacion": "2026-09-05T18:34:47.983482+00:00",
+  "fecha_grabacion": "2026-09-15T14:38:30.070188+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -28,7 +28,7 @@
           "tarjeta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.9,
+        "confianza": 0.95,
         "slot_filling": false,
         "datos_faltantes": [],
         "respuesta_usuario": "Voy a anotar $5.000 en Kiosco desde Galicia. ¿Va?\nSi fue con otra, decime cuál.",
@@ -62,7 +62,7 @@
           "tarjeta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.9,
+        "confianza": 0.95,
         "slot_filling": false,
         "datos_faltantes": [],
         "respuesta_usuario": "Voy a anotar $5.000 en Kiosco desde Galicia. ¿Va?\nSi fue con otra, decime cuál."

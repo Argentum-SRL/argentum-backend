@@ -1,6 +1,6 @@
 {
   "escenario_id": "P11.10",
-  "fecha_grabacion": "2026-09-05T18:41:32.781756+00:00",
+  "fecha_grabacion": "2026-09-15T14:54:02.305214+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -43,7 +43,7 @@
         "confianza": 0.85,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $5.000 en Kiosco y $8.000 en Verdulería. ¿Va?"
+        "respuesta_usuario": "Voy a anotar $5.000 en Kiosco y $8.000 en Verdulería. ¿Confirmás?"
       }
     }
   ]

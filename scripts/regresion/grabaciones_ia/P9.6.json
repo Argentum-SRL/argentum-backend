@@ -1,6 +1,6 @@
 {
   "escenario_id": "P9.6",
-  "fecha_grabacion": "2026-09-05T18:38:37.372087+00:00",
+  "fecha_grabacion": "2026-09-15T14:46:19.607121+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,7 +11,7 @@
           "monto": 5000,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": "Otros",
+          "categoria": null,
           "descripcion": "Gasto",
           "servicio": null,
           "frecuencia": null,
@@ -29,10 +29,13 @@
           "tarjeta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.85,
-        "slot_filling": false,
-        "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $5.000 en Otros desde Galicia. ¿Va?"
+        "confianza": 0.8,
+        "slot_filling": true,
+        "datos_faltantes": [
+          "categoria",
+          "descripcion"
+        ],
+        "respuesta_usuario": "¿Fue un gasto, ingreso o transferencia?"
       }
     }
   ]

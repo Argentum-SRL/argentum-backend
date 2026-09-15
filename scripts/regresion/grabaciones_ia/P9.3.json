@@ -1,6 +1,6 @@
 {
   "escenario_id": "P9.3",
-  "fecha_grabacion": "2026-09-05T18:38:25.105120+00:00",
+  "fecha_grabacion": "2026-09-15T14:45:52.931553+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -26,13 +26,15 @@
           "monto_destino": null,
           "monto_comision": null,
           "confirmado": null,
-          "tarjeta": "•••• 5077",
+          "tarjeta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.85,
-        "slot_filling": false,
-        "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $30.000 en Gasto desde Santander. ¿Va?"
+        "confianza": 0.7,
+        "slot_filling": true,
+        "datos_faltantes": [
+          "categoria"
+        ],
+        "respuesta_usuario": "¿Qué categoría corresponde a este gasto?"
       }
     }
   ]

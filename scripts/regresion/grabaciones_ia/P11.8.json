@@ -1,6 +1,6 @@
 {
   "escenario_id": "P11.8",
-  "fecha_grabacion": "2026-09-05T18:41:23.106341+00:00",
+  "fecha_grabacion": "2026-09-15T14:53:41.832610+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -43,7 +43,7 @@
         "confianza": 0.85,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $5.000 en Kiosco y 50 dólares en un libro. ¿Va?"
+        "respuesta_usuario": "Voy a anotar $5.000 en Kiosco y 50 dólares en un libro. ¿Confirmás?"
       }
     }
   ]

@@ -1,6 +1,6 @@
 {
   "escenario_id": "P7.3",
-  "fecha_grabacion": "2026-09-05T18:36:18.898485+00:00",
+  "fecha_grabacion": "2026-09-15T14:41:31.471524+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -30,11 +30,9 @@
           "transacciones_adicionales": []
         },
         "confianza": 0.9,
-        "slot_filling": true,
-        "datos_faltantes": [
-          "¿Desde qué billetera?"
-        ],
-        "respuesta_usuario": "¿Desde qué billetera cargaste los 30.000 de nafta?"
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Voy a anotar $30.000 en Combustible. ¿Va?"
       }
     }
   ]

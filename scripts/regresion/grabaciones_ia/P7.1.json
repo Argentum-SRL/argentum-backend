@@ -1,6 +1,6 @@
 {
   "escenario_id": "P7.1",
-  "fecha_grabacion": "2026-09-05T18:36:11.323862+00:00",
+  "fecha_grabacion": "2026-09-15T14:41:20.616678+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -29,7 +29,7 @@
           "tarjeta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.85,
+        "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
         "respuesta_usuario": "Voy a anotar $5.000 en Kiosco. ¿Va?"

@@ -1,6 +1,6 @@
 {
   "escenario_id": "P10.2",
-  "fecha_grabacion": "2026-09-05T18:40:00.930071+00:00",
+  "fecha_grabacion": "2026-09-15T14:50:21.088854+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -29,10 +29,10 @@
           "tarjeta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.85,
+        "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $5.000 en Otros por Disney+. ¿Va?"
+        "respuesta_usuario": "Voy a anotar $5.000 en Otros. ¿Va?"
       }
     }
   ]

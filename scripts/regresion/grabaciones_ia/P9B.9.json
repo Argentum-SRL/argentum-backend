@@ -1,6 +1,6 @@
 {
   "escenario_id": "P9B.9",
-  "fecha_grabacion": "2026-09-05T18:39:26.068839+00:00",
+  "fecha_grabacion": "2026-09-15T14:48:42.357667+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -12,7 +12,7 @@
           "moneda": "ARS",
           "tipo": "egreso",
           "categoria": null,
-          "descripcion": "Transferencia a hermano",
+          "descripcion": "Transferencia a mi hermano",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
@@ -32,7 +32,7 @@
         "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $5.000 como transferencia a tu hermano desde Santander. ¿Va?"
+        "respuesta_usuario": "Voy a anotar $5.000 en Transferencia a mi hermano desde Santander. ¿Va?"
       }
     }
   ]

@@ -1,6 +1,6 @@
 {
   "escenario_id": "P11.4",
-  "fecha_grabacion": "2026-09-05T18:40:55.701471+00:00",
+  "fecha_grabacion": "2026-09-15T14:52:39.990926+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -50,10 +50,10 @@
             }
           ]
         },
-        "confianza": 0.9,
+        "confianza": 0.85,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $5.000 en Kiosco desde Galicia. ¿Va?"
+        "respuesta_usuario": "Voy a anotar $5.000 en Kiosco desde Galicia. Además, $3.000 en Panadería y $4.000 en Verdulería. ¿Confirmás?"
       }
     }
   ]

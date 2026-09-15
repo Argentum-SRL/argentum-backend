@@ -1,6 +1,6 @@
 {
   "escenario_id": "P9.4",
-  "fecha_grabacion": "2026-09-05T18:38:28.943943+00:00",
+  "fecha_grabacion": "2026-09-15T14:46:02.067228+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -12,7 +12,7 @@
           "moneda": "ARS",
           "tipo": "egreso",
           "categoria": "Otros",
-          "descripcion": "Compra de tele",
+          "descripcion": "Televisor",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
@@ -32,7 +32,7 @@
         "confianza": 0.85,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $960.000 en Otros en 12 cuotas de $80.000. ¿Va?"
+        "respuesta_usuario": "Voy a anotar $960.000 en Otros en 12 cuotas desde tu billetera. ¿Va?"
       }
     }
   ]

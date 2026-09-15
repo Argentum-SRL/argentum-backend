@@ -1,6 +1,6 @@
 {
   "escenario_id": "P5.5",
-  "fecha_grabacion": "2026-09-05T18:35:28.487755+00:00",
+  "fecha_grabacion": "2026-09-15T14:39:57.374024+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -65,7 +65,7 @@
         "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $5.000 en Farmacia desde Galicia. ¿Va?\nSi fue con otra, decime cuál."
+        "respuesta_usuario": "Voy a anotar $5.000 en Farmacia desde Galicia. ¿Va? Si fue con otra, decime cuál."
       }
     }
   ]

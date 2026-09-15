@@ -1,6 +1,6 @@
 {
   "escenario_id": "P10.10",
-  "fecha_grabacion": "2026-09-05T18:40:22.928525+00:00",
+  "fecha_grabacion": "2026-09-15T14:51:31.740036+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -32,7 +32,7 @@
         "confianza": 0.85,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $9.000 en Otros. ¿Va?"
+        "respuesta_usuario": "Voy a anotar $9.000 en Otros desde la billetera que elijas. ¿Va?"
       }
     }
   ]

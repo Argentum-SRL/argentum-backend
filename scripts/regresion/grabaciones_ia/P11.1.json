@@ -1,6 +1,6 @@
 {
   "escenario_id": "P11.1",
-  "fecha_grabacion": "2026-09-05T18:40:37.795665+00:00",
+  "fecha_grabacion": "2026-09-15T14:51:55.540309+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -40,7 +40,7 @@
             }
           ]
         },
-        "confianza": 0.85,
+        "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
         "respuesta_usuario": "Voy a anotar $5.000 en Kiosco desde Galicia y $8.000 en Verdulería desde Santander. ¿Va?"

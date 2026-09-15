@@ -258,18 +258,13 @@ INTENTS VÁLIDOS — respondé siempre con exactamente uno de estos:
 - consultar_saldo
 - consultar_balance
 - consultar_proyeccion
-- crear_meta
-- aportar_meta
-- retirar_meta
 - consultar_meta
-- crear_presupuesto
 - consultar_presupuesto
 - agregar_suscripcion
 - cancelar_suscripcion
 - cambiar_precio_suscripcion
 - consultar_suscripciones
 - consultar_cotizacion
-- pedir_consejo
 - deshacer
 - corregir
 - confirmar
@@ -632,24 +627,22 @@ def _construir_schema_estricto(db: Session) -> dict[str, Any]:
 
     intents_enum = [
         "registrar_transaccion",
-        "consultar_saldo",
-        "consultar_resumen",
-        "consultar_presupuesto",
-        "consultar_meta",
-        "consultar_proyeccion",
-        "consultar_deuda",
-        "consultar_ahorro",
         "transferir_fondos",
+        "consultar_saldo",
+        "consultar_balance",
+        "consultar_proyeccion",
+        "consultar_meta",
+        "consultar_presupuesto",
         "agregar_suscripcion",
         "cancelar_suscripcion",
         "cambiar_precio_suscripcion",
         "consultar_suscripciones",
+        "consultar_cotizacion",
         "deshacer",
         "corregir",
-        "cancelar",
         "confirmar",
+        "cancelar",
         "saludo",
-        "ayuda",
         "desconocido",
     ]
 

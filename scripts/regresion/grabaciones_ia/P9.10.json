@@ -1,6 +1,6 @@
 {
   "escenario_id": "P9.10",
-  "fecha_grabacion": "2026-09-05T18:38:50.874646+00:00",
+  "fecha_grabacion": "2026-09-15T14:46:57.639634+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,8 +11,8 @@
           "monto": 30000,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": null,
-          "descripcion": "Amex",
+          "categoria": "Otros",
+          "descripcion": "Gasto",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
@@ -29,12 +29,10 @@
           "tarjeta": "•••• 2745",
           "transacciones_adicionales": []
         },
-        "confianza": 0.8,
-        "slot_filling": true,
-        "datos_faltantes": [
-          "¿Qué concepto fue?"
-        ],
-        "respuesta_usuario": "¿Qué concepto fue?"
+        "confianza": 0.85,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Voy a anotar $30.000 en Otros desde la tarjeta Amex. ¿Va?"
       }
     }
   ]

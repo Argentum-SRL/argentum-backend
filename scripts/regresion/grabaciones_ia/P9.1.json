@@ -1,6 +1,6 @@
 {
   "escenario_id": "P9.1",
-  "fecha_grabacion": "2026-09-05T18:38:14.932822+00:00",
+  "fecha_grabacion": "2026-09-15T14:45:28.815095+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -29,10 +29,12 @@
           "tarjeta": "•••• 2745",
           "transacciones_adicionales": []
         },
-        "confianza": 0.85,
-        "slot_filling": false,
-        "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $30.000 en Otros desde la tarjeta Amex. ¿Va?"
+        "confianza": 0.7,
+        "slot_filling": true,
+        "datos_faltantes": [
+          "¿Qué fue el gasto?"
+        ],
+        "respuesta_usuario": "¿Qué fue el gasto?"
       }
     }
   ]

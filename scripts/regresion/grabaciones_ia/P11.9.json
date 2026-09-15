@@ -1,6 +1,6 @@
 {
   "escenario_id": "P11.9",
-  "fecha_grabacion": "2026-09-05T18:41:28.283747+00:00",
+  "fecha_grabacion": "2026-09-15T14:53:52.349243+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -40,10 +40,10 @@
             }
           ]
         },
-        "confianza": 0.85,
+        "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $5.000 en Kiosco desde Efectivo ARS. ¿Va?"
+        "respuesta_usuario": "Voy a anotar $5.000 en Kiosco desde la billetera. ¿Va?"
       }
     }
   ]

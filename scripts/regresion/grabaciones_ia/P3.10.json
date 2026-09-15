@@ -1,6 +1,6 @@
 {
   "escenario_id": "P3.10",
-  "fecha_grabacion": "2026-09-05T18:34:02.921758+00:00",
+  "fecha_grabacion": "2026-09-15T14:36:56.407198+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,7 +11,7 @@
           "monto": 5000,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": null,
+          "categoria": "Otros",
           "descripcion": "Gasto",
           "servicio": null,
           "frecuencia": null,
@@ -29,7 +29,7 @@
           "tarjeta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.0,
+        "confianza": 0.9,
         "slot_filling": true,
         "datos_faltantes": [
           "¿Desde qué billetera?"

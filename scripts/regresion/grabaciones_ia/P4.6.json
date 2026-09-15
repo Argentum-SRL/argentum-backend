@@ -1,6 +1,6 @@
 {
   "escenario_id": "P4.6",
-  "fecha_grabacion": "2026-09-05T18:34:33.746574+00:00",
+  "fecha_grabacion": "2026-09-15T14:37:50.073584+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -32,7 +32,7 @@
         "confianza": 1.0,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "No puedo ayudarte con eso. No tengo información sobre cuánto gastaste en pizza."
+        "respuesta_usuario": "No puedo darte el total de gastos en pizza. ¿Necesitás algo más?"
       }
     }
   ]

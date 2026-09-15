@@ -1,6 +1,6 @@
 {
   "escenario_id": "P5.7",
-  "fecha_grabacion": "2026-09-05T18:35:43.020311+00:00",
+  "fecha_grabacion": "2026-09-15T14:40:32.145618+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -43,7 +43,7 @@
         "confianza": 0.85,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $5.000 en Kiosco. ¿Va?"
+        "respuesta_usuario": "Voy a anotar $5.000 en Kiosco desde la billetera que elijas. ¿Va?"
       }
     }
   ]
