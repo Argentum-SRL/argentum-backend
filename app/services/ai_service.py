@@ -25,6 +25,7 @@ from app.services.dashboard_service import get_ciclo_fechas
 from app.services.openai_client import get_openai_client
 from app.services.proyeccion_service import calcular_proyeccion
 from app.services import categoria_service
+from app.services import presupuesto_service
 from app.utils.fecha import hoy_argentina
 
 
@@ -475,8 +476,9 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
     def _obtener_monto_usado_presupuesto(p: Presupuesto) -> float:
         if getattr(p, "monto_usado_actual", None) is not None:
             return float(p.monto_usado_actual)
-        if p.periodos:
-            return float(p.periodos[-1].monto_usado)
+        periodo_activo = presupuesto_service.obtener_periodo_activo(None, p)
+        if periodo_activo:
+            return float(periodo_activo.monto_usado)
         return 0.0
 
     res = {

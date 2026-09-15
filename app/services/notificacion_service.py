@@ -23,6 +23,7 @@ def crear_notificacion(
     canal_whatsapp: bool = False,
     canal_email: bool = False,
     grupo_agrupacion_override: Optional[str] = None,
+    commit: bool = True,
 ) -> Optional[Notificacion]:
     """
     Crea una notificación con deduplicación diaria por grupo_agrupacion.
@@ -65,8 +66,11 @@ def crear_notificacion(
         grupo_agrupacion=grupo,
     )
     db.add(notif)
-    db.commit()
-    db.refresh(notif)
+    if commit:
+        db.commit()
+        db.refresh(notif)
+    else:
+        db.flush()
     return notif
 
 

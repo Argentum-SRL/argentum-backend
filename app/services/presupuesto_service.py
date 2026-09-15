@@ -538,7 +538,7 @@ def obtener_historial(db: Session, usuario_id: UUID, presupuesto_id: UUID) -> Li
     )
     return db.execute(query).scalars().all()
 
-def registrar_impacto_presupuesto(db: Session, transaccion: Transaccion, revertir: bool = False):
+def registrar_impacto_presupuesto(db: Session, transaccion: Transaccion, revertir: bool = False, commit: bool = True):
     if transaccion.tipo != TipoTransaccion.EGRESO:
         return
     if transaccion.estado_verificacion not in [EstadoVerificacionTransaccion.CONFIRMADA, None]:
@@ -629,9 +629,9 @@ def registrar_impacto_presupuesto(db: Session, transaccion: Transaccion, reverti
         db.flush()
         
         if not revertir:
-            verificar_alertas_presupuesto(db, presu, periodo_activo)
+            verificar_alertas_presupuesto(db, presu, periodo_activo, commit=commit)
 
-def verificar_alertas_presupuesto(db: Session, presupuesto: Presupuesto, periodo: PeriodoPresupuesto):
+def verificar_alertas_presupuesto(db: Session, presupuesto: Presupuesto, periodo: PeriodoPresupuesto, commit: bool = True):
     if periodo.monto_limite == 0:
         return
         
@@ -688,7 +688,8 @@ def verificar_alertas_presupuesto(db: Session, presupuesto: Presupuesto, periodo
         canal_web=canal_web,
         canal_whatsapp=canal_whatsapp,
         canal_email=False,
-        grupo_agrupacion_override=f"presupuestos/{presupuesto.id}/{periodo.id}"
+        grupo_agrupacion_override=f"presupuestos/{presupuesto.id}/{periodo.id}",
+        commit=commit,
     )
     
     # 5. Enviar mensaje de WhatsApp inmediato si corresponde
@@ -699,7 +700,10 @@ def verificar_alertas_presupuesto(db: Session, presupuesto: Presupuesto, periodo
                 enviado = enviar_mensaje_whatsapp(usuario.telefono, mensaje)
                 if enviado:
                     notif.enviada_whatsapp = True
-                    db.commit()
+                    if commit:
+                        db.commit()
+                    else:
+                        db.flush()
             except Exception:
                 logger.warning("Error al enviar notificación de presupuesto por WhatsApp", exc_info=True)
 

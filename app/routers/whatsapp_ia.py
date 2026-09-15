@@ -49,6 +49,7 @@ from app.models.transferencia_interna import TransferenciaInterna
 from app.schemas.transferencia_interna import TransferenciaInternaCreate
 from app.services import transferencia_service
 from app.services import ai_service
+from app.services import presupuesto_service
 from app.services.evento_service import emitir_evento_actualizacion
 from app.services.openai_client import get_openai_client
 from app.services import transaccion_service
@@ -1729,6 +1730,7 @@ def _registrar_item_batch(
         es_padre_cuotas=False,
     )
     db.add(tx)
+    presupuesto_service.registrar_impacto_presupuesto(db, tx, revertir=False, commit=False)
     return tx, None
 
 
@@ -2200,6 +2202,8 @@ def _confirmar_propuesta_transaccion(
         billetera.saldo_actual += monto_decimal
     else:
         billetera.saldo_actual -= monto_decimal
+
+    presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=False, commit=False)
 
     adicionales = entidades.get("transacciones_adicionales")
     descartadas = []
@@ -2969,6 +2973,8 @@ def _registrar_movimiento_directo(
         billetera.saldo_actual += monto_decimal
     else:
         billetera.saldo_actual -= monto_decimal
+
+    presupuesto_service.registrar_impacto_presupuesto(db, tx, revertir=False, commit=False)
 
     adicionales = entidades.get("transacciones_adicionales") if registrar_adicionales else None
     descartadas = []
