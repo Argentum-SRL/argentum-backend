@@ -4777,8 +4777,10 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
     db = SessionLocal()
     try:
         try:
-            # 2.1 Detección del código de vinculación ANTES de resolver usuario o cooldown
-            if msg_type == "text":
+            usuario = _buscar_usuario_por_telefono(from_number, db)
+
+            # 2.1 Detección del código de vinculación: solo para remitentes no vinculados
+            if msg_type == "text" and not usuario:
                 texto_candidato = msg.get("text", {}).get("body", "").strip()
                 logger.info("whatsapp_webhook_mensaje_recibido", from_number=from_number, texto=texto_candidato, msg_type=msg_type)
                 codigo_vinc, entrada_vinc, es_vencido = buscar_codigo_vinculacion(texto_candidato)
@@ -4868,8 +4870,6 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
 
                     logger.info("whatsapp_vinculacion_exitosa", usuario_id=str(usuario_dueno.id), telefono=from_number)
                     return
-
-            usuario = _buscar_usuario_por_telefono(from_number, db)
             if not usuario:
                 telefono_norm = normalizar_telefono_ar(from_number)
                 debe_responder = _debe_responder_no_registrado(telefono_norm)
