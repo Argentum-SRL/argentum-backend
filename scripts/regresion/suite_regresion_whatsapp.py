@@ -344,7 +344,7 @@ def obtener_conteos_base(db: Session):
 
 def obtener_saldos_21(db: Session):
     return {
-        (email, b.nombre): b.saldo_actual
+        (email, b.nombre, b.moneda.value if hasattr(b.moneda, "value") else str(b.moneda)): b.saldo_actual
         for b, email in db.execute(
             select(Billetera, Usuario.email)
             .join(Usuario, Billetera.usuario_id == Usuario.id)
@@ -439,10 +439,10 @@ def verificar_reconciliacion_billeteras(db: Session):
     return len(discrepancias_no_esperadas) == 0, discrepancias_no_esperadas, detalles
 
 SALDOS_REFERENCIA_21 = {
-    ("testingadmin@argentum.com", "Efectivo ARS"): Decimal("0.00"),
-    ("testingadmin@argentum.com", "Efectivo USD"): Decimal("0.00"),
-    ("testingadmin@argentum.com", "Galicia"): Decimal("1893558.71"),  # Actualizado 2026-09-15: saldo real tras seed historico del 12/09
-    ("testingadmin@argentum.com", "Santander"): Decimal("84270.29"),
+    ("testingadmin@argentum.com", "Efectivo ARS", "ARS"): Decimal("0.00"),
+    ("testingadmin@argentum.com", "Efectivo USD", "USD"): Decimal("0.00"),
+    ("testingadmin@argentum.com", "Galicia", "ARS"): Decimal("1893558.71"),  # Actualizado 2026-09-15: saldo real tras seed historico del 12/09
+    ("testingadmin@argentum.com", "Santander", "ARS"): Decimal("84270.29"),
 }
 
 def verificar_saldos_contra_referencia(db: Session, saldos_inicio_21: dict):
@@ -463,14 +463,16 @@ def verificar_saldos_contra_referencia(db: Session, saldos_inicio_21: dict):
     detalles = []
     for b, email in billeteras:
         actual = b.saldo_actual
-        clave = (email, b.nombre)
-        ref = SALDOS_REFERENCIA_21.get(clave)
+        moneda = b.moneda.value if hasattr(b.moneda, "value") else str(b.moneda)
+        clave = (email, b.nombre, moneda)
+        ref = SALDOS_REFERENCIA_21.get(clave) or SALDOS_REFERENCIA_21.get((email, b.nombre))
         saldo_inicial = saldos_inicio_21.get(clave)
         esperado = ref if ref is not None else saldo_inicial
         diff = actual - esperado if esperado is not None else None
         item = {
             "email": email,
             "billetera": b.nombre,
+            "moneda": moneda,
             "actual": actual,
             "referencia": ref,
             "saldo_inicial": saldo_inicial,
@@ -3473,13 +3475,13 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             esperado = d["referencia"] if d["referencia"] is not None else d["saldo_inicial"]
             criterio = "referencia" if d["referencia"] is not None else "foto_inicio"
             st = "OK" if d["diff"] == Decimal("0.00") else f"DESVIO ({d['diff']})"
-            print(f"  {d['email']} | {d['billetera']}: antes={esperado} | después={d['actual']} | diferencia={d['diff']} | criterio={criterio} -> {st}")
+            print(f"  {d['email']} | {d['billetera']} {d['moneda']}: antes={esperado} | después={d['actual']} | diferencia={d['diff']} | criterio={criterio} -> {st}")
         print(f"¿Todos los saldos cumplen el criterio?: {'SÍ' if saldos_ref_ok else 'NO'}")
         if not saldos_ref_ok:
             print(f"ALERTA: Se detectaron {len(desvios_ref)} billeteras con saldos alterados:")
             for desv in desvios_ref:
                 antes = desv["referencia"] if desv["referencia"] is not None else desv["saldo_inicial"]
-                print(f"  - {desv['email']} ({desv['billetera']}): antes={antes}, después={desv['actual']}, diferencia={desv['diff']}")
+                print(f"  - {desv['email']} ({desv['billetera']} {desv['moneda']}): antes={antes}, después={desv['actual']}, diferencia={desv['diff']}")
 
         print(f"\n=== VERIFICACION DE RECONCILIACION ({total_billeteras} BILLETERAS) ===")
         for d in detalles_rec:
@@ -3505,7 +3507,7 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             print(f"Saldos {total_billeteras} billeteras: DESVIO ({len(desvios_ref)} billeteras)")
             for desv in desvios_ref:
                 antes = desv["referencia"] if desv["referencia"] is not None else desv["saldo_inicial"]
-                print(f"  - {desv['email']} ({desv['billetera']}): antes={antes}, después={desv['actual']}, diferencia={desv['diff']}")
+                print(f"  - {desv['email']} ({desv['billetera']} {desv['moneda']}): antes={antes}, después={desv['actual']}, diferencia={desv['diff']}")
         if rec_ok:
             print(f"Reconciliación {total_billeteras} billeteras: OK (todas dentro del baseline)")
         else:
