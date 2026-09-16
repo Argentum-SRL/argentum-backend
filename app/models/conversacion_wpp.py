@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, JSON, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Index, JSON, Numeric, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,6 +20,9 @@ class TipoMensajeWpp(str, Enum):
 
 class ConversacionWpp(Base):
     __tablename__ = "conversaciones_wpp"
+    __table_args__ = (
+        Index("ix_conversaciones_wpp_usuario_fecha", "usuario_id", text("fecha DESC")),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     usuario_id: Mapped[UUID] = mapped_column(
