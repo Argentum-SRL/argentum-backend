@@ -415,26 +415,6 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
         )
     ).scalars().all()
 
-    # 1. Categorías y subcategorías globales desde cache en memoria
-    cats_globales, subs_globales = categoria_service.obtener_categorias_globales(db)
-
-    subcats_por_cat: dict[str, list[str]] = {}
-    for s in subs_globales:
-        key = str(s["categoria_id"])
-        if key not in subcats_por_cat:
-            subcats_por_cat[key] = []
-        subcats_por_cat[key].append(s["nombre"])
-
-    categorias_lista = [
-        {
-            "nombre": cg["nombre"],
-            "tipo": cg["tipo"].value if hasattr(cg["tipo"], "value") else str(cg["tipo"]),
-            "subcategorias": subcats_por_cat.get(str(cg["id"]), [])
-        }
-        for cg in cats_globales
-        if cg["nombre"] not in CATEGORIAS_SISTEMA
-    ]
-
     hoy = hoy_argentina()
     dia_semana_str = _DIAS_SEMANA_ES[hoy.weekday()]
     mes_str = _MESES_ES[hoy.month - 1]
@@ -512,7 +492,6 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
                 .order_by(TarjetaCredito.nombre.asc(), TarjetaCredito.id.asc())
             ).scalars().all()
         ],
-        "categorias": categorias_lista,
         "ciclo_actual": {
             "fecha_inicio": fecha_inicio.isoformat(),
             "fecha_fin": fecha_fin.isoformat(),
@@ -589,13 +568,61 @@ def construir_contexto_proyeccion(usuario: Usuario, db: Session) -> dict:
 _SCHEMA_CACHE: dict[str, Any] | None = None
 _SCHEMA_CACHE_EXPIRY: float = 0.0
 _SCHEMA_CACHE_TTL: float = 300.0  # 5 minutos
+_SYSTEM_PROMPT_CACHE: str | None = None
+_SYSTEM_PROMPT_CACHE_EXPIRY: float = 0.0
 
 
 def invalidar_cache_schema() -> None:
-    """Invalida la cache en memoria del esquema JSON estricto."""
-    global _SCHEMA_CACHE, _SCHEMA_CACHE_EXPIRY
+    """Invalida la cache en memoria del esquema JSON estricto y del system prompt completo."""
+    global _SCHEMA_CACHE, _SCHEMA_CACHE_EXPIRY, _SYSTEM_PROMPT_CACHE, _SYSTEM_PROMPT_CACHE_EXPIRY
     _SCHEMA_CACHE = None
     _SCHEMA_CACHE_EXPIRY = 0.0
+    _SYSTEM_PROMPT_CACHE = None
+    _SYSTEM_PROMPT_CACHE_EXPIRY = 0.0
+
+
+def _construir_system_prompt_completo(db: Session) -> str:
+    """
+    Construye y cachea en memoria el SYSTEM_PROMPT concatenando el listado
+    completo de categorías y subcategorías globales en texto plano legible.
+    Garantiza estabilidad byte a byte para el Prompt Caching de OpenAI.
+    """
+    global _SYSTEM_PROMPT_CACHE, _SYSTEM_PROMPT_CACHE_EXPIRY
+    ahora = time.time()
+    if _SYSTEM_PROMPT_CACHE is not None and ahora < _SYSTEM_PROMPT_CACHE_EXPIRY:
+        return _SYSTEM_PROMPT_CACHE
+
+    from app.core.constants import CATEGORIAS_SISTEMA
+    cats_globales, subs_globales = categoria_service.obtener_categorias_globales(db)
+
+    subcats_por_cat: dict[str, list[str]] = {}
+    for s in subs_globales:
+        key = str(s["categoria_id"])
+        if key not in subcats_por_cat:
+            subcats_por_cat[key] = []
+        subcats_por_cat[key].append(s["nombre"])
+
+    lineas = [
+        SYSTEM_PROMPT.rstrip(),
+        "",
+        "LISTADO OFICIAL DE CATEGORÍAS Y SUBCATEGORÍAS PERMITIDAS:",
+        "Al categorizar, debés elegir siempre la subcategoría más específica o la categoría correspondiente de este listado:",
+    ]
+
+    for cg in sorted(cats_globales, key=lambda c: c["nombre"]):
+        if cg["nombre"] in CATEGORIAS_SISTEMA:
+            continue
+        tipo_str = cg["tipo"].value if hasattr(cg["tipo"], "value") else str(cg["tipo"])
+        subs = sorted(subcats_por_cat.get(str(cg["id"]), []))
+        if subs:
+            lineas.append(f"- {cg['nombre']} ({tipo_str}): {', '.join(subs)}")
+        else:
+            lineas.append(f"- {cg['nombre']} ({tipo_str})")
+
+    prompt_completo = "\n".join(lineas) + "\n"
+    _SYSTEM_PROMPT_CACHE = prompt_completo
+    _SYSTEM_PROMPT_CACHE_EXPIRY = ahora + _SCHEMA_CACHE_TTL
+    return _SYSTEM_PROMPT_CACHE
 
 
 def obtener_categorias_permitidas(db: Session) -> list[str]:
@@ -791,8 +818,9 @@ def procesar_mensaje(
     try:
         contexto = construir_contexto_financiero(usuario, db)
         
-        # System prompt limpio sin contexto financiero
-        messages_openai = [{"role": "system", "content": SYSTEM_PROMPT}]
+        # System prompt completo cacheado con categorías
+        system_prompt_completo = _construir_system_prompt_completo(db)
+        messages_openai = [{"role": "system", "content": system_prompt_completo}]
 
         # Contexto financiero como primer mensaje del sistema (separado)
         contexto_msg = f"CONTEXTO FINANCIERO ACTUAL DEL USUARIO:\n{json.dumps(contexto, ensure_ascii=False)}"
