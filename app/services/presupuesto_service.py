@@ -672,8 +672,18 @@ def verificar_alertas_presupuesto(db: Session, presupuesto: Presupuesto, periodo
     
     if tipo == TipoNotificacion.PRESUPUESTO_AGOTADO:
         mensaje = f"Llevás {formatear_monto(periodo.monto_usado, presupuesto.moneda)} de {formatear_monto(periodo.monto_limite, presupuesto.moneda)} en {nombres_cats}. Ya superaste el límite."
+        datos_template = {
+            "nombre_pres": presupuesto.nombre,
+            "gastado_fmt": formatear_monto(periodo.monto_usado, presupuesto.moneda),
+            "limite_fmt": formatear_monto(periodo.monto_limite, presupuesto.moneda),
+        }
     else:
         mensaje = f"Llevás {formatear_monto(periodo.monto_usado, presupuesto.moneda)} de {formatear_monto(periodo.monto_limite, presupuesto.moneda)}."
+        datos_template = {
+            "gastado_fmt": formatear_monto(periodo.monto_usado, presupuesto.moneda),
+            "limite_fmt": formatear_monto(periodo.monto_limite, presupuesto.moneda),
+            "nombre_pres": presupuesto.nombre,
+        }
 
     # 4. Crear la notificación utilizando el servicio común (se encarga del commit/db.add/deduplicación)
     notif = crear_notificacion(
@@ -690,6 +700,7 @@ def verificar_alertas_presupuesto(db: Session, presupuesto: Presupuesto, periodo
         canal_email=False,
         grupo_agrupacion_override=f"presupuestos/{presupuesto.id}/{periodo.id}",
         commit=commit,
+        datos_template=datos_template,
     )
     
     # 5. Enviar mensaje de WhatsApp inmediato si corresponde

@@ -280,6 +280,7 @@ def prepagar_grupo(
                     deep_link="/app/billeteras",
                     canal_web=canal_web,
                     canal_whatsapp=canal_whatsapp,
+                    datos_template={"billetera_nombre": billetera.nombre},
                 )
         except Exception:
             pass

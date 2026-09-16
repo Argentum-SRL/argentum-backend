@@ -24,6 +24,7 @@ def crear_notificacion(
     canal_email: bool = False,
     grupo_agrupacion_override: Optional[str] = None,
     commit: bool = True,
+    datos_template: Optional[dict] = None,
 ) -> Optional[Notificacion]:
     """
     Crea una notificación con deduplicación diaria por grupo_agrupacion.
@@ -64,6 +65,7 @@ def crear_notificacion(
         canal_whatsapp=canal_whatsapp,
         canal_email=canal_email,
         grupo_agrupacion=grupo,
+        datos_template=datos_template,
     )
     db.add(notif)
     if commit:

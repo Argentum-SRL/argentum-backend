@@ -95,6 +95,7 @@ def _job_notificaciones_cuotas(db_session_factory):
                     canal_web=config.cuota_vence_web,
                     canal_whatsapp=config.cuota_vence_whatsapp,
                     grupo_agrupacion_override=grupo_override,
+                    datos_template={"tarjeta_nombre": tarjeta.nombre, "fecha_cierre": resumen.fecha_cierre_proximo.strftime('%d/%m/%Y'), "fecha_vencimiento": fecha_vencimiento_resumen.strftime('%d/%m/%Y')},
                 )
 
             # ─────────────────────────────────────────────────────────────────
@@ -138,6 +139,7 @@ def _job_notificaciones_cuotas(db_session_factory):
                     deep_link="/app/tarjetas",
                     canal_web=config.cuota_vence_web,
                     canal_whatsapp=config.cuota_vence_whatsapp,
+                    datos_template={"cuota_progreso": f"{numero}/{cantidad}", "descripcion": descripcion, "fecha": fecha_objetivo.strftime('%d/%m/%Y'), "monto_fmt": monto_fmt},
                 )
 
         logger.info("Job notificaciones_cuotas completado")
@@ -222,6 +224,7 @@ def _job_notificaciones_presupuestos(db_session_factory):
                         deep_link="/app/presupuestos",
                         canal_web=config.presupuesto_umbral_1_web,
                         canal_whatsapp=config.presupuesto_umbral_1_whatsapp,
+                        datos_template={"gastado_fmt": gastado_fmt, "limite_fmt": limite_fmt, "nombre_pres": nombre_pres},
                     )
 
                 # Alertas del umbral 2 (100% agotado)
@@ -240,6 +243,7 @@ def _job_notificaciones_presupuestos(db_session_factory):
                         deep_link="/app/presupuestos",
                         canal_web=config.presupuesto_umbral_2_web,
                         canal_whatsapp=config.presupuesto_umbral_2_whatsapp,
+                        datos_template={"nombre_pres": nombre_pres, "gastado_fmt": gastado_fmt, "limite_fmt": limite_fmt},
                     )
 
         logger.info("Job notificaciones_presupuestos completado")
@@ -305,6 +309,7 @@ def _job_notificaciones_suscripciones(db_session_factory):
                         deep_link="/app/suscripciones",
                         canal_web=config.suscripcion_hoy_web,
                         canal_whatsapp=config.suscripcion_hoy_whatsapp,
+                        datos_template={"nombre": s.nombre, "cuando": "hoy", "monto_fmt": monto_fmt},
                     )
 
                 # Recordatorio anticipado
@@ -328,6 +333,7 @@ def _job_notificaciones_suscripciones(db_session_factory):
                             deep_link="/app/suscripciones",
                             canal_web=config.suscripcion_recordatorio_web,
                             canal_whatsapp=config.suscripcion_recordatorio_whatsapp,
+                            datos_template={"nombre": s.nombre, "cuando": f"en {anticipacion} días", "monto_fmt": monto_fmt},
                         )
 
         logger.info("Job notificaciones_suscripciones completado")
@@ -399,6 +405,7 @@ def _job_notificaciones_inactividad(db_session_factory):
                         mensaje=mensaje,
                         canal_web=config.inactividad_web,
                         canal_whatsapp=config.inactividad_whatsapp,
+                        datos_template={"dias": dias},
                     )
 
         logger.info("Job notificaciones_inactividad completado")
@@ -964,7 +971,8 @@ def _job_proyeccion_negativa(db_session_factory):
                                     canal_web=canal_web,
                                     canal_whatsapp=canal_whatsapp,
                                     canal_email=False,
-                                    grupo_agrupacion_override=grupo_override
+                                    grupo_agrupacion_override=grupo_override,
+                                    datos_template={"moneda_label": "pesos" if moneda_key == "ars" else "dólares", "monto_fmt": f"{simbolo}{abs(balance):,.0f}" if moneda_key == "ars" else f"{simbolo}{abs(balance):,.2f}"},
                                 )
                                 if notif:
                                     cant_notificaciones_creadas += 1

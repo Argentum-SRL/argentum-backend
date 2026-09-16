@@ -314,6 +314,7 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
                         deep_link="/app/metas",
                         canal_web=canal_web,
                         canal_whatsapp=canal_whatsapp,
+                        datos_template={"nombre": meta.nombre, "monto_fmt": formatear_monto(meta.monto_objetivo, meta.moneda)},
                     )
             except Exception:
                 pass

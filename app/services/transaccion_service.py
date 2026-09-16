@@ -381,6 +381,7 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, co
                             deep_link="/app/billeteras",
                             canal_web=canal_web,
                             canal_whatsapp=canal_whatsapp,
+                            datos_template={"billetera_nombre": billetera.nombre},
                         )
                 except Exception:
                     pass
@@ -516,6 +517,7 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
                                 deep_link="/app/billeteras",
                                 canal_web=canal_web,
                                 canal_whatsapp=canal_whatsapp,
+                                datos_template={"billetera_nombre": billetera_nueva.nombre},
                             )
                     except Exception:
                         pass
@@ -773,6 +775,7 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
                             deep_link="/app/billeteras",
                             canal_web=canal_web,
                             canal_whatsapp=canal_whatsapp,
+                            datos_template={"billetera_nombre": billetera.nombre},
                         )
                 except Exception:
                     pass
@@ -960,6 +963,7 @@ def evaluar_gasto_inusual(db: Session, usuario_id: UUID, transaccion: Transaccio
                     deep_link="/app/transacciones",
                     canal_web=canal_web,
                     canal_whatsapp=canal_whatsapp,
+                    datos_template={"monto_fmt": monto_fmt, "categoria": categoria_nombre, "habitual_fmt": mediana_fmt},
                 )
     else:
         # NIVEL 2 y 3: count >= 30
@@ -1066,5 +1070,6 @@ def evaluar_gasto_inusual(db: Session, usuario_id: UUID, transaccion: Transaccio
                     deep_link="/app/transacciones",
                     canal_web=canal_web,
                     canal_whatsapp=canal_whatsapp,
+                    datos_template={"monto_fmt": f"{simbolo}{monto_actual:,.0f}", "categoria": categoria_nombre, "habitual_fmt": f"{simbolo}{promedio_ajustado:,.0f}"},
                 )
 

@@ -5,7 +5,7 @@ from sqlalchemy import (
     Column, String, Boolean, DateTime, ForeignKey,
     Enum as SAEnum, Text, Index
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
@@ -81,6 +81,9 @@ class Notificacion(Base):
 
     # Deep link para navegar al detalle al hacer click
     deep_link = Column(String(300), nullable=True)
+
+    # Datos estructurados para plantillas de mensajería (ej. WhatsApp Templates)
+    datos_template = Column(JSONB, nullable=True)
 
     # Silenciado temporalmente
     silenciada_hasta = Column(DateTime(timezone=True), nullable=True)
