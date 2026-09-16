@@ -13,7 +13,6 @@ from app.models.historial_suscripcion import HistorialSuscripcion
 from app.models.suscripcion import EstadoSuscripcion, Suscripcion
 from app.models.tools import IPCCache
 from app.models.transaccion import EstadoVerificacionTransaccion, TipoTransaccion, Transaccion
-from app.models.transaccion_recurrente import EstadoTransaccionRecurrente, TipoTransaccionRecurrente, TransaccionRecurrente
 from app.models.usuario import Moneda, Usuario
 from app.services.dashboard_service import get_ciclo_fechas
 from app.utils.fecha import hoy_argentina
@@ -77,13 +76,7 @@ def _carga(db: Session, usuario: Usuario, fecha_referencia: date | None = None) 
     historial_subs = db.execute(
         select(HistorialSuscripcion).join(Suscripcion).where(Suscripcion.usuario_id == usuario.id)
     ).scalars().all()
-    recurrentes = db.execute(
-        select(TransaccionRecurrente).where(
-            TransaccionRecurrente.usuario_id == usuario.id,
-            TransaccionRecurrente.estado == EstadoTransaccionRecurrente.ACTIVA,
-        )
-    ).scalars().all()
-    return {"hoy": hoy, "txs": txs, "ipc": ipc, "cuotas": cuotas, "suscripciones": suscripciones, "historial_subs": historial_subs, "recurrentes": recurrentes}
+    return {"hoy": hoy, "txs": txs, "ipc": ipc, "cuotas": cuotas, "suscripciones": suscripciones, "historial_subs": historial_subs}
 
 
 def _tx_valido(tx: Any) -> bool:
@@ -502,7 +495,7 @@ def evaluar_calibracion_usuario(
         compr_ids_k = {tx_id for s in clasif_k.streams if s.clase == "COMPROMISO" for tx_id in s.transacciones_ids}
         compr_ids_k.update(
             tx.id for tx in txs_previas
-            if getattr(tx, "es_recurrente", False) or getattr(tx, "recurrente_id", None) is not None
+            if getattr(tx, "es_recurrente", False)
         )
 
         # Compromisos ciertos pendientes al inicio del ciclo k
@@ -671,7 +664,7 @@ def calcular_proyeccion_nueva(
     # Incluir recurrentes declaradas
     compromiso_tx_ids.update(
         tx.id for tx in data["txs"]
-        if getattr(tx, "es_recurrente", False) or getattr(tx, "recurrente_id", None) is not None
+        if getattr(tx, "es_recurrente", False)
     )
 
     for moneda in (Moneda.ARS, Moneda.USD):
@@ -1322,13 +1315,6 @@ def proyectar_ingreso_ciclo(
     data = data_previa if data_previa is not None else _carga(db, usuario, fecha_ciclo)
     inicio, fin = get_ciclo_fechas(usuario, fecha_ciclo)
     anteriores = _ciclos_anteriores(usuario, fecha_ciclo, 12)
-
-    # Ingresos recurrentes activos ciertos
-    ingreso_cierto = ZERO
-    for r in data["recurrentes"]:
-        if r.tipo == TipoTransaccionRecurrente.INGRESO and r.moneda == Moneda.ARS:
-            ingreso_cierto += r.monto
-
     # Ingresos históricos observados deflactados
     ingresos_hist = []
     ingresos_por_mes = []
@@ -1346,13 +1332,13 @@ def proyectar_ingreso_ciclo(
 
     # Ingreso mensual regular de referencia (excluyendo aguinaldos de junio y diciembre)
     regulares = [v for m, v in ingresos_por_mes if m not in (6, 12)]
-    ingreso_regular = mediana(regulares) if regulares else (mediana(ingresos_hist) or ingreso_cierto)
+    ingreso_regular = mediana(regulares) if regulares else (mediana(ingresos_hist) or ZERO)
 
     # Aguinaldo
-    aguinaldo_aplica = fin.month in (6, 12) and (ingreso_regular > ZERO or ingreso_cierto > ZERO)
+    aguinaldo_aplica = fin.month in (6, 12) and (ingreso_regular > ZERO)
     aguinaldo = (ingreso_regular * Decimal("0.50")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if aguinaldo_aplica else ZERO
 
-    base_estimada = ingreso_regular if ingreso_regular > ZERO else ingreso_cierto
+    base_estimada = ingreso_regular
     ingreso_total_proyectado = base_estimada + aguinaldo
 
     return {

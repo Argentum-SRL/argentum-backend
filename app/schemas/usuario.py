@@ -89,11 +89,6 @@ class EditarDatosPersonales(BaseModel):
             hoy = hoy_argentina()
             if self.fecha_nacimiento > hoy:
                 raise ValueError("La fecha de nacimiento no puede ser futura.")
-            edad = hoy.year - self.fecha_nacimiento.year - ((hoy.month, hoy.day) < (self.fecha_nacimiento.month, self.fecha_nacimiento.day))
-            if edad < 18:
-                raise ValueError("Tenés que ser mayor de 18 años para usar Argentum.")
-            if edad > 120:
-                raise ValueError("La fecha de nacimiento no es válida.")
         return self
 
 

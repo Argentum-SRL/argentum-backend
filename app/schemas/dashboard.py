@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
@@ -34,6 +35,18 @@ class DisponibleRealMoneda(BaseModel):
 class DisponibleRealDashboard(BaseModel):
     ars: DisponibleRealMoneda
     usd: DisponibleRealMoneda
+
+
+class SaldoDisponibleMoneda(BaseModel):
+    saldo_total: Decimal = Field(..., description="Suma de saldo actual de billeteras activas incluidas en el filtro")
+    cuotas_pendientes: Decimal = Field(..., ge=0, description="Cuotas con pagada=False y vencimiento <= fin del ciclo actual, excluyendo cubiertas por pago de resumen")
+    suscripciones_pendientes: Decimal = Field(..., ge=0, description="Suscripciones activas con próximo cobro <= fin del ciclo actual")
+    saldo_disponible: Decimal = Field(..., description="Saldo disponible para gastar (saldo_total - cuotas - suscripciones)")
+
+
+class SaldoDisponibleDashboard(BaseModel):
+    ars: SaldoDisponibleMoneda
+    usd: SaldoDisponibleMoneda
 
 
 class MovimientoDashboard(BaseModel):
@@ -79,6 +92,7 @@ class DashboardResumenResponse(BaseModel):
     periodo: PeriodoDashboard
     balance: BalanceDashboard
     disponible_real: DisponibleRealDashboard
+    saldo_disponible: Optional[SaldoDisponibleDashboard] = None
     gastos_por_categoria: GastosPorCategoriaDashboard = Field(
         default_factory=lambda: GastosPorCategoriaDashboard(ars=[], usd=[]),
         description="Desglose de gastos reales acumulados por categoría en el ciclo actual"
@@ -116,6 +130,7 @@ class ResumenCompletoResponse(BaseModel):
     billeteras: List[BilleteraDashboardItem]
     resumen: DashboardResumenResponse
     cotizacion: CotizacionDolarResponse
+    saldo_disponible: Optional[SaldoDisponibleDashboard] = None
 
 
 class SubcategoriaGastoResponse(BaseModel):

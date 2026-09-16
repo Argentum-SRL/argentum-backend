@@ -104,7 +104,7 @@ def calcular_y_guardar_calibracion_usuario(
     compromiso_tx_ids.update(
         tx.id
         for tx in data["txs"]
-        if getattr(tx, "es_recurrente", False) or getattr(tx, "recurrente_id", None) is not None
+        if getattr(tx, "es_recurrente", False)
     )
     calib = evaluar_calibracion_usuario(data, usuario, moneda, compromiso_tx_ids)
 

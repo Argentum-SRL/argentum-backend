@@ -18,6 +18,9 @@ def intentar_tomar_lock_job(db: Session, nombre_job: str) -> bool:
     Devuelve True si consiguió el lock (este proceso debe correr el job),
     False si no (otro proceso ya lo está corriendo ahora mismo).
     """
+    if db.bind and db.bind.dialect.name != "postgresql":
+        return True
+
     try:
         resultado = db.execute(
             text("SELECT pg_try_advisory_lock(hashtext(:nombre))"),
@@ -37,6 +40,9 @@ def liberar_lock_job(db: Session, nombre_job: str) -> None:
     """
     Libera el advisory lock previamente adquirido en Postgres para el job.
     """
+    if db.bind and db.bind.dialect.name != "postgresql":
+        return
+
     try:
         db.execute(
             text("SELECT pg_advisory_unlock(hashtext(:nombre))"),

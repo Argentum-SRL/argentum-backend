@@ -14,7 +14,6 @@ from app.models.categoria import Categoria
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion
 from app.models.cuota import Cuota
 from app.models.historial_suscripcion import HistorialSuscripcion
-from app.models.transaccion_recurrente import TransaccionRecurrente, EstadoTransaccionRecurrente, FrecuenciaTransaccionRecurrente, TipoTransaccionRecurrente
 from app.models.tools import IPCCache
 from app.services.dashboard_service import get_ciclo_fechas
 from app.services.tools_service import ajustar_por_ipc
@@ -234,39 +233,6 @@ def _preparar_datos_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
     for r in db.execute(stmt_ingresos).all():
         if r.moneda in ingresos_por_moneda:
             ingresos_por_moneda[r.moneda] = r.total or Decimal("0")
-
-    # 9. Transacciones recurrentes de ingreso y verificación diaria
-    recurrentes_activas = db.execute(
-        select(TransaccionRecurrente)
-        .where(
-            and_(
-                TransaccionRecurrente.usuario_id == usuario.id,
-                TransaccionRecurrente.tipo == TipoTransaccionRecurrente.INGRESO,
-                TransaccionRecurrente.estado == EstadoTransaccionRecurrente.ACTIVA
-            )
-        )
-    ).scalars().all()
-
-    recurrentes_por_moneda: Dict[Moneda, List[TransaccionRecurrente]] = {
-        Moneda.ARS: [],
-        Moneda.USD: []
-    }
-    for rec in recurrentes_activas:
-        if rec.moneda in recurrentes_por_moneda:
-            recurrentes_por_moneda[rec.moneda].append(rec)
-
-    recurrentes_ids = [rec.id for rec in recurrentes_activas]
-    recurrentes_hoy: set = set()
-    if recurrentes_ids:
-        stmt_hoy = select(Transaccion.recurrente_id).where(
-            and_(
-                Transaccion.usuario_id == usuario.id,
-                Transaccion.recurrente_id.in_(recurrentes_ids),
-                Transaccion.fecha == hoy
-            )
-        )
-        recurrentes_hoy = set(db.execute(stmt_hoy).scalars().all())
-
     return {
         "hoy": hoy,
         "fecha_inicio_actual": fecha_inicio_actual,
@@ -280,8 +246,6 @@ def _preparar_datos_proyeccion(db: Session, usuario: Usuario) -> Dict[str, Any]:
         "cuotas_por_moneda": cuotas_por_moneda,
         "suscripciones_por_moneda": suscripciones_por_moneda,
         "ingresos_por_moneda": ingresos_por_moneda,
-        "recurrentes_por_moneda": recurrentes_por_moneda,
-        "recurrentes_hoy": recurrentes_hoy,
     }
 
 
@@ -306,8 +270,6 @@ def _calcular_proyeccion_por_moneda(
     cuotas_restantes = preloaded["cuotas_por_moneda"].get(moneda, Decimal("0"))
     suscripciones_restantes = preloaded["suscripciones_por_moneda"].get(moneda, Decimal("0"))
     ingresos_actuales = preloaded["ingresos_por_moneda"].get(moneda, Decimal("0"))
-    recurrentes_activas = preloaded["recurrentes_por_moneda"].get(moneda, [])
-    recurrentes_hoy = preloaded["recurrentes_hoy"]
 
     n_ciclos = len(ciclos_con_datos)
     advertencias = []
@@ -472,33 +434,7 @@ def _calcular_proyeccion_por_moneda(
     gasto_proyectado_total = gasto_proyectado_categorias + total_certezas
 
     # Paso 7: Ingresos proyectados
-    ingresos_recurrentes_pendientes = Decimal("0")
-    for rec in recurrentes_activas:
-        ya_genero_hoy = rec.id in recurrentes_hoy
-        start_date = hoy if not ya_genero_hoy else hoy + timedelta(days=1)
-
-        if start_date > fecha_fin_actual:
-            continue
-
-        if rec.frecuencia == FrecuenciaTransaccionRecurrente.MENSUAL:
-            if rec.dia_registro >= start_date.day and rec.dia_registro <= fecha_fin_actual.day:
-                ingresos_recurrentes_pendientes += rec.monto
-
-        elif rec.frecuencia == FrecuenciaTransaccionRecurrente.SEMANAL:
-            current = start_date
-            while current <= fecha_fin_actual:
-                if current.weekday() == rec.dia_registro:
-                    ingresos_recurrentes_pendientes += rec.monto
-                current += timedelta(days=1)
-
-        elif rec.frecuencia == FrecuenciaTransaccionRecurrente.QUINCENAL:
-            current = start_date
-            while current <= fecha_fin_actual:
-                if current.day == rec.dia_registro or current.day == ((rec.dia_registro + 15) % 30 or 30):
-                    ingresos_recurrentes_pendientes += rec.monto
-                current += timedelta(days=1)
-
-    ingresos_proyectados = ingresos_actuales + ingresos_recurrentes_pendientes
+    ingresos_proyectados = ingresos_actuales
 
     # Paso 8: Nivel de confianza y Gate de datos insuficientes
     datos_suficientes = True

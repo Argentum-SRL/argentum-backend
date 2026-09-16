@@ -516,7 +516,7 @@ def _inferir_frecuencia_y_estado(
 
 
 def _es_recurrente_declarado(tx: Any) -> bool:
-    return bool(getattr(tx, "es_recurrente", False) or getattr(tx, "recurrente_id", None))
+    return bool(getattr(tx, "es_recurrente", False))
 
 
 def _determinar_clase_stream(
@@ -634,7 +634,7 @@ def clasificar_gastos(
     txs_declaradas = [tx for tx in txs if _es_recurrente_declarado(tx)]
     por_decl = defaultdict(list)
     for tx in txs_declaradas:
-        k = getattr(tx, "recurrente_id", None) or tx.descripcion or "recurrente"
+        k = tx.descripcion or "recurrente"
         por_decl[k].append(tx)
 
     for _, cluster in por_decl.items():

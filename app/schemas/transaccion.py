@@ -49,7 +49,6 @@ class TransaccionBase(BaseModel):
     tarjeta_id: UUID | None = None
     primer_vencimiento_manual: date | None = None
     es_recurrente: bool = False
-    recurrente_id: UUID | None = None
     es_cuota_hija: bool = False
     es_padre_cuotas: bool = False
     grupo_cuotas_id: UUID | None = None

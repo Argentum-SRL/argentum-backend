@@ -171,7 +171,7 @@ def test_importar_transacciones_simples(db):
     resultado = persistencia_service.importar_transacciones_resumen(
         db=db,
         usuario_id=db.usuario_id,
-        tarjeta_id=db.tarjeta_id,
+        tarjeta_id=None,
         importacion_id=db.importacion_id,
         billetera_id=db.billetera_id,
         billetera_usd_id=db.billetera_usd_id,
@@ -457,7 +457,7 @@ def test_importar_usd_sin_billetera_usd(db):
     resultado = persistencia_service.importar_transacciones_resumen(
         db=db,
         usuario_id=db.usuario_id,
-        tarjeta_id=db.tarjeta_id,
+        tarjeta_id=None,
         importacion_id=db.importacion_id,
         billetera_id=db.billetera_id,
         billetera_usd_id=None,  # No se provee billetera USD

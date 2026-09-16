@@ -77,7 +77,6 @@ class Transaccion(Base):
         Index("ix_transacciones_estado_verificacion", "estado_verificacion"),
         Index("ix_transacciones_importacion_id", "importacion_id"),
         Index("idx_transacciones_import_hash", "usuario_id", "import_hash", unique=True, postgresql_where=text("import_hash IS NOT NULL")),
-        Index("ix_transacciones_recurrente_fecha", "recurrente_id", "fecha", postgresql_where=text("recurrente_id IS NOT NULL")),
         Index("ix_transacciones_pago_resumen_vencimiento", "tarjeta_id", "pago_resumen_vencimiento", postgresql_where=text("pago_resumen_vencimiento IS NOT NULL")),
         Index("ix_transacciones_pago_origen_id", "pago_origen_id", postgresql_where=text("pago_origen_id IS NOT NULL")),
         Index("ix_transacciones_suscripcion_id", "suscripcion_id", postgresql_where=text("suscripcion_id IS NOT NULL")),
@@ -112,9 +111,6 @@ class Transaccion(Base):
     )
     primer_vencimiento_manual: Mapped[date | None] = mapped_column(Date, nullable=True)
     es_recurrente: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    recurrente_id: Mapped[UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("transacciones_recurrentes.id"), nullable=True
-    )
     es_cuota_hija: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # Estas transacciones se excluyen de dashboard/graficos en la capa de consulta.
     es_padre_cuotas: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

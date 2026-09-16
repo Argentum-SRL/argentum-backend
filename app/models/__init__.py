@@ -22,7 +22,6 @@ from app.models.subcategoria import Subcategoria
 from app.models.suscripcion import Suscripcion
 from app.models.tarjeta_credito import TarjetaCredito
 from app.models.transaccion import Transaccion
-from app.models.transaccion_recurrente import TransaccionRecurrente
 from app.models.transferencia_interna import TransferenciaInterna
 from app.models.usuario import Usuario
 from app.models.tools import IPCCache
@@ -63,7 +62,6 @@ __all__ = [
     "RefreshToken",
     "Suscripcion",
     "Transaccion",
-    "TransaccionRecurrente",
     "TransferenciaInterna",
     "IPCCache",
     "FeriadoAR",

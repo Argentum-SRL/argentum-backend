@@ -20,7 +20,6 @@ from app.models.refresh_token import RefreshToken
 from app.models.perfil_financiero import PerfilFinanciero
 from app.models.historial_perfil_financiero import HistorialPerfilFinanciero
 from app.models.grupo_cuotas import GrupoCuotas
-from app.models.transaccion_recurrente import TransaccionRecurrente
 from app.models.transferencia_interna import TransferenciaInterna
 from app.models.categoria_excluida import CategoriaExcluida
 from app.models.configuracion_notificacion import ConfiguracionNotificacion
@@ -405,7 +404,7 @@ def eliminar_usuario(db: Session, usuario: Usuario) -> dict:
         # 2. Modelos con usuario_id
         modelos_usuario = [
             ConversacionWpp, Notificacion, RefreshToken, Suscripcion,
-            Presupuesto, Meta, GrupoCuotas, TransaccionRecurrente, 
+            Presupuesto, Meta, GrupoCuotas, 
             TransferenciaInterna, CategoriaExcluida, ConfiguracionNotificacion,
             Transaccion, ImportacionResumen, TarjetaCredito, Billetera,
             PerfilFinanciero, HistorialPerfilFinanciero

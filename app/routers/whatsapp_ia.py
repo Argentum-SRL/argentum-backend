@@ -1544,7 +1544,6 @@ def _buscar_transaccion_duplicada_reciente(
             Transaccion.es_cuota_hija == False,
             Transaccion.es_padre_cuotas == False,
             Transaccion.es_recurrente == False,
-            Transaccion.recurrente_id.is_(None),
             Transaccion.suscripcion_id.is_(None),
             Transaccion.pago_origen_id.is_(None),
             Transaccion.pago_resumen_vencimiento.is_(None),
@@ -3356,7 +3355,7 @@ def _buscar_ultimo_movimiento_whatsapp(usuario_id: UUID, db: Session) -> tuple[T
         return None, "ES_RESUMEN"
     if tx.movimiento_meta_id is not None or tx.descripcion.startswith("Aporte a la meta:") or tx.descripcion.startswith("Retiro de la meta:"):
         return None, "ES_META"
-    if tx.es_recurrente or tx.recurrente_id is not None:
+    if tx.es_recurrente:
         return None, "ES_RECURRENTE"
 
     return tx, None
@@ -6977,7 +6976,6 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                                         Transaccion.es_cuota_hija == False,
                                         Transaccion.es_padre_cuotas == False,
                                         Transaccion.es_recurrente == False,
-                                        Transaccion.recurrente_id.is_(None),
                                         Transaccion.suscripcion_id.is_(None),
                                         Transaccion.pago_origen_id.is_(None),
                                         Transaccion.pago_resumen_vencimiento.is_(None),

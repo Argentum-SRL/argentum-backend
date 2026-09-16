@@ -50,7 +50,6 @@ import structlog
 
 struct_logger = structlog.get_logger(__name__)
 
-from app.services.recurrente_service import procesar_recurrentes
 from app.services.vencimiento_tarjeta_service import procesar_vencimientos_tarjetas
 from app.services.presupuesto_service import renovar_presupuestos
 from app.services.cobro_suscripcion_service import procesar_cobros_suscripciones
@@ -233,28 +232,6 @@ def _job_limpiar_tokens():
             liberar_lock_job(db, "_job_limpiar_tokens")
         db.close()
 
-
-def _job_procesar_recurrentes():
-    """Tarea programada: genera transacciones recurrentes una vez al día."""
-    db = SessionLocal()
-    lock_adquirido = False
-    try:
-        if not intentar_tomar_lock_job(db, "_job_procesar_recurrentes"):
-            struct_logger.info(
-                "Job omitido: ya se está ejecutando en otra instancia",
-                job="_job_procesar_recurrentes",
-            )
-            return
-        lock_adquirido = True
-        generadas = procesar_recurrentes(db)
-        if generadas:
-            logger.info("Transacciones recurrentes generadas: %s", generadas)
-    except Exception:
-        logger.exception("Error en job procesar_recurrentes")
-    finally:
-        if lock_adquirido:
-            liberar_lock_job(db, "_job_procesar_recurrentes")
-        db.close()
 
 
 def _job_vencimientos_tarjetas():
@@ -537,16 +514,6 @@ async def lifespan(app: FastAPI):
             "interval",
             hours=6,
             id="limpiar_refresh_tokens",
-            misfire_grace_time=300,
-            max_instances=1,
-            replace_existing=True,
-        )
-        scheduler.add_job(
-            _job_procesar_recurrentes,
-            "cron",
-            hour=0,
-            minute=5,
-            id="procesar_recurrentes",
             misfire_grace_time=300,
             max_instances=1,
             replace_existing=True,
@@ -902,7 +869,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 
-from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, recurrentes, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin, perfil_financiero, importacion, reporte_error
+from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin, perfil_financiero, importacion, reporte_error
 
 app.include_router(auth.router)
 app.include_router(onboarding.router)
@@ -911,7 +878,6 @@ app.include_router(billeteras.router)
 app.include_router(tarjetas.router, prefix="/tarjetas", tags=["tarjetas"])
 app.include_router(transacciones.router)
 app.include_router(transferencias.router)
-app.include_router(recurrentes.router)
 app.include_router(categorias.router)
 app.include_router(dashboard.router)
 app.include_router(presupuestos.router, prefix="/presupuestos")

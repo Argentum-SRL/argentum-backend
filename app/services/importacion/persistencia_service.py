@@ -387,7 +387,6 @@ def importar_transacciones_resumen(
                             es_padre_cuotas=True,
                             origen=OrigenTransaccion.IA_PDF,
                             estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-                            import_hash=hash_val,
                             importacion_id=imp_id,
                             titular_pdf=cruda.titular_seccion
                         )

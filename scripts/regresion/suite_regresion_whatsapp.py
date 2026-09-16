@@ -441,7 +441,7 @@ def verificar_reconciliacion_billeteras(db: Session):
 SALDOS_REFERENCIA_21 = {
     ("testingadmin@argentum.com", "Efectivo ARS", "ARS"): Decimal("0.00"),
     ("testingadmin@argentum.com", "Efectivo USD", "USD"): Decimal("0.00"),
-    ("testingadmin@argentum.com", "Galicia", "ARS"): Decimal("1893558.71"),  # Actualizado 2026-09-15: saldo real tras seed historico del 12/09
+    ("testingadmin@argentum.com", "Galicia", "ARS"): Decimal("1889058.71"),  # Actualizado 2026-09-16: cobro legítimo Spotify 15/09 (-$4.500)
     ("testingadmin@argentum.com", "Santander", "ARS"): Decimal("84270.29"),
 }
 
@@ -1908,6 +1908,7 @@ def p10_caso_1(datos):
     u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         db = Session()
+        _limpiar_subs(conn, u.id)
         conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
 
@@ -1924,7 +1925,7 @@ def p10_caso_1(datos):
         resp3 = respuestas[-1][1] if respuestas else ""
 
         sub = db.execute(select(Suscripcion).where(Suscripcion.usuario_id == u.id, Suscripcion.nombre == "Disney+")).scalars().first()
-        txs_sub = db.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id, Transaccion.suscripcion_id.is_not(None))).scalar()
+        txs_sub = db.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id, Transaccion.suscripcion_id == sub.id)).scalar() if sub else 0
 
         return (
             f"Pregunta frecuencia: {'¿Con qué frecuencia' in resp1}\n"
