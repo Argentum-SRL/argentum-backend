@@ -319,6 +319,22 @@ def _debe_responder_no_registrado(telefono_normalizado: str) -> bool:
     return permitido
 
 
+# Rate limiting para vinculación de cuentas por WhatsApp (por número de teléfono no registrado)
+MAX_INTENTOS_VINCULACION_POR_VENTANA = 5
+VENTANA_VINCULACION_SEGUNDOS = 15 * 60  # 15 minutos
+
+
+def _verificar_rate_limit_vinculacion(telefono_norm: str, db: Session | None = None) -> bool:
+    permitido, _, _ = verificar_rate_limit(
+        accion="vinculacion_no_registrado",
+        identificador=telefono_norm,
+        max_intentos=MAX_INTENTOS_VINCULACION_POR_VENTANA,
+        ventana_segundos=VENTANA_VINCULACION_SEGUNDOS,
+        db=db,
+    )
+    return permitido
+
+
 # Rate limiting para usuarios verificados (protección contra ráfagas y costos de OpenAI en Postgres)
 MAX_MENSAJES_POR_MINUTO_REGISTRADO = 12
 MAX_MEDIOS_POR_MINUTO_REGISTRADO = 4
@@ -4804,6 +4820,14 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
 
             # 2.1 Detección del código de vinculación: solo para remitentes no vinculados
             if msg_type == "text" and not usuario:
+                tel_identificador = normalizar_telefono_ar(from_number) or from_number
+                if not _verificar_rate_limit_vinculacion(tel_identificador, db=db):
+                    logger.warning(
+                        "whatsapp_rate_limit_vinculacion_superado",
+                        from_number=from_number,
+                    )
+                    return
+
                 texto_candidato = msg.get("text", {}).get("body", "").strip()
                 logger.info("whatsapp_webhook_mensaje_recibido", from_number=from_number, texto=texto_candidato, msg_type=msg_type)
                 codigo_vinc, entrada_vinc, es_vencido = buscar_codigo_vinculacion(texto_candidato)

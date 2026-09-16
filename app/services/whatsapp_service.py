@@ -154,7 +154,6 @@ def buscar_codigo_vinculacion(
         return None, None, False
 
     texto_upper = mensaje_texto.upper()
-    texto_compacto = re.sub(r"[^A-Z0-9]", "", texto_upper)
     ahora = datetime.now(timezone.utc)
     hace_dos_horas = ahora - timedelta(hours=2)
 
@@ -171,7 +170,12 @@ def buscar_codigo_vinculacion(
 
         # 1. Coincidencia directa con códigos activos o recientemente vencidos
         for entrada in filas:
-            if entrada.codigo in texto_compacto:
+            patron = (
+                r"(?<![A-Z0-9])"
+                + r"[\s\-]*".join(re.escape(c) for c in entrada.codigo)
+                + r"(?![A-Z0-9])"
+            )
+            if re.search(patron, texto_upper):
                 if ahora <= entrada.expiracion:
                     ent = EntradaCodigoVinculacion(
                         usuario_id=entrada.identificador,
