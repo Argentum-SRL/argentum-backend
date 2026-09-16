@@ -20,7 +20,7 @@ import anyio
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -1480,6 +1480,40 @@ def _buscar_propuesta_pendiente(usuario_id: UUID, db: Session) -> ConversacionWp
             ConversacionWpp.fecha >= limite,
         )
         .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+
+def _buscar_propuesta_confirmable_mas_reciente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    """
+    Busca la propuesta pendiente más reciente entre todos los tipos confirmables (deshacer,
+    corregir, transferir, suscripciones, registrar movimiento) dentro de la ventana de vigencia (30 min).
+    Garantiza que la confirmación ('sí', 'dale') aplique a lo último que el bot propuso.
+    """
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    intents_confirmables = [
+        "deshacer",
+        "corregir",
+        "transferir_fondos",
+        "dar_baja_suscripcion",
+        "cambiar_precio_suscripcion",
+        "agregar_suscripcion",
+        "registrar_transaccion",
+    ]
+    return db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.intent_detectado.in_(intents_confirmables),
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+            or_(
+                ConversacionWpp.intent_detectado != "registrar_transaccion",
+                ConversacionWpp.confianza >= Decimal("0.85"),
+            ),
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+        .limit(1)
     ).scalars().first()
 
 
@@ -4372,29 +4406,45 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
             return None
 
         elif intent == "confirmar":
-            prop_undo = _buscar_propuesta_deshacer_pendiente(usuario.id, db)
-            if prop_undo:
+            propuesta_ganadora = _buscar_propuesta_confirmable_mas_reciente(usuario.id, db)
+            intent_ganador = propuesta_ganadora.intent_detectado if propuesta_ganadora else None
+
+            if intent_ganador == "deshacer":
                 tx, msg_resp, ya_conf = _confirmar_propuesta_deshacer(usuario, db)
                 resultado_ia["_mensaje_confirmacion_directo"] = msg_resp
-                if tx:
-                    return str(tx.id)
-                return None
+                return str(tx.id) if tx else None
 
-            prop_corr = _buscar_propuesta_corregir_pendiente(usuario.id, db)
-            if prop_corr:
+            elif intent_ganador == "corregir":
                 tx, msg_resp, ya_conf = _confirmar_propuesta_corregir(usuario, db)
                 resultado_ia["_mensaje_confirmacion_directo"] = msg_resp
-                if tx:
-                    return str(tx.id)
-                return None
+                return str(tx.id) if tx else None
 
-            tx, msg_resp, ya_conf = _confirmar_propuesta_transaccion(
-                usuario, db, entidades_actuales=resultado_ia.get("entidades")
-            )
-            resultado_ia["_mensaje_confirmacion_directo"] = msg_resp
-            if tx:
-                return str(tx.id)
-            return None
+            elif intent_ganador == "transferir_fondos":
+                tr, msg_resp, ya_conf = _confirmar_propuesta_transferencia(usuario, db)
+                resultado_ia["_mensaje_confirmacion_directo"] = msg_resp
+                return str(tr.id) if tr else None
+
+            elif intent_ganador == "dar_baja_suscripcion":
+                sub, msg_resp, ya_conf = _confirmar_propuesta_baja_suscripcion(usuario, db)
+                resultado_ia["_mensaje_confirmacion_directo"] = msg_resp
+                return str(sub.id) if sub else None
+
+            elif intent_ganador == "cambiar_precio_suscripcion":
+                hist, msg_resp, ya_conf = _confirmar_propuesta_cambio_precio(usuario, db)
+                resultado_ia["_mensaje_confirmacion_directo"] = msg_resp
+                return str(hist.id) if hist else None
+
+            elif intent_ganador == "agregar_suscripcion":
+                sub, msg_resp, ya_conf = _confirmar_propuesta_suscripcion(usuario, db)
+                resultado_ia["_mensaje_confirmacion_directo"] = msg_resp
+                return str(sub.id) if sub else None
+
+            else:
+                tx, msg_resp, ya_conf = _confirmar_propuesta_transaccion(
+                    usuario, db, entidades_actuales=resultado_ia.get("entidades")
+                )
+                resultado_ia["_mensaje_confirmacion_directo"] = msg_resp
+                return str(tx.id) if tx else None
 
         elif intent == "cancelar":
             txs_pendientes = db.execute(
@@ -5588,9 +5638,10 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
 
             # 4. Chequeo determinístico de confirmación con bloqueo de concurrencia (Tarea 2)
             if _es_confirmacion(mensaje_texto):
-                # Prioridad 1: propuesta de deshacer pendiente
-                prop_deshacer = _buscar_propuesta_deshacer_pendiente(usuario.id, db)
-                if prop_deshacer:
+                propuesta_ganadora = _buscar_propuesta_confirmable_mas_reciente(usuario.id, db)
+                intent_ganador = propuesta_ganadora.intent_detectado if propuesta_ganadora else None
+
+                if intent_ganador == "deshacer":
                     tx_deshecha, msg_confirm, ya_conf = _confirmar_propuesta_deshacer(usuario, db)
                     nueva_conv = ConversacionWpp(
                         usuario_id=usuario.id,
@@ -5611,9 +5662,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                     enviar_whatsapp(from_number, msg_confirm)
                     return
 
-                # Prioridad 2: propuesta de corregir pendiente
-                prop_corregir = _buscar_propuesta_corregir_pendiente(usuario.id, db)
-                if prop_corregir:
+                elif intent_ganador == "corregir":
                     tx_corregida, msg_confirm, ya_conf = _confirmar_propuesta_corregir(usuario, db)
                     nueva_conv = ConversacionWpp(
                         usuario_id=usuario.id,
@@ -5634,9 +5683,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                     enviar_whatsapp(from_number, msg_confirm)
                     return
 
-                # Prioridad 2.5: propuesta de transferir fondos pendiente
-                prop_transfer = _buscar_propuesta_transferencia_pendiente(usuario.id, db)
-                if prop_transfer:
+                elif intent_ganador == "transferir_fondos":
                     tr_creada, msg_confirm, ya_conf = _confirmar_propuesta_transferencia(usuario, db)
                     nueva_conv = ConversacionWpp(
                         usuario_id=usuario.id,
@@ -5657,9 +5704,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                     enviar_whatsapp(from_number, msg_confirm)
                     return
 
-                # Prioridad 2.6: propuesta de dar de baja suscripción pendiente
-                prop_baja = _buscar_propuesta_baja_suscripcion_pendiente(usuario.id, db)
-                if prop_baja:
+                elif intent_ganador == "dar_baja_suscripcion":
                     sub_bajada, msg_confirm, ya_conf = _confirmar_propuesta_baja_suscripcion(usuario, db)
                     nueva_conv = ConversacionWpp(
                         usuario_id=usuario.id,
@@ -5680,9 +5725,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                     enviar_whatsapp(from_number, msg_confirm)
                     return
 
-                # Prioridad 2.7: propuesta de cambio de precio de suscripción pendiente
-                prop_cp = _buscar_propuesta_cambio_precio_pendiente(usuario.id, db)
-                if prop_cp:
+                elif intent_ganador == "cambiar_precio_suscripcion":
                     hist_cp, msg_confirm, ya_conf = _confirmar_propuesta_cambio_precio(usuario, db)
                     nueva_conv = ConversacionWpp(
                         usuario_id=usuario.id,
@@ -5703,9 +5746,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                     enviar_whatsapp(from_number, msg_confirm)
                     return
 
-                # Prioridad 2.8: propuesta de alta de suscripción pendiente
-                prop_sub = _buscar_propuesta_suscripcion_pendiente(usuario.id, db)
-                if prop_sub:
+                elif intent_ganador == "agregar_suscripcion":
                     sub_creada, msg_confirm, ya_conf = _confirmar_propuesta_suscripcion(usuario, db)
                     nueva_conv = ConversacionWpp(
                         usuario_id=usuario.id,
@@ -5726,34 +5767,35 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                     enviar_whatsapp(from_number, msg_confirm)
                     return
 
-                # Prioridad 3: propuesta de registrar movimiento
-                tx_creada, msg_confirm, ya_conf = _confirmar_propuesta_transaccion(usuario, db)
-                prop_confirmada = db.execute(
-                    select(ConversacionWpp).where(
-                        ConversacionWpp.usuario_id == usuario.id,
-                        ConversacionWpp.intent_detectado == "registrar_transaccion",
-                        ConversacionWpp.accion_ejecutada.is_not(None),
-                    ).order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
-                ).scalars().first()
-                accion_final = prop_confirmada.accion_ejecutada if prop_confirmada else (str(tx_creada.id) if tx_creada else ("ya_confirmada" if ya_conf else None))
-                nueva_conv = ConversacionWpp(
-                    usuario_id=usuario.id,
-                    wamid=wamid,
-                    mensaje_usuario=mensaje_texto,
-                    tipo_mensaje=TipoMensajeWpp.TEXTO,
-                    transcripcion=None,
-                    mensaje_bot=msg_confirm,
-                    intent_detectado="confirmar",
-                    entidades={},
-                    accion_ejecutada=accion_final,
-                    confianza=Decimal("1.000"),
-                    slot_filling_activo=False,
-                    slot_filling_estado=None,
-                )
-                db.add(nueva_conv)
-                db.commit()
-                enviar_whatsapp(from_number, msg_confirm)
-                return
+                else:
+                    # intent_ganador == "registrar_transaccion" o None (sin propuesta pendiente)
+                    tx_creada, msg_confirm, ya_conf = _confirmar_propuesta_transaccion(usuario, db)
+                    prop_confirmada = db.execute(
+                        select(ConversacionWpp).where(
+                            ConversacionWpp.usuario_id == usuario.id,
+                            ConversacionWpp.intent_detectado == "registrar_transaccion",
+                            ConversacionWpp.accion_ejecutada.is_not(None),
+                        ).order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+                    ).scalars().first()
+                    accion_final = prop_confirmada.accion_ejecutada if prop_confirmada else (str(tx_creada.id) if tx_creada else ("ya_confirmada" if ya_conf else None))
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=msg_confirm,
+                        intent_detectado="confirmar",
+                        entidades={},
+                        accion_ejecutada=accion_final,
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, msg_confirm)
+                    return
 
             # 4. Buscar conversación activa previa con slot_filling dentro del plazo (Tarea 2)
             conv_activa = _buscar_slot_filling_activo(usuario.id, db)
