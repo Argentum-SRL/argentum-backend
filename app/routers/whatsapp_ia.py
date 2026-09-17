@@ -4953,6 +4953,8 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
 
             mensaje_texto = ""
             transcripcion = None
+            es_imagen = False
+            caption_imagen = ""
 
             if msg_type == "text":
                 mensaje_texto = msg.get("text", {}).get("body", "").strip()
@@ -5004,6 +5006,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
 
             elif msg_type == "image":
                 image_obj = msg.get("image", {})
+                caption = image_obj.get("caption") or ""
                 media_id = image_obj.get("id")
                 mime_type = image_obj.get("mime_type", "image/jpeg")
                 nombre_usuario = f"{usuario.nombre or ''} {usuario.apellido or ''}".strip()
@@ -5027,6 +5030,8 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                         return
 
                     if descripcion_imagen:
+                        es_imagen = True
+                        caption_imagen = caption
                         mensaje_texto = descripcion_imagen
                         if settings.ENVIRONMENT == "production":
                             logger.info("Imagen analizada exitosamente (longitud: %d caracteres)", len(descripcion_imagen))
@@ -7518,12 +7523,25 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
             except (ValueError, TypeError):
                 confianza_dec = Decimal("0.000")
 
+            if es_imagen:
+                tipo_msg_guardar = TipoMensajeWpp.IMAGEN
+                mensaje_usuario_guardar = caption_imagen
+                transcripcion_guardar = mensaje_texto
+            elif transcripcion:
+                tipo_msg_guardar = TipoMensajeWpp.AUDIO
+                mensaje_usuario_guardar = transcripcion
+                transcripcion_guardar = transcripcion
+            else:
+                tipo_msg_guardar = TipoMensajeWpp.TEXTO
+                mensaje_usuario_guardar = mensaje_texto
+                transcripcion_guardar = None
+
             nueva_conv = ConversacionWpp(
                 usuario_id=usuario.id,
                 wamid=wamid,
-                mensaje_usuario=mensaje_texto,
-                tipo_mensaje=TipoMensajeWpp.AUDIO if transcripcion else TipoMensajeWpp.TEXTO,
-                transcripcion=transcripcion,
+                mensaje_usuario=mensaje_usuario_guardar,
+                tipo_mensaje=tipo_msg_guardar,
+                transcripcion=transcripcion_guardar,
                 mensaje_bot=resultado_ia["respuesta_usuario"],
                 intent_detectado=resultado_ia.get("intent"),
                 entidades=resultado_ia.get("entidades"),

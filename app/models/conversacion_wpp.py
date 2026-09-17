@@ -16,6 +16,7 @@ from app.core.database import Base
 class TipoMensajeWpp(str, Enum):
     TEXTO = "texto"
     AUDIO = "audio"
+    IMAGEN = "imagen"
 
 
 class ConversacionWpp(Base):
