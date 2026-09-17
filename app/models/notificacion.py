@@ -45,6 +45,9 @@ MENSAJE_CAMBIO_CONTRASENA = (
 TEMPLATE_CAMBIO_CONTRASENA = "alerta_cambio_contrasena"
 TEMPLATE_CAMBIO_CONTRASENA_LANG = "es"
 
+TEMPLATE_CAMBIO_EMAIL = "alerta_cambio_email"
+TEMPLATE_CAMBIO_EMAIL_LANG = "es"
+
 
 class Notificacion(Base):
     __tablename__ = "notificaciones"

@@ -107,10 +107,11 @@ def actualizar_email(
     usuario.email_verificado = False
     db.commit()
 
+    notif = None
     try:
         from app.services.notificacion_service import crear_notificacion
         from app.models.notificacion import TipoNotificacion, NivelNotificacion
-        crear_notificacion(
+        notif = crear_notificacion(
             db=db,
             usuario_id=usuario.id,
             tipo=TipoNotificacion.CAMBIO_EMAIL,
@@ -122,6 +123,25 @@ def actualizar_email(
         )
     except Exception:
         pass
+
+    if usuario.telefono:
+        try:
+            from app.services.whatsapp_service import enviar_whatsapp_template
+            from app.models.notificacion import TEMPLATE_CAMBIO_EMAIL, TEMPLATE_CAMBIO_EMAIL_LANG
+            componentes = [
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": email_limpio}
+                    ],
+                }
+            ]
+            if enviar_whatsapp_template(usuario.telefono, TEMPLATE_CAMBIO_EMAIL, TEMPLATE_CAMBIO_EMAIL_LANG, componentes):
+                if notif:
+                    notif.enviada_whatsapp = True
+                    db.commit()
+        except Exception as e:
+            logger.error("Error al enviar WhatsApp de cambio de email: %s", e)
     
     email_service.generar_y_enviar_verificacion_email(email_limpio)
     
