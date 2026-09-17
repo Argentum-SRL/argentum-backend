@@ -202,11 +202,14 @@ class ProyeccionMoneda(BaseModel):
     mensaje_insuficiente: Optional[str] = None
     mensaje: Optional[str] = None
     calibracion: Optional[CalibracionAuditoria] = None
+    mostrar_card: bool = False
 
 
 class ProyeccionesResponse(BaseModel):
     ars: ProyeccionMoneda
     usd: ProyeccionMoneda
+    mostrar_card: bool = False
+    mostrar_modal_bienvenida: bool = False
 
 
 class PeriodoActualResponse(BaseModel):

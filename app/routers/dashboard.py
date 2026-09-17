@@ -133,6 +133,8 @@ def get_proyeccion(
     Si la calibración está pendiente, programa su cálculo en segundo plano.
     """
     res = proyeccion_service.calcular_proyeccion(db, current_user)
+    mostrar_card = bool(res.get("mostrar_card", False))
+    res["mostrar_modal_bienvenida"] = bool(mostrar_card and not getattr(current_user, "modal_bienvenida_financiera_visto", False))
     ars_calib = (res.get("ars") or {}).get("calibracion") or {}
     usd_calib = (res.get("usd") or {}).get("calibracion") or {}
     if ars_calib.get("motivo") == "calibracion_pendiente" or usd_calib.get("motivo") == "calibracion_pendiente":

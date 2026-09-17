@@ -36,6 +36,8 @@ class PerfilInterpretaciones(BaseModel):
 class PerfilFinancieroResponse(PerfilFinancieroRead):
     interpretaciones: PerfilInterpretaciones
     perfil_nuevo: PerfilNuevoRead
+    mostrar_card: bool = True
+    mostrar_modal_bienvenida: bool = False
 
 
 def construir_interpretaciones(perfil) -> dict:
@@ -99,10 +101,14 @@ def get_perfil_financiero(
     
     # Mapear a esquema de respuesta
     response_data = PerfilFinancieroRead.model_validate(perfil)
+    mostrar_card = bool(perfil_nuevo.get("mostrar_card", True))
+    mostrar_modal = bool(mostrar_card and not getattr(current_user, "modal_bienvenida_financiera_visto", False))
     return PerfilFinancieroResponse(
         **response_data.model_dump(),
         interpretaciones=PerfilInterpretaciones(**interpretaciones),
-        perfil_nuevo=PerfilNuevoRead(**perfil_nuevo)
+        perfil_nuevo=PerfilNuevoRead(**perfil_nuevo),
+        mostrar_card=mostrar_card,
+        mostrar_modal_bienvenida=mostrar_modal
     )
 
 
@@ -118,10 +124,14 @@ def recalcular_perfil_financiero(
     
     # Mapear a esquema de respuesta
     response_data = PerfilFinancieroRead.model_validate(perfil)
+    mostrar_card = bool(perfil_nuevo.get("mostrar_card", True))
+    mostrar_modal = bool(mostrar_card and not getattr(current_user, "modal_bienvenida_financiera_visto", False))
     return PerfilFinancieroResponse(
         **response_data.model_dump(),
         interpretaciones=PerfilInterpretaciones(**interpretaciones),
-        perfil_nuevo=PerfilNuevoRead(**perfil_nuevo)
+        perfil_nuevo=PerfilNuevoRead(**perfil_nuevo),
+        mostrar_card=mostrar_card,
+        mostrar_modal_bienvenida=mostrar_modal
     )
 
 

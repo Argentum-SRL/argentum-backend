@@ -33,6 +33,7 @@ class UsuarioBase(BaseModel):
     ultimo_acceso: datetime | None = None
     fecha_nacimiento: date | None = None
     sexo: str | None = None
+    modal_bienvenida_financiera_visto: bool = False
 
 
 class UsuarioCreate(UsuarioBase):

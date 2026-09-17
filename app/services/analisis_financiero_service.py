@@ -329,6 +329,7 @@ def calcular_perfil_nuevo(db: Session, usuario: Usuario, data: dict[str, Any] | 
             interp_relativas["ingreso_tipico"] = "Mediana histórica deflactada de tus ciclos con ingreso."
 
     return {
+        "mostrar_card": datos_suficientes,
         "datos_suficientes": datos_suficientes,
         "mensaje_insuficiente": mensaje_insuficiente,
         "calidad_registro_advertencia": calidad_advertencia,
@@ -679,6 +680,7 @@ def calcular_proyeccion_nueva(
 
         # Puerta de la escalera de historia
         datos_suficientes, nivel_confianza, mensaje_insuficiente = evaluar_escalera_historia(cant_ciclos_datos)
+        mostrar_card_moneda = bool(datos_suficientes)
 
         # ----------------------------------------------------------------------
         # PARTE 1: CIERTO (Pendiente en lo que queda del ciclo)
@@ -874,6 +876,7 @@ def calcular_proyeccion_nueva(
                     "pesos": {"historial": 1.0, "ciclo_actual": 0.0},
                     "advertencias": advertencias_salida,
                     "datos_suficientes": False,
+                    "mostrar_card": mostrar_card_moneda,
                     "clasificacion": {
                         "comprometidos": len(clasificacion.comprometidos),
                         "recurrentes_detectados": len(clasificacion.recurrentes_detectados),
@@ -926,6 +929,7 @@ def calcular_proyeccion_nueva(
                     "pesos": None,
                     "advertencias": advertencias_salida,
                     "datos_suficientes": False,
+                    "mostrar_card": mostrar_card_moneda,
                     "clasificacion": None,
                     "distribucion": None,
                     "intervalos": None,
@@ -1029,6 +1033,7 @@ def calcular_proyeccion_nueva(
                     "pesos": {"historial": 1.0, "ciclo_actual": 0.0},
                     "advertencias": advertencias_sin_disp,
                     "datos_suficientes": False,
+                    "mostrar_card": mostrar_card_moneda,
                     "clasificacion": {
                         "comprometidos": len(clasificacion.comprometidos),
                         "recurrentes_detectados": len(clasificacion.recurrentes_detectados),
@@ -1081,6 +1086,7 @@ def calcular_proyeccion_nueva(
                     "pesos": None,
                     "advertencias": advertencias_sin_disp,
                     "datos_suficientes": False,
+                    "mostrar_card": mostrar_card_moneda,
                     "clasificacion": None,
                     "distribucion": None,
                     "intervalos": None,
@@ -1167,6 +1173,7 @@ def calcular_proyeccion_nueva(
                 "pesos": None,
                 "advertencias": advertencias_salida,
                 "datos_suficientes": False,
+                "mostrar_card": mostrar_card_moneda,
                 "clasificacion": None,
                 "distribucion": None,
                 "intervalos": None,
@@ -1272,6 +1279,7 @@ def calcular_proyeccion_nueva(
             "pesos": {"historial": 1.0, "ciclo_actual": 0.0},
             "advertencias": advertencias,
             "datos_suficientes": True,
+            "mostrar_card": mostrar_card_moneda,
             "clasificacion": {
                 "comprometidos": len(clasificacion.comprometidos),
                 "recurrentes_detectados": len(clasificacion.recurrentes_detectados),
@@ -1298,6 +1306,10 @@ def calcular_proyeccion_nueva(
             } if calib else None,
         }
 
+    resultado["mostrar_card"] = bool(
+        (resultado.get("ars") or {}).get("mostrar_card")
+        or (resultado.get("usd") or {}).get("mostrar_card")
+    )
     return resultado
 
 

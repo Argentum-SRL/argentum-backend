@@ -120,3 +120,15 @@ def delete_me(
 ):
     """Elimina el usuario y todos sus datos en cascada."""
     return usuario_service.eliminar_usuario(db, current_user)
+
+
+@router.post("/me/marcar-modal-financiero-visto")
+def marcar_modal_financiero_visto(
+    current_user: Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Marca como visto el modal explicativo de bienvenida financiera."""
+    current_user.modal_bienvenida_financiera_visto = True
+    db.commit()
+    return {"ok": True, "modal_bienvenida_financiera_visto": True}
+

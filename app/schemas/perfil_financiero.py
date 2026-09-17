@@ -51,6 +51,7 @@ class PerfilFinancieroRead(PerfilFinancieroBase):
 
 
 class PerfilNuevoRead(BaseModel):
+    mostrar_card: bool = True
     datos_suficientes: bool = True
     mensaje_insuficiente: str | None = None
     calidad_registro_advertencia: str | None = None

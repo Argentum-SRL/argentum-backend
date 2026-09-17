@@ -370,7 +370,8 @@ def _calcular_proyeccion_por_moneda(
             "ciclos_analizados": n_ciclos,
             "pesos": {"historial": 1.0, "ciclo_actual": 0.0},
             "advertencias": ["El ciclo actual ya finalizó."],
-            "datos_suficientes": True
+            "datos_suficientes": True,
+            "mostrar_card": bool(n_ciclos >= 3),
         }
 
     # Gasto actual por categoría
@@ -493,7 +494,8 @@ def _calcular_proyeccion_por_moneda(
             "ciclo_actual": float(peso_actual)
         },
         "advertencias": advertencias,
-        "datos_suficientes": datos_suficientes
+        "datos_suficientes": datos_suficientes,
+        "mostrar_card": bool(n_ciclos >= 3)
     }
 
 
