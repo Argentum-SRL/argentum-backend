@@ -1,0 +1,39 @@
+{
+  "escenario_id": "P12.2",
+  "fecha_grabacion": "2026-09-17T18:54:26.067919+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "a cuánto está el dólar",
+      "respuesta": {
+        "intent": "consultar_cotizacion",
+        "entidades": {
+          "monto": null,
+          "moneda": null,
+          "tipo": null,
+          "categoria": null,
+          "descripcion": null,
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": null,
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "transacciones_adicionales": []
+        },
+        "confianza": 1.0,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "No tengo la cotización del dólar en este momento."
+      }
+    }
+  ]
+}

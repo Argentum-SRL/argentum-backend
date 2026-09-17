@@ -1,6 +1,6 @@
 """
 Suite consolidada de regresión de WhatsApp para Argentum.
-Ejecuta todos los escenarios acumulados (Puntos 3, 4, 5, 6, 7, 8, 9, 9B, 10 y 11) usando exclusivamente testingadmin@argentum.com
+Ejecuta todos los escenarios acumulados (Puntos 3, 4, 5, 6, 7, 8, 9, 9B, 10, 11 y 12) usando exclusivamente testingadmin@argentum.com
 con verificación automática y rollback total.
 
 CUÁNDO USAR CADA MODO:
@@ -2394,6 +2394,97 @@ def p11_caso_10(datos):
         )
     return run_isolated(test)
 
+def p11_caso_11(datos):
+    """Lote de 3 gastos en un solo mensaje: confirma, crea 3 txs, valida accion_ejecutada > 100 caracteres"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+
+        tx_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+
+        # Enviar mensaje con 3 gastos
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(
+            make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco, 8000 en la verdulería y 3000 en la panadería"),
+            time.perf_counter()
+        )
+
+        # Confirmar con "sí"
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(
+            make_payload(TELEFONO_TEST, "sí"),
+            time.perf_counter()
+        )
+        resp_final = respuestas[-1][1] if respuestas else ""
+
+        tx_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        tx_creadas = tx_despues - tx_antes
+
+        row = conn.execute(
+            text("SELECT accion_ejecutada, length(accion_ejecutada) as largo FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        accion_len = row["largo"] if row and row["largo"] is not None else 0
+
+        return (
+            f"Txs creadas: {tx_creadas} | "
+            f"Accion len ok: {accion_len > 100} | "
+            f"Sin error: {'Hubo un problema' not in resp_final}"
+        )
+    return run_isolated(test)
+
+# ==============================================================================
+# ESCENARIOS PUNTO 12: Consultas y Dashboard (Balance y Cotización)
+# ==============================================================================
+
+def p12_caso_1(datos):
+    """consultar_balance: 'cuál es mi balance' detecta intent y devuelve balance real del dashboard"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cuál es mi balance"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        tiene_datos_reales = "En este ciclo llevás ingresados" in resp and "(balance:" in resp
+        return f"Intent: {intent} | Datos reales: {tiene_datos_reales}"
+    return run_isolated(test)
+
+def p12_caso_2(datos):
+    """consultar_cotizacion: 'a cuánto está el dólar' detecta intent y devuelve cotizaciones reales con mock"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    mock_cotizaciones = {
+        "cotizaciones": {
+            "blue": {"venta": 1450.0},
+            "oficial": {"venta": 1050.0},
+            "mep": {"venta": 1400.0},
+        }
+    }
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        with patch("app.services.dolar_service.get_cotizaciones_dolar", return_value=mock_cotizaciones):
+            _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "a cuánto está el dólar"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        tiene_cotizacion = (
+            "Cotizaciones del dólar:" in resp
+            and "Dólar Blue: $1.450" in resp
+            and "MEP: $1.400" in resp
+            and "Oficial: $1.050" in resp
+        )
+        return f"Intent: {intent} | Cotizacion fija ok: {tiene_cotizacion}"
+    return run_isolated(test)
+
 def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False, solo_escenario: str | None = None):
     global _gestor_actual
     _gestor_actual = GestorGrabacionesIA(
@@ -3357,6 +3448,31 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             "nombre": "Un lote seguido de 'borrá eso'",
             "ejecutar": lambda: p11_caso_10(datos),
             "esperado": "Propuesta deshacer lote: True | Confirmacion deshacer lote: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P11.11",
+            "punto": "Punto 11",
+            "nombre": "Lote de 3 gastos en un solo mensaje: confirma, crea 3 txs, valida accion_ejecutada > 100 caracteres",
+            "ejecutar": lambda: p11_caso_11(datos),
+            "esperado": "Txs creadas: 3 | Accion len ok: True | Sin error: True",
+            "match": "exacto",
+        },
+        # --- PUNTO 12: Consultas y Dashboard (Balance y Cotización) ---
+        {
+            "id": "P12.1",
+            "punto": "Punto 12",
+            "nombre": "consultar_balance: 'cuál es mi balance' detecta intent y devuelve balance real del dashboard",
+            "ejecutar": lambda: p12_caso_1(datos),
+            "esperado": "Intent: consultar_balance | Datos reales: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P12.2",
+            "punto": "Punto 12",
+            "nombre": "consultar_cotizacion: 'a cuánto está el dólar' detecta intent y devuelve cotizaciones reales",
+            "ejecutar": lambda: p12_caso_2(datos),
+            "esperado": "Intent: consultar_cotizacion | Cotizacion fija ok: True",
             "match": "exacto",
         },
     ]
