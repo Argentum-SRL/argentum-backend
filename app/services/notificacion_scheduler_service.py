@@ -453,6 +453,8 @@ def _job_entrega_whatsapp_batched(db_session_factory):
             .all()
         )
 
+        from app.services.whatsapp_service import enviar_whatsapp_template
+
         for u in usuarios:
             # Obtener todas las notificaciones pendientes de WhatsApp para el usuario
             notifs = (
@@ -469,19 +471,73 @@ def _job_entrega_whatsapp_batched(db_session_factory):
             if not notifs:
                 continue
 
-            # Agrupar mensajes
-            mensajes = [n.mensaje for n in notifs]
-            if len(mensajes) == 1:
-                wpp_mensaje = mensajes[0]
-            else:
-                wpp_mensaje = wpp_svc.formatear_resumen_diario(mensajes)
+            for notif in notifs:
+                try:
+                    dt = notif.datos_template
+                    template_name = None
+                    valores = None
 
-            # Enviar mensaje
-            exito = wpp_svc.enviar_whatsapp_notificacion(u.telefono, wpp_mensaje)
-            if exito:
-                for n in notifs:
-                    n.enviada_whatsapp = True
-                db.commit()
+                    if dt is not None and isinstance(dt, dict):
+                        tipo = notif.tipo
+                        if tipo == TipoNotificacion.SALDO_CERO and "billetera_nombre" in dt:
+                            template_name = "alerta_saldo_cero"
+                            valores = [dt.get("billetera_nombre")]
+                        elif tipo == TipoNotificacion.PRESUPUESTO_LIMITE and all(k in dt for k in ("gastado_fmt", "limite_fmt", "nombre_pres")):
+                            template_name = "alerta_presupuesto_limite"
+                            valores = [dt.get("gastado_fmt"), dt.get("limite_fmt"), dt.get("nombre_pres")]
+                        elif tipo == TipoNotificacion.PRESUPUESTO_AGOTADO and all(k in dt for k in ("nombre_pres", "gastado_fmt", "limite_fmt")):
+                            template_name = "alerta_presupuesto_agotado"
+                            valores = [dt.get("nombre_pres"), dt.get("gastado_fmt"), dt.get("limite_fmt")]
+                        elif tipo == TipoNotificacion.CUOTA_VENCE:
+                            if "cuota_progreso" in dt and all(k in dt for k in ("cuota_progreso", "descripcion", "fecha", "monto_fmt")):
+                                template_name = "alerta_cuota_vence"
+                                valores = [dt.get("cuota_progreso"), dt.get("descripcion"), dt.get("fecha"), dt.get("monto_fmt")]
+                            elif "tarjeta_nombre" in dt and all(k in dt for k in ("tarjeta_nombre", "fecha_cierre", "fecha_vencimiento")):
+                                template_name = "alerta_resumen_tarjeta"
+                                valores = [dt.get("tarjeta_nombre"), dt.get("fecha_cierre"), dt.get("fecha_vencimiento")]
+                        elif tipo in (TipoNotificacion.SUSCRIPCION_HOY, TipoNotificacion.SUSCRIPCION_PROXIMA) and all(k in dt for k in ("nombre", "cuando", "monto_fmt")):
+                            template_name = "alerta_suscripcion_cobro"
+                            valores = [dt.get("nombre"), dt.get("cuando"), dt.get("monto_fmt")]
+                        elif tipo == TipoNotificacion.INACTIVIDAD and "dias" in dt:
+                            template_name = "alerta_inactividad"
+                            valores = [str(dt.get("dias"))]
+                        elif tipo == TipoNotificacion.RESUMEN_SEMANAL and all(k in dt for k in ("ingresos", "egresos", "balance", "top_categoria")):
+                            template_name = "resumen_semanal"
+                            valores = [dt.get("ingresos"), dt.get("egresos"), dt.get("balance"), dt.get("top_categoria")]
+                        elif tipo == TipoNotificacion.RESUMEN_CICLO and all(k in dt for k in ("ingresos", "egresos", "balance", "top_categoria")):
+                            template_name = "resumen_ciclo"
+                            valores = [dt.get("ingresos"), dt.get("egresos"), dt.get("balance"), dt.get("top_categoria")]
+                        elif tipo == TipoNotificacion.CAMBIO_CONTRASENA:
+                            template_name = "alerta_cambio_contrasena"
+                            valores = []
+                        elif tipo == TipoNotificacion.CAMBIO_EMAIL and "email" in dt:
+                            template_name = "alerta_cambio_email"
+                            valores = [dt.get("email")]
+                    elif notif.tipo == TipoNotificacion.CAMBIO_CONTRASENA:
+                        template_name = "alerta_cambio_contrasena"
+                        valores = []
+
+                    if template_name is not None and valores is not None:
+                        componentes = [
+                            {
+                                "type": "body",
+                                "parameters": [{"type": "text", "text": str(v)} for v in valores],
+                            }
+                        ] if valores else []
+                        enviado = enviar_whatsapp_template(u.telefono, template_name, "es", componentes)
+                    else:
+                        enviado = wpp_svc.enviar_whatsapp_notificacion(u.telefono, notif.mensaje)
+
+                    if enviado:
+                        notif.enviada_whatsapp = True
+                        db.commit()
+                except Exception as notif_err:
+                    logger.error(
+                        "Error entregando notificación %s a usuario %s: %s",
+                        notif.id,
+                        u.id,
+                        notif_err,
+                    )
 
         logger.info("Job entrega_whatsapp_batched completado")
 
@@ -650,6 +706,10 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                 ] if gastos_hormiga_raw else None
 
                 if hay_ars and not hay_usd:
+                    signo_ars = "+" if balance_ars >= 0 else ""
+                    str_ingresos = formatear_monto(ingresos_ars, Moneda.ARS, con_decimales=False)
+                    str_egresos = formatear_monto(egresos_ars, Moneda.ARS, con_decimales=False)
+                    str_balance = f"{signo_ars}{formatear_monto(balance_ars, Moneda.ARS, con_decimales=False)}"
                     mensaje = wpp_svc.formatear_resumen_ciclo(
                         total_ingresos=ingresos_ars,
                         total_egresos=egresos_ars,
@@ -660,6 +720,10 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                         moneda=Moneda.ARS,
                     )
                 elif hay_usd and not hay_ars:
+                    signo_usd = "+" if balance_usd >= 0 else ""
+                    str_ingresos = formatear_monto(ingresos_usd, Moneda.USD)
+                    str_egresos = formatear_monto(egresos_usd, Moneda.USD)
+                    str_balance = f"{signo_usd}{formatear_monto(balance_usd, Moneda.USD)}"
                     mensaje = wpp_svc.formatear_resumen_ciclo(
                         total_ingresos=ingresos_usd,
                         total_egresos=egresos_usd,
@@ -674,12 +738,15 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                     str_bal_ars = f"{signo_ars}{formatear_monto(balance_ars, Moneda.ARS, con_decimales=False)}"
                     signo_usd = "+" if balance_usd >= 0 else ""
                     str_bal_usd = f"{signo_usd}{formatear_monto(balance_usd, Moneda.USD)}"
+                    str_ingresos = f"{formatear_monto(ingresos_ars, Moneda.ARS, con_decimales=False)} + {formatear_monto(ingresos_usd, Moneda.USD)}"
+                    str_egresos = f"{formatear_monto(egresos_ars, Moneda.ARS, con_decimales=False)} + {formatear_monto(egresos_usd, Moneda.USD)}"
+                    str_balance = f"{str_bal_ars} y {str_bal_usd}"
 
                     lineas = [
                         f"*Cerraste el ciclo*\n",
-                        f"Ingresos: {formatear_monto(ingresos_ars, Moneda.ARS, con_decimales=False)} + {formatear_monto(ingresos_usd, Moneda.USD)}",
-                        f"Egresos: {formatear_monto(egresos_ars, Moneda.ARS, con_decimales=False)} + {formatear_monto(egresos_usd, Moneda.USD)}",
-                        f"Balance: {str_bal_ars} y {str_bal_usd}",
+                        f"Ingresos: {str_ingresos}",
+                        f"Egresos: {str_egresos}",
+                        f"Balance: {str_balance}",
                     ]
                     if cat_top and cat_top.total:
                         lineas.append(f"\nMás gastaste en *{cat_top.nombre}*: {formatear_monto(float(cat_top.total), moneda_top)}")
@@ -687,6 +754,13 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                         for g in gastos_hormiga[:2]:
                             lineas.append(f"• {g['categoria']}: {formatear_monto(g['total'], moneda_top)} en {g['cantidad']} compras")
                     mensaje = "\n".join(lineas)
+
+                datos_template = {
+                    "ingresos": str_ingresos,
+                    "egresos": str_egresos,
+                    "balance": str_balance,
+                    "top_categoria": cat_top.nombre if cat_top else "Varios",
+                }
 
                 from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion
                 config = obtener_configuracion(db, usuario.id)
@@ -701,6 +775,7 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                         mensaje=mensaje,
                         canal_web=canal_web,
                         canal_whatsapp=canal_whatsapp,
+                        datos_template=datos_template,
                     )
 
             except Exception:
@@ -869,6 +944,13 @@ def _job_resumen_semanal(db_session_factory):
                         f"(balance {str_balance})."
                     )
 
+                datos_template = {
+                    "ingresos": str_ingresos,
+                    "egresos": str_egresos,
+                    "balance": str_balance,
+                    "top_categoria": top_categoria if top_categoria else "Varios",
+                }
+
                 # Usar los canales configurados por el usuario si config existe
                 canal_web = config.resumen_semanal_web if config else True
                 canal_whatsapp = config.resumen_semanal_whatsapp if config else True
@@ -882,6 +964,7 @@ def _job_resumen_semanal(db_session_factory):
                     deep_link="/app/dashboard",
                     canal_web=canal_web,
                     canal_whatsapp=canal_whatsapp,
+                    datos_template=datos_template,
                 )
 
             except Exception as e:

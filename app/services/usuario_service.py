@@ -120,6 +120,7 @@ def actualizar_email(
             canal_web=True,
             canal_whatsapp=True,
             canal_email=False,
+            datos_template={"email": email_limpio},
         )
     except Exception:
         pass
