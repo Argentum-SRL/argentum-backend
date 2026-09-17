@@ -6,7 +6,7 @@ import logging
 import random
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import httpx
 
@@ -24,7 +24,6 @@ def get_meta_http_client() -> httpx.Client:
     return _meta_http_client
 
 
-CODIGO_EXPIRACION_SEGUNDOS = 10 * 60  # 10 minutos
 MAX_INTENTOS = 3
 
 

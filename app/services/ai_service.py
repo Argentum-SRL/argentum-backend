@@ -23,7 +23,6 @@ from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
 from app.models.usuario import Usuario
 from app.services.dashboard_service import get_ciclo_fechas
 from app.services.openai_client import get_openai_client
-from app.services.proyeccion_service import calcular_proyeccion
 from app.services import categoria_service
 from app.services import presupuesto_service
 from app.utils.fecha import hoy_argentina
@@ -529,40 +528,6 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
         logger.error(f"Error al inyectar perfil financiero en el AI bootstrap: {str(e)}", exc_info=True)
 
     return res
-
-
-def construir_contexto_proyeccion(usuario: Usuario, db: Session) -> dict:
-    try:
-        proyeccion = calcular_proyeccion(db, usuario)
-        return {
-            "ars": {
-                "gasto_proyectado_total": proyeccion["ars"].get("gasto_proyectado_total"),
-                "balance_proyectado": proyeccion["ars"].get("balance_proyectado"),
-                "ingresos_proyectados": proyeccion["ars"].get("ingresos_proyectados"),
-                "nivel_confianza": proyeccion["ars"].get("nivel_confianza"),
-                "advertencias": proyeccion["ars"].get("advertencias", []),
-                "dias_restantes": proyeccion["ars"].get("periodo", {}).get("dias_restantes"),
-                "certezas_total": proyeccion["ars"].get("certezas", {}).get("total"),
-                "datos_suficientes": proyeccion["ars"].get("datos_suficientes", True),
-                "pasa_puerta": (proyeccion["ars"].get("calibracion") or {}).get("pasa_puerta", False),
-                "mensaje": proyeccion["ars"].get("mensaje"),
-            },
-            "usd": {
-                "gasto_proyectado_total": proyeccion["usd"].get("gasto_proyectado_total"),
-                "balance_proyectado": proyeccion["usd"].get("balance_proyectado"),
-                "ingresos_proyectados": proyeccion["usd"].get("ingresos_proyectados"),
-                "nivel_confianza": proyeccion["usd"].get("nivel_confianza"),
-                "advertencias": proyeccion["usd"].get("advertencias", []),
-                "dias_restantes": proyeccion["usd"].get("periodo", {}).get("dias_restantes"),
-                "certezas_total": proyeccion["usd"].get("certezas", {}).get("total"),
-                "datos_suficientes": proyeccion["usd"].get("datos_suficientes", True),
-                "pasa_puerta": (proyeccion["usd"].get("calibracion") or {}).get("pasa_puerta", False),
-                "mensaje": proyeccion["usd"].get("mensaje"),
-            }
-        }
-    except Exception:
-        logger.exception("Error al construir contexto de proyección")
-        return {}
 
 
 _SCHEMA_CACHE: dict[str, Any] | None = None

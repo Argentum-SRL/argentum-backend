@@ -5,8 +5,6 @@ Recibe webhooks JSON de Meta, los procesa con ai_service y responde vía Graph A
 import hashlib
 import hmac
 import json
-import logging
-import os
 import re
 import secrets
 import tempfile
@@ -28,15 +26,14 @@ from app.core.auth import get_current_admin_user
 from app.core.database import SessionLocal, get_db
 from app.core.config import settings
 from app.core.constants import MAX_MONTO_INTEGRIDAD
-from app.utils.fecha import hoy_argentina, TZ_ARGENTINA, ahora_argentina
+from app.utils.fecha import hoy_argentina, TZ_ARGENTINA
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria, EstadoCategoria, TipoCategoria
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 from app.models.mensaje_whatsapp_procesado import MensajeWhatsappProcesado
 from app.models.subcategoria import EstadoSubcategoria, Subcategoria
-from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta, RedTarjeta
+from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
 from app.models.grupo_cuotas import GrupoCuotas
-from app.models.cuota import Cuota
 from app.models.transaccion import (
     EstadoVerificacionTransaccion,
     MetodoPago,
@@ -69,11 +66,11 @@ from app.services.whatsapp_service import (
 )
 from app.services.rate_limit_service import verificar_rate_limit
 from app.utils.telefono import normalizar_telefono_ar
-from app.models.suscripcion import Suscripcion, EstadoSuscripcion, FrecuenciaSuscripcion
+from app.models.suscripcion import Suscripcion, EstadoSuscripcion
 from app.models.historial_suscripcion import HistorialSuscripcion
 from app.schemas.suscripcion import SuscripcionCreate, ActualizarPrecioRequest
 from app.services import suscripcion_service
-from app.core.catalogo_suscripciones import buscar_servicio_por_texto, identificar_servicio_en_texto, CATALOGO_SERVICIOS
+from app.core.catalogo_suscripciones import buscar_servicio_por_texto, identificar_servicio_en_texto
 import structlog
 
 from app.core.constants import CATEGORIAS_SISTEMA
@@ -87,10 +84,6 @@ logger = structlog.get_logger("whatsapp")
 def _fmt(monto: float, moneda: Moneda | str = Moneda.ARS) -> str:
     """Formatea un número con formato argentino y símbolo según moneda."""
     return formatear_monto(monto, moneda)
-
-
-# Alias unificado de normalización
-_normalizar_texto = normalizar_texto
 
 
 def _nombre_corto_categoria(nombre: str | None) -> str:
@@ -108,7 +101,6 @@ def _nombre_corto_categoria(nombre: str | None) -> str:
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp-ia"])
 
 PLAZO_EXPIRACION_ESTADO_MINUTOS = 30
-EXPIRACION_PREGUNTA_BILLETERA_MINUTOS = PLAZO_EXPIRACION_ESTADO_MINUTOS
 PLAZO_DESHACER_CORREGIR_MINUTOS = 30
 
 MAX_MOVIMIENTOS_POR_LOTE = 10
@@ -3174,45 +3166,6 @@ def _evaluar_correccion_billetera(
         return True, None, cands_moneda, None
 
     return False, None, [], None
-
-
-def _resolver_seleccion_numerica(
-    mensaje: str,
-    usuario_id: UUID,
-    db: Session,
-    conv_activa: ConversacionWpp | None,
-) -> tuple[bool, str | None]:
-    """
-    Detecta si el mensaje es una selección numérica de billetera (1, 2, 3...).
-    Retorna (es_seleccion_numerica, nombre_billetera_seleccionada).
-    Solo actúa si hay una conversación activa con slot_filling y datos_faltantes incluye billetera.
-    """
-    mensaje_limpio = mensaje.strip()
-    if not mensaje_limpio.isdigit():
-        return False, None
-    
-    numero = int(mensaje_limpio)
-    
-    if not conv_activa or not conv_activa.slot_filling_activo:
-        return False, None
-    
-    estado = conv_activa.slot_filling_estado or {}
-    datos_faltantes = estado.get("datos_faltantes", [])
-    if "billetera_origen" not in datos_faltantes and "billetera" not in datos_faltantes and "billetera_destino" not in datos_faltantes:
-        return False, None
-    
-    moneda_sel = None
-    moneda_str = estado.get("moneda")
-    if moneda_str:
-        moneda_sel = Moneda.USD if moneda_str == "USD" else Moneda.ARS
-    
-    billeteras = _obtener_billeteras_activas(usuario_id, db, moneda=moneda_sel)
-    max_opc = min(len(billeteras), 8)
-    if numero < 1 or numero > max_opc:
-        return True, None
-    
-    billetera_seleccionada = billeteras[numero - 1]
-    return True, billetera_seleccionada.nombre
 
 
 def _parsear_monto_argentino(texto: str) -> Decimal | None:
@@ -7544,112 +7497,6 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
             # Si se confirmó o intentó confirmar, usar el mensaje del gestor de confirmación
             if intent_detectado == "confirmar" and resultado_ia.get("_mensaje_confirmacion_directo"):
                 resultado_ia["respuesta_usuario"] = resultado_ia["_mensaje_confirmacion_directo"]
-            elif transaccion_id and intent_detectado == "confirmar":
-                try:
-                    tx = db.execute(
-                        select(Transaccion).where(Transaccion.id == UUID(transaccion_id))
-                    ).scalars().first()
-                    if tx:
-                        tipo_str = "ingreso" if tx.tipo == TipoTransaccion.INGRESO else "egreso"
-                        monto_str = formatear_monto(float(tx.monto), tx.moneda)
-
-                        # Obtener nombre de billetera
-                        bill_nombre = None
-                        if tx.billetera_id:
-                            bill = db.execute(
-                                select(Billetera).where(Billetera.id == tx.billetera_id)
-                            ).scalars().first()
-                            bill_nombre = bill.nombre if bill else None
-
-                        # Verificar si la conversación previa ejecutada incluía transacciones adicionales
-                        conv_ejecutada = db.execute(
-                            select(ConversacionWpp)
-                            .where(
-                                ConversacionWpp.usuario_id == usuario.id,
-                                ConversacionWpp.accion_ejecutada == str(tx.id),
-                            )
-                        ).scalars().first()
-
-                        adicionales = (
-                            conv_ejecutada.entidades.get("transacciones_adicionales")
-                            if conv_ejecutada and conv_ejecutada.entidades
-                            else None
-                        )
-
-                        descartadas = resultado_ia.get("operaciones_descartadas", [])
-
-                        if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
-                            total_registrados = 1 + len(adicionales) - len(descartadas)
-                            cat_display = _nombre_corto_categoria(
-                                conv_ejecutada.entidades.get("categoria")
-                            )
-                            fecha_p_nat = _formatear_fecha_natural(tx.fecha)
-                            fecha_p_disp = f" ({fecha_p_nat})" if fecha_p_nat else ""
-                            items_str = [f"{monto_str} en {cat_display}{fecha_p_disp}"]
-                            for ad in adicionales:
-                                if isinstance(ad, dict) and ad.get("monto") is not None:
-                                    ad_moneda = Moneda.USD if ad.get("moneda") == "USD" else Moneda.ARS
-                                    if ad_moneda == tx.moneda:
-                                        fecha_ad_obj, _ = _resolver_y_validar_fecha(ad.get("fecha"))
-                                        fecha_ad_nat = _formatear_fecha_natural(fecha_ad_obj)
-                                        fecha_ad_disp = f" ({fecha_ad_nat})" if fecha_ad_nat else ""
-                                        items_str.append(
-                                            f"{formatear_monto(float(ad['monto']), ad_moneda)} en {_nombre_corto_categoria(ad.get('categoria'))}{fecha_ad_disp}"
-                                        )
-                            origen_str = f" desde {bill_nombre}" if bill_nombre else (f" a {bill_nombre}" if tx.tipo == TipoTransaccion.INGRESO else "")
-                            mov_palabra = "movimientos" if total_registrados != 1 else "movimiento"
-                            reg_palabra = "registrados" if total_registrados != 1 else "registrado"
-                            resultado_ia["respuesta_usuario"] = f"Listo. {total_registrados} {mov_palabra}{origen_str}: {', '.join(items_str)} — {reg_palabra}."
-                            if descartadas:
-                                resultado_ia["respuesta_usuario"] += "\n" + "\n".join(descartadas)
-                        else:
-                            # Obtener nombre de categoría
-                            cat_nombre = None
-                            if tx.categoria_id:
-                                cat = db.execute(
-                                    select(Categoria).where(Categoria.id == tx.categoria_id)
-                                ).scalars().first()
-                                cat_nombre = cat.nombre if cat else None
-
-                            # Si hay subcategoría, mostrar su nombre en vez de la categoría principal
-                            subcat_nombre = None
-                            if tx.subcategoria_id:
-                                subcat = db.execute(
-                                    select(Subcategoria).where(Subcategoria.id == tx.subcategoria_id)
-                                ).scalars().first()
-                                subcat_nombre = subcat.nombre if subcat else None
-
-                            nombre_categoria_display = subcat_nombre or cat_nombre or "Otros"
-
-                            fecha_nat = _formatear_fecha_natural(tx.fecha)
-                            fecha_disp = f" ({fecha_nat})" if fecha_nat else ""
-
-                            if tx.tipo == TipoTransaccion.INGRESO:
-                                partes = [f"Listo. Ingreso de {monto_str}"]
-                                if nombre_categoria_display:
-                                    partes.append(f"en {nombre_categoria_display}")
-                                if bill_nombre:
-                                    partes.append(f"a {bill_nombre}{fecha_disp}")
-                                partes.append("— registrado.")
-                            else:
-                                partes = [f"Listo. {monto_str}"]
-                                if nombre_categoria_display:
-                                    partes.append(f"en {nombre_categoria_display}")
-                                if bill_nombre:
-                                    partes.append(f"desde {bill_nombre}{fecha_disp}")
-                                partes.append("— registrado.")
-
-                            resultado_ia["respuesta_usuario"] = " ".join(partes)
-                            if descartadas:
-                                resultado_ia["respuesta_usuario"] += "\n" + "\n".join(descartadas)
-
-                        if bill:
-                            # REGLA DE PRIVACIDAD: Los saldos no se muestran tras registrar un movimiento,
-                            # salvo que el usuario los pida explícitamente (privacidad de pantalla).
-                            if bill.saldo_actual < 0:
-                                resultado_ia["respuesta_usuario"] += "\nLa billetera quedó en negativo."
-                except Exception:
-                    logger.exception("Error al construir mensaje de confirmación")
 
             # Si se canceló, asegurar tono rioplatense
             if intent_detectado == "cancelar":
