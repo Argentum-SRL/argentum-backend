@@ -16,12 +16,19 @@ def verificar_turnstile_token(token: str | None, remote_ip: str | None = None) -
     Nunca lanza excepción: si hay error de red, timeout o respuesta inesperada,
     retorna False (trata el token como inválido).
     """
-    if not token or not token.strip():
-        logger.warning("Turnstile token ausente o vacio")
-        return False
+    clean_token = token.strip()
+    is_dev = getattr(settings, "ENVIRONMENT", "development") == "development" or getattr(settings, "DEBUG", False)
+
+    # Bypass o token de pruebas en desarrollo local
+    if is_dev and (clean_token in ("dummy-turnstile-token", "1x00000000000000000000AA") or clean_token.startswith("XXXX.")):
+        logger.info("Turnstile: token de prueba aceptado en desarrollo")
+        return True
 
     secret_key = getattr(settings, "TURNSTILE_SECRET_KEY", "") or ""
     if not secret_key:
+        if is_dev:
+            logger.info("Turnstile: secret key no configurada en desarrollo, permitiendo paso")
+            return True
         logger.error("TURNSTILE_SECRET_KEY no esta configurada")
         return False
 

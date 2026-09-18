@@ -373,6 +373,15 @@ def setear_cookies_auth(response: Response, access_token: str, refresh_token: st
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
         path="/",
     )
+    response.set_cookie(
+        key="argentum_has_session",
+        value="true",
+        httponly=False,
+        secure=is_production,
+        samesite=samesite_val,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/",
+    )
 
 
 def limpiar_cookies_auth(response: Response) -> None:
@@ -390,6 +399,12 @@ def limpiar_cookies_auth(response: Response) -> None:
     )
     response.delete_cookie(
         key="refresh_token",
+        path="/",
+        secure=is_production,
+        samesite=samesite_val
+    )
+    response.delete_cookie(
+        key="argentum_has_session",
         path="/",
         secure=is_production,
         samesite=samesite_val
