@@ -1,22 +1,32 @@
 """
 Consultas y operaciones de base de datos para el flujo de WhatsApp IA.
-Incluye verificaciones de rate limiting, resolución de usuarios, billeteras, tarjetas, categorías y cotizaciones.
+Incluye verificaciones de rate limiting, resolución de usuarios, billeteras, tarjetas, categorías, cotizaciones, propuestas y suscripciones.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
 import structlog
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.catalogo_suscripciones import buscar_servicio_por_texto
 from app.core.constants import CATEGORIAS_SISTEMA
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria, EstadoCategoria, TipoCategoria
+from app.models.conversacion_wpp import ConversacionWpp
 from app.models.cotizacion_dolar import CotizacionDolar
 from app.models.subcategoria import EstadoSubcategoria, Subcategoria
+from app.models.suscripcion import EstadoSuscripcion, Suscripcion
 from app.models.tarjeta_credito import EstadoTarjeta, TarjetaCredito
+from app.models.transaccion import (
+    EstadoVerificacionTransaccion,
+    OrigenTransaccion,
+    Transaccion,
+)
+from app.models.transferencia_interna import TransferenciaInterna
 from app.models.usuario import EstadoUsuario, Moneda, Usuario
 from app.routers.whatsapp.resolvers_cascada import resolver_billetera_cascada
 from app.services.rate_limit_service import verificar_rate_limit
@@ -25,6 +35,10 @@ from app.utils.telefono import normalizar_telefono_ar
 from app.utils.texto import normalizar_texto
 
 logger = structlog.get_logger("whatsapp")
+
+# Plazos de expiración
+PLAZO_EXPIRACION_ESTADO_MINUTOS = 15
+PLAZO_DESHACER_CORREGIR_MINUTOS = 30
 
 MAX_INTENTOS_VINCULACION_POR_VENTANA = 5
 VENTANA_VINCULACION_SEGUNDOS = 15 * 60  # 15 minutos
@@ -344,3 +358,415 @@ def _obtener_cotizacion_referencia_usuario(usuario: Usuario, db: Session) -> Dec
             return val
 
     return None
+
+def _buscar_slot_filling_activo(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    conv = db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.slot_filling_activo == True,
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+    return conv
+
+def _buscar_slot_filling_vencido(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    conv = db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.slot_filling_activo == True,
+            ConversacionWpp.fecha < limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+    return conv
+
+def _buscar_propuesta_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    return db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.intent_detectado == "registrar_transaccion",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.confianza >= Decimal("0.85"),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+def _buscar_propuesta_confirmable_mas_reciente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    """
+    Busca la propuesta pendiente más reciente entre todos los tipos confirmables (deshacer,
+    corregir, transferir, suscripciones, registrar movimiento) dentro de la ventana de vigencia (30 min).
+    Garantiza que la confirmación ('sí', 'dale') aplique a lo último que el bot propuso.
+    """
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    intents_confirmables = [
+        "deshacer",
+        "corregir",
+        "transferir_fondos",
+        "dar_baja_suscripcion",
+        "cambiar_precio_suscripcion",
+        "agregar_suscripcion",
+        "registrar_transaccion",
+    ]
+    return db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.intent_detectado.in_(intents_confirmables),
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+            or_(
+                ConversacionWpp.intent_detectado != "registrar_transaccion",
+                ConversacionWpp.confianza >= Decimal("0.85"),
+            ),
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+        .limit(1)
+    ).scalars().first()
+
+def _buscar_transaccion_duplicada_reciente(
+    usuario_id: UUID,
+    monto: Decimal,
+    moneda: Moneda,
+    categoria_id: UUID | None,
+    db: Session,
+) -> Transaccion | None:
+    """
+    Busca una transacción confirmada del mismo usuario con el mismo monto, moneda y categoría,
+    creada en la última hora (Tarea 3.1).
+    Excluye movimientos generados de forma automática o diferida:
+    - Cuotas hijas y padres de cuotas (planes de tarjeta de crédito)
+    - Pagos automáticos de resúmenes de tarjeta
+    - Débitos automáticos de suscripciones / recurrentes
+    """
+    limite = datetime.now(timezone.utc) - timedelta(hours=1)
+    query = (
+        select(Transaccion)
+        .where(
+            Transaccion.usuario_id == usuario_id,
+            Transaccion.monto == monto,
+            Transaccion.moneda == moneda,
+            Transaccion.fecha_creacion >= limite,
+            Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
+            Transaccion.es_cuota_hija == False,
+            Transaccion.es_padre_cuotas == False,
+            Transaccion.es_recurrente == False,
+            Transaccion.suscripcion_id.is_(None),
+            Transaccion.pago_origen_id.is_(None),
+            Transaccion.pago_resumen_vencimiento.is_(None),
+        )
+    )
+    if categoria_id is not None:
+        query = query.where(Transaccion.categoria_id == categoria_id)
+    else:
+        query = query.where(Transaccion.categoria_id.is_(None))
+    return db.execute(query.order_by(Transaccion.fecha_creacion.desc(), Transaccion.id.desc())).scalars().first()
+
+def _buscar_propuesta_transferencia_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    return db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.intent_detectado == "transferir_fondos",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+def _buscar_ultimo_movimiento_whatsapp(usuario_id: UUID, db: Session) -> tuple[Transaccion | None, str | None]:
+    """
+    Identifica el último movimiento registrado por WhatsApp por el usuario dentro del plazo permitido.
+    Retorna (transaccion, motivo_error_o_none).
+    """
+    conv_reciente = db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.accion_ejecutada.is_not(None),
+            ConversacionWpp.accion_ejecutada.not_in((
+                "cancelada", "vencida", "descartado_por_duplicado",
+                "descartada_por_nueva_operacion", "interrumpida_por_saludo",
+                "test", "test_setup", "test_reset"
+            )),
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+    tx_target_id = None
+    if conv_reciente:
+        accion = str(conv_reciente.accion_ejecutada)
+        if accion.startswith("deshecho:"):
+            return None, "YA_DESHECHO"
+        if accion.startswith("lote:"):
+            try:
+                ids_str = accion.replace("lote:", "").split(",")
+                uuids = [UUID(s.strip()) for s in ids_str if s.strip()]
+                txs = db.execute(
+                    select(Transaccion).where(
+                        Transaccion.id.in_(uuids),
+                        Transaccion.usuario_id == usuario_id,
+                    ).order_by(Transaccion.fecha_creacion.asc(), Transaccion.id.asc())
+                ).scalars().all()
+                if not txs:
+                    return None, "YA_BORRADO"
+                limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_DESHACER_CORREGIR_MINUTOS)
+                if txs[0].fecha_creacion < limite:
+                    return None, "PLAZO_VENCIDO"
+                return txs, None
+            except Exception:
+                pass
+        if accion.startswith("transferencia:"):
+            try:
+                tr_id = UUID(accion.replace("transferencia:", ""))
+                tr = db.execute(
+                    select(TransferenciaInterna).where(
+                        TransferenciaInterna.id == tr_id,
+                        TransferenciaInterna.usuario_id == usuario_id,
+                    )
+                ).scalar_one_or_none()
+                if not tr:
+                    return None, "YA_BORRADO"
+                limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_DESHACER_CORREGIR_MINUTOS)
+                if tr.fecha_creacion < limite:
+                    return None, "PLAZO_VENCIDO"
+                return tr, None
+            except ValueError:
+                pass
+        try:
+            tx_target_id = UUID(accion.replace("corregido:", ""))
+        except ValueError:
+            pass
+
+    if tx_target_id:
+        tx = db.execute(
+            select(Transaccion).where(Transaccion.id == tx_target_id, Transaccion.usuario_id == usuario_id)
+        ).scalar_one_or_none()
+        if not tx:
+            return None, "YA_BORRADO"
+    else:
+        tx = db.execute(
+            select(Transaccion)
+            .where(
+                Transaccion.usuario_id == usuario_id,
+                Transaccion.origen == OrigenTransaccion.IA_WPP,
+            )
+            .order_by(Transaccion.fecha_creacion.desc(), Transaccion.id.desc())
+        ).scalars().first()
+        if not tx:
+            return None, "SIN_MOVIMIENTOS"
+
+    # Verificar plazo temporal
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_DESHACER_CORREGIR_MINUTOS)
+    if tx.fecha_creacion < limite:
+        return None, "PLAZO_VENCIDO"
+
+    # Restricciones (2.8 y Decisiones de Producto)
+    if tx.origen != OrigenTransaccion.IA_WPP:
+        return None, "ORIGEN_INVALIDO"
+    if tx.es_cuota_hija:
+        return None, "ES_CUOTA"
+    if tx.pago_resumen_vencimiento is not None or tx.pago_origen_id is not None:
+        return None, "ES_RESUMEN"
+    if tx.movimiento_meta_id is not None or tx.descripcion.startswith("Aporte a la meta:") or tx.descripcion.startswith("Retiro de la meta:"):
+        return None, "ES_META"
+    if tx.es_recurrente:
+        return None, "ES_RECURRENTE"
+
+    return tx, None
+
+def _buscar_propuesta_deshacer_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_DESHACER_CORREGIR_MINUTOS)
+    return db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.intent_detectado == "deshacer",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+def _buscar_propuesta_corregir_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_DESHACER_CORREGIR_MINUTOS)
+    return db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.intent_detectado == "corregir",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+def _buscar_suscripcion_cobrada_periodo_actual(
+    usuario_id: UUID,
+    monto: Decimal,
+    nombre_servicio_o_concepto: str,
+    db: Session,
+) -> tuple[Suscripcion | None, Transaccion | None]:
+    if not nombre_servicio_o_concepto or monto <= 0:
+        return None, None
+
+    subs_activas = db.query(Suscripcion).filter(
+        Suscripcion.usuario_id == usuario_id,
+        Suscripcion.estado == EstadoSuscripcion.ACTIVA,
+    ).all()
+
+    norm_concepto = normalizar_texto(nombre_servicio_o_concepto)
+    hoy = hoy_argentina()
+    limite_periodo = hoy - timedelta(days=32)
+
+    for s in subs_activas:
+        s_norm = normalizar_texto(s.nombre)
+        coincide = (s_norm == norm_concepto or s_norm in norm_concepto or norm_concepto in s_norm)
+        if not coincide:
+            srv_cat = buscar_servicio_por_texto(s.nombre)
+            if srv_cat:
+                variantes = [normalizar_texto(v) for v in srv_cat.get("variantes", [])]
+                if any(v in norm_concepto for v in variantes):
+                    coincide = True
+
+        if coincide:
+            tx = db.execute(
+                select(Transaccion)
+                .where(
+                    Transaccion.usuario_id == usuario_id,
+                    Transaccion.suscripcion_id == s.id,
+                    Transaccion.fecha >= limite_periodo,
+                    Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
+                )
+                .order_by(Transaccion.fecha.desc())
+            ).scalars().first()
+
+            if tx and tx.monto == monto:
+                return s, tx
+
+    return None, None
+
+def _buscar_propuesta_suscripcion_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    return db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.intent_detectado == "agregar_suscripcion",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+def _buscar_propuesta_baja_suscripcion_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    return db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.intent_detectado == "dar_baja_suscripcion",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+def _buscar_propuesta_cambio_precio_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    return db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.intent_detectado == "cambiar_precio_suscripcion",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+def _buscar_suscripcion_activa_por_nombre(usuario_id: UUID, nombre: str | None, db: Session) -> Suscripcion | None:
+    subs = db.query(Suscripcion).options(joinedload(Suscripcion.historial)).filter(
+        Suscripcion.usuario_id == usuario_id,
+        Suscripcion.estado == EstadoSuscripcion.ACTIVA,
+    ).all()
+    if not subs:
+        return None
+    if not nombre:
+        if len(subs) == 1:
+            return subs[0]
+        return None
+
+    norm = normalizar_texto(nombre)
+    for s in subs:
+        s_norm = normalizar_texto(s.nombre)
+        if s_norm == norm or norm in s_norm or s_norm in norm:
+            return s
+        srv_cat = buscar_servicio_por_texto(s.nombre)
+        if srv_cat:
+            variantes = [normalizar_texto(v) for v in srv_cat.get("variantes", [])]
+            if any(v in norm or norm in v for v in variantes):
+                return s
+    return None
+
+def _obtener_historial_reciente(usuario_id: UUID, db: Session, n: int = 6) -> list[dict]:
+    """
+    Obtiene los últimos N turnos de conversación del usuario (por defecto 6).
+    Solo incluye conversaciones de los últimos 30 minutos (PLAZO_EXPIRACION_ESTADO_MINUTOS).
+    Incluye las preguntas que hizo el sistema para que la IA entienda a qué responde un 'sí'
+    o una selección suelta, y utiliza la confianza y estado reales sin inventar valores fijos.
+    """
+    limite_tiempo = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+
+    convs = db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario_id,
+            ConversacionWpp.fecha >= limite_tiempo,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+        .limit(n)
+    ).scalars().all()
+
+    # Revertir para orden cronológico
+    convs = list(reversed(convs))
+
+    resultado = []
+    for c in convs:
+        # Excluir únicamente fallbacks genéricos de error técnico que no aportan contexto conversacional
+        if (
+            c.mensaje_bot.startswith("Hubo un problema al procesar tu mensaje")
+            or c.mensaje_bot.startswith("No pude escuchar el audio")
+            or c.mensaje_bot.startswith("No pude leer el comprobante")
+        ):
+            continue
+        if c.intent_detectado is None:
+            continue
+
+        estado = c.slot_filling_estado or {}
+        resultado.append({
+            "usuario": c.mensaje_usuario,
+            "bot": c.mensaje_bot,
+            "intent": c.intent_detectado or "desconocido",
+            "entidades": c.entidades or {},
+            "confianza": float(c.confianza) if c.confianza is not None else None,
+            "slot_filling": c.slot_filling_activo,
+            "datos_faltantes": estado.get("datos_faltantes", []) if c.slot_filling_activo else [],
+        })
+    return resultado
