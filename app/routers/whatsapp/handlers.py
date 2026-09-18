@@ -5,10 +5,12 @@ Cada handler encapsula la detección, procesamiento, persistencia en Conversacio
 from __future__ import annotations
 
 from decimal import Decimal
+from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
+from app.models.tarjeta_credito import TarjetaCredito
 from app.models.transferencia_interna import TransferenciaInterna
 from app.models.transaccion import (
     EstadoVerificacionTransaccion,
@@ -17,10 +19,15 @@ from app.models.transaccion import (
 )
 from app.models.usuario import Moneda, Usuario
 from app.routers.whatsapp.db_lookups import (
+    _obtener_tarjetas_activas,
     _buscar_propuesta_confirmable_mas_reciente,
     _buscar_slot_filling_activo,
     _buscar_suscripcion_activa_por_nombre,
     _buscar_ultimo_movimiento_whatsapp,
+)
+from app.routers.whatsapp.resolvers_cascada import (
+    _generar_menu_tarjetas,
+    resolver_tarjeta_cascada,
 )
 from app.routers.whatsapp.detectors import (
     _detectar_ambiguedad_suscripcion,
@@ -34,10 +41,15 @@ from app.routers.whatsapp.detectors import (
     _es_saludo,
     _parece_intento_correccion,
 )
-from app.routers.whatsapp.parsers import _nombre_corto_categoria
+from app.routers.whatsapp.parsers import (
+    _nombre_corto_categoria,
+    _resolver_y_validar_fecha,
+)
 from app.services import suscripcion_service, whatsapp_service
+from app.services.tarjeta_service import calcular_primer_vencimiento
 from app.services.evento_service import emitir_evento_actualizacion
 from app.utils.formato import formatear_monto
+from app.utils.texto import normalizar_texto
 
 
 def manejar_saludo(
@@ -918,3 +930,118 @@ def manejar_transferencias(
         db.commit()
         whatsapp_service.enviar_whatsapp(from_number, resp_tr)
         return True
+
+
+def manejar_menu_tarjeta(mensaje_texto: str, usuario: Usuario, db: Session, from_number: str, wamid: str | None=None, conv_activa: ConversacionWpp | None=None) -> bool:
+    """Maneja la selección de tarjeta de crédito durante el slot filling de un gasto.
+Si no aplica, retorna False. Si aplica, persiste ConversacionWpp, envía la respuesta y retorna True."""
+    if not (conv_activa and conv_activa.slot_filling_estado and any(('tarjeta' in d for d in conv_activa.slot_filling_estado.get('datos_faltantes', [])))):
+        return False
+    from app.routers.whatsapp_ia import _construir_propuesta_credito
+    estado_prev_tarj = dict(conv_activa.slot_filling_estado)
+    tarjetas_activas = _obtener_tarjetas_activas(usuario.id, db)
+    cands_ids = estado_prev_tarj.get('candidatas_tarjetas_ids', [])
+    if cands_ids:
+        tarjetas_opciones = [t for t in tarjetas_activas if str(t.id) in cands_ids]
+    else:
+        tarjetas_opciones = tarjetas_activas
+    mensaje_limpio = mensaje_texto.strip()
+    tarjeta_elegida = None
+    es_sel = False
+    if mensaje_limpio.isdigit():
+        num = int(mensaje_limpio)
+        if 1 <= num <= len(tarjetas_opciones):
+            tarjeta_elegida = tarjetas_opciones[num - 1]
+            es_sel = True
+        else:
+            whatsapp_service.enviar_whatsapp(from_number, f'Opción inválida. Elegí un número del 1 al {len(tarjetas_opciones)}.')
+            return True
+    else:
+        t_match, cands = resolver_tarjeta_cascada(mensaje_limpio, tarjetas_opciones)
+        if t_match:
+            tarjeta_elegida = t_match
+            es_sel = True
+        elif len(cands) > 1:
+            menu = _generar_menu_tarjetas(cands)
+            whatsapp_service.enviar_whatsapp(from_number, f'¿A cuál te referís?\n{menu}')
+            return True
+        else:
+            menu = _generar_menu_tarjetas(tarjetas_opciones)
+            whatsapp_service.enviar_whatsapp(from_number, f'No encontré esa tarjeta entre las tuyas.\n\n{menu}')
+            return True
+    if es_sel and tarjeta_elegida:
+        cant_cuotas = int(estado_prev_tarj.get('cantidad_cuotas', 1))
+        monto_total = Decimal(str(estado_prev_tarj.get('monto_total', estado_prev_tarj['monto'])))
+        monto_cuota = Decimal(str(estado_prev_tarj.get('monto_cuota', monto_total / Decimal(str(cant_cuotas)))))
+        fecha_obj, _ = _resolver_y_validar_fecha(estado_prev_tarj.get('fecha'))
+        primer_v = calcular_primer_vencimiento(fecha_obj, tarjeta_elegida.dia_cierre, tarjeta_elegida.dia_vencimiento, False)
+        estado_prev_tarj['tarjeta_id'] = str(tarjeta_elegida.id)
+        estado_prev_tarj['tarjeta_nombre'] = tarjeta_elegida.nombre
+        estado_prev_tarj['tarjeta_billetera_id'] = str(tarjeta_elegida.billetera_id)
+        estado_prev_tarj['cantidad_cuotas'] = cant_cuotas
+        estado_prev_tarj['monto_cuota'] = float(monto_cuota)
+        estado_prev_tarj['monto_total'] = float(monto_total)
+        estado_prev_tarj['monto'] = float(monto_total)
+        if 'datos_faltantes' in estado_prev_tarj:
+            estado_prev_tarj['datos_faltantes'] = [d for d in estado_prev_tarj['datos_faltantes'] if 'tarjeta' not in d]
+        conv_activa.slot_filling_activo = False
+        db.flush()
+        propuesta_msg = _construir_propuesta_credito(estado_prev_tarj, tarjeta_elegida, cant_cuotas, monto_cuota, monto_total, primer_v, se_asumio_tarjeta=False)
+        nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=propuesta_msg, intent_detectado='registrar_transaccion', entidades=estado_prev_tarj, accion_ejecutada=None, confianza=Decimal('1.000'), slot_filling_activo=False, slot_filling_estado=None)
+        db.add(nueva_conv)
+        db.commit()
+        whatsapp_service.enviar_whatsapp(from_number, propuesta_msg)
+        return True
+    return False
+
+
+def manejar_aclaracion_cuotas(mensaje_texto: str, usuario: Usuario, db: Session, from_number: str, wamid: str | None=None, conv_activa: ConversacionWpp | None=None) -> bool:
+    """Maneja la aclaración de si el monto de una compra en cuotas es el total o por cuota.
+Si no aplica, retorna False. Si aplica, persiste ConversacionWpp, envía la respuesta y retorna True."""
+    if not (conv_activa and conv_activa.slot_filling_estado and any(('aclarar_cuotas' in d for d in conv_activa.slot_filling_estado.get('datos_faltantes', [])))):
+        return False
+    from app.routers.whatsapp_ia import _construir_propuesta_credito
+    estado_prev_cuotas = dict(conv_activa.slot_filling_estado)
+    m_txt_norm = normalizar_texto(mensaje_texto)
+    es_total = any((w in m_txt_norm for w in ['total', 'el total', 'en total', 'es el total', 'los dos', 'todo']))
+    es_por_cuota = any((w in m_txt_norm for w in ['cuota', 'cada cuota', 'por cuota', 'cada una', 'de cada cuota', 'por mes', 'cada mes']))
+    if not es_total and (not es_por_cuota):
+        whatsapp_service.enviar_whatsapp(from_number, "Por favor decime si ese monto es 'el total' o 'por cuota'.")
+        return True
+    monto_base = Decimal(str(estado_prev_cuotas['monto']))
+    cant_cuotas = int(estado_prev_cuotas.get('cantidad_cuotas', 1))
+    if es_total:
+        monto_total = monto_base
+        monto_cuota = round(monto_total / Decimal(str(cant_cuotas)), 2)
+    else:
+        monto_cuota = monto_base
+        monto_total = Decimal(str(cant_cuotas)) * monto_cuota
+    estado_prev_cuotas['cantidad_cuotas'] = cant_cuotas
+    estado_prev_cuotas['monto_cuota'] = float(monto_cuota)
+    estado_prev_cuotas['monto_total'] = float(monto_total)
+    estado_prev_cuotas['monto'] = float(monto_total)
+    if 'datos_faltantes' in estado_prev_cuotas:
+        estado_prev_cuotas['datos_faltantes'] = [d for d in estado_prev_cuotas['datos_faltantes'] if 'aclarar_cuotas' not in d]
+    tarjetas_activas = _obtener_tarjetas_activas(usuario.id, db)
+    t_id_prev = estado_prev_cuotas.get('tarjeta_id')
+    tarjeta_obj = db.get(TarjetaCredito, UUID(t_id_prev)) if t_id_prev else None
+    if not tarjeta_obj:
+        if len(tarjetas_activas) == 1:
+            tarjeta_obj = tarjetas_activas[0]
+        elif len(tarjetas_activas) > 1:
+            tarjeta_obj = next((t for t in tarjetas_activas if t.billetera and t.billetera.es_principal), tarjetas_activas[0])
+    if tarjeta_obj:
+        fecha_obj, _ = _resolver_y_validar_fecha(estado_prev_cuotas.get('fecha'))
+        primer_v = calcular_primer_vencimiento(fecha_obj, tarjeta_obj.dia_cierre, tarjeta_obj.dia_vencimiento, False)
+        estado_prev_cuotas['tarjeta_id'] = str(tarjeta_obj.id)
+        estado_prev_cuotas['tarjeta_nombre'] = tarjeta_obj.nombre
+        estado_prev_cuotas['tarjeta_billetera_id'] = str(tarjeta_obj.billetera_id)
+        conv_activa.slot_filling_activo = False
+        db.flush()
+        propuesta_msg = _construir_propuesta_credito(estado_prev_cuotas, tarjeta_obj, cant_cuotas, monto_cuota, monto_total, primer_v, se_asumio_tarjeta=False)
+        nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=propuesta_msg, intent_detectado='registrar_transaccion', entidades=estado_prev_cuotas, accion_ejecutada=None, confianza=Decimal('1.000'), slot_filling_activo=False, slot_filling_estado=None)
+        db.add(nueva_conv)
+        db.commit()
+        whatsapp_service.enviar_whatsapp(from_number, propuesta_msg)
+        return True
+    return False
