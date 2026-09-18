@@ -308,9 +308,12 @@ def run_isolated(fn):
     respuestas = []
     BoundSession = sessionmaker(bind=conn, join_transaction_mode="create_savepoint")
     try:
+        # Modularización WhatsApp: Se patchea en whatsapp_ia (para imports sueltos legacy)
+        # y en whatsapp_service (para módulos de handlers nuevos que usan acceso calificado).
         with patch("app.routers.whatsapp_ia.SessionLocal", BoundSession), \
              patch("app.routers.whatsapp_ia._buscar_usuario_por_telefono", side_effect=_mock_buscar_usuario_testingadmin), \
              patch("app.routers.whatsapp_ia.enviar_whatsapp", side_effect=lambda t, m: respuestas.append((t, m))), \
+             patch("app.services.whatsapp_service.enviar_whatsapp", side_effect=lambda t, m: respuestas.append((t, m))), \
              patch("app.routers.whatsapp_ia._verificar_rate_limit_registrado", return_value=(True, None)):
             res = fn(conn, BoundSession, respuestas)
             return res
@@ -925,8 +928,10 @@ def p5_caso_6_concurrente(datos):
         _procesar_webhook_whatsapp_sync(payload, time.perf_counter())
 
     try:
+        # Modularización WhatsApp: Doble patch para soportar imports sueltos en whatsapp_ia y acceso calificado en handlers.
         with patch("app.routers.whatsapp_ia._buscar_usuario_por_telefono", side_effect=_mock_buscar_concurrente), \
              patch("app.routers.whatsapp_ia.enviar_whatsapp", side_effect=mock_envio), \
+             patch("app.services.whatsapp_service.enviar_whatsapp", side_effect=mock_envio), \
              patch("app.routers.whatsapp_ia._verificar_rate_limit_registrado", return_value=(True, None)):
             th1 = threading.Thread(target=worker, args=(1, wamid1))
             th2 = threading.Thread(target=worker, args=(2, wamid2))

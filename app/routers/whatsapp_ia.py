@@ -161,6 +161,7 @@ from app.routers.whatsapp.media import (
     _obtener_duracion_audio_bytes,
     _transcribir_audio,
 )
+from app.routers.whatsapp.handlers import manejar_saludo
 from app.utils.telefono import normalizar_telefono_ar
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion
 from app.models.historial_suscripcion import HistorialSuscripcion
@@ -3158,49 +3159,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                 return
 
             # 1. Chequeo determinístico de saludo rioplatense (Tarea 4)
-            if _es_saludo(mensaje_texto):
-                conv_activa_saludo = _buscar_slot_filling_activo(usuario.id, db)
-                msg_saludo = ""
-                if conv_activa_saludo and conv_activa_saludo.slot_filling_estado:
-                    est_saludo = conv_activa_saludo.slot_filling_estado
-                    monto_saludo = est_saludo.get("monto")
-                    cat_saludo = est_saludo.get("categoria")
-                    mon_saludo = est_saludo.get("moneda", "ARS")
-                    mon_enum = Moneda.USD if mon_saludo == "USD" else Moneda.ARS
-                    cat_disp = _nombre_corto_categoria(cat_saludo) if cat_saludo else ""
-                    if monto_saludo is not None:
-                        monto_fmt = formatear_monto(float(monto_saludo), mon_enum)
-                        if cat_disp:
-                            linea_pend = f"Tenías una operación a medias (anotar {monto_fmt} en {cat_disp}). Podés completarla o empezar de nuevo."
-                        else:
-                            linea_pend = f"Tenías una operación a medias de {monto_fmt}. Podés completarla o empezar de nuevo."
-                    else:
-                        linea_pend = "Tenías una operación a medias. Podés completarla o empezar de nuevo."
-                    msg_saludo = f"Hola. {linea_pend}\nTambién podés registrar otro gasto, ingreso o consultar tus saldos."
-                    # Desactivar para que el saludo no arrastre ni reactive nada
-                    conv_activa_saludo.slot_filling_activo = False
-                    conv_activa_saludo.accion_ejecutada = "interrumpida_por_saludo"
-                    db.flush()
-                else:
-                    msg_saludo = "Hola. Podés registrar gastos, ingresos o consultar tus saldos y proyecciones. Por ejemplo: 'gasté 5000 en el kiosco'."
-
-                nueva_conv = ConversacionWpp(
-                    usuario_id=usuario.id,
-                    wamid=wamid,
-                    mensaje_usuario=mensaje_texto,
-                    tipo_mensaje=TipoMensajeWpp.TEXTO,
-                    transcripcion=None,
-                    mensaje_bot=msg_saludo,
-                    intent_detectado="saludo",
-                    entidades={},
-                    accion_ejecutada=None,
-                    confianza=Decimal("1.000"),
-                    slot_filling_activo=False,
-                    slot_filling_estado=None,
-                )
-                db.add(nueva_conv)
-                db.commit()
-                enviar_whatsapp(from_number, msg_saludo)
+            if manejar_saludo(mensaje_texto, usuario, db, from_number, wamid=wamid):
                 return
 
             # 2. Si hay una propuesta pendiente y el usuario menciona una billetera, corregirla determinísticamente
