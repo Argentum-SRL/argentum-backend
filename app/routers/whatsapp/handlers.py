@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
+from app.models.transferencia_interna import TransferenciaInterna
 from app.models.transaccion import (
     EstadoVerificacionTransaccion,
     OrigenTransaccion,
@@ -16,17 +17,22 @@ from app.models.transaccion import (
 )
 from app.models.usuario import Moneda, Usuario
 from app.routers.whatsapp.db_lookups import (
+    _buscar_propuesta_confirmable_mas_reciente,
     _buscar_slot_filling_activo,
     _buscar_suscripcion_activa_por_nombre,
+    _buscar_ultimo_movimiento_whatsapp,
 )
 from app.routers.whatsapp.detectors import (
     _detectar_ambiguedad_suscripcion,
     _es_cambio_precio_suscripcion,
     _es_cancelacion,
+    _es_confirmacion,
     _es_consulta_suscripciones,
     _es_pedido_baja_suscripcion,
+    _es_pedido_deshacer,
     _es_pedido_pago_resumen,
     _es_saludo,
+    _parece_intento_correccion,
 )
 from app.routers.whatsapp.parsers import _nombre_corto_categoria
 from app.services import suscripcion_service, whatsapp_service
@@ -471,3 +477,444 @@ def manejar_ambiguedad_suscripcion(
     db.commit()
     whatsapp_service.enviar_whatsapp(from_number, msg_pregunta)
     return True
+
+
+def manejar_confirmacion(
+    mensaje_texto: str,
+    usuario: Usuario,
+    db: Session,
+    from_number: str,
+    wamid: str | None = None,
+) -> bool:
+    """
+    Chequeo determinístico de confirmación con bloqueo de concurrencia.
+    Despacha a la propuesta confirmable más reciente.
+    """
+    if not _es_confirmacion(mensaje_texto):
+        return False
+
+    from app.routers.whatsapp_ia import (
+        _confirmar_propuesta_baja_suscripcion,
+        _confirmar_propuesta_cambio_precio,
+        _confirmar_propuesta_corregir,
+        _confirmar_propuesta_deshacer,
+        _confirmar_propuesta_suscripcion,
+        _confirmar_propuesta_transaccion,
+        _confirmar_propuesta_transferencia,
+    )
+
+    propuesta_ganadora = _buscar_propuesta_confirmable_mas_reciente(usuario.id, db)
+    intent_ganador = propuesta_ganadora.intent_detectado if propuesta_ganadora else None
+
+    if intent_ganador == "deshacer":
+        tx_deshecha, msg_confirm, ya_conf = _confirmar_propuesta_deshacer(usuario, db)
+        nueva_conv = ConversacionWpp(
+            usuario_id=usuario.id,
+            wamid=wamid,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            transcripcion=None,
+            mensaje_bot=msg_confirm,
+            intent_detectado="confirmar_deshacer",
+            entidades={},
+            accion_ejecutada=f"deshecho:{tx_deshecha.id}" if tx_deshecha else ("ya_deshecho" if ya_conf else None),
+            confianza=Decimal("1.000"),
+            slot_filling_activo=False,
+            slot_filling_estado=None,
+        )
+        db.add(nueva_conv)
+        db.commit()
+        whatsapp_service.enviar_whatsapp(from_number, msg_confirm)
+        return True
+
+    elif intent_ganador == "corregir":
+        tx_corregida, msg_confirm, ya_conf = _confirmar_propuesta_corregir(usuario, db)
+        nueva_conv = ConversacionWpp(
+            usuario_id=usuario.id,
+            wamid=wamid,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            transcripcion=None,
+            mensaje_bot=msg_confirm,
+            intent_detectado="confirmar_corregir",
+            entidades={},
+            accion_ejecutada=f"corregido:{tx_corregida.id}" if tx_corregida else ("ya_corregido" if ya_conf else None),
+            confianza=Decimal("1.000"),
+            slot_filling_activo=False,
+            slot_filling_estado=None,
+        )
+        db.add(nueva_conv)
+        db.commit()
+        whatsapp_service.enviar_whatsapp(from_number, msg_confirm)
+        return True
+
+    elif intent_ganador == "transferir_fondos":
+        tr_creada, msg_confirm, ya_conf = _confirmar_propuesta_transferencia(usuario, db)
+        nueva_conv = ConversacionWpp(
+            usuario_id=usuario.id,
+            wamid=wamid,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            transcripcion=None,
+            mensaje_bot=msg_confirm,
+            intent_detectado="confirmar_transferencia",
+            entidades={},
+            accion_ejecutada=f"transferencia:{tr_creada.id}" if tr_creada else ("ya_confirmada" if ya_conf else None),
+            confianza=Decimal("1.000"),
+            slot_filling_activo=False,
+            slot_filling_estado=None,
+        )
+        db.add(nueva_conv)
+        db.commit()
+        whatsapp_service.enviar_whatsapp(from_number, msg_confirm)
+        return True
+
+    elif intent_ganador == "dar_baja_suscripcion":
+        sub_bajada, msg_confirm, ya_conf = _confirmar_propuesta_baja_suscripcion(usuario, db)
+        nueva_conv = ConversacionWpp(
+            usuario_id=usuario.id,
+            wamid=wamid,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            transcripcion=None,
+            mensaje_bot=msg_confirm,
+            intent_detectado="confirmar_baja_suscripcion",
+            entidades={},
+            accion_ejecutada=f"baja:{sub_bajada.id}" if sub_bajada else ("ya_bajada" if ya_conf else None),
+            confianza=Decimal("1.000"),
+            slot_filling_activo=False,
+            slot_filling_estado=None,
+        )
+        db.add(nueva_conv)
+        db.commit()
+        whatsapp_service.enviar_whatsapp(from_number, msg_confirm)
+        return True
+
+    elif intent_ganador == "cambiar_precio_suscripcion":
+        hist_cp, msg_confirm, ya_conf = _confirmar_propuesta_cambio_precio(usuario, db)
+        nueva_conv = ConversacionWpp(
+            usuario_id=usuario.id,
+            wamid=wamid,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            transcripcion=None,
+            mensaje_bot=msg_confirm,
+            intent_detectado="confirmar_cambio_precio",
+            entidades={},
+            accion_ejecutada=f"precio:{hist_cp.id}" if hist_cp else ("ya_actualizado" if ya_conf else None),
+            confianza=Decimal("1.000"),
+            slot_filling_activo=False,
+            slot_filling_estado=None,
+        )
+        db.add(nueva_conv)
+        db.commit()
+        whatsapp_service.enviar_whatsapp(from_number, msg_confirm)
+        return True
+
+    elif intent_ganador == "agregar_suscripcion":
+        sub_creada, msg_confirm, ya_conf = _confirmar_propuesta_suscripcion(usuario, db)
+        nueva_conv = ConversacionWpp(
+            usuario_id=usuario.id,
+            wamid=wamid,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            transcripcion=None,
+            mensaje_bot=msg_confirm,
+            intent_detectado="confirmar_suscripcion",
+            entidades={},
+            accion_ejecutada=str(sub_creada.id) if sub_creada else ("ya_creada" if ya_conf else None),
+            confianza=Decimal("1.000"),
+            slot_filling_activo=False,
+            slot_filling_estado=None,
+        )
+        db.add(nueva_conv)
+        db.commit()
+        whatsapp_service.enviar_whatsapp(from_number, msg_confirm)
+        return True
+
+    else:
+        # intent_ganador == "registrar_transaccion" o None (sin propuesta pendiente)
+        tx_creada, msg_confirm, ya_conf = _confirmar_propuesta_transaccion(usuario, db)
+        prop_confirmada = db.execute(
+            select(ConversacionWpp).where(
+                ConversacionWpp.usuario_id == usuario.id,
+                ConversacionWpp.intent_detectado == "registrar_transaccion",
+                ConversacionWpp.accion_ejecutada.is_not(None),
+            ).order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+        ).scalars().first()
+        accion_final = prop_confirmada.accion_ejecutada if prop_confirmada else (str(tx_creada.id) if tx_creada else ("ya_confirmada" if ya_conf else None))
+        nueva_conv = ConversacionWpp(
+            usuario_id=usuario.id,
+            wamid=wamid,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            transcripcion=None,
+            mensaje_bot=msg_confirm,
+            intent_detectado="confirmar",
+            entidades={},
+            accion_ejecutada=accion_final,
+            confianza=Decimal("1.000"),
+            slot_filling_activo=False,
+            slot_filling_estado=None,
+        )
+        db.add(nueva_conv)
+        db.commit()
+        whatsapp_service.enviar_whatsapp(from_number, msg_confirm)
+        return True
+
+
+def manejar_deshacer(
+    mensaje_texto: str,
+    usuario: Usuario,
+    db: Session,
+    from_number: str,
+    wamid: str | None = None,
+) -> bool:
+    """
+    Detección determinística de deshacer.
+    """
+    if not _es_pedido_deshacer(mensaje_texto):
+        return False
+
+    from app.routers.whatsapp_ia import _construir_propuesta_deshacer
+
+    tx_last, motivo_err = _buscar_ultimo_movimiento_whatsapp(usuario.id, db)
+    if not tx_last:
+        if motivo_err in ("YA_DESHECHO", "YA_BORRADO"):
+            msg_undo_resp = "No hay nada para deshacer."
+        elif motivo_err == "PLAZO_VENCIDO":
+            msg_undo_resp = "El último movimiento fue hace más de 30 minutos. Para eliminarlo, ingresá a la web de Argentum."
+        elif motivo_err == "ES_CUOTA":
+            msg_undo_resp = "Ese movimiento corresponde a una cuota de tarjeta y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
+        elif motivo_err == "ES_RESUMEN":
+            msg_undo_resp = "Ese movimiento corresponde al pago de un resumen y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
+        elif motivo_err == "ES_META":
+            msg_undo_resp = "Ese movimiento corresponde a una meta de ahorro y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
+        elif motivo_err == "ES_RECURRENTE":
+            msg_undo_resp = "Ese movimiento fue generado automáticamente y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
+        else:
+            msg_undo_resp = "No tenés ningún movimiento reciente registrado por WhatsApp para deshacer. Podés gestionarlo desde la web de Argentum."
+
+        nueva_conv = ConversacionWpp(
+            usuario_id=usuario.id,
+            wamid=wamid,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            transcripcion=None,
+            mensaje_bot=msg_undo_resp,
+            intent_detectado="deshacer",
+            entidades={},
+            accion_ejecutada="sin_efecto",
+            confianza=Decimal("1.000"),
+            slot_filling_activo=False,
+            slot_filling_estado=None,
+        )
+        db.add(nueva_conv)
+        db.commit()
+        whatsapp_service.enviar_whatsapp(from_number, msg_undo_resp)
+        return True
+
+    # Hay movimiento para deshacer: armar propuesta de confirmación
+    msg_propuesta_undo = _construir_propuesta_deshacer(tx_last, db)
+    if isinstance(tx_last, list):
+        entidades_undo = {"lote_ids": [str(t.id) for t in tx_last]}
+    elif isinstance(tx_last, TransferenciaInterna):
+        entidades_undo = {"transferencia_id": str(tx_last.id)}
+    else:
+        entidades_undo = {"transaccion_id": str(tx_last.id)}
+    nueva_conv = ConversacionWpp(
+        usuario_id=usuario.id,
+        wamid=wamid,
+        mensaje_usuario=mensaje_texto,
+        tipo_mensaje=TipoMensajeWpp.TEXTO,
+        transcripcion=None,
+        mensaje_bot=msg_propuesta_undo,
+        intent_detectado="deshacer",
+        entidades=entidades_undo,
+        accion_ejecutada=None,
+        confianza=Decimal("1.000"),
+        slot_filling_activo=False,
+        slot_filling_estado=None,
+    )
+    db.add(nueva_conv)
+    db.commit()
+    whatsapp_service.enviar_whatsapp(from_number, msg_propuesta_undo)
+    return True
+
+
+def manejar_corregir(
+    mensaje_texto: str,
+    usuario: Usuario,
+    db: Session,
+    from_number: str,
+    wamid: str | None = None,
+) -> bool:
+    """
+    Detección determinística de corregir último movimiento.
+    """
+    from app.routers.whatsapp_ia import (
+        _construir_propuesta_corregir,
+        _detectar_correccion_ultimo_movimiento,
+    )
+
+    tx_last_corr, motivo_corr = _buscar_ultimo_movimiento_whatsapp(usuario.id, db)
+    if tx_last_corr and isinstance(tx_last_corr, Transaccion):
+        es_corr, cambios, err_corr = _detectar_correccion_ultimo_movimiento(
+            mensaje_texto, usuario.id, db, tx_last_corr
+        )
+        if es_corr:
+            if err_corr:
+                nueva_conv = ConversacionWpp(
+                    usuario_id=usuario.id,
+                    wamid=wamid,
+                    mensaje_usuario=mensaje_texto,
+                    tipo_mensaje=TipoMensajeWpp.TEXTO,
+                    transcripcion=None,
+                    mensaje_bot=err_corr,
+                    intent_detectado="corregir",
+                    entidades={},
+                    accion_ejecutada="error_moneda",
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=False,
+                    slot_filling_estado=None,
+                )
+                db.add(nueva_conv)
+                db.commit()
+                whatsapp_service.enviar_whatsapp(from_number, err_corr)
+                return True
+
+            if cambios:
+                msg_propuesta_corr = _construir_propuesta_corregir(tx_last_corr, cambios, db)
+                nueva_conv = ConversacionWpp(
+                    usuario_id=usuario.id,
+                    wamid=wamid,
+                    mensaje_usuario=mensaje_texto,
+                    tipo_mensaje=TipoMensajeWpp.TEXTO,
+                    transcripcion=None,
+                    mensaje_bot=msg_propuesta_corr,
+                    intent_detectado="corregir",
+                    entidades={"transaccion_id": str(tx_last_corr.id), "cambios": cambios},
+                    accion_ejecutada=None,
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=False,
+                    slot_filling_estado=None,
+                )
+                db.add(nueva_conv)
+                db.commit()
+                whatsapp_service.enviar_whatsapp(from_number, msg_propuesta_corr)
+                return True
+    else:
+        if _parece_intento_correccion(mensaje_texto):
+            if motivo_corr == "PLAZO_VENCIDO":
+                msg_resp = "El último movimiento fue hace más de 30 minutos. Para modificarlo, ingresá a la web de Argentum."
+            elif motivo_corr == "ES_CUOTA":
+                msg_resp = "Ese movimiento corresponde a una cuota de tarjeta y no se puede modificar por WhatsApp. Podés gestionarlo desde la web de Argentum."
+            else:
+                msg_resp = "No tenés ningún movimiento reciente registrado por WhatsApp para corregir. Podés gestionarlo desde la web de Argentum."
+
+            nueva_conv = ConversacionWpp(
+                usuario_id=usuario.id,
+                wamid=wamid,
+                mensaje_usuario=mensaje_texto,
+                tipo_mensaje=TipoMensajeWpp.TEXTO,
+                transcripcion=None,
+                mensaje_bot=msg_resp,
+                intent_detectado="corregir",
+                entidades={},
+                accion_ejecutada="sin_efecto",
+                confianza=Decimal("1.000"),
+                slot_filling_activo=False,
+                slot_filling_estado=None,
+            )
+            db.add(nueva_conv)
+            db.commit()
+            whatsapp_service.enviar_whatsapp(from_number, msg_resp)
+            return True
+    return False
+
+
+def manejar_transferencias(
+    mensaje_texto: str,
+    usuario: Usuario,
+    db: Session,
+    from_number: str,
+    wamid: str | None = None,
+    conv_activa: ConversacionWpp | None = None,
+    estado_previo: dict | None = None,
+) -> bool:
+    """
+    Detección determinística de transferencias / cajero / dólares.
+    """
+    from app.routers.whatsapp_ia import _interpretar_transferencia
+
+    es_tr, estado_tr, ents_tr, resp_tr = _interpretar_transferencia(
+        mensaje_texto, usuario, db, estado_previo=estado_previo
+    )
+    if not es_tr:
+        return False
+
+    if estado_tr in ("no_cash", "no_usd", "absurda", "misma_billetera"):
+        nueva_conv = ConversacionWpp(
+            usuario_id=usuario.id,
+            wamid=wamid,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            transcripcion=None,
+            mensaje_bot=resp_tr,
+            intent_detectado="transferir_fondos",
+            entidades={},
+            accion_ejecutada="sin_efecto",
+            confianza=Decimal("1.000"),
+            slot_filling_activo=False,
+            slot_filling_estado=None,
+        )
+        db.add(nueva_conv)
+        db.commit()
+        whatsapp_service.enviar_whatsapp(from_number, resp_tr)
+        return True
+
+    elif estado_tr == "slot_filling":
+        if conv_activa:
+            conv_activa.slot_filling_activo = False
+            db.flush()
+        nueva_conv = ConversacionWpp(
+            usuario_id=usuario.id,
+            wamid=wamid,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            transcripcion=None,
+            mensaje_bot=resp_tr,
+            intent_detectado="transferir_fondos",
+            entidades=ents_tr,
+            accion_ejecutada=None,
+            confianza=Decimal("1.000"),
+            slot_filling_activo=True,
+            slot_filling_estado=ents_tr,
+        )
+        db.add(nueva_conv)
+        db.commit()
+        whatsapp_service.enviar_whatsapp(from_number, resp_tr)
+        return True
+
+    elif estado_tr == "propuesta":
+        if conv_activa:
+            conv_activa.slot_filling_activo = False
+            db.flush()
+        nueva_conv = ConversacionWpp(
+            usuario_id=usuario.id,
+            wamid=wamid,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            transcripcion=None,
+            mensaje_bot=resp_tr,
+            intent_detectado="transferir_fondos",
+            entidades=ents_tr,
+            accion_ejecutada=None,
+            confianza=Decimal("1.000"),
+            slot_filling_activo=False,
+            slot_filling_estado=None,
+        )
+        db.add(nueva_conv)
+        db.commit()
+        whatsapp_service.enviar_whatsapp(from_number, resp_tr)
+        return True

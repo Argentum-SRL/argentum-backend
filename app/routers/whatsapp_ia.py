@@ -166,10 +166,14 @@ from app.routers.whatsapp.handlers import (
     manejar_baja_suscripcion,
     manejar_cambio_precio_suscripcion,
     manejar_cancelacion,
+    manejar_confirmacion,
     manejar_consulta_suscripciones,
+    manejar_corregir,
+    manejar_deshacer,
     manejar_numero_aislado,
     manejar_pago_resumen,
     manejar_saludo,
+    manejar_transferencias,
 )
 from app.utils.telefono import normalizar_telefono_ar
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion
@@ -3524,165 +3528,8 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                         return
 
             # 4. Chequeo determinístico de confirmación con bloqueo de concurrencia (Tarea 2)
-            if _es_confirmacion(mensaje_texto):
-                propuesta_ganadora = _buscar_propuesta_confirmable_mas_reciente(usuario.id, db)
-                intent_ganador = propuesta_ganadora.intent_detectado if propuesta_ganadora else None
-
-                if intent_ganador == "deshacer":
-                    tx_deshecha, msg_confirm, ya_conf = _confirmar_propuesta_deshacer(usuario, db)
-                    nueva_conv = ConversacionWpp(
-                        usuario_id=usuario.id,
-                        wamid=wamid,
-                        mensaje_usuario=mensaje_texto,
-                        tipo_mensaje=TipoMensajeWpp.TEXTO,
-                        transcripcion=None,
-                        mensaje_bot=msg_confirm,
-                        intent_detectado="confirmar_deshacer",
-                        entidades={},
-                        accion_ejecutada=f"deshecho:{tx_deshecha.id}" if tx_deshecha else ("ya_deshecho" if ya_conf else None),
-                        confianza=Decimal("1.000"),
-                        slot_filling_activo=False,
-                        slot_filling_estado=None,
-                    )
-                    db.add(nueva_conv)
-                    db.commit()
-                    enviar_whatsapp(from_number, msg_confirm)
-                    return
-
-                elif intent_ganador == "corregir":
-                    tx_corregida, msg_confirm, ya_conf = _confirmar_propuesta_corregir(usuario, db)
-                    nueva_conv = ConversacionWpp(
-                        usuario_id=usuario.id,
-                        wamid=wamid,
-                        mensaje_usuario=mensaje_texto,
-                        tipo_mensaje=TipoMensajeWpp.TEXTO,
-                        transcripcion=None,
-                        mensaje_bot=msg_confirm,
-                        intent_detectado="confirmar_corregir",
-                        entidades={},
-                        accion_ejecutada=f"corregido:{tx_corregida.id}" if tx_corregida else ("ya_corregido" if ya_conf else None),
-                        confianza=Decimal("1.000"),
-                        slot_filling_activo=False,
-                        slot_filling_estado=None,
-                    )
-                    db.add(nueva_conv)
-                    db.commit()
-                    enviar_whatsapp(from_number, msg_confirm)
-                    return
-
-                elif intent_ganador == "transferir_fondos":
-                    tr_creada, msg_confirm, ya_conf = _confirmar_propuesta_transferencia(usuario, db)
-                    nueva_conv = ConversacionWpp(
-                        usuario_id=usuario.id,
-                        wamid=wamid,
-                        mensaje_usuario=mensaje_texto,
-                        tipo_mensaje=TipoMensajeWpp.TEXTO,
-                        transcripcion=None,
-                        mensaje_bot=msg_confirm,
-                        intent_detectado="confirmar_transferencia",
-                        entidades={},
-                        accion_ejecutada=f"transferencia:{tr_creada.id}" if tr_creada else ("ya_confirmada" if ya_conf else None),
-                        confianza=Decimal("1.000"),
-                        slot_filling_activo=False,
-                        slot_filling_estado=None,
-                    )
-                    db.add(nueva_conv)
-                    db.commit()
-                    enviar_whatsapp(from_number, msg_confirm)
-                    return
-
-                elif intent_ganador == "dar_baja_suscripcion":
-                    sub_bajada, msg_confirm, ya_conf = _confirmar_propuesta_baja_suscripcion(usuario, db)
-                    nueva_conv = ConversacionWpp(
-                        usuario_id=usuario.id,
-                        wamid=wamid,
-                        mensaje_usuario=mensaje_texto,
-                        tipo_mensaje=TipoMensajeWpp.TEXTO,
-                        transcripcion=None,
-                        mensaje_bot=msg_confirm,
-                        intent_detectado="confirmar_baja_suscripcion",
-                        entidades={},
-                        accion_ejecutada=f"baja:{sub_bajada.id}" if sub_bajada else ("ya_bajada" if ya_conf else None),
-                        confianza=Decimal("1.000"),
-                        slot_filling_activo=False,
-                        slot_filling_estado=None,
-                    )
-                    db.add(nueva_conv)
-                    db.commit()
-                    enviar_whatsapp(from_number, msg_confirm)
-                    return
-
-                elif intent_ganador == "cambiar_precio_suscripcion":
-                    hist_cp, msg_confirm, ya_conf = _confirmar_propuesta_cambio_precio(usuario, db)
-                    nueva_conv = ConversacionWpp(
-                        usuario_id=usuario.id,
-                        wamid=wamid,
-                        mensaje_usuario=mensaje_texto,
-                        tipo_mensaje=TipoMensajeWpp.TEXTO,
-                        transcripcion=None,
-                        mensaje_bot=msg_confirm,
-                        intent_detectado="confirmar_cambio_precio",
-                        entidades={},
-                        accion_ejecutada=f"precio:{hist_cp.id}" if hist_cp else ("ya_actualizado" if ya_conf else None),
-                        confianza=Decimal("1.000"),
-                        slot_filling_activo=False,
-                        slot_filling_estado=None,
-                    )
-                    db.add(nueva_conv)
-                    db.commit()
-                    enviar_whatsapp(from_number, msg_confirm)
-                    return
-
-                elif intent_ganador == "agregar_suscripcion":
-                    sub_creada, msg_confirm, ya_conf = _confirmar_propuesta_suscripcion(usuario, db)
-                    nueva_conv = ConversacionWpp(
-                        usuario_id=usuario.id,
-                        wamid=wamid,
-                        mensaje_usuario=mensaje_texto,
-                        tipo_mensaje=TipoMensajeWpp.TEXTO,
-                        transcripcion=None,
-                        mensaje_bot=msg_confirm,
-                        intent_detectado="confirmar_suscripcion",
-                        entidades={},
-                        accion_ejecutada=str(sub_creada.id) if sub_creada else ("ya_creada" if ya_conf else None),
-                        confianza=Decimal("1.000"),
-                        slot_filling_activo=False,
-                        slot_filling_estado=None,
-                    )
-                    db.add(nueva_conv)
-                    db.commit()
-                    enviar_whatsapp(from_number, msg_confirm)
-                    return
-
-                else:
-                    # intent_ganador == "registrar_transaccion" o None (sin propuesta pendiente)
-                    tx_creada, msg_confirm, ya_conf = _confirmar_propuesta_transaccion(usuario, db)
-                    prop_confirmada = db.execute(
-                        select(ConversacionWpp).where(
-                            ConversacionWpp.usuario_id == usuario.id,
-                            ConversacionWpp.intent_detectado == "registrar_transaccion",
-                            ConversacionWpp.accion_ejecutada.is_not(None),
-                        ).order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
-                    ).scalars().first()
-                    accion_final = prop_confirmada.accion_ejecutada if prop_confirmada else (str(tx_creada.id) if tx_creada else ("ya_confirmada" if ya_conf else None))
-                    nueva_conv = ConversacionWpp(
-                        usuario_id=usuario.id,
-                        wamid=wamid,
-                        mensaje_usuario=mensaje_texto,
-                        tipo_mensaje=TipoMensajeWpp.TEXTO,
-                        transcripcion=None,
-                        mensaje_bot=msg_confirm,
-                        intent_detectado="confirmar",
-                        entidades={},
-                        accion_ejecutada=accion_final,
-                        confianza=Decimal("1.000"),
-                        slot_filling_activo=False,
-                        slot_filling_estado=None,
-                    )
-                    db.add(nueva_conv)
-                    db.commit()
-                    enviar_whatsapp(from_number, msg_confirm)
-                    return
+            if manejar_confirmacion(mensaje_texto, usuario, db, from_number, wamid=wamid):
+                return
 
             # 4. Buscar conversación activa previa con slot_filling dentro del plazo (Tarea 2)
             conv_activa = _buscar_slot_filling_activo(usuario.id, db)
@@ -4115,214 +3962,17 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                 return
 
             # 7.5 Detección determinística de deshacer (Tarea 2)
-            if _es_pedido_deshacer(mensaje_texto):
-                tx_last, motivo_err = _buscar_ultimo_movimiento_whatsapp(usuario.id, db)
-                if not tx_last:
-                    if motivo_err in ("YA_DESHECHO", "YA_BORRADO"):
-                        msg_undo_resp = "No hay nada para deshacer."
-                    elif motivo_err == "PLAZO_VENCIDO":
-                        msg_undo_resp = "El último movimiento fue hace más de 30 minutos. Para eliminarlo, ingresá a la web de Argentum."
-                    elif motivo_err == "ES_CUOTA":
-                        msg_undo_resp = "Ese movimiento corresponde a una cuota de tarjeta y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
-                    elif motivo_err == "ES_RESUMEN":
-                        msg_undo_resp = "Ese movimiento corresponde al pago de un resumen y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
-                    elif motivo_err == "ES_META":
-                        msg_undo_resp = "Ese movimiento corresponde a una meta de ahorro y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
-                    elif motivo_err == "ES_RECURRENTE":
-                        msg_undo_resp = "Ese movimiento fue generado automáticamente y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
-                    else:
-                        msg_undo_resp = "No tenés ningún movimiento reciente registrado por WhatsApp para deshacer. Podés gestionarlo desde la web de Argentum."
-
-                    nueva_conv = ConversacionWpp(
-                        usuario_id=usuario.id,
-                        wamid=wamid,
-                        mensaje_usuario=mensaje_texto,
-                        tipo_mensaje=TipoMensajeWpp.TEXTO,
-                        transcripcion=None,
-                        mensaje_bot=msg_undo_resp,
-                        intent_detectado="deshacer",
-                        entidades={},
-                        accion_ejecutada="sin_efecto",
-                        confianza=Decimal("1.000"),
-                        slot_filling_activo=False,
-                        slot_filling_estado=None,
-                    )
-                    db.add(nueva_conv)
-                    db.commit()
-                    enviar_whatsapp(from_number, msg_undo_resp)
-                    return
-
-                # Hay movimiento para deshacer: armar propuesta de confirmación
-                msg_propuesta_undo = _construir_propuesta_deshacer(tx_last, db)
-                if isinstance(tx_last, list):
-                    entidades_undo = {"lote_ids": [str(t.id) for t in tx_last]}
-                elif isinstance(tx_last, TransferenciaInterna):
-                    entidades_undo = {"transferencia_id": str(tx_last.id)}
-                else:
-                    entidades_undo = {"transaccion_id": str(tx_last.id)}
-                nueva_conv = ConversacionWpp(
-                    usuario_id=usuario.id,
-                    wamid=wamid,
-                    mensaje_usuario=mensaje_texto,
-                    tipo_mensaje=TipoMensajeWpp.TEXTO,
-                    transcripcion=None,
-                    mensaje_bot=msg_propuesta_undo,
-                    intent_detectado="deshacer",
-                    entidades=entidades_undo,
-                    accion_ejecutada=None,
-                    confianza=Decimal("1.000"),
-                    slot_filling_activo=False,
-                    slot_filling_estado=None,
-                )
-                db.add(nueva_conv)
-                db.commit()
-                enviar_whatsapp(from_number, msg_propuesta_undo)
+            if manejar_deshacer(mensaje_texto, usuario, db, from_number, wamid=wamid):
                 return
 
             # 7.6 Detección determinística de corregir (Tarea 3)
-            tx_last_corr, motivo_corr = _buscar_ultimo_movimiento_whatsapp(usuario.id, db)
-            if tx_last_corr and isinstance(tx_last_corr, Transaccion):
-                es_corr, cambios, err_corr = _detectar_correccion_ultimo_movimiento(
-                    mensaje_texto, usuario.id, db, tx_last_corr
-                )
-                if es_corr:
-                    if err_corr:
-                        nueva_conv = ConversacionWpp(
-                            usuario_id=usuario.id,
-                            wamid=wamid,
-                            mensaje_usuario=mensaje_texto,
-                            tipo_mensaje=TipoMensajeWpp.TEXTO,
-                            transcripcion=None,
-                            mensaje_bot=err_corr,
-                            intent_detectado="corregir",
-                            entidades={},
-                            accion_ejecutada="error_moneda",
-                            confianza=Decimal("1.000"),
-                            slot_filling_activo=False,
-                            slot_filling_estado=None,
-                        )
-                        db.add(nueva_conv)
-                        db.commit()
-                        enviar_whatsapp(from_number, err_corr)
-                        return
-
-                    if cambios:
-                        msg_propuesta_corr = _construir_propuesta_corregir(tx_last_corr, cambios, db)
-                        nueva_conv = ConversacionWpp(
-                            usuario_id=usuario.id,
-                            wamid=wamid,
-                            mensaje_usuario=mensaje_texto,
-                            tipo_mensaje=TipoMensajeWpp.TEXTO,
-                            transcripcion=None,
-                            mensaje_bot=msg_propuesta_corr,
-                            intent_detectado="corregir",
-                            entidades={"transaccion_id": str(tx_last_corr.id), "cambios": cambios},
-                            accion_ejecutada=None,
-                            confianza=Decimal("1.000"),
-                            slot_filling_activo=False,
-                            slot_filling_estado=None,
-                        )
-                        db.add(nueva_conv)
-                        db.commit()
-                        enviar_whatsapp(from_number, msg_propuesta_corr)
-                        return
-            else:
-                if _parece_intento_correccion(mensaje_texto):
-                    if motivo_corr == "PLAZO_VENCIDO":
-                        msg_resp = "El último movimiento fue hace más de 30 minutos. Para modificarlo, ingresá a la web de Argentum."
-                    elif motivo_corr == "ES_CUOTA":
-                        msg_resp = "Ese movimiento corresponde a una cuota de tarjeta y no se puede modificar por WhatsApp. Podés gestionarlo desde la web de Argentum."
-                    else:
-                        msg_resp = "No tenés ningún movimiento reciente registrado por WhatsApp para corregir. Podés gestionarlo desde la web de Argentum."
-
-                    nueva_conv = ConversacionWpp(
-                        usuario_id=usuario.id,
-                        wamid=wamid,
-                        mensaje_usuario=mensaje_texto,
-                        tipo_mensaje=TipoMensajeWpp.TEXTO,
-                        transcripcion=None,
-                        mensaje_bot=msg_resp,
-                        intent_detectado="corregir",
-                        entidades={},
-                        accion_ejecutada="sin_efecto",
-                        confianza=Decimal("1.000"),
-                        slot_filling_activo=False,
-                        slot_filling_estado=None,
-                    )
-                    db.add(nueva_conv)
-                    db.commit()
-                    enviar_whatsapp(from_number, msg_resp)
-                    return
+            if manejar_corregir(mensaje_texto, usuario, db, from_number, wamid=wamid):
+                return
             # 7.7 Detección determinística de transferencias / cajero / dólares (Punto 9B)
-            es_tr, estado_tr, ents_tr, resp_tr = _interpretar_transferencia(
-                mensaje_texto, usuario, db, estado_previo=estado_previo
-            )
-            if es_tr:
-                if estado_tr in ("no_cash", "no_usd", "absurda", "misma_billetera"):
-                    nueva_conv = ConversacionWpp(
-                        usuario_id=usuario.id,
-                        wamid=wamid,
-                        mensaje_usuario=mensaje_texto,
-                        tipo_mensaje=TipoMensajeWpp.TEXTO,
-                        transcripcion=None,
-                        mensaje_bot=resp_tr,
-                        intent_detectado="transferir_fondos",
-                        entidades={},
-                        accion_ejecutada="sin_efecto",
-                        confianza=Decimal("1.000"),
-                        slot_filling_activo=False,
-                        slot_filling_estado=None,
-                    )
-                    db.add(nueva_conv)
-                    db.commit()
-                    enviar_whatsapp(from_number, resp_tr)
-                    return
-
-                elif estado_tr == "slot_filling":
-                    if conv_activa:
-                        conv_activa.slot_filling_activo = False
-                        db.flush()
-                    nueva_conv = ConversacionWpp(
-                        usuario_id=usuario.id,
-                        wamid=wamid,
-                        mensaje_usuario=mensaje_texto,
-                        tipo_mensaje=TipoMensajeWpp.TEXTO,
-                        transcripcion=None,
-                        mensaje_bot=resp_tr,
-                        intent_detectado="transferir_fondos",
-                        entidades=ents_tr,
-                        accion_ejecutada=None,
-                        confianza=Decimal("1.000"),
-                        slot_filling_activo=True,
-                        slot_filling_estado=ents_tr,
-                    )
-                    db.add(nueva_conv)
-                    db.commit()
-                    enviar_whatsapp(from_number, resp_tr)
-                    return
-
-                elif estado_tr == "propuesta":
-                    if conv_activa:
-                        conv_activa.slot_filling_activo = False
-                        db.flush()
-                    nueva_conv = ConversacionWpp(
-                        usuario_id=usuario.id,
-                        wamid=wamid,
-                        mensaje_usuario=mensaje_texto,
-                        tipo_mensaje=TipoMensajeWpp.TEXTO,
-                        transcripcion=None,
-                        mensaje_bot=resp_tr,
-                        intent_detectado="transferir_fondos",
-                        entidades=ents_tr,
-                        accion_ejecutada=None,
-                        confianza=Decimal("1.000"),
-                        slot_filling_activo=False,
-                        slot_filling_estado=None,
-                    )
-                    db.add(nueva_conv)
-                    db.commit()
-                    enviar_whatsapp(from_number, resp_tr)
-                    return
+            if manejar_transferencias(
+                mensaje_texto, usuario, db, from_number, wamid=wamid, conv_activa=conv_activa, estado_previo=estado_previo
+            ):
+                return
 
             # 7.8 Detección determinística de consultas de suscripciones (Tarea 7)
             if manejar_consulta_suscripciones(mensaje_texto, usuario, db, from_number, wamid=wamid):
