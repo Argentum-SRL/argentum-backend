@@ -65,6 +65,48 @@ from app.services.whatsapp_service import (
     get_meta_http_client,
 )
 from app.services.rate_limit_service import verificar_rate_limit
+from app.routers.whatsapp.parsers import (
+    _MESES_RIOPLATENSE,
+    _extraer_frecuencia_mencionada,
+    _extraer_monto_y_moneda_suscripcion,
+    _extraer_nombre_servicio,
+    _fmt,
+    _formatear_fecha_natural,
+    _interpretar_cuotas,
+    _nombre_corto_categoria,
+    _parsear_monto_argentino,
+    _parsear_monto_texto_cuota,
+    _resolver_fecha_transaccion,
+    _resolver_y_validar_fecha,
+)
+
+from app.routers.whatsapp.detectors import (
+    COOLDOWN_MINUTOS_NO_REGISTRADO,
+    FRASES_DESHACER,
+    PALABRAS_CANCELACION,
+    PALABRAS_CONFIRMACION,
+    SALUDOS_RIOPLATENSE,
+    _debe_responder_no_registrado,
+    _detectar_ambiguedad_suscripcion,
+    _es_cambio_precio_suscripcion,
+    _es_cancelacion,
+    _es_confirmacion,
+    _es_confirmacion_gasto_aparte,
+    _es_confirmacion_lote_ambos,
+    _es_confirmacion_lote_uno_solo,
+    _es_confirmacion_nuevo_movimiento,
+    _es_consulta_suscripciones,
+    _es_descarte_duplicado,
+    _es_intento_alta_suscripcion,
+    _es_pedido_baja_suscripcion,
+    _es_pedido_deshacer,
+    _es_pedido_pago_resumen,
+    _es_pregunta_billetera,
+    _es_saludo,
+    _es_senial_gasto_suelto,
+    _es_senial_suscripcion,
+    _parece_intento_correccion,
+)
 from app.utils.telefono import normalizar_telefono_ar
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion
 from app.models.historial_suscripcion import HistorialSuscripcion
@@ -81,21 +123,8 @@ from app.models.usuario import Moneda
 logger = structlog.get_logger("whatsapp")
 
 
-def _fmt(monto: float, moneda: Moneda | str = Moneda.ARS) -> str:
-    """Formatea un número con formato argentino y símbolo según moneda."""
-    return formatear_monto(monto, moneda)
 
 
-def _nombre_corto_categoria(nombre: str | None) -> str:
-    """
-    Si la categoría viene en formato 'Categoría > Subcategoría',
-    devuelve solo 'Subcategoría'. Si no tiene '>', devuelve el nombre tal cual.
-    """
-    if not nombre:
-        return "Otros"
-    if ">" in nombre:
-        return nombre.split(">", 1)[1].strip()
-    return nombre.strip()
 
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp-ia"])
@@ -113,150 +142,18 @@ MSG_NO_MEZCLAR_TRANSFERENCIAS = (
     "en mensajes separados de los gastos o ingresos. Por favor mandalas por separado."
 )
 
-SALUDOS_RIOPLATENSE = {
-    "hola",
-    "buenas",
-    "buen dia",
-    "buen día",
-    "buenos dias",
-    "buenos días",
-    "buenas tardes",
-    "buenas noches",
-    "holis",
-    "holi",
-    "que tal",
-    "qué tal",
-    "buenas y santas",
-    "como va",
-    "cómo va",
-    "como andas",
-    "cómo andás",
-    "que onda",
-    "qué onda",
-    "che",
-    "che hola",
-    "hola che",
-    "hola buenas",
-    "hola buen dia",
-    "hola como va",
-    "hola que tal",
-    "buendia",
-}
-
-PALABRAS_CANCELACION = {
-    "no",
-    "cancela",
-    "cancelá",
-    "cancelar",
-    "cancelalo",
-    "cancelala",
-    "deja",
-    "dejá",
-    "dejalo",
-    "dejala",
-    "olvidate",
-    "olvidalo",
-    "olvidala",
-    "no importa",
-    "nada",
-    "borrar",
-    "descarta",
-    "descartar",
-    "no cancela",
-    "no gracias",
-    "no quiero",
-    "no hace falta",
-}
-
-PALABRAS_CONFIRMACION = {
-    "si",
-    "sí",
-    "dale",
-    "ok",
-    "confirmo",
-    "confirmar",
-    "va",
-    "listo",
-    "de una",
-    "correcto",
-    "perfecto",
-    "seh",
-    "sip",
-    "yes",
-}
 
 
-def _es_saludo(mensaje: str) -> bool:
-    norm = normalizar_texto(mensaje)
-    return bool(norm and norm in SALUDOS_RIOPLATENSE)
 
 
-def _es_cancelacion(mensaje: str) -> bool:
-    norm = normalizar_texto(mensaje)
-    if not norm:
-        return False
-    if norm in PALABRAS_CANCELACION:
-        return True
-    if re.match(r"^no+$", norm):  # no, noo, nooo, noooo...
-        return True
-    if norm.startswith("no cancela") or norm.startswith("no gracias") or norm.startswith("no, cancela"):
-        return True
-    return False
 
 
-def _es_confirmacion(mensaje: str) -> bool:
-    norm = normalizar_texto(mensaje)
-    return bool(norm and norm in PALABRAS_CONFIRMACION)
 
 
-FRASES_DESHACER = {
-    "borra eso",
-    "borrala",
-    "borralo",
-    "borrar eso",
-    "borrar el ultimo",
-    "borra el ultimo",
-    "borralo por favor",
-    "elimina eso",
-    "eliminalo",
-    "eliminala",
-    "eliminar eso",
-    "eliminar el ultimo",
-    "elimina el ultimo",
-    "me equivoque",
-    "me equivoqué",
-    "eso estaba mal",
-    "estaba mal",
-    "anula eso",
-    "anular eso",
-    "anulalo",
-    "anula el ultimo",
-    "anular el ultimo",
-    "cancela el ultimo",
-    "cancelar el ultimo",
-    "cancelalo el ultimo",
-    "cancelar el ultimo movimiento",
-    "cancela el ultimo movimiento",
-    "cancelar el gasto",
-    "cancela el gasto",
-    "deshacer",
-    "deshace eso",
-    "deshacer el ultimo",
-    "deshace el ultimo",
-}
 
 
-def _es_pedido_deshacer(mensaje: str) -> bool:
-    norm = normalizar_texto(mensaje)
-    if not norm:
-        return False
-    if norm in FRASES_DESHACER:
-        return True
-    if re.match(r"^(?:por favor\s+)?(?:borra|elimina|anula|cancela|deshace)(?:r)?\s+(?:eso|el\s+ultimo|lo\s+ultimo|el\s+ultimo\s+movimiento|el\s+ultimo\s+gasto)(?:\s+por\s+favor)?$", norm):
-        return True
-    if re.match(r"^me\s+equivoque(?:\s+en\s+eso)?$", norm):
-        return True
-    return False
+
+
 
 ALIAS_BILLETERAS = {
     "mp": "mercado pago",
@@ -298,17 +195,8 @@ PREFIJOS_CORRECCION = [
     r"^a\s+",
 ]
 
-COOLDOWN_MINUTOS_NO_REGISTRADO = 15
 
 
-def _debe_responder_no_registrado(telefono_normalizado: str) -> bool:
-    permitido, _, _ = verificar_rate_limit(
-        accion="cooldown_no_registrado",
-        identificador=telefono_normalizado,
-        max_intentos=1,
-        ventana_segundos=COOLDOWN_MINUTOS_NO_REGISTRADO * 60,
-    )
-    return permitido
 
 
 # Rate limiting para vinculación de cuentas por WhatsApp (por número de teléfono no registrado)
@@ -406,14 +294,6 @@ def _buscar_slot_filling_vencido(usuario_id: UUID, db: Session) -> ConversacionW
     return conv
 
 
-def _es_pregunta_billetera(conv: ConversacionWpp | None) -> bool:
-    if not conv or not conv.slot_filling_activo:
-        return False
-    estado = conv.slot_filling_estado or {}
-    if estado.get("tipo_flujo") == "lote_slot_filling":
-        return True
-    datos_faltantes = estado.get("datos_faltantes", [])
-    return any(d in datos_faltantes for d in ("billetera_origen", "billetera_destino", "billetera", "billetera_lote"))
 
 
 def _merge_entidades(
@@ -1023,107 +903,10 @@ def _generar_menu_tarjetas(tarjetas: list[TarjetaCredito]) -> str:
     return "\n".join(lineas)
 
 
-def _es_pedido_pago_resumen(mensaje: str) -> bool:
-    """Detecta si el usuario pide pagar el resumen de la tarjeta de crédito (Tarea 7)."""
-    m = normalizar_texto(mensaje)
-    frases = [
-        "pague el resumen", "pague resumen", "pagar el resumen", "pagar resumen",
-        "pago del resumen", "pago resumen", "pagar la tarjeta", "pague la tarjeta",
-        "pagar tarjeta", "pague tarjeta", "abonar el resumen", "abonar resumen",
-        "pago de resumen", "pagar el saldo de la tarjeta", "pague el saldo de la tarjeta",
-    ]
-    return any(f in m for f in frases)
 
 
-def _parsear_monto_texto_cuota(t: str) -> Decimal | None:
-    """Parsea montos en texto soportando modismos argentinos como '80 mil', '80k', '1 palo'."""
-    t = t.lower().strip()
-    m_mil = re.match(r"^([0-9]+(?:[.,][0-9]+)?)\s*(?:mil|k)$", t)
-    if m_mil:
-        val = float(m_mil.group(1).replace(",", ".")) * 1000
-        return Decimal(str(int(val)))
-    m_palo = re.match(r"^([0-9]+(?:[.,][0-9]+)?)\s*(?:palos?|lucas?)$", t)
-    if m_palo:
-        mult = 1000000 if "palo" in t else 1000
-        val = float(m_palo.group(1).replace(",", ".")) * mult
-        return Decimal(str(int(val)))
-    t_clean = re.sub(r"[^\d.,]", "", t)
-    if not t_clean:
-        return None
-    if "." in t_clean and "," in t_clean:
-        t_clean = t_clean.replace(".", "").replace(",", ".")
-    elif "." in t_clean:
-        partes = t_clean.split(".")
-        if len(partes[-1]) == 3 and len(partes) > 1:
-            t_clean = t_clean.replace(".", "")
-    elif "," in t_clean:
-        t_clean = t_clean.replace(",", ".")
-    try:
-        return Decimal(t_clean)
-    except Exception:
-        return None
 
 
-def _interpretar_cuotas(
-    mensaje: str,
-    monto_ia: Decimal | None,
-) -> tuple[int, Decimal | None, Decimal | None, bool, str | None]:
-    """
-    Interpreta cantidad de cuotas y determina si el monto es total o por cuota (Tarea 5).
-    Retorna: (cant_cuotas, monto_cuota, monto_total, es_ambiguo, err_msg)
-    """
-    m_norm = normalizar_texto(mensaje)
-
-    # Caso 1: "en X cuotas de M" o "X cuotas de M" -> M es por cuota
-    pat_de = re.search(
-        r"(?:en\s+)?(\d+)\s*(?:cuotas?|pagos?)\s+de\s+(?:cada\s+una\s+de\s+)?(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?)(?:\b|$)",
-        m_norm,
-    )
-    if pat_de:
-        cant = int(pat_de.group(1))
-        if cant < 1 or cant > 48:
-            return cant, None, None, False, "La cantidad de cuotas debe ser entre 1 y 48."
-        m_str = pat_de.group(2).strip()
-        m_val = _parsear_monto_texto_cuota(m_str)
-        if m_val is None and monto_ia is not None:
-            m_val = monto_ia
-        if m_val is not None:
-            monto_cuota = m_val
-            monto_total = Decimal(str(cant)) * monto_cuota
-            return cant, monto_cuota, monto_total, False, None
-
-    # Caso 2: "M en X cuotas" o "M a pagar en X cuotas" -> M es el total
-    pat_en = re.search(
-        r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?)\s+(?:a\s+pagar\s+)?en\s+(\d+)\s*(?:cuotas?|pagos?)(?:\b|$)",
-        m_norm,
-    )
-    if pat_en:
-        cant = int(pat_en.group(2))
-        if cant < 1 or cant > 48:
-            return cant, None, None, False, "La cantidad de cuotas debe ser entre 1 y 48."
-        m_str = pat_en.group(1).strip()
-        m_val = _parsear_monto_texto_cuota(m_str)
-        if m_val is None and monto_ia is not None:
-            m_val = monto_ia
-        if m_val is not None:
-            monto_total = m_val
-            monto_cuota = round(monto_total / Decimal(str(cant)), 2)
-            return cant, monto_cuota, monto_total, False, None
-
-    # Caso 3: Menciona cuotas ("X cuotas") pero sin encajar claramente en Caso 1 ni Caso 2
-    pat_gen = re.search(r"(?:en\s+)?(\d+)\s*(?:cuotas?|pagos?)", m_norm)
-    if pat_gen:
-        cant = int(pat_gen.group(1))
-        if cant < 1 or cant > 48:
-            return cant, None, None, False, "La cantidad de cuotas debe ser entre 1 y 48."
-        if cant > 1 and monto_ia is not None:
-            return cant, None, None, True, None
-
-    # Caso 4: No menciona cuotas (1 pago)
-    if monto_ia is not None:
-        return 1, monto_ia, monto_ia, False, None
-
-    return 1, None, None, False, None
 
 
 def _construir_propuesta_credito(
@@ -1156,60 +939,10 @@ def _construir_propuesta_credito(
 
 
 
-def _resolver_y_validar_fecha(fecha_val: str | None) -> tuple[date, str | None]:
-    """
-    Resuelve la fecha de la transacción y valida reglas de negocio:
-    - Fechas futuras: se avisa y se usa hoy.
-    - Fechas de más de 60 días atrás: se avisa y se usa hoy.
-    - Fechas válidas (hasta 60 días atrás y <= hoy): se usan tal cual.
-    - Si no se especifica fecha o es inválida: se usa hoy sin aviso.
-    Retorna (fecha_resuelta, aviso_o_none).
-    """
-    hoy = hoy_argentina()
-    if not fecha_val:
-        return hoy, None
-
-    try:
-        fecha_candidata = date.fromisoformat(str(fecha_val))
-    except Exception:
-        return hoy, None
-
-    limite_antiguedad = hoy - timedelta(days=60)
-    if fecha_candidata > hoy:
-        return hoy, "No puedo registrar movimientos con fecha futura porque todavía no ocurrieron. Va a quedar con fecha de hoy."
-    elif fecha_candidata < limite_antiguedad:
-        return hoy, "No puedo registrar movimientos de más de 60 días atrás. Va a quedar con fecha de hoy."
-    else:
-        return fecha_candidata, None
 
 
-_MESES_RIOPLATENSE = [
-    "enero", "febrero", "marzo", "abril", "mayo", "junio",
-    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
-]
 
 
-def _formatear_fecha_natural(fecha_obj: date) -> str | None:
-    """
-    Formatea una fecha de forma natural en rioplatense:
-    - Hoy: None (no se menciona)
-    - Ayer: 'ayer'
-    - Anteayer: 'anteayer'
-    - Otra fecha: 'el 31 de agosto' (o 'el 31 de agosto de 2025' si difiere el año)
-    """
-    hoy = hoy_argentina()
-    if fecha_obj == hoy:
-        return None
-    delta = (hoy - fecha_obj).days
-    if delta == 1:
-        return "ayer"
-    elif delta == 2:
-        return "anteayer"
-    else:
-        mes_nombre = _MESES_RIOPLATENSE[fecha_obj.month - 1]
-        if fecha_obj.year != hoy.year:
-            return f"el {fecha_obj.day} de {mes_nombre} de {fecha_obj.year}"
-        return f"el {fecha_obj.day} de {mes_nombre}"
 
 
 def _validar_item_movimiento(
@@ -1583,46 +1316,12 @@ def _detectar_duplicados_en_lote(entidades: dict) -> tuple[bool, Decimal | None,
     return False, None, None, None
 
 
-def _es_confirmacion_nuevo_movimiento(mensaje: str) -> bool:
-    """Verifica si el usuario confirma que el movimiento repetido es nuevo."""
-    norm = normalizar_texto(mensaje)
-    if not norm:
-        return False
-    if any(k in norm for k in ("es nuevo", "nuevo", "es otro", "otro", "son dos", "son distintos", "gasto nuevo", "movimiento nuevo", "es otra cosa")):
-        return True
-    if norm in PALABRAS_CONFIRMACION:
-        return True
-    return False
 
 
-def _es_descarte_duplicado(mensaje: str) -> bool:
-    """Verifica si el usuario indica que el movimiento repetido es un error o duplicado."""
-    norm = normalizar_texto(mensaje)
-    if not norm:
-        return False
-    if any(k in norm for k in ("error", "repitio", "repetido", "equivoque", "equivoqué", "no anotes", "no registres", "deja", "dejalo")):
-        return True
-    if _es_cancelacion(mensaje):
-        return True
-    return False
 
 
-def _es_confirmacion_lote_ambos(mensaje: str) -> bool:
-    norm = normalizar_texto(mensaje)
-    if not norm:
-        return False
-    if any(k in norm for k in ("son dos", "dos", "los dos", "ambos", "son distintos", "distintos", "anota los dos", "anota ambos")):
-        return True
-    if norm in PALABRAS_CONFIRMACION:
-        return True
-    return False
 
 
-def _es_confirmacion_lote_uno_solo(mensaje: str) -> bool:
-    norm = normalizar_texto(mensaje)
-    if not norm:
-        return False
-    return any(k in norm for k in ("es uno solo", "uno solo", "solo uno", "uno", "es uno", "fue uno solo", "fue uno", "anota uno", "anota solo uno"))
 
 
 def _registrar_item_batch(
@@ -3168,48 +2867,6 @@ def _evaluar_correccion_billetera(
     return False, None, [], None
 
 
-def _parsear_monto_argentino(texto: str) -> Decimal | None:
-    if not texto:
-        return None
-    limpio = texto.strip().lower()
-    limpio = limpio.replace("$", "").replace("ars", "").replace("usd", "").strip()
-    multiplicador = Decimal("1")
-    if limpio.endswith("k"):
-        multiplicador = Decimal("1000")
-        limpio = limpio[:-1].strip()
-    elif "mil" in limpio.split() or limpio.endswith("mil") or re.search(r"\bmil\b", limpio):
-        multiplicador = Decimal("1000")
-        limpio = re.sub(r"\bmil\b", "", limpio).strip()
-    elif "luca" in limpio:
-        multiplicador = Decimal("1000")
-        limpio = re.sub(r"lucas?", "", limpio).strip()
-    elif "palo" in limpio:
-        multiplicador = Decimal("1000000")
-        limpio = re.sub(r"palos?", "", limpio).strip()
-
-    if "." in limpio and "," in limpio:
-        limpio = limpio.replace(".", "").replace(",", ".")
-    elif "." in limpio:
-        partes = limpio.split(".")
-        if len(partes) == 2 and len(partes[1]) == 3:
-            limpio = partes[0] + partes[1]
-        elif len(partes) > 2:
-            limpio = "".join(partes)
-        else:
-            if len(partes[1]) == 3:
-                limpio = partes[0] + partes[1]
-            else:
-                limpio = partes[0] + "." + partes[1]
-    elif "," in limpio:
-        limpio = limpio.replace(",", ".")
-
-    try:
-        val = Decimal(limpio) * multiplicador
-        if val > 0:
-            return val
-    except Exception:
-        pass
-    return None
 
 
 def _buscar_ultimo_movimiento_whatsapp(usuario_id: UUID, db: Session) -> tuple[Transaccion | None, str | None]:
@@ -3537,21 +3194,6 @@ def _confirmar_propuesta_corregir(
     return tx, "Listo, movimiento corregido.", False
 
 
-def _parece_intento_correccion(mensaje: str) -> bool:
-    norm = normalizar_texto(mensaje)
-    if not norm:
-        return False
-    if re.search(r"(?:eran?|fue)?\s*\$?[\d\.,]+k?\s+no\s+\$?[\d\.,]+k?", norm):
-        return True
-    if re.search(r"^no,?\s+(?:eran?\s+)?\$?[\d\.,]+k?$", norm):
-        return True
-    if re.search(r"^(?:eso\s+era|era|en\s+realidad\s+era)\s+", norm):
-        return True
-    if re.search(r"^(?:fue\s+con|era\s+con|fue\s+en|era\s+en)\s+", norm):
-        return True
-    if re.search(r"^(?:fue\s+ayer|era\s+ayer|fue\s+anteayer|era\s+anteayer|fue\s+hoy)\b", norm):
-        return True
-    return False
 
 
 def _detectar_correccion_ultimo_movimiento(
@@ -3782,164 +3424,20 @@ def _construir_propuesta_corregir(
 # HELPERS Y GESTIÓN DE SUSCRIPCIONES POR WHATSAPP (ETAPA B)
 # ==============================================================================
 
-def _es_senial_suscripcion(mensaje: str) -> bool:
-    norm = normalizar_texto(mensaje)
-    if not norm:
-        return False
-    patrones = [
-        r"\b(?:empece|empecé)\s+a\s+pagar\b",
-        r"\b(?:me\s+suscribi|me\s+suscribí)\b",
-        r"\b(?:me\s+abone|me\s+aboné)\b",
-        r"\bcontrat[eé]\b",
-        r"\bpago\s+todos\s+los\s+meses\b",
-        r"\bpago\s+mensual\b",
-        r"\bes\s+(?:mensual|anual|bimestral|trimestral|semestral)\b",
-        r"\bse\s+debita\b",
-        r"\bme\s+lo\s+descuentan\b",
-        r"\bnueva\s+suscripci[oó]n\b",
-        r"\bme\s+anot[eé]\b",
-    ]
-    return any(re.search(p, norm) for p in patrones)
 
 
-def _es_senial_gasto_suelto(mensaje: str) -> bool:
-    norm = normalizar_texto(mensaje)
-    if not norm:
-        return False
-    if _es_senial_suscripcion(mensaje):
-        return False
-    return bool(re.search(r"\b(?:gast[eé]|me\s+sali[oó])\b", norm))
 
 
-def _extraer_frecuencia_mencionada(mensaje: str) -> str | None:
-    norm = normalizar_texto(mensaje)
-    if not norm:
-        return None
-    if re.search(r"\b(?:por\s+mes|al\s+mes|cada\s+mes|todos\s+los\s+meses|mensual(?:mente)?)\b", norm):
-        return "mensual"
-    if re.search(r"\b(?:bimestral(?:mente)?|cada\s+2\s+meses|cada\s+dos\s+meses)\b", norm):
-        return "bimestral"
-    if re.search(r"\b(?:trimestral(?:mente)?|cada\s+3\s+meses|cada\s+tres\s+meses)\b", norm):
-        return "trimestral"
-    if re.search(r"\b(?:semestral(?:mente)?|cada\s+6\s+meses|cada\s+seis\s+meses)\b", norm):
-        return "semestral"
-    if re.search(r"\b(?:por\s+a[nñ]o|al\s+a[nñ]o|todos\s+los\s+a[nñ]os|anual(?:mente)?)\b", norm):
-        return "anual"
-    return None
 
 
-def _extraer_nombre_servicio(mensaje: str) -> str | None:
-    serv_cat = identificar_servicio_en_texto(mensaje)
-    if serv_cat:
-        return serv_cat["nombre"]
-
-    m1 = re.search(
-        r"(?:empec[eé]|empece)\s+a\s+pagar\s+(?:\$?\s*[\d\.,]+(?:k|\s*mil)?\s*(?:d[oó]lares|usd|pesos)?\s+)?(?:de\s+la|de\s+el|del|de|a|en)\s+(.+?)(?:\s+(?:por\s+mes|al\s+mes|mensual|anual|cada\s+mes|con|desde)\b|$)",
-        mensaje,
-        flags=re.IGNORECASE,
-    )
-    if m1:
-        cand = m1.group(1).strip(" .,-")
-        if cand:
-            return cand
-
-    m2 = re.search(
-        r"me\s+suscrib[ií]\s+a\s+(.+?)(?:\s+(?:por\s+\$?[\d\.,]+|por\s+mes|al\s+mes|mensual|anual|con|desde)\b|$)",
-        mensaje,
-        flags=re.IGNORECASE,
-    )
-    if m2:
-        cand = m2.group(1).strip(" .,-")
-        if cand:
-            return cand
-
-    m3 = re.search(
-        r"(?:di\s+de\s+baja|dar\s+de\s+baja|baja\s+de|cancel[eé]|cancele|ya\s+no\s+pago\s+m[aá]s|me\s+desuscrib[ií])\s+(?:la\s+suscripci[oó]n\s+a\s+|a\s+|el\s+|la\s+)?([^,\.]+?)(?:\s+por\s+favor|$)",
-        mensaje,
-        flags=re.IGNORECASE,
-    )
-    if m3:
-        cand = m3.group(1).strip(" .,-")
-        if cand:
-            return cand
-
-    m4 = re.search(
-        r"(?:aument[oó]|aumento|subi[oó]|subio|cambi[oó]\s+de\s+precio)\s+(?:el\s+|la\s+)?([^,\.]+?)(?:,|\s+ahora|\s+a\s+|\s+subio|$)",
-        mensaje,
-        flags=re.IGNORECASE,
-    )
-    if m4:
-        cand = m4.group(1).strip(" .,-")
-        if cand:
-            return cand
-
-    return None
 
 
-def _es_pedido_baja_suscripcion(mensaje: str) -> tuple[bool, str | None]:
-    norm = normalizar_texto(mensaje)
-    if not norm:
-        return False, None
-    if re.search(r"\b(?:di\s+de\s+baja|dar\s+de\s+baja|baja\s+de|cancele\s+la\s+suscripcion|cancele|cancel[eé]|ya\s+no\s+pago\s+mas|ya\s+no\s+pago\s+más|me\s+desuscribi|me\s+desuscribí)\b", norm):
-        srv = _extraer_nombre_servicio(mensaje)
-        return True, srv
-    return False, None
 
 
-def _es_cambio_precio_suscripcion(mensaje: str) -> tuple[bool, str | None, Decimal | None]:
-    norm = normalizar_texto(mensaje)
-    if not norm:
-        return False, None, None
-    if re.search(r"\b(?:aument[oó]|aumento|ahora\s+sale|subi[oó]\s+a|subio\s+a|me\s+lo\s+aumentaron|cambi[oó]\s+de\s+precio)\b", norm):
-        srv = _extraer_nombre_servicio(mensaje)
-        m_num = re.search(r"(?:ahora\s+son|ahora\s+sale|a|subi[oó]\s+a|subio\s+a|en)\s+(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\b", norm)
-        monto = None
-        if m_num:
-            monto = _parsear_monto_argentino(m_num.group(1))
-        else:
-            m_alt = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\b", norm)
-            if m_alt:
-                monto = _parsear_monto_argentino(m_alt.group(1))
-        return True, srv, monto
-    return False, None, None
 
 
-def _es_consulta_suscripciones(mensaje: str) -> bool:
-    norm = normalizar_texto(mensaje)
-    if not norm:
-        return False
-    frases = [
-        "cuanto gasto en suscripciones",
-        "cuanto pago por mes en suscripciones",
-        "cuanto pago en suscripciones",
-        "que suscripciones tengo",
-        "cuales son mis suscripciones",
-        "mis suscripciones",
-        "suscripciones activas",
-        "cuanto pago por mes",
-    ]
-    return any(f in norm for f in frases)
 
 
-def _detectar_ambiguedad_suscripcion(mensaje: str) -> tuple[bool, str | None]:
-    norm = normalizar_texto(mensaje)
-    if not norm:
-        return False, None
-    if _es_senial_suscripcion(mensaje):
-        return False, None
-    if _extraer_frecuencia_mencionada(mensaje):
-        return False, None
-    if _es_senial_gasto_suelto(mensaje):
-        return False, None
-
-    srv = identificar_servicio_en_texto(mensaje)
-    if srv:
-        if re.search(r"\b(?:pagu[eé]|abone|abon[eé])\b", norm):
-            return True, srv["nombre"]
-        if norm in (normalizar_texto(srv["nombre"]), f"el {normalizar_texto(srv['nombre'])}", f"la {normalizar_texto(srv['nombre'])}"):
-            return True, srv["nombre"]
-
-    return False, None
 
 
 def _buscar_suscripcion_cobrada_periodo_actual(
@@ -3988,16 +3486,6 @@ def _buscar_suscripcion_cobrada_periodo_actual(
     return None, None
 
 
-def _es_confirmacion_gasto_aparte(mensaje: str) -> bool:
-    norm = normalizar_texto(mensaje)
-    if not norm:
-        return False
-    frases = [
-        "es un gasto aparte", "gasto aparte", "es aparte", "aparte",
-        "es otro gasto", "es otro", "otro gasto", "anotalo igual",
-        "anotarlo igual", "es nuevo", "nuevo", "si anotalo", "si, anotalo"
-    ]
-    return any(f in norm for f in frases)
 
 
 def _buscar_propuesta_suscripcion_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
@@ -4200,14 +3688,6 @@ def _confirmar_propuesta_cambio_precio(
     return hist, f"Listo, actualicé el precio de {nombre} a {nuevo_fmt}.", False
 
 
-def _extraer_monto_y_moneda_suscripcion(mensaje: str) -> tuple[Decimal | None, str]:
-    norm = normalizar_texto(mensaje)
-    moneda = "USD" if any(w in norm for w in ["dolar", "dolares", "dólares", "usd", "us$"]) else "ARS"
-    m = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\s*(?:d[oó]lares|usd|pesos)?\b", mensaje, flags=re.IGNORECASE)
-    if m:
-        monto = _parsear_monto_argentino(m.group(1))
-        return monto, moneda
-    return None, moneda
 
 
 def _buscar_suscripcion_activa_por_nombre(usuario_id: UUID, nombre: str | None, db: Session) -> Suscripcion | None:
@@ -4266,17 +3746,6 @@ def _procesar_consulta_suscripciones(usuario: Usuario, db: Session) -> str:
     return "\n".join(lineas)
 
 
-def _es_intento_alta_suscripcion(mensaje: str) -> bool:
-    if _es_senial_gasto_suelto(mensaje):
-        return False
-    if _es_senial_suscripcion(mensaje):
-        return True
-    frec = _extraer_frecuencia_mencionada(mensaje)
-    if frec:
-        srv = _extraer_nombre_servicio(mensaje)
-        if srv:
-            return True
-    return False
 
 
 def _obtener_historial_reciente(usuario_id: UUID, db: Session, n: int = 6) -> list[dict]:
@@ -4326,9 +3795,6 @@ def _obtener_historial_reciente(usuario_id: UUID, db: Session, n: int = 6) -> li
     return resultado
 
 
-def _resolver_fecha_transaccion(fecha_val: str | None) -> date:
-    fecha_obj, _ = _resolver_y_validar_fecha(fecha_val)
-    return fecha_obj
 
 
 def _crear_transaccion_adicional(
