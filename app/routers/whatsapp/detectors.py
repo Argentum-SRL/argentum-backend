@@ -7,8 +7,13 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from app.core.catalogo_suscripciones import identificar_servicio_en_texto
-from app.utils.texto import normalizar_texto
+from app.routers.whatsapp.parsers import (
+    _extraer_frecuencia_mencionada,
+    _extraer_nombre_servicio,
+    _parsear_monto_argentino,
+)
 from app.services.rate_limit_service import verificar_rate_limit
+from app.utils.texto import normalizar_texto
 
 if TYPE_CHECKING:
     from app.models.conversacion_wpp import ConversacionWpp
@@ -266,7 +271,6 @@ def _es_senial_gasto_suelto(mensaje: str) -> bool:
     return bool(re.search(r"\b(?:gast[eé]|me\s+sali[oó])\b", norm))
 
 def _es_pedido_baja_suscripcion(mensaje: str) -> tuple[bool, str | None]:
-    from app.routers.whatsapp_ia import _extraer_nombre_servicio
     norm = normalizar_texto(mensaje)
     if not norm:
         return False, None
@@ -276,7 +280,6 @@ def _es_pedido_baja_suscripcion(mensaje: str) -> tuple[bool, str | None]:
     return False, None
 
 def _es_cambio_precio_suscripcion(mensaje: str) -> tuple[bool, str | None, Decimal | None]:
-    from app.routers.whatsapp_ia import _extraer_nombre_servicio, _parsear_monto_argentino
     norm = normalizar_texto(mensaje)
     if not norm:
         return False, None, None
@@ -310,7 +313,6 @@ def _es_consulta_suscripciones(mensaje: str) -> bool:
     return any(f in norm for f in frases)
 
 def _detectar_ambiguedad_suscripcion(mensaje: str) -> tuple[bool, str | None]:
-    from app.routers.whatsapp_ia import _extraer_frecuencia_mencionada
     norm = normalizar_texto(mensaje)
     if not norm:
         return False, None
@@ -342,7 +344,6 @@ def _es_confirmacion_gasto_aparte(mensaje: str) -> bool:
     return any(f in norm for f in frases)
 
 def _es_intento_alta_suscripcion(mensaje: str) -> bool:
-    from app.routers.whatsapp_ia import _extraer_frecuencia_mencionada, _extraer_nombre_servicio
     if _es_senial_gasto_suelto(mensaje):
         return False
     if _es_senial_suscripcion(mensaje):
