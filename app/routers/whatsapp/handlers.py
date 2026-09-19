@@ -49,15 +49,22 @@ from app.routers.whatsapp.detectors import (
     _es_pregunta_billetera,
     _es_saludo,
     _parece_intento_correccion,
+    _es_confirmacion_gasto_aparte,
+    _es_confirmacion_lote_ambos,
+    _es_confirmacion_lote_uno_solo,
+    _es_confirmacion_nuevo_movimiento,
+    _es_descarte_duplicado,
 )
 from app.routers.whatsapp.parsers import (
     _nombre_corto_categoria,
     _resolver_y_validar_fecha,
+    _extraer_frecuencia_mencionada,
 )
 from app.services import suscripcion_service, whatsapp_service
 from app.services.tarjeta_service import calcular_primer_vencimiento
 from app.services.evento_service import emitir_evento_actualizacion
-from app.utils.fecha import TZ_ARGENTINA
+from app.core.catalogo_suscripciones import buscar_servicio_por_texto
+from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
 from app.utils.formato import formatear_monto
 from app.utils.texto import normalizar_texto
 
@@ -1194,4 +1201,187 @@ Si aplica y procesa la selección o error de rango/moneda, persiste y retorna Tr
         db.commit()
         whatsapp_service.enviar_whatsapp(from_number, propuesta_msg)
         return True
+    return False
+
+
+def manejar_verificaciones_slot_filling(
+    mensaje_texto: str,
+    usuario: Usuario,
+    db: Session,
+    from_number: str,
+    wamid: str | None = None,
+) -> bool:
+    """Maneja las respuestas a verificaciones de slot filling pendientes:
+    duplicados simples, lotes duplicados, duplicados de suscripción, ambigüedad y alta de suscripción.
+    Si procesa o cancela el flujo, persiste y retorna True.
+    Si no aplica o el usuario ignora la pregunta con otro mensaje, retorna False.
+    """
+    from app.routers.whatsapp_ia import _registrar_movimiento_directo, MESES_ES_GEN
+
+    conv_activa_dup = _buscar_slot_filling_activo(usuario.id, db)
+    if conv_activa_dup and conv_activa_dup.slot_filling_estado:
+        tipo_flujo = conv_activa_dup.slot_filling_estado.get('tipo_flujo')
+        if tipo_flujo == 'verificacion_duplicado':
+            if _es_confirmacion_nuevo_movimiento(mensaje_texto):
+                entidades_pend = conv_activa_dup.slot_filling_estado
+                tx_creada, msg_confirm = _registrar_movimiento_directo(usuario, entidades_pend, db)
+                conv_activa_dup.slot_filling_activo = False
+                conv_activa_dup.accion_ejecutada = str(tx_creada.id) if tx_creada else 'error'
+                nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=msg_confirm, intent_detectado='confirmar_duplicado', entidades=entidades_pend, accion_ejecutada=str(tx_creada.id) if tx_creada else None, confianza=Decimal('1.000'), slot_filling_activo=False, slot_filling_estado=None)
+                db.add(nueva_conv)
+                db.commit()
+                whatsapp_service.enviar_whatsapp(from_number, msg_confirm)
+                return True
+            elif _es_descarte_duplicado(mensaje_texto):
+                conv_activa_dup.slot_filling_activo = False
+                conv_activa_dup.accion_ejecutada = 'descartado_por_duplicado'
+                msg_desc = 'Listo, no anoto nada.'
+                nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=msg_desc, intent_detectado='cancelar', entidades={}, accion_ejecutada='descartado_por_duplicado', confianza=Decimal('1.000'), slot_filling_activo=False, slot_filling_estado=None)
+                db.add(nueva_conv)
+                db.commit()
+                whatsapp_service.enviar_whatsapp(from_number, msg_desc)
+                return True
+        elif tipo_flujo == 'verificacion_lote_duplicado':
+            if _es_confirmacion_lote_ambos(mensaje_texto):
+                entidades_pend = conv_activa_dup.slot_filling_estado
+                tx_creada, msg_confirm = _registrar_movimiento_directo(usuario, entidades_pend, db, registrar_adicionales=True)
+                conv_activa_dup.slot_filling_activo = False
+                conv_activa_dup.accion_ejecutada = str(tx_creada.id) if tx_creada else 'error'
+                nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=msg_confirm, intent_detectado='confirmar_lote', entidades=entidades_pend, accion_ejecutada=str(tx_creada.id) if tx_creada else None, confianza=Decimal('1.000'), slot_filling_activo=False, slot_filling_estado=None)
+                db.add(nueva_conv)
+                db.commit()
+                whatsapp_service.enviar_whatsapp(from_number, msg_confirm)
+                return True
+            elif _es_confirmacion_lote_uno_solo(mensaje_texto):
+                entidades_pend = dict(conv_activa_dup.slot_filling_estado)
+                entidades_pend['transacciones_adicionales'] = []
+                tx_creada, msg_confirm = _registrar_movimiento_directo(usuario, entidades_pend, db, registrar_adicionales=False)
+                conv_activa_dup.slot_filling_activo = False
+                conv_activa_dup.accion_ejecutada = str(tx_creada.id) if tx_creada else 'error'
+                nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=msg_confirm, intent_detectado='confirmar_lote_uno', entidades=entidades_pend, accion_ejecutada=str(tx_creada.id) if tx_creada else None, confianza=Decimal('1.000'), slot_filling_activo=False, slot_filling_estado=None)
+                db.add(nueva_conv)
+                db.commit()
+                whatsapp_service.enviar_whatsapp(from_number, msg_confirm)
+                return True
+            elif _es_descarte_duplicado(mensaje_texto):
+                conv_activa_dup.slot_filling_activo = False
+                conv_activa_dup.accion_ejecutada = 'descartado_por_duplicado'
+                msg_desc = 'Listo, no anoto nada.'
+                nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=msg_desc, intent_detectado='cancelar', entidades={}, accion_ejecutada='descartado_por_duplicado', confianza=Decimal('1.000'), slot_filling_activo=False, slot_filling_estado=None)
+                db.add(nueva_conv)
+                db.commit()
+                whatsapp_service.enviar_whatsapp(from_number, msg_desc)
+                return True
+        elif tipo_flujo == 'verificacion_duplicado_suscripcion':
+            if _es_confirmacion_gasto_aparte(mensaje_texto):
+                entidades_pend = conv_activa_dup.slot_filling_estado
+                tx_creada, msg_confirm = _registrar_movimiento_directo(usuario, entidades_pend, db)
+                conv_activa_dup.slot_filling_activo = False
+                conv_activa_dup.accion_ejecutada = str(tx_creada.id) if tx_creada else 'error'
+                nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=msg_confirm, intent_detectado='confirmar_gasto_aparte', entidades=entidades_pend, accion_ejecutada=str(tx_creada.id) if tx_creada else None, confianza=Decimal('1.000'), slot_filling_activo=False, slot_filling_estado=None)
+                db.add(nueva_conv)
+                db.commit()
+                whatsapp_service.enviar_whatsapp(from_number, msg_confirm)
+                return True
+            elif _es_cancelacion(mensaje_texto) or _es_descarte_duplicado(mensaje_texto):
+                conv_activa_dup.slot_filling_activo = False
+                conv_activa_dup.accion_ejecutada = 'descartado_por_duplicado'
+                msg_desc = 'Listo, cancelado.'
+                nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=msg_desc, intent_detectado='cancelar', entidades={}, accion_ejecutada='cancelada', confianza=Decimal('1.000'), slot_filling_activo=False, slot_filling_estado=None)
+                db.add(nueva_conv)
+                db.commit()
+                whatsapp_service.enviar_whatsapp(from_number, msg_desc)
+                return True
+        elif tipo_flujo == 'ambiguedad_suscripcion':
+            norm_amb = normalizar_texto(mensaje_texto)
+            srv_nom = conv_activa_dup.slot_filling_estado.get('servicio')
+            if any((w in norm_amb for w in ['suscripcion', 'suscripción', 'me suscribi', 'me suscribí', 'es una suscripcion', 'es suscripcion', 'abono'])):
+                srv_cat = buscar_servicio_por_texto(srv_nom) if srv_nom else None
+                if srv_cat and srv_cat.get('frecuencia_sugerida'):
+                    frec_tipica = srv_cat['frecuencia_sugerida']
+                    msg_frec = f'¿Con qué frecuencia se paga {srv_nom}? (lo habitual es {frec_tipica}: mensual, bimestral, trimestral, semestral o anual)'
+                else:
+                    msg_frec = f'¿Con qué frecuencia se paga {srv_nom}? (mensual, bimestral, trimestral, semestral o anual)'
+                conv_activa_dup.slot_filling_estado = {'tipo_flujo': 'crear_suscripcion_frecuencia', 'servicio': srv_nom, 'monto': conv_activa_dup.slot_filling_estado.get('monto'), 'moneda': conv_activa_dup.slot_filling_estado.get('moneda', 'ARS')}
+                db.commit()
+                whatsapp_service.enviar_whatsapp(from_number, msg_frec)
+                return True
+            elif any((w in norm_amb for w in ['gasto', 'unico', 'único', 'gasto unico', 'es un gasto'])):
+                msg_monto = f'¿Cuánto gastaste en {srv_nom}?'
+                conv_activa_dup.slot_filling_estado = {'tipo_flujo': 'pedir_monto_gasto', 'concepto': srv_nom, 'categoria': 'Entretenimiento'}
+                db.commit()
+                whatsapp_service.enviar_whatsapp(from_number, msg_monto)
+                return True
+        elif tipo_flujo == 'crear_suscripcion_frecuencia':
+            frec = _extraer_frecuencia_mencionada(mensaje_texto)
+            if frec:
+                srv_nom = conv_activa_dup.slot_filling_estado.get('servicio')
+                monto_val = conv_activa_dup.slot_filling_estado.get('monto')
+                moneda_val = conv_activa_dup.slot_filling_estado.get('moneda', 'ARS')
+                if monto_val is not None:
+                    billetera_obj = db.query(Billetera).filter(Billetera.usuario_id == usuario.id, Billetera.es_principal == True).first()
+                    if not billetera_obj:
+                        billetera_obj = db.query(Billetera).filter(Billetera.usuario_id == usuario.id).first()
+                    proximo_cobro = suscripcion_service.calcular_siguiente_cobro(hoy_argentina(), frec)
+                    fecha_fmt = f'{proximo_cobro.day} de {MESES_ES_GEN[proximo_cobro.month - 1]}'
+                    mon_enum = Moneda.USD if moneda_val == 'USD' else Moneda.ARS
+                    monto_fmt = formatear_monto(float(monto_val), mon_enum)
+                    medio_pago_txt = f'desde {billetera_obj.nombre}' if billetera_obj else ''
+                    propuesta_msg = f'Voy a programar la suscripción a {srv_nom}: {monto_fmt} {frec} {medio_pago_txt}, primer cobro el {fecha_fmt}. ¿Confirmás?'
+                    conv_activa_dup.slot_filling_activo = False
+                    conv_activa_dup.accion_ejecutada = 'propuesta_creada'
+                    db.flush()
+                    srv_cat = buscar_servicio_por_texto(srv_nom) if srv_nom else None
+                    cat_sugerida = srv_cat.get('categoria_sugerida') if srv_cat else 'Entretenimiento'
+                    nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=propuesta_msg, intent_detectado='agregar_suscripcion', entidades={'servicio': srv_nom, 'monto': float(monto_val), 'moneda': moneda_val, 'frecuencia': frec, 'billetera_id': str(billetera_obj.id) if billetera_obj else None, 'medio_pago_txt': medio_pago_txt, 'proximo_cobro': proximo_cobro.isoformat(), 'categoria': cat_sugerida}, accion_ejecutada=None, confianza=Decimal('1.000'), slot_filling_activo=False, slot_filling_estado=None)
+                    db.add(nueva_conv)
+                    db.commit()
+                    whatsapp_service.enviar_whatsapp(from_number, propuesta_msg)
+                    return True
+                else:
+                    msg_monto = f'¿Cuánto pagás por {srv_nom}?'
+                    conv_activa_dup.slot_filling_estado['frecuencia'] = frec
+                    conv_activa_dup.slot_filling_estado['tipo_flujo'] = 'crear_suscripcion_monto'
+                    db.commit()
+                    whatsapp_service.enviar_whatsapp(from_number, msg_monto)
+                    return True
+            else:
+                whatsapp_service.enviar_whatsapp(from_number, 'Por favor elegí una frecuencia: mensual, bimestral, trimestral, semestral o anual.')
+                return True
+        elif tipo_flujo == 'duplicado_suscripcion_existente':
+            norm_dup = normalizar_texto(mensaje_texto)
+            if any((w in norm_dup for w in ['otra', 'otra igual', 'crear otra', 'si', 'sí', 'registrar otra'])):
+                srv_nom = conv_activa_dup.slot_filling_estado.get('servicio')
+                monto_val = conv_activa_dup.slot_filling_estado.get('monto')
+                moneda_val = conv_activa_dup.slot_filling_estado.get('moneda', 'ARS')
+                frec = conv_activa_dup.slot_filling_estado.get('frecuencia') or 'mensual'
+                billetera_obj = db.query(Billetera).filter(Billetera.usuario_id == usuario.id, Billetera.es_principal == True).first()
+                if not billetera_obj:
+                    billetera_obj = db.query(Billetera).filter(Billetera.usuario_id == usuario.id).first()
+                proximo_cobro = suscripcion_service.calcular_siguiente_cobro(hoy_argentina(), frec)
+                fecha_fmt = f'{proximo_cobro.day} de {MESES_ES_GEN[proximo_cobro.month - 1]}'
+                mon_enum = Moneda.USD if moneda_val == 'USD' else Moneda.ARS
+                monto_fmt = formatear_monto(float(monto_val), mon_enum)
+                medio_pago_txt = f'desde {billetera_obj.nombre}' if billetera_obj else ''
+                propuesta_msg = f'Voy a programar la suscripción a {srv_nom}: {monto_fmt} {frec} {medio_pago_txt}, primer cobro el {fecha_fmt}. ¿Confirmás?'
+                conv_activa_dup.slot_filling_activo = False
+                conv_activa_dup.accion_ejecutada = 'propuesta_creada'
+                db.flush()
+                srv_cat = buscar_servicio_por_texto(srv_nom) if srv_nom else None
+                cat_sugerida = srv_cat.get('categoria_sugerida') if srv_cat else 'Entretenimiento'
+                nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=propuesta_msg, intent_detectado='agregar_suscripcion', entidades={'servicio': srv_nom, 'monto': float(monto_val), 'moneda': moneda_val, 'frecuencia': frec, 'billetera_id': str(billetera_obj.id) if billetera_obj else None, 'medio_pago_txt': medio_pago_txt, 'proximo_cobro': proximo_cobro.isoformat(), 'categoria': cat_sugerida}, accion_ejecutada=None, confianza=Decimal('1.000'), slot_filling_activo=False, slot_filling_estado=None)
+                db.add(nueva_conv)
+                db.commit()
+                whatsapp_service.enviar_whatsapp(from_number, propuesta_msg)
+                return True
+            else:
+                conv_activa_dup.slot_filling_activo = False
+                conv_activa_dup.accion_ejecutada = 'cancelada'
+                msg_desc = 'Listo, cancelado.'
+                nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=msg_desc, intent_detectado='cancelar', entidades={}, accion_ejecutada='cancelada', confianza=Decimal('1.000'), slot_filling_activo=False, slot_filling_estado=None)
+                db.add(nueva_conv)
+                db.commit()
+                whatsapp_service.enviar_whatsapp(from_number, msg_desc)
+                return True
+
     return False
