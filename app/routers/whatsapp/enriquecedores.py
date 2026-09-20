@@ -109,12 +109,12 @@ def enriquecer_respuesta_por_intent(
 
     elif intent_detectado == "consultar_saldo":
         try:
-            from app.services.dashboard_service import get_dashboard_resumen
-            resumen = get_dashboard_resumen(db, usuario)
-            ars_total = resumen["disponible_real"]["ars"]["saldo_billeteras"]
-            ars_disp = resumen["disponible_real"]["ars"]["disponible"]
-            usd_total = resumen["disponible_real"]["usd"]["saldo_billeteras"]
-            usd_disp = resumen["disponible_real"]["usd"]["disponible"]
+            from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
+            disp_ctx = _calcular_saldo_disponible_sync(db, usuario.id)
+            ars_total = float(disp_ctx["ars"]["total_billeteras"])
+            ars_disp = float(disp_ctx["ars"]["saldo_disponible"])
+            usd_total = float(disp_ctx["usd"]["total_billeteras"])
+            usd_disp = float(disp_ctx["usd"]["saldo_disponible"])
 
             msg = f"Tenés {_fmt(ars_total)} en tus billeteras en pesos. Disponible real (descontando cuotas): {_fmt(ars_disp)}."
             if usd_total > 0 or usd_disp > 0:
@@ -126,9 +126,9 @@ def enriquecer_respuesta_por_intent(
 
     elif intent_detectado == "consultar_balance":
         try:
-            from app.services.dashboard_service import get_dashboard_resumen
-            resumen = get_dashboard_resumen(db, usuario)
-            b_ars = resumen["balance"]["ars"]
+            from app.services.dashboard_service import calcular_balance_ciclo
+            bal_ciclo = calcular_balance_ciclo(db, usuario)
+            b_ars = bal_ciclo["ars"]
             ing_ars = b_ars.get("ingresos", 0.0)
             egr_ars = b_ars.get("egresos", 0.0)
             bal_ars = b_ars.get("balance", 0.0)
@@ -136,7 +136,7 @@ def enriquecer_respuesta_por_intent(
             signo_ars = "+" if bal_ars >= 0 else ""
             msg = f"En este ciclo llevás ingresados {_fmt(ing_ars)} y gastados {_fmt(egr_ars)} en pesos (balance: {signo_ars}{_fmt(bal_ars)})."
 
-            b_usd = resumen["balance"]["usd"]
+            b_usd = bal_ciclo["usd"]
             ing_usd = b_usd.get("ingresos", 0.0)
             egr_usd = b_usd.get("egresos", 0.0)
             bal_usd = b_usd.get("balance", 0.0)

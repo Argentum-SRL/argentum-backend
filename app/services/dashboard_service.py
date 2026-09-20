@@ -717,6 +717,77 @@ def get_dashboard_resumen(
         "proximos_pagos": proximos_pagos
     }
 
+
+def calcular_balance_ciclo(
+    db: Session, 
+    usuario: Usuario, 
+    fecha_desde_override: Optional[date] = None, 
+    fecha_hasta_override: Optional[date] = None,
+    total_billeteras_override: Optional[Dict[str, Decimal]] = None,
+    billetera_ids: Optional[List[UUID]] = None
+) -> Dict[str, Any]:
+    hoy = hoy_argentina()
+    fecha_inicio, fecha_fin = (fecha_desde_override, fecha_hasta_override) if (fecha_desde_override and fecha_hasta_override) else get_ciclo_fechas(usuario, hoy)
+    fecha_inicio_ant, fecha_fin_ant = get_ciclo_fechas(usuario, fecha_inicio - timedelta(days=1))
+    cycle_actual_cond = and_(Transaccion.fecha >= fecha_inicio, Transaccion.fecha <= fecha_fin)
+    cycle_ant_cond = and_(Transaccion.fecha >= fecha_inicio_ant, Transaccion.fecha <= fecha_fin_ant)
+    res_stmt_where = and_(
+        Transaccion.usuario_id == usuario.id,
+        Transaccion.es_padre_cuotas == False,
+        Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
+        Transaccion.movimiento_meta_id.is_(None),
+        ~Transaccion.descripcion.ilike("Aporte a la meta:%"),
+        ~Transaccion.descripcion.ilike("Retiro de la meta:%"),
+        or_(Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA, Transaccion.estado_verificacion == None)
+    )
+    if billetera_ids:
+        res_stmt_where = and_(res_stmt_where, Transaccion.billetera_id.in_(billetera_ids))
+    res_stmt = select(
+        func.min(Transaccion.fecha).label("primera_tx"),
+        # ARS actual
+        func.sum(case((and_(cycle_actual_cond, Transaccion.moneda == Moneda.ARS, Transaccion.tipo == TipoTransaccion.INGRESO), Transaccion.monto), else_=0)).label("ing_actual_ars"),
+        func.sum(case((and_(cycle_actual_cond, Transaccion.moneda == Moneda.ARS, Transaccion.tipo == TipoTransaccion.EGRESO), Transaccion.monto), else_=0)).label("egr_actual_ars"),
+        # ARS anterior
+        func.sum(case((and_(cycle_ant_cond, Transaccion.moneda == Moneda.ARS, Transaccion.tipo == TipoTransaccion.INGRESO), Transaccion.monto), else_=0)).label("ing_ant_ars"),
+        func.sum(case((and_(cycle_ant_cond, Transaccion.moneda == Moneda.ARS, Transaccion.tipo == TipoTransaccion.EGRESO), Transaccion.monto), else_=0)).label("egr_ant_ars"),
+        # USD actual
+        func.sum(case((and_(cycle_actual_cond, Transaccion.moneda == Moneda.USD, Transaccion.tipo == TipoTransaccion.INGRESO), Transaccion.monto), else_=0)).label("ing_actual_usd"),
+        func.sum(case((and_(cycle_actual_cond, Transaccion.moneda == Moneda.USD, Transaccion.tipo == TipoTransaccion.EGRESO), Transaccion.monto), else_=0)).label("egr_actual_usd"),
+        # USD anterior
+        func.sum(case((and_(cycle_ant_cond, Transaccion.moneda == Moneda.USD, Transaccion.tipo == TipoTransaccion.INGRESO), Transaccion.monto), else_=0)).label("ing_ant_usd"),
+        func.sum(case((and_(cycle_ant_cond, Transaccion.moneda == Moneda.USD, Transaccion.tipo == TipoTransaccion.EGRESO), Transaccion.monto), else_=0)).label("egr_ant_usd")
+    ).where(res_stmt_where)
+    res = db.execute(res_stmt).one()
+    ing_actual_ars = res.ing_actual_ars or Decimal("0")
+    egr_actual_ars = res.egr_actual_ars or Decimal("0")
+    ing_ant_ars = res.ing_ant_ars or Decimal("0")
+    egr_ant_ars = res.egr_ant_ars or Decimal("0")
+    balance_ars = ing_actual_ars - egr_actual_ars
+    balance_ant_ars = ing_ant_ars - egr_ant_ars
+    variacion_ars = round(float(((balance_ars - balance_ant_ars) / abs(balance_ant_ars)) * 100), 1) if balance_ant_ars != 0 else None
+    ing_actual_usd = res.ing_actual_usd or Decimal("0")
+    egr_actual_usd = res.egr_actual_usd or Decimal("0")
+    ing_ant_usd = res.ing_ant_usd or Decimal("0")
+    egr_ant_usd = res.egr_ant_usd or Decimal("0")
+    balance_usd = ing_actual_usd - egr_actual_usd
+    balance_ant_usd = ing_ant_usd - egr_ant_usd
+    variacion_usd = round(float(((balance_usd - balance_ant_usd) / abs(balance_ant_usd)) * 100), 1) if balance_ant_usd != 0 else None
+
+    return {
+        "ars": {
+            "ingresos": float(ing_actual_ars),
+            "egresos": float(egr_actual_ars),
+            "balance": float(balance_ars),
+            "variacion_vs_ciclo_anterior": variacion_ars
+        },
+        "usd": {
+            "ingresos": float(ing_actual_usd),
+            "egresos": float(egr_actual_usd),
+            "balance": float(balance_usd),
+            "variacion_vs_ciclo_anterior": variacion_usd
+        }
+    }
+
 def get_cotizacion_usuario(usuario: Usuario) -> Dict[str, Any]:
     from app.services.dolar_service import get_cotizaciones_dolar
     tipo = (usuario.tipo_dolar or "blue").lower()
