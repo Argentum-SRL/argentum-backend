@@ -105,6 +105,7 @@ def enriquecer_respuesta_por_intent(
             resultado_ia["respuesta_usuario"] = msg
         except Exception:
             logger.exception("Error al calcular proyección para WhatsApp")
+            resultado_ia["respuesta_usuario"] = "No pude calcular tu proyección en este momento. Probá de nuevo en unos minutos."
 
     elif intent_detectado == "consultar_saldo":
         try:
@@ -121,6 +122,7 @@ def enriquecer_respuesta_por_intent(
             resultado_ia["respuesta_usuario"] = msg
         except Exception:
             logger.exception("Error al calcular saldo para WhatsApp")
+            resultado_ia["respuesta_usuario"] = "No pude consultar tu saldo en este momento. Probá de nuevo en unos minutos."
 
     elif intent_detectado == "consultar_balance":
         try:
@@ -145,6 +147,7 @@ def enriquecer_respuesta_por_intent(
             resultado_ia["respuesta_usuario"] = msg
         except Exception:
             logger.exception("Error al calcular balance para WhatsApp")
+            resultado_ia["respuesta_usuario"] = "No pude calcular tu balance en este momento. Probá de nuevo en unos minutos."
 
     elif intent_detectado == "consultar_cotizacion":
         try:
@@ -165,8 +168,11 @@ def enriquecer_respuesta_por_intent(
 
             if msg_parts:
                 resultado_ia["respuesta_usuario"] = "Cotizaciones del dólar: " + " | ".join(msg_parts)
+            else:
+                resultado_ia["respuesta_usuario"] = "No pude obtener la cotización del dólar en este momento. Probá de nuevo en unos minutos."
         except Exception:
             logger.exception("Error al consultar cotizaciones para WhatsApp")
+            resultado_ia["respuesta_usuario"] = "No pude obtener la cotización del dólar en este momento. Probá de nuevo en unos minutos."
 
     elif intent_detectado == "deshacer":
         if not _es_pedido_deshacer(mensaje_texto) and resultado_ia.get("entidades", {}).get("monto"):
