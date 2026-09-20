@@ -438,19 +438,18 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
         )
     ).scalars().all()
 
+    totales_disponibles = {}
     try:
         from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
         disp_ctx = _calcular_saldo_disponible_sync(db, usuario.id, wallets_override=billeteras)
-        saldo_disponible_ars = float(disp_ctx["ars"]["total_billeteras"])
-        disponible_real_ars = float(disp_ctx["ars"]["saldo_disponible"])
-        saldo_disponible_usd = float(disp_ctx["usd"]["total_billeteras"])
-        disponible_real_usd = float(disp_ctx["usd"]["saldo_disponible"])
+        totales_disponibles = {
+            "saldo_total_billeteras_pesos": float(disp_ctx["ars"]["total_billeteras"]),
+            "disponible_real_pesos": float(disp_ctx["ars"]["saldo_disponible"]),
+            "saldo_total_billeteras_dolares": float(disp_ctx["usd"]["total_billeteras"]),
+            "disponible_real_dolares": float(disp_ctx["usd"]["saldo_disponible"]),
+        }
     except Exception:
         logger.exception("Error al obtener disponible real en ai_service")
-        saldo_disponible_ars = 0.0
-        disponible_real_ars = 0.0
-        saldo_disponible_usd = 0.0
-        disponible_real_usd = 0.0
 
     def _obtener_monto_usado_presupuesto(p: Presupuesto) -> float:
         if getattr(p, "monto_usado_actual", None) is not None:
@@ -510,10 +509,7 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
             }
             for p in presupuestos
         ],
-        "saldo_total_billeteras_pesos": saldo_disponible_ars,
-        "disponible_real_pesos": disponible_real_ars,
-        "saldo_total_billeteras_dolares": saldo_disponible_usd,
-        "disponible_real_dolares": disponible_real_usd,
+        **totales_disponibles,
     }
 
     try:
