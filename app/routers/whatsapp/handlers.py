@@ -54,11 +54,14 @@ from app.routers.whatsapp.detectors import (
     _es_confirmacion_lote_uno_solo,
     _es_confirmacion_nuevo_movimiento,
     _es_descarte_duplicado,
+    _es_intento_alta_suscripcion,
 )
 from app.routers.whatsapp.parsers import (
     _nombre_corto_categoria,
     _resolver_y_validar_fecha,
     _extraer_frecuencia_mencionada,
+    _extraer_monto_y_moneda_suscripcion,
+    _extraer_nombre_servicio,
 )
 from app.services import suscripcion_service, whatsapp_service
 from app.services.tarjeta_service import calcular_primer_vencimiento
@@ -1382,6 +1385,145 @@ def manejar_verificaciones_slot_filling(
                 db.add(nueva_conv)
                 db.commit()
                 whatsapp_service.enviar_whatsapp(from_number, msg_desc)
+                return True
+
+    return False
+
+
+def manejar_alta_suscripcion(
+    mensaje_texto: str,
+    usuario: Usuario,
+    db: Session,
+    from_number: str,
+    wamid: str | None = None,
+) -> bool:
+    """
+    Detección determinística de alta de suscripción.
+    """
+    from app.routers.whatsapp_ia import MESES_ES_GEN
+
+    if _es_intento_alta_suscripcion(mensaje_texto):
+        srv_nom = _extraer_nombre_servicio(mensaje_texto)
+        monto_sub, mon_sub = _extraer_monto_y_moneda_suscripcion(mensaje_texto)
+        if srv_nom:
+            # Verificar si ya tiene suscripción activa a este servicio (Tarea 4.9)
+            sub_act = _buscar_suscripcion_activa_por_nombre(usuario.id, srv_nom, db)
+            if sub_act:
+                pv = suscripcion_service.obtener_precio_vigente(db, sub_act.id)
+                m_val = pv.monto if pv else Decimal("0")
+                mon_val = pv.moneda if pv else "ARS"
+                mon_enum = Moneda.USD if mon_val == "USD" else Moneda.ARS
+                m_fmt = formatear_monto(float(m_val), mon_enum)
+                frec_str = sub_act.frecuencia.value if hasattr(sub_act.frecuencia, "value") else str(sub_act.frecuencia)
+                msg_aviso = f"Ya tenés una suscripción activa a {sub_act.nombre} por {m_fmt} {frec_str}. ¿Querés registrar otra igual o te referías a la existente?"
+                nueva_conv = ConversacionWpp(
+                    usuario_id=usuario.id,
+                    wamid=wamid,
+                    mensaje_usuario=mensaje_texto,
+                    tipo_mensaje=TipoMensajeWpp.TEXTO,
+                    transcripcion=None,
+                    mensaje_bot=msg_aviso,
+                    intent_detectado="agregar_suscripcion",
+                    entidades={
+                        "servicio": srv_nom,
+                        "monto": float(monto_sub) if monto_sub else None,
+                        "moneda": mon_sub,
+                    },
+                    accion_ejecutada=None,
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=True,
+                    slot_filling_estado={
+                        "tipo_flujo": "duplicado_suscripcion_existente",
+                        "servicio": srv_nom,
+                        "monto": float(monto_sub) if monto_sub else None,
+                        "moneda": mon_sub,
+                    },
+                )
+                db.add(nueva_conv)
+                db.commit()
+                whatsapp_service.enviar_whatsapp(from_number, msg_aviso)
+                return True
+
+            # Verificar frecuencia (Tarea 4.3)
+            frecuencia = _extraer_frecuencia_mencionada(mensaje_texto)
+            if not frecuencia:
+                srv_cat = buscar_servicio_por_texto(srv_nom)
+                if srv_cat and srv_cat.get("frecuencia_sugerida"):
+                    frec_tipica = srv_cat["frecuencia_sugerida"]
+                    msg_frec = f"¿Con qué frecuencia se paga {srv_nom}? (lo habitual es {frec_tipica}: mensual, bimestral, trimestral, semestral o anual)"
+                else:
+                    msg_frec = f"¿Con qué frecuencia se paga {srv_nom}? (mensual, bimestral, trimestral, semestral o anual)"
+
+                nueva_conv = ConversacionWpp(
+                    usuario_id=usuario.id,
+                    wamid=wamid,
+                    mensaje_usuario=mensaje_texto,
+                    tipo_mensaje=TipoMensajeWpp.TEXTO,
+                    transcripcion=None,
+                    mensaje_bot=msg_frec,
+                    intent_detectado="agregar_suscripcion",
+                    entidades={
+                        "servicio": srv_nom,
+                        "monto": float(monto_sub) if monto_sub else None,
+                        "moneda": mon_sub,
+                    },
+                    accion_ejecutada=None,
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=True,
+                    slot_filling_estado={
+                        "tipo_flujo": "crear_suscripcion_frecuencia",
+                        "servicio": srv_nom,
+                        "monto": float(monto_sub) if monto_sub else None,
+                        "moneda": mon_sub,
+                    },
+                )
+                db.add(nueva_conv)
+                db.commit()
+                whatsapp_service.enviar_whatsapp(from_number, msg_frec)
+                return True
+
+            if monto_sub is not None:
+                # Todo listo para proponer suscripción (Tarea 4.6)
+                billetera_obj = db.query(Billetera).filter(Billetera.usuario_id == usuario.id, Billetera.es_principal == True).first()
+                if not billetera_obj:
+                    billetera_obj = db.query(Billetera).filter(Billetera.usuario_id == usuario.id).first()
+
+                proximo_cobro = suscripcion_service.calcular_siguiente_cobro(hoy_argentina(), frecuencia)
+                fecha_fmt = f"{proximo_cobro.day} de {MESES_ES_GEN[proximo_cobro.month - 1]}"
+                mon_enum = Moneda.USD if mon_sub == "USD" else Moneda.ARS
+                monto_fmt = formatear_monto(float(monto_sub), mon_enum)
+                medio_pago_txt = f"desde {billetera_obj.nombre}" if billetera_obj else ""
+                propuesta_msg = f"Voy a programar la suscripción a {srv_nom}: {monto_fmt} {frecuencia} {medio_pago_txt}, primer cobro el {fecha_fmt}. ¿Confirmás?"
+
+                srv_cat = buscar_servicio_por_texto(srv_nom)
+                cat_sugerida = srv_cat.get("categoria_sugerida") if srv_cat else "Entretenimiento"
+
+                nueva_conv = ConversacionWpp(
+                    usuario_id=usuario.id,
+                    wamid=wamid,
+                    mensaje_usuario=mensaje_texto,
+                    tipo_mensaje=TipoMensajeWpp.TEXTO,
+                    transcripcion=None,
+                    mensaje_bot=propuesta_msg,
+                    intent_detectado="agregar_suscripcion",
+                    entidades={
+                        "servicio": srv_nom,
+                        "monto": float(monto_sub),
+                        "moneda": mon_sub,
+                        "frecuencia": frecuencia,
+                        "billetera_id": str(billetera_obj.id) if billetera_obj else None,
+                        "medio_pago_txt": medio_pago_txt,
+                        "proximo_cobro": proximo_cobro.isoformat(),
+                        "categoria": cat_sugerida,
+                    },
+                    accion_ejecutada=None,
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=False,
+                    slot_filling_estado=None,
+                )
+                db.add(nueva_conv)
+                db.commit()
+                whatsapp_service.enviar_whatsapp(from_number, propuesta_msg)
                 return True
 
     return False
