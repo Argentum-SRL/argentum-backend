@@ -181,6 +181,7 @@ from app.routers.whatsapp.handlers import (
     manejar_alta_suscripcion,
 )
 from app.routers.whatsapp.enriquecedores import enriquecer_respuesta_por_intent
+from app.routers.whatsapp.gastos import manejar_consulta_gastos
 from app.utils.telefono import normalizar_telefono_ar
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion
 from app.models.historial_suscripcion import HistorialSuscripcion
@@ -3290,6 +3291,9 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
 
             # 7.12 Detección determinística de alta de suscripción (Tarea 4)
             if manejar_alta_suscripcion(mensaje_texto, usuario, db, from_number, wamid=wamid):
+                return
+
+            if manejar_consulta_gastos(mensaje_texto, usuario, db, from_number, wamid=wamid, conv_activa=conv_activa):
                 return
 
             # 8. Procesamiento normal de IA

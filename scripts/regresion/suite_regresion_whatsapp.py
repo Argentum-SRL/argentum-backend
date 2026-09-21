@@ -725,7 +725,18 @@ def p4_caso_6(datos):
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cuánto gasté en pizza"), time.perf_counter())
-        return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
+        resp = respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        prefijos = (
+            "En este ciclo gastaste", "En este ciclo no registraste gastos", "En este ciclo no encontré gastos",
+            "Hoy gastaste", "Hoy no registraste gastos", "Hoy no encontré gastos",
+        )
+        msg_ok = any(resp.startswith(p) for p in prefijos)
+        return f"Intent: {intent} | Respuesta ok: {msg_ok}"
     return run_isolated(test)
 
 def p4_caso_7(datos):
@@ -2742,6 +2753,135 @@ def p12_caso_13(datos):
         return f"Intent: {intent} | Falla manejada: {falla_ok}"
     return run_isolated(test)
 
+def p13_caso_1(datos):
+    """consultar_gastos: 'cuánto gasté hoy' detecta intent y calcula gastos de hoy"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cuánto gasté hoy"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        db = Session()
+        try:
+            from app.services import gastos_consulta_service
+            from app.routers.whatsapp.gastos import _formatear_respuesta_gastos
+            from app.utils.fecha import hoy_argentina
+            hoy = hoy_argentina()
+            res = gastos_consulta_service.calcular_gastos_periodo(db, u.id, hoy, hoy, top_n=3)
+            msg_esp = _formatear_respuesta_gastos(
+                "Hoy", None, False,
+                float(res["ars"]["total"]), res["ars"]["cantidad"],
+                float(res["usd"]["total"]), res["usd"]["cantidad"],
+                res["top_categorias_ars"]
+            )
+            resp_ok = (resp == msg_esp) and ("LLM_INVENTADO_999" not in resp)
+        finally:
+            db.close()
+        return f"Intent: {intent} | Respuesta ok: {resp_ok}"
+    return run_isolated(test)
+
+def p13_caso_2(datos):
+    """consultar_gastos: 'cuánto gasté este ciclo' coincide con balance de ciclo"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cuánto gasté este ciclo"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        db = Session()
+        try:
+            from app.services.dashboard_service import calcular_balance_ciclo
+            from app.routers.whatsapp.parsers import _fmt
+            from app.models.usuario import Moneda
+            bal = calcular_balance_ciclo(db, u)
+            egr_ars = bal["ars"]["egresos"]
+            egr_usd = bal["usd"]["egresos"]
+            sin_marcador = "LLM_INVENTADO_999" not in resp
+            if egr_ars == 0 and egr_usd == 0:
+                coincide = (resp == "En este ciclo no registraste gastos.") and sin_marcador
+            else:
+                coincide = resp.startswith("En este ciclo gastaste ") and sin_marcador
+                if egr_ars > 0:
+                    coincide = coincide and (_fmt(egr_ars) in resp)
+                if egr_usd > 0:
+                    coincide = coincide and (_fmt(egr_usd, Moneda.USD) in resp)
+        finally:
+            db.close()
+        return f"Intent: {intent} | Coincide con balance: {coincide}"
+    return run_isolated(test)
+
+def p13_caso_3(datos):
+    """consultar_gastos: 'cuánto gasté en pizza esta semana' filtra por descripción"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cuánto gasté en pizza esta semana"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        sin_marcador = "LLM_INVENTADO_999" not in resp
+        ok = (
+            (resp.startswith("Esta semana gastaste ") and resp.endswith(" en «pizza»."))
+            or (resp == "Esta semana no encontré gastos que mencionen «pizza».")
+        ) and sin_marcador
+        return f"Intent: {intent} | Filtro por descripcion: {ok}"
+    return run_isolated(test)
+
+def p13_caso_4(datos):
+    """consultar_gastos: 'cuánto gasté en supermercado el mes pasado' filtra por catálogo"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cuánto gasté en supermercado el mes pasado"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        sin_marcador = "LLM_INVENTADO_999" not in resp
+        ok = (
+            (resp.startswith("El mes pasado gastaste ") and resp.endswith(" en Supermercado."))
+            or (resp == "El mes pasado no registraste gastos en Supermercado.")
+        ) and sin_marcador
+        return f"Intent: {intent} | Filtro por catalogo: {ok}"
+    return run_isolated(test)
+
+def p13_caso_5(datos):
+    """consultar_gastos: falla de servicio maneja error con mensaje amigable"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        with patch("app.services.gastos_consulta_service.calcular_gastos_periodo", side_effect=RuntimeError("boom")):
+            _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cuánto gasté hoy"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        falla_esperada = "No pude consultar tus gastos en este momento. Probá de nuevo en unos minutos."
+        falla_ok = (resp == falla_esperada) and ("LLM_INVENTADO_999" not in resp)
+        return f"Intent: {intent} | Falla manejada: {falla_ok}"
+    return run_isolated(test)
+
+
 def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False, solo_escenario: str | None = None):
     global _gestor_actual
     _gestor_actual = GestorGrabacionesIA(
@@ -2901,7 +3041,7 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             "punto": "Punto 4",
             "nombre": "Manda 'cuánto gasté en pizza'",
             "ejecutar": lambda: p4_caso_6(datos),
-            "esperado": "No entendí ese mensaje. Por ahora puedo registrar gastos e ingresos, o consultar tus saldos y proyecciones. Por ejemplo: 'gasté 5000 en el kiosco' o 'cuánta plata tengo'.",
+            "esperado": "Intent: consultar_gastos | Respuesta ok: True",
             "match": "exacto",
         },
         {
@@ -3818,6 +3958,46 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             "nombre": "consultar_presupuesto: falla de servicio maneja error con mensaje amigable",
             "ejecutar": lambda: p12_caso_13(datos),
             "esperado": "Intent: consultar_presupuesto | Falla manejada: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P13.1",
+            "punto": "Punto 13",
+            "nombre": "consultar_gastos: 'cuánto gasté hoy' detecta intent y calcula gastos de hoy",
+            "ejecutar": lambda: p13_caso_1(datos),
+            "esperado": "Intent: consultar_gastos | Respuesta ok: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P13.2",
+            "punto": "Punto 13",
+            "nombre": "consultar_gastos: 'cuánto gasté este ciclo' coincide con balance de ciclo",
+            "ejecutar": lambda: p13_caso_2(datos),
+            "esperado": "Intent: consultar_gastos | Coincide con balance: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P13.3",
+            "punto": "Punto 13",
+            "nombre": "consultar_gastos: 'cuánto gasté en pizza esta semana' filtra por descripción",
+            "ejecutar": lambda: p13_caso_3(datos),
+            "esperado": "Intent: consultar_gastos | Filtro por descripcion: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P13.4",
+            "punto": "Punto 13",
+            "nombre": "consultar_gastos: 'cuánto gasté en supermercado el mes pasado' filtra por catálogo",
+            "ejecutar": lambda: p13_caso_4(datos),
+            "esperado": "Intent: consultar_gastos | Filtro por catalogo: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P13.5",
+            "punto": "Punto 13",
+            "nombre": "consultar_gastos: falla de servicio maneja error con mensaje amigable",
+            "ejecutar": lambda: p13_caso_5(datos),
+            "esperado": "Intent: consultar_gastos | Falla manejada: True",
             "match": "exacto",
         },
     ]
