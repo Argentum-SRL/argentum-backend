@@ -2490,6 +2490,154 @@ def p12_caso_2(datos):
         return f"Intent: {intent} | Cotizacion fija ok: {tiene_cotizacion}"
     return run_isolated(test)
 
+def p12_caso_3(datos):
+    """consultar_saldo: 'cuánto tengo' detecta intent y devuelve saldo real del dashboard"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cuánto tengo"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        db = Session()
+        try:
+            from app.services.dashboard_service import get_dashboard_resumen
+            from app.routers.whatsapp.parsers import _fmt
+            resumen = get_dashboard_resumen(db, u)
+            disp = resumen["disponible_real"]
+            ars_total_str = _fmt(disp["ars"]["saldo_billeteras"])
+            ars_disp_str = _fmt(disp["ars"]["disponible"])
+            datos_reales = (
+                "LLM_INVENTADO_999" not in resp
+                and ars_total_str in resp
+                and ars_disp_str in resp
+            )
+            if disp["usd"]["saldo_billeteras"] > 0 or disp["usd"]["disponible"] > 0:
+                usd_tot_str = _fmt(disp["usd"]["saldo_billeteras"], Moneda.USD)
+                usd_disp_str = _fmt(disp["usd"]["disponible"], Moneda.USD)
+                datos_reales = datos_reales and (usd_tot_str in resp) and (usd_disp_str in resp)
+        finally:
+            db.close()
+        return f"Intent: {intent} | Datos reales: {datos_reales}"
+    return run_isolated(test)
+
+def p12_caso_4(datos):
+    """consultar_proyeccion: 'cuál es mi proyección financiera' detecta intent y devuelve proyección real"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cuál es mi proyección financiera"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        falla_msg = "No pude calcular tu proyección en este momento. Probá de nuevo en unos minutos."
+        proyeccion_ok = bool(resp) and ("LLM_INVENTADO_999" not in resp) and (falla_msg not in resp)
+        return f"Intent: {intent} | Proyeccion ok: {proyeccion_ok}"
+    return run_isolated(test)
+
+def p12_caso_5(datos):
+    """consultar_saldo: falla de servicio maneja error con mensaje amigable"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        with patch("app.services.contexto_financiero_service._calcular_saldo_disponible_sync", side_effect=RuntimeError("boom")):
+            _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cuánto tengo"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        falla_esperada = "No pude consultar tu saldo en este momento. Probá de nuevo en unos minutos."
+        falla_ok = (resp == falla_esperada) and ("LLM_INVENTADO_999" not in resp)
+        return f"Intent: {intent} | Falla manejada: {falla_ok}"
+    return run_isolated(test)
+
+def p12_caso_6(datos):
+    """consultar_balance: falla de servicio maneja error con mensaje amigable"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        with patch("app.services.dashboard_service.calcular_balance_ciclo", side_effect=RuntimeError("boom")):
+            _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cuál es mi balance mensual"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        falla_esperada = "No pude calcular tu balance en este momento. Probá de nuevo en unos minutos."
+        falla_ok = (resp == falla_esperada) and ("LLM_INVENTADO_999" not in resp)
+        return f"Intent: {intent} | Falla manejada: {falla_ok}"
+    return run_isolated(test)
+
+def p12_caso_7(datos):
+    """consultar_proyeccion: falla de servicio maneja error con mensaje amigable"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        with patch("app.services.proyeccion_service.calcular_proyeccion", side_effect=RuntimeError("boom")):
+            _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cuál es mi proyección financiera"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        falla_esperada = "No pude calcular tu proyección en este momento. Probá de nuevo en unos minutos."
+        falla_ok = (resp == falla_esperada) and ("LLM_INVENTADO_999" not in resp)
+        return f"Intent: {intent} | Falla manejada: {falla_ok}"
+    return run_isolated(test)
+
+def p12_caso_8(datos):
+    """consultar_cotizacion: falla de servicio maneja error con mensaje amigable"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        with patch("app.services.dolar_service.get_cotizaciones_dolar", side_effect=RuntimeError("boom")):
+            _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "a cuánto cotiza el dólar hoy"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        falla_esperada = "No pude obtener la cotización del dólar en este momento. Probá de nuevo en unos minutos."
+        falla_ok = (resp == falla_esperada) and ("LLM_INVENTADO_999" not in resp)
+        return f"Intent: {intent} | Falla manejada: {falla_ok}"
+    return run_isolated(test)
+
+def p12_caso_9(datos):
+    """consultar_cotizacion: cotizaciones vacías devuelve mensaje amigable"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        with patch("app.services.dolar_service.get_cotizaciones_dolar", return_value={"cotizaciones": {}}):
+            _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "a cuánto cotiza el dólar hoy"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        falla_esperada = "No pude obtener la cotización del dólar en este momento. Probá de nuevo en unos minutos."
+        falla_ok = (resp == falla_esperada) and ("LLM_INVENTADO_999" not in resp)
+        return f"Intent: {intent} | Falla manejada: {falla_ok}"
+    return run_isolated(test)
+
 def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False, solo_escenario: str | None = None):
     global _gestor_actual
     _gestor_actual = GestorGrabacionesIA(
@@ -3478,6 +3626,62 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             "nombre": "consultar_cotizacion: 'a cuánto está el dólar' detecta intent y devuelve cotizaciones reales",
             "ejecutar": lambda: p12_caso_2(datos),
             "esperado": "Intent: consultar_cotizacion | Cotizacion fija ok: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P12.3",
+            "punto": "Punto 12",
+            "nombre": "consultar_saldo: 'cuánto tengo' detecta intent y devuelve saldo real del dashboard",
+            "ejecutar": lambda: p12_caso_3(datos),
+            "esperado": "Intent: consultar_saldo | Datos reales: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P12.4",
+            "punto": "Punto 12",
+            "nombre": "consultar_proyeccion: 'cuál es mi proyección financiera' detecta intent y devuelve proyección real",
+            "ejecutar": lambda: p12_caso_4(datos),
+            "esperado": "Intent: consultar_proyeccion | Proyeccion ok: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P12.5",
+            "punto": "Punto 12",
+            "nombre": "consultar_saldo: falla de servicio maneja error con mensaje amigable",
+            "ejecutar": lambda: p12_caso_5(datos),
+            "esperado": "Intent: consultar_saldo | Falla manejada: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P12.6",
+            "punto": "Punto 12",
+            "nombre": "consultar_balance: falla de servicio maneja error con mensaje amigable",
+            "ejecutar": lambda: p12_caso_6(datos),
+            "esperado": "Intent: consultar_balance | Falla manejada: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P12.7",
+            "punto": "Punto 12",
+            "nombre": "consultar_proyeccion: falla de servicio maneja error con mensaje amigable",
+            "ejecutar": lambda: p12_caso_7(datos),
+            "esperado": "Intent: consultar_proyeccion | Falla manejada: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P12.8",
+            "punto": "Punto 12",
+            "nombre": "consultar_cotizacion: falla de servicio maneja error con mensaje amigable",
+            "ejecutar": lambda: p12_caso_8(datos),
+            "esperado": "Intent: consultar_cotizacion | Falla manejada: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P12.9",
+            "punto": "Punto 12",
+            "nombre": "consultar_cotizacion: cotizaciones vacías devuelve mensaje amigable",
+            "ejecutar": lambda: p12_caso_9(datos),
+            "esperado": "Intent: consultar_cotizacion | Falla manejada: True",
             "match": "exacto",
         },
     ]
