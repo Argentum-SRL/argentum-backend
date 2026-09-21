@@ -174,6 +174,49 @@ def enriquecer_respuesta_por_intent(
             logger.exception("Error al consultar cotizaciones para WhatsApp")
             resultado_ia["respuesta_usuario"] = "No pude obtener la cotización del dólar en este momento. Probá de nuevo en unos minutos."
 
+    elif intent_detectado == "consultar_meta":
+        try:
+            from app.services.contexto_financiero_service import _resumen_metas_activas_sync
+            metas_res = _resumen_metas_activas_sync(db, usuario.id)
+            if not metas_res:
+                resultado_ia["respuesta_usuario"] = "No tenés metas activas."
+            else:
+                partes_meta = []
+                for meta_i in metas_res[:8]:
+                    mon_meta = Moneda.USD if meta_i["moneda"] == "USD" else Moneda.ARS
+                    parte_meta = f"{meta_i['nombre']}: {_fmt(meta_i['acumulado'], mon_meta)} de {_fmt(meta_i['objetivo'], mon_meta)}"
+                    if meta_i["objetivo"] > 0:
+                        parte_meta += f" ({round(meta_i['acumulado'] / meta_i['objetivo'] * 100)}%)"
+                    partes_meta.append(parte_meta)
+                if len(metas_res) > 8:
+                    partes_meta.append(f"y {len(metas_res) - 8} más")
+                resultado_ia["respuesta_usuario"] = "Tus metas activas: " + " | ".join(partes_meta)
+        except Exception:
+            logger.exception("Error al consultar metas para WhatsApp")
+            resultado_ia["respuesta_usuario"] = "No pude consultar tus metas en este momento. Probá de nuevo en unos minutos."
+
+    elif intent_detectado == "consultar_presupuesto":
+        try:
+            from app.services.contexto_financiero_service import _resumen_presupuestos_activos_sync
+            pres_res = _resumen_presupuestos_activos_sync(db, usuario.id)
+            if not pres_res:
+                resultado_ia["respuesta_usuario"] = "No tenés presupuestos activos."
+            else:
+                partes_pres = []
+                for pres_i in pres_res[:8]:
+                    mon_pres = Moneda.USD if pres_i["moneda"] == "USD" else Moneda.ARS
+                    if pres_i["usado"] > pres_i["limite"]:
+                        detalle_pres = f"te pasaste por {_fmt(pres_i['usado'] - pres_i['limite'], mon_pres)}"
+                    else:
+                        detalle_pres = f"te quedan {_fmt(pres_i['limite'] - pres_i['usado'], mon_pres)}"
+                    partes_pres.append(f"{pres_i['nombre']}: usaste {_fmt(pres_i['usado'], mon_pres)} de {_fmt(pres_i['limite'], mon_pres)} ({detalle_pres})")
+                if len(pres_res) > 8:
+                    partes_pres.append(f"y {len(pres_res) - 8} más")
+                resultado_ia["respuesta_usuario"] = "Tus presupuestos activos: " + " | ".join(partes_pres)
+        except Exception:
+            logger.exception("Error al consultar presupuestos para WhatsApp")
+            resultado_ia["respuesta_usuario"] = "No pude consultar tus presupuestos en este momento. Probá de nuevo en unos minutos."
+
     elif intent_detectado == "deshacer":
         if not _es_pedido_deshacer(mensaje_texto) and resultado_ia.get("entidades", {}).get("monto"):
             resultado_ia["intent"] = "registrar_transaccion"

@@ -2638,6 +2638,110 @@ def p12_caso_9(datos):
         return f"Intent: {intent} | Falla manejada: {falla_ok}"
     return run_isolated(test)
 
+def p12_caso_10(datos):
+    """consultar_meta: 'cómo va mi meta' detecta intent y devuelve metas reales"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cómo va mi meta"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        db = Session()
+        try:
+            from app.services.ai_service import construir_contexto_financiero
+            from app.routers.whatsapp.parsers import _fmt
+            ctx = construir_contexto_financiero(u, db)
+            metas = sorted(ctx.get("metas_activas", []), key=lambda x: x["nombre"])
+            if not metas:
+                datos_reales = (resp == "No tenés metas activas.") and ("LLM_INVENTADO_999" not in resp)
+            else:
+                datos_reales = ("LLM_INVENTADO_999" not in resp) and resp.startswith("Tus metas activas:")
+                for m in metas[:8]:
+                    mon = Moneda.USD if m["moneda"] == "USD" else Moneda.ARS
+                    obj_str = _fmt(m["objetivo"], mon)
+                    acum_str = _fmt(m["acumulado"], mon)
+                    datos_reales = datos_reales and (m["nombre"] in resp) and (obj_str in resp) and (acum_str in resp)
+        finally:
+            db.close()
+        return f"Intent: {intent} | Datos reales: {datos_reales}"
+    return run_isolated(test)
+
+def p12_caso_11(datos):
+    """consultar_presupuesto: 'cómo va mi presupuesto' detecta intent y devuelve presupuestos reales"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cómo va mi presupuesto"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        db = Session()
+        try:
+            from app.services.ai_service import construir_contexto_financiero
+            from app.routers.whatsapp.parsers import _fmt
+            ctx = construir_contexto_financiero(u, db)
+            presupuestos = sorted(ctx.get("presupuestos_activos", []), key=lambda x: x["nombre"])
+            if not presupuestos:
+                datos_reales = (resp == "No tenés presupuestos activos.") and ("LLM_INVENTADO_999" not in resp)
+            else:
+                datos_reales = ("LLM_INVENTADO_999" not in resp) and resp.startswith("Tus presupuestos activos:")
+                for p in presupuestos[:8]:
+                    mon = Moneda.USD if p["moneda"] == "USD" else Moneda.ARS
+                    lim_str = _fmt(p["limite"], mon)
+                    usado_str = _fmt(p["monto_usado"], mon)
+                    datos_reales = datos_reales and (p["nombre"] in resp) and ("usaste" in resp) and (usado_str in resp) and (lim_str in resp)
+        finally:
+            db.close()
+        return f"Intent: {intent} | Datos reales: {datos_reales}"
+    return run_isolated(test)
+
+def p12_caso_12(datos):
+    """consultar_meta: falla de servicio maneja error con mensaje amigable"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        with patch("app.services.contexto_financiero_service._resumen_metas_activas_sync", side_effect=RuntimeError("boom")):
+            _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cómo va mi meta"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        falla_esperada = "No pude consultar tus metas en este momento. Probá de nuevo en unos minutos."
+        falla_ok = (resp == falla_esperada) and ("LLM_INVENTADO_999" not in resp)
+        return f"Intent: {intent} | Falla manejada: {falla_ok}"
+    return run_isolated(test)
+
+def p12_caso_13(datos):
+    """consultar_presupuesto: falla de servicio maneja error con mensaje amigable"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        with patch("app.services.contexto_financiero_service._resumen_presupuestos_activos_sync", side_effect=RuntimeError("boom")):
+            _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cómo va mi presupuesto"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+        row = conn.execute(
+            text("SELECT intent_detectado FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        intent = row["intent_detectado"] if row else None
+        falla_esperada = "No pude consultar tus presupuestos en este momento. Probá de nuevo en unos minutos."
+        falla_ok = (resp == falla_esperada) and ("LLM_INVENTADO_999" not in resp)
+        return f"Intent: {intent} | Falla manejada: {falla_ok}"
+    return run_isolated(test)
+
 def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False, solo_escenario: str | None = None):
     global _gestor_actual
     _gestor_actual = GestorGrabacionesIA(
@@ -3682,6 +3786,38 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             "nombre": "consultar_cotizacion: cotizaciones vacías devuelve mensaje amigable",
             "ejecutar": lambda: p12_caso_9(datos),
             "esperado": "Intent: consultar_cotizacion | Falla manejada: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P12.10",
+            "punto": "Punto 12",
+            "nombre": "consultar_meta: 'cómo va mi meta' detecta intent y devuelve metas reales",
+            "ejecutar": lambda: p12_caso_10(datos),
+            "esperado": "Intent: consultar_meta | Datos reales: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P12.11",
+            "punto": "Punto 12",
+            "nombre": "consultar_presupuesto: 'cómo va mi presupuesto' detecta intent y devuelve presupuestos reales",
+            "ejecutar": lambda: p12_caso_11(datos),
+            "esperado": "Intent: consultar_presupuesto | Datos reales: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P12.12",
+            "punto": "Punto 12",
+            "nombre": "consultar_meta: falla de servicio maneja error con mensaje amigable",
+            "ejecutar": lambda: p12_caso_12(datos),
+            "esperado": "Intent: consultar_meta | Falla manejada: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P12.13",
+            "punto": "Punto 12",
+            "nombre": "consultar_presupuesto: falla de servicio maneja error con mensaje amigable",
+            "ejecutar": lambda: p12_caso_13(datos),
+            "esperado": "Intent: consultar_presupuesto | Falla manejada: True",
             "match": "exacto",
         },
     ]

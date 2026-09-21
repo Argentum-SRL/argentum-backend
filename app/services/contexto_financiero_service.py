@@ -133,3 +133,37 @@ async def calcular_saldo_disponible(
     billetera_ids: Optional[List[UUID]] = None
 ) -> dict:
     return _calcular_saldo_disponible_sync(db, usuario_id, billetera_ids)
+
+
+def _resumen_metas_activas_sync(db: Session, usuario_id: UUID) -> list[dict]:
+    from sqlalchemy import select
+    from app.models.meta import Meta, EstadoMeta
+    metas = db.execute(
+        select(Meta).where(Meta.usuario_id == usuario_id, Meta.estado == EstadoMeta.ACTIVA).order_by(Meta.nombre)
+    ).scalars().all()
+    return [
+        {"nombre": m.nombre, "objetivo": float(m.monto_objetivo), "acumulado": float(m.monto_actual), "moneda": m.moneda.value}
+        for m in metas
+    ]
+
+
+def _resumen_presupuestos_activos_sync(db: Session, usuario_id: UUID) -> list[dict]:
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from app.models.presupuesto import Presupuesto, EstadoPresupuesto
+    from app.services import presupuesto_service
+    presupuestos = db.execute(
+        select(Presupuesto)
+        .options(selectinload(Presupuesto.periodos))
+        .where(Presupuesto.usuario_id == usuario_id, Presupuesto.estado == EstadoPresupuesto.ACTIVO)
+        .order_by(Presupuesto.nombre)
+    ).scalars().all()
+    res = []
+    for p in presupuestos:
+        if getattr(p, "monto_usado_actual", None) is not None:
+            usado = float(p.monto_usado_actual)
+        else:
+            periodo_activo = presupuesto_service.obtener_periodo_activo(None, p)
+            usado = float(periodo_activo.monto_usado) if periodo_activo else 0.0
+        res.append({"nombre": p.nombre, "limite": float(p.monto), "usado": usado, "moneda": p.moneda.value})
+    return res
