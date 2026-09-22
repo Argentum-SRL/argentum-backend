@@ -17,7 +17,7 @@ from app.models.subcategoria import Subcategoria
 from app.models.notificacion import TipoNotificacion, NivelNotificacion
 from app.models.usuario import Usuario, Moneda
 from app.schemas.presupuesto import PresupuestoCreate, PresupuestoUpdate
-from app.services.whatsapp_service import enviar_mensaje_whatsapp
+from app.services.whatsapp_service import enviar_whatsapp_template, enviar_whatsapp
 from app.utils.fecha import hoy_argentina
 
 logger = logging.getLogger(__name__)
@@ -708,7 +708,22 @@ def verificar_alertas_presupuesto(db: Session, presupuesto: Presupuesto, periodo
         usuario = db.get(Usuario, presupuesto.usuario_id)
         if usuario and usuario.telefono:
             try:
-                enviado = enviar_mensaje_whatsapp(usuario.telefono, mensaje)
+                if tipo == TipoNotificacion.PRESUPUESTO_AGOTADO:
+                    template_name = "alerta_presupuesto_agotado"
+                    valores = [datos_template["nombre_pres"], datos_template["gastado_fmt"], datos_template["limite_fmt"]]
+                else:
+                    template_name = "alerta_presupuesto_limite"
+                    valores = [datos_template["gastado_fmt"], datos_template["limite_fmt"], datos_template["nombre_pres"]]
+
+                componentes = [
+                    {
+                        "type": "body",
+                        "parameters": [{"type": "text", "text": str(v)} for v in valores],
+                    }
+                ]
+                enviado = enviar_whatsapp_template(usuario.telefono, template_name, "es", componentes)
+                if not enviado:
+                    enviado = enviar_whatsapp(usuario.telefono, mensaje)
                 if enviado:
                     notif.enviada_whatsapp = True
                     if commit:
