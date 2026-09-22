@@ -286,3 +286,37 @@ def test_actualizar_datos_personales_edad(db):
     actualizar_datos_personales(db, usuario, datos_mayor)
     db.refresh(usuario)
     assert usuario.fecha_nacimiento == fecha_mayor
+
+
+def test_desvincular_telefono(db):
+    """
+    Verifica que desvincular_telefono limpia el teléfono, teléfono normalizado
+    y marca telefono_verificado en False en la base de datos.
+    """
+    from app.services.usuario_service import desvincular_telefono
+
+    usuario = Usuario(
+        id=uuid4(),
+        nombre="Test",
+        apellido="WhatsApp",
+        email="wpp@example.com",
+        telefono="+5491112345678",
+        telefono_normalizado="1112345678",
+        telefono_verificado=True,
+        auth_provider=AuthProvider.EMAIL,
+        rol=RolUsuario.USUARIO,
+        estado=EstadoUsuario.ACTIVO,
+    )
+    db.add(usuario)
+    db.commit()
+
+    resultado = desvincular_telefono(db, usuario)
+
+    assert resultado.telefono is None
+    assert resultado.telefono_normalizado is None
+    assert resultado.telefono_verificado is False
+
+    db.refresh(usuario)
+    assert usuario.telefono is None
+    assert usuario.telefono_normalizado is None
+    assert usuario.telefono_verificado is False

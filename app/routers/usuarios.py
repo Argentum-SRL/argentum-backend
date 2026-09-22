@@ -77,6 +77,14 @@ def update_telefono(
     """Actualiza teléfono del usuario autenticado (envía código por WhatsApp)."""
     return usuario_service.actualizar_telefono(db, current_user, datos)
 
+@router.delete("/me/telefono", response_model=UsuarioResponse)
+def delete_telefono(
+    current_user: Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Desvincula el teléfono de WhatsApp del usuario autenticado."""
+    return usuario_service.desvincular_telefono(db, current_user)
+
 @router.put("/me/ciclo-financiero", response_model=UsuarioResponse)
 def update_ciclo_financiero(
     datos: EditarCicloFinanciero,

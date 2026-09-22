@@ -226,6 +226,21 @@ def actualizar_telefono(
     )
 
 
+def desvincular_telefono(db: Session, usuario: Usuario) -> Usuario:
+    """
+    Desvincula el número de WhatsApp del usuario autenticado en una sola transacción
+    y emite el evento de actualización en tiempo real.
+    """
+    from app.services.evento_service import emitir_evento_actualizacion
+    usuario.telefono = None
+    usuario.telefono_normalizado = None
+    usuario.telefono_verificado = False
+    emitir_evento_actualizacion(db, usuario.id, "usuario")
+    db.commit()
+    db.refresh(usuario)
+    return usuario
+
+
 def actualizar_ciclo_financiero(
     db: Session, usuario: Usuario, datos: EditarCicloFinanciero
 ) -> Usuario:
