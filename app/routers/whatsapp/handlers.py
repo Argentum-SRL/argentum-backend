@@ -4,6 +4,8 @@ Cada handler encapsula la detección, procesamiento, persistencia en Conversacio
 """
 from __future__ import annotations
 
+from datetime import timedelta
+from app.utils.fecha import ahora_argentina
 from decimal import Decimal
 from uuid import UUID
 from sqlalchemy import select
@@ -666,6 +668,48 @@ def manejar_confirmacion(
 
     else:
         # intent_ganador == "registrar_transaccion" o None (sin propuesta pendiente)
+        limite_30 = ahora_argentina() - timedelta(minutes=30)
+        ultima_conv = db.execute(
+            select(ConversacionWpp)
+            .where(
+                ConversacionWpp.usuario_id == usuario.id,
+                ConversacionWpp.fecha >= limite_30,
+            )
+            .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+        ).scalars().first()
+
+        es_tras_directo = (
+            propuesta_ganadora is None
+            and ultima_conv is not None
+            and ultima_conv.intent_detectado == "registrar_transaccion"
+            and ultima_conv.accion_ejecutada not in (None, "cancelada", "vencida", "error", "descartado_por_duplicado")
+            and (
+                (ultima_conv.entidades and ultima_conv.entidades.get("registro_directo") is True)
+                or (ultima_conv.mensaje_bot and ultima_conv.mensaje_bot.startswith("Listo."))
+            )
+        )
+
+        if es_tras_directo:
+            msg_confirm = "Ya quedó anotado. Si hay algo mal, decime qué corregir."
+            nueva_conv = ConversacionWpp(
+                usuario_id=usuario.id,
+                wamid=wamid,
+                mensaje_usuario=mensaje_texto,
+                tipo_mensaje=TipoMensajeWpp.TEXTO,
+                transcripcion=None,
+                mensaje_bot=msg_confirm,
+                intent_detectado="confirmar",
+                entidades={},
+                accion_ejecutada=ultima_conv.accion_ejecutada,
+                confianza=Decimal("1.000"),
+                slot_filling_activo=False,
+                slot_filling_estado=None,
+            )
+            db.add(nueva_conv)
+            db.commit()
+            whatsapp_service.enviar_whatsapp(from_number, msg_confirm)
+            return True
+
         tx_creada, msg_confirm, ya_conf = _confirmar_propuesta_transaccion(usuario, db)
         prop_confirmada = db.execute(
             select(ConversacionWpp).where(
@@ -1147,6 +1191,10 @@ Si aplica y procesa la selección o error de rango/moneda, persiste y retorna Tr
                 return True
             ops_todas = estado_previo_bill.get('operaciones', [])
             entidades_lote = dict(ops_todas[0])
+            if estado_previo_bill.get("origen_imagen") or estado_previo_bill.get("es_imagen"):
+                entidades_lote["origen_imagen"] = True
+            if estado_previo_bill.get("confianza_baja"):
+                entidades_lote["confianza_baja"] = True
             entidades_lote['transacciones_adicionales'] = [dict(o) for o in ops_todas[1:]]
             hay_lote_dup, m_dup, mon_dup, cat_dup = _detectar_duplicados_en_lote(entidades_lote)
             if hay_lote_dup:
@@ -1163,8 +1211,15 @@ Si aplica y procesa la selección o error de rango/moneda, persiste y retorna Tr
                 slot_estado_val = None
             nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=propuesta_msg, intent_detectado=intent_val, entidades=entidades_lote, accion_ejecutada=None, confianza=Decimal('1.000'), slot_filling_activo=slot_activo_val, slot_filling_estado=slot_estado_val)
             db.add(nueva_conv)
-            db.commit()
-            whatsapp_service.enviar_whatsapp(from_number, propuesta_msg)
+            db.flush()
+            from app.routers.whatsapp_ia import _registrar_directo_si_corresponde
+            es_img = bool(entidades_lote.get("origen_imagen") or entidades_lote.get("es_imagen") or estado_previo_bill.get("origen_imagen") or estado_previo_bill.get("es_imagen"))
+            reg_dir, resp_dir = _registrar_directo_si_corresponde(
+                usuario, db, nueva_conv, es_credito=False, es_imagen=es_img, es_duplicado=(intent_val != "registrar_transaccion"), se_asumio_principal=False
+            )
+            if not reg_dir and nueva_conv.accion_ejecutada != "error":
+                db.commit()
+            whatsapp_service.enviar_whatsapp(from_number, resp_dir)
             return True
         clave_bill = 'billetera_destino' if tipo_mov == 'ingreso' else 'billetera_origen'
         clave_otra = 'billetera_origen' if tipo_mov == 'ingreso' else 'billetera_destino'
@@ -1201,8 +1256,15 @@ Si aplica y procesa la selección o error de rango/moneda, persiste y retorna Tr
                 slot_estado_val = None
         nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=propuesta_msg, intent_detectado=intent_val, entidades=estado_previo_bill, accion_ejecutada=None, confianza=Decimal('1.000'), slot_filling_activo=slot_activo_val, slot_filling_estado=slot_estado_val)
         db.add(nueva_conv)
-        db.commit()
-        whatsapp_service.enviar_whatsapp(from_number, propuesta_msg)
+        db.flush()
+        from app.routers.whatsapp_ia import _registrar_directo_si_corresponde
+        es_img = bool(estado_previo_bill.get("origen_imagen") or estado_previo_bill.get("es_imagen"))
+        reg_dir, resp_dir = _registrar_directo_si_corresponde(
+            usuario, db, nueva_conv, es_credito=False, es_imagen=es_img, es_duplicado=(intent_val != "registrar_transaccion"), se_asumio_principal=False
+        )
+        if not reg_dir and nueva_conv.accion_ejecutada != "error":
+            db.commit()
+        whatsapp_service.enviar_whatsapp(from_number, resp_dir)
         return True
     return False
 

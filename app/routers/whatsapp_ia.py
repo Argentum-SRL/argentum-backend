@@ -1221,6 +1221,183 @@ def _confirmar_propuesta_transaccion(
     return transaccion, msg_resp, False
 
 
+def _es_registro_directo(
+    fila: ConversacionWpp,
+    es_credito: bool = False,
+    es_imagen: bool = False,
+    es_duplicado: bool = False,
+    se_asumio_principal: bool = False,
+) -> bool:
+    """
+    Determina si una propuesta cumple TODAS las condiciones para registro directo (Decisión 1):
+    - intent registrar_transaccion
+    - confianza >= 0.85
+    - sin slot filling pendiente
+    - monto, billetera y categoría resueltos
+    - medio de pago que no es tarjeta de crédito
+    - sin sospecha de duplicado (temporal ni de lote)
+    - mensaje que no es imagen
+    - al menos un ítem válido
+    Ante cualquier dato ausente o dudoso devuelve False.
+    """
+    if fila.intent_detectado != "registrar_transaccion":
+        return False
+
+    if fila.confianza is None or fila.confianza < Decimal("0.85"):
+        return False
+
+    if fila.slot_filling_activo:
+        return False
+
+    if es_imagen or fila.tipo_mensaje == TipoMensajeWpp.IMAGEN:
+        return False
+
+    if es_duplicado:
+        return False
+
+    entidades = fila.entidades or {}
+    if not isinstance(entidades, dict):
+        return False
+
+    if bool(entidades.get("origen_imagen")) or bool(entidades.get("es_imagen")):
+        return False
+    if bool(entidades.get("confianza_baja")):
+        return False
+
+    if entidades.get("datos_faltantes"):
+        return False
+
+    tipo_flujo = entidades.get("tipo_flujo")
+    if tipo_flujo in ("verificacion_duplicado", "verificacion_lote_duplicado", "verificacion_duplicado_suscripcion"):
+        return False
+
+    if tipo_flujo == "propuesta_credito":
+        return False
+    if es_credito or entidades.get("tarjeta_id") or entidades.get("tarjeta") or entidades.get("tarjeta_nombre"):
+        return False
+    if entidades.get("cantidad_cuotas") and int(entidades.get("cantidad_cuotas", 1)) > 1:
+        return False
+    if entidades.get("medio_pago") == "tarjeta_credito":
+        return False
+    if entidades.get("tipo_operacion") in ("transferencia", "extraccion", "compra_usd", "venta_usd"):
+        return False
+    if entidades.get("intent_origen") == "transferir_fondos":
+        return False
+
+    adicionales = entidades.get("transacciones_adicionales")
+    operaciones = entidades.get("operaciones")
+    es_lote = bool((adicionales and isinstance(adicionales, list) and len(adicionales) > 0) or (operaciones and isinstance(operaciones, list) and len(operaciones) > 0))
+
+    if es_lote:
+        items_a_validar = []
+        if operaciones and isinstance(operaciones, list):
+            items_a_validar = operaciones
+        else:
+            items_a_validar = [entidades] + (adicionales if isinstance(adicionales, list) else [])
+
+        items_validos = 0
+        for it in items_a_validar:
+            if not isinstance(it, dict):
+                continue
+            m = it.get("monto")
+            if m is None:
+                continue
+            try:
+                if Decimal(str(m)) <= Decimal("0"):
+                    continue
+            except (ValueError, TypeError):
+                continue
+            bill = it.get("billetera") or it.get("billetera_origen") or it.get("billetera_destino") or entidades.get("billetera") or entidades.get("billetera_origen") or entidades.get("billetera_destino")
+            if not bill:
+                continue
+            cat = it.get("categoria")
+            if not cat:
+                continue
+            items_validos += 1
+
+        return items_validos > 0
+
+    monto = entidades.get("monto")
+    if monto is None:
+        return False
+    try:
+        if Decimal(str(monto)) <= Decimal("0"):
+            return False
+    except (ValueError, TypeError):
+        return False
+
+    billetera = entidades.get("billetera") or entidades.get("billetera_origen") or entidades.get("billetera_destino") or entidades.get("billetera_resuelta_nombre")
+    if not billetera:
+        return False
+
+    categoria = entidades.get("categoria")
+    if not categoria:
+        return False
+
+    return True
+
+
+def _registrar_directo_si_corresponde(
+    usuario: Usuario,
+    db: Session,
+    fila: ConversacionWpp,
+    es_credito: bool = False,
+    es_imagen: bool = False,
+    es_duplicado: bool = False,
+    se_asumio_principal: bool = False,
+) -> tuple[bool, str]:
+    """
+    Ejecuta el registro directo sobre una propuesta recién guardada y flusheada
+    si cumple todas las condiciones de _es_registro_directo.
+    Retorna (registrado, mensaje_respuesta).
+    """
+    if not _es_registro_directo(
+        fila,
+        es_credito=es_credito,
+        es_imagen=es_imagen,
+        es_duplicado=es_duplicado,
+        se_asumio_principal=se_asumio_principal,
+    ):
+        return False, fila.mensaje_bot or ""
+
+    tx_creada, msg_resp, _ = _confirmar_propuesta_transaccion(usuario, db, propuesta_id=fila.id)
+
+    descartes = []
+    for l in (fila.mensaje_bot or "").split("\n"):
+        l_s = l.strip()
+        if l_s.startswith("No se pudo registrar") and l_s not in descartes:
+            descartes.append(l_s)
+    for l in msg_resp.split("\n"):
+        l_s = l.strip()
+        if l_s.startswith("No se pudo registrar") and l_s not in descartes:
+            descartes.append(l_s)
+
+    resto = [l for l in msg_resp.split("\n") if not l.strip().startswith("No se pudo registrar")]
+    if descartes:
+        msg_resp = "\n".join(descartes + resto)
+
+    if not tx_creada:
+        fila.accion_ejecutada = "error"
+        fila.mensaje_bot = msg_resp
+        db.flush()
+        db.commit()
+        return False, msg_resp
+
+    asumio = se_asumio_principal or (bool(fila.entidades.get("_asumio_principal")) if fila.entidades else False)
+    if asumio and "Si fue con otra, decime cuál." not in msg_resp:
+        msg_resp += "\nSi fue con otra, decime cuál."
+
+    if fila.entidades is not None:
+        entidades_copy = dict(fila.entidades)
+        entidades_copy["registro_directo"] = True
+        fila.entidades = entidades_copy
+
+    fila.mensaje_bot = msg_resp
+    db.flush()
+    db.commit()
+    return True, msg_resp
+
+
 FACTOR_MIN_COTIZACION_DOLAR = Decimal("0.40")
 FACTOR_MAX_COTIZACION_DOLAR = Decimal("2.50")
 
@@ -3011,6 +3188,8 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
             mensaje_texto = ""
             transcripcion = None
             es_imagen = False
+            es_credito = False
+            es_lote = False
             caption_imagen = ""
 
             if msg_type == "text":
@@ -3377,6 +3556,14 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                     intent_nuevo=resultado_ia.get("intent"),
                 )
 
+            if conv_activa and conv_activa.slot_filling_estado and isinstance(resultado_ia.get("entidades"), dict):
+                for marca in ("origen_imagen", "confianza_baja"):
+                    if conv_activa.slot_filling_estado.get(marca):
+                        resultado_ia["entidades"][marca] = True
+
+            if confianza_ia_raw < 0.85 and isinstance(resultado_ia.get("entidades"), dict):
+                resultado_ia["entidades"]["confianza_baja"] = True
+
             entidades_actuales = resultado_ia.get("entidades", {})
 
             # 5. Resolución determinística de billetera para movimientos (Tareas 2, 3, 4, 8)
@@ -3574,6 +3761,8 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                                 else:
                                     resultado_ia["intent"] = "registrar_transaccion"
                                     resultado_ia["slot_filling"] = False
+                                    if confianza_ia_raw < 0.85:
+                                        entidades_actuales["confianza_baja"] = True
                                     resultado_ia["confianza"] = max(float(resultado_ia.get("confianza", 0.0)), 0.85)
                                     resultado_ia["_asumio_principal"] = bool(operaciones[0].get("se_asumio_principal", False))
                                     resultado_ia["respuesta_usuario"] = _construir_propuesta_transaccion(
@@ -3736,6 +3925,8 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                                     )
                                     resultado_ia["intent"] = "registrar_transaccion"
                                     resultado_ia["slot_filling"] = False
+                                    if confianza_ia_raw < 0.85:
+                                        entidades_actuales["confianza_baja"] = True
                                     resultado_ia["confianza"] = max(float(resultado_ia.get("confianza", 0.0)), 0.85)
                                     resultado_ia["respuesta_usuario"] = propuesta_cred
                     else:
@@ -3879,6 +4070,8 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                                         else:
                                             resultado_ia["intent"] = "registrar_transaccion"
                                             resultado_ia["slot_filling"] = False
+                                            if confianza_ia_raw < 0.85:
+                                                entidades_actuales["confianza_baja"] = True
                                             resultado_ia["confianza"] = max(float(resultado_ia.get("confianza", 0.0)), 0.85)
                                             resultado_ia["_asumio_principal"] = se_asumio_principal
                                             resultado_ia["respuesta_usuario"] = _construir_propuesta_transaccion(
@@ -3928,6 +4121,8 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                 tipo_msg_guardar = TipoMensajeWpp.IMAGEN
                 mensaje_usuario_guardar = caption_imagen
                 transcripcion_guardar = mensaje_texto
+                if isinstance(resultado_ia.get("entidades"), dict):
+                    resultado_ia["entidades"]["origen_imagen"] = True
             elif transcripcion:
                 tipo_msg_guardar = TipoMensajeWpp.AUDIO
                 mensaje_usuario_guardar = transcripcion
@@ -3952,7 +4147,23 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                 slot_filling_estado=resultado_ia.get("entidades") if slot_activo else None,
             )
             db.add(nueva_conv)
-            db.commit()
+            db.flush()
+
+            es_dup = bool(resultado_ia.get("intent") in ("verificar_duplicado", "verificar_lote_duplicado", "verificar_duplicado_suscripcion"))
+            asumio_ppal = bool(resultado_ia.get("_asumio_principal", False))
+            registrado_dir, msg_dir = _registrar_directo_si_corresponde(
+                usuario,
+                db,
+                nueva_conv,
+                es_credito=es_credito,
+                es_imagen=es_imagen,
+                es_duplicado=es_dup,
+                se_asumio_principal=asumio_ppal,
+            )
+            if registrado_dir or nueva_conv.accion_ejecutada == "error":
+                resultado_ia["respuesta_usuario"] = msg_dir
+            else:
+                db.commit()
 
             # Envío saliente vía Meta Graph API
             t_envio_start = time.perf_counter()
