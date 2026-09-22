@@ -27,14 +27,14 @@ CATEGORIAS_SEED = [
         "subcategorias": ["Ropa", "Calzado", "Accesorios"]
     },
     {
-        "nombre": "Servicios",
+        "nombre": "Vivienda",
         "tipo": "egreso",
         "icono": "luz",
         "color": "#EAB308",
         "subcategorias": ["Luz", "Gas", "Agua", "Alquiler", "Expensas", "Impuestos", "Seguros"]
     },
     {
-        "nombre": "Hogar",
+        "nombre": "Equipamiento del hogar",
         "tipo": "egreso",
         "icono": "casa",
         "color": "#8B5CF6",
@@ -45,7 +45,7 @@ CATEGORIAS_SEED = [
         "tipo": "egreso",
         "icono": "medicina",
         "color": "#10B981",
-        "subcategorias": ["Farmacia", "Médico / Consulta", "Obra social / Prepaga", "Estudios y análisis", "Odontología", "Terapias"]
+        "subcategorias": ["Farmacia", "Médico / Consulta", "Obra social / Prepaga", "Estudios y análisis", "Odontología", "Terapias", "Deportes y gimnasio"]
     },
     {
         "nombre": "Transporte",
@@ -66,7 +66,7 @@ CATEGORIAS_SEED = [
         "tipo": "egreso",
         "icono": "entretenimiento",
         "color": "#EC4899",
-        "subcategorias": ["Salidas", "Deportes y gimnasio", "Hobbies y juegos", "Viajes"]
+        "subcategorias": ["Salidas", "Hobbies y juegos", "Viajes"]
     },
     {
         "nombre": "Educación",
@@ -76,7 +76,7 @@ CATEGORIAS_SEED = [
         "subcategorias": ["Cuotas", "Materiales y libros", "Idiomas"]
     },
     {
-        "nombre": "Restaurantes y delivery",
+        "nombre": "Gastronomía",
         "tipo": "egreso",
         "icono": "hamburguesa",
         "color": "#F59E0B",

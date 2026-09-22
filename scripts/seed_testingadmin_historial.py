@@ -193,12 +193,12 @@ def regenerar_datos_realistas(db, usuario: Usuario):
 
     cat_empleo, sub_sueldo = get_cat_sub("Empleo", "Sueldo", "ingreso")
     _, sub_aguinaldo = get_cat_sub("Empleo", "Aguinaldo", "ingreso")
-    cat_servicios = db.query(Categoria).filter(Categoria.nombre.ilike("servicios"), Categoria.tipo == "egreso").first()
+    cat_servicios = db.query(Categoria).filter(Categoria.nombre.in_(["Vivienda", "Servicios"]), Categoria.tipo == "egreso").first()
     if not cat_servicios:
-        raise RuntimeError("Categoría 'Servicios' no encontrada.")
-    _, sub_luz = get_cat_sub("Servicios", "Luz", "egreso")
-    _, sub_gas = get_cat_sub("Servicios", "Gas", "egreso")
-    _, sub_agua = get_cat_sub("Servicios", "Agua", "egreso")
+        raise RuntimeError("Categoría 'Vivienda' no encontrada.")
+    _, sub_luz = get_cat_sub(cat_servicios.nombre, "Luz", "egreso")
+    _, sub_gas = get_cat_sub(cat_servicios.nombre, "Gas", "egreso")
+    _, sub_agua = get_cat_sub(cat_servicios.nombre, "Agua", "egreso")
     cat_comunicacion, sub_internet = get_cat_sub("Comunicación", "Internet y cable", "egreso")
     _, sub_celular = get_cat_sub("Comunicación", "Celular", "egreso")
     cat_alimentacion, sub_supermercado = get_cat_sub("Alimentación", "Supermercado", "egreso")
@@ -210,16 +210,17 @@ def regenerar_datos_realistas(db, usuario: Usuario):
     cat_salud, sub_farmacia = get_cat_sub("Salud", "Farmacia", "egreso")
     cat_recreativo, sub_salidas = get_cat_sub("Recreativo", "Salidas", "egreso")
     _, sub_viajes = get_cat_sub("Recreativo", "Viajes", "egreso")
-    cat_restaurantes, sub_restaurantes = get_cat_sub("Restaurantes y delivery", "Restaurantes", "egreso")
-    _, sub_delivery = get_cat_sub("Restaurantes y delivery", "Delivery", "egreso")
+    cat_restaurantes = db.query(Categoria).filter(Categoria.nombre.in_(["Gastronomía", "Restaurantes y delivery"]), Categoria.tipo == "egreso").first()
+    _, sub_restaurantes = get_cat_sub(cat_restaurantes.nombre, "Restaurantes", "egreso")
+    _, sub_delivery = get_cat_sub(cat_restaurantes.nombre, "Delivery", "egreso")
     cat_otros, sub_cuidado = get_cat_sub("Otros", "Cuidado personal", "egreso")
     _, sub_regalos = get_cat_sub("Otros", "Regalos", "egreso")
     cat_educacion, sub_cuotas_edu = get_cat_sub("Educación", "Cuotas", "egreso")
     _, sub_utiles = get_cat_sub("Educación", "Materiales y libros", "egreso")
     cat_ahorro = db.query(Categoria).filter(Categoria.nombre.ilike("ahorro")).first()
-    cat_hogar = db.query(Categoria).filter(Categoria.nombre.ilike("hogar"), Categoria.tipo == "egreso").first()
+    cat_hogar = db.query(Categoria).filter(Categoria.nombre.in_(["Equipamiento del hogar", "Hogar"]), Categoria.tipo == "egreso").first()
     if not cat_hogar:
-        raise RuntimeError("Categoría 'Hogar' no encontrada.")
+        raise RuntimeError("Categoría 'Equipamiento del hogar' no encontrada.")
     sub_alquiler = db.query(Subcategoria).filter(
         Subcategoria.categoria_id == cat_hogar.id,
         Subcategoria.nombre.ilike("alquiler")
@@ -754,7 +755,7 @@ def regenerar_datos_realistas(db, usuario: Usuario):
         pct_cat = (prom_cat / prom_ingreso_13m * Decimal("100")) if prom_ingreso_13m > 0 else Decimal("0")
         print(f"  {cat_n:<25}: Promedio Mensual = ${prom_cat:>11,.2f} ({pct_cat:>5.1f}% del ingreso) | Total 13m = ${total_cat:>12,.2f}")
 
-    prom_serv = sum(t / Decimal("13") for c, t in rows_cat if c == "Servicios")
+    prom_serv = sum(t / Decimal("13") for c, t in rows_cat if c in ("Vivienda", "Servicios"))
     prom_com = sum(t / Decimal("13") for c, t in rows_cat if c == "Comunicación")
     pct_serv = (prom_serv / prom_ingreso_13m * Decimal("100")) if prom_ingreso_13m > 0 else Decimal("0")
     pct_serv_com = ((prom_serv + prom_com) / prom_ingreso_13m * Decimal("100")) if prom_ingreso_13m > 0 else Decimal("0")
