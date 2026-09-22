@@ -17,6 +17,8 @@ from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.models.codigo_verificacion import CodigoVerificacion
+from app.models.conversacion_wpp import ConversacionWpp
+from app.models.mensaje_whatsapp_procesado import MensajeWhatsappProcesado
 from app.models.rate_limit import RateLimit
 from limits.storage import Storage
 
@@ -133,6 +135,42 @@ def limpiar_codigos_y_rate_limits_expirados(db: Session) -> dict[str, int]:
         "codigos_verificacion_eliminados": codigos_borrados,
         "rate_limits_eliminados": rate_limits_borrados,
     }
+
+
+def purgar_conversaciones_wpp_antiguas(db: Session) -> int:
+    """
+    Elimina conversaciones de WhatsApp con más de 90 días de antigüedad.
+    Retorna la cantidad de filas eliminadas.
+    """
+    limite = datetime.now(timezone.utc) - timedelta(days=90)
+    borrados = db.execute(
+        delete(ConversacionWpp).where(ConversacionWpp.fecha < limite)
+    ).rowcount
+    db.commit()
+    logger.info(
+        "Purga de conversaciones_wpp ejecutada: %d filas eliminadas (anteriores a %s).",
+        borrados,
+        limite.isoformat(),
+    )
+    return borrados
+
+
+def purgar_mensajes_whatsapp_procesados_antiguos(db: Session) -> int:
+    """
+    Elimina registros de mensajes WhatsApp procesados con más de 7 días de antigüedad.
+    Retorna la cantidad de filas eliminadas.
+    """
+    limite = datetime.now(timezone.utc) - timedelta(days=7)
+    borrados = db.execute(
+        delete(MensajeWhatsappProcesado).where(MensajeWhatsappProcesado.fecha_recepcion < limite)
+    ).rowcount
+    db.commit()
+    logger.info(
+        "Purga de mensajes_whatsapp_procesados ejecutada: %d filas eliminadas (anteriores a %s).",
+        borrados,
+        limite.isoformat(),
+    )
+    return borrados
 
 
 class PostgresStorage(Storage):

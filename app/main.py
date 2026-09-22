@@ -44,7 +44,11 @@ logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 import time
 from app.core.database import SessionLocal, db_query_duration_var
 from app.core.auth import limpiar_tokens_expirados
-from app.services.rate_limit_service import limpiar_codigos_y_rate_limits_expirados
+from app.services.rate_limit_service import (
+    limpiar_codigos_y_rate_limits_expirados,
+    purgar_conversaciones_wpp_antiguas,
+    purgar_mensajes_whatsapp_procesados_antiguos,
+)
 from app.core.job_lock import intentar_tomar_lock_job, liberar_lock_job
 import structlog
 
@@ -225,6 +229,14 @@ def _job_limpiar_tokens():
                 res_limpieza["codigos_verificacion_eliminados"],
                 res_limpieza["rate_limits_eliminados"],
             )
+
+        conv_eliminadas = purgar_conversaciones_wpp_antiguas(db)
+        if conv_eliminadas:
+            logger.info("Conversaciones WhatsApp antiguas eliminadas: %s", conv_eliminadas)
+
+        wamid_eliminados = purgar_mensajes_whatsapp_procesados_antiguos(db)
+        if wamid_eliminados:
+            logger.info("Mensajes WhatsApp procesados antiguos eliminados: %s", wamid_eliminados)
     except Exception:
         logger.exception("Error en job limpiar_tokens")
     finally:
