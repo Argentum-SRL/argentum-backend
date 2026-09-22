@@ -698,7 +698,7 @@ def verificar_alertas_presupuesto(db: Session, presupuesto: Presupuesto, periodo
         canal_web=canal_web,
         canal_whatsapp=canal_whatsapp,
         canal_email=False,
-        grupo_agrupacion_override=f"presupuestos/{presupuesto.id}/{periodo.id}",
+        grupo_agrupacion_override=f"presupuestos/{presupuesto.id}/{periodo.id}/{tipo.value}",
         commit=commit,
         datos_template=datos_template,
     )
