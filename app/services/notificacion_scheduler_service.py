@@ -525,6 +525,8 @@ def _job_entrega_whatsapp_batched(db_session_factory):
                             }
                         ] if valores else []
                         enviado = enviar_whatsapp_template(u.telefono, template_name, "es", componentes)
+                        if not enviado and notif.tipo == TipoNotificacion.CAMBIO_CONTRASENA:
+                            enviado = wpp_svc.enviar_whatsapp_notificacion(u.telefono, notif.mensaje)
                     else:
                         enviado = wpp_svc.enviar_whatsapp_notificacion(u.telefono, notif.mensaje)
 
