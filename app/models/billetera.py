@@ -37,6 +37,7 @@ class Billetera(Base):
     saldo_inicial: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False, default=Decimal("0"))
     es_principal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     es_efectivo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    es_inversion: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     estado: Mapped[EstadoBilletera] = mapped_column(
         SAEnum(EstadoBilletera, values_callable=lambda obj: [e.value for e in obj], name="estado_billetera_enum"),
         nullable=False,

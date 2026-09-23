@@ -279,9 +279,22 @@ def calcular_perfil_nuevo(db: Session, usuario: Usuario, data: dict[str, Any] | 
         habitos_ratio = None
 
     # Runway / Cobertura líquida (Pilar Ahorrar)
-    from app.models.billetera import Billetera
+    from app.models.billetera import Billetera, EstadoBilletera
     from app.models.meta import Meta
-    saldo_ars = sum((b.saldo_actual for b in db.execute(select(Billetera).where(Billetera.usuario_id == usuario.id, Billetera.moneda == Moneda.ARS)).scalars()), ZERO)
+    saldo_ars = sum(
+        (
+            b.saldo_actual
+            for b in db.execute(
+                select(Billetera).where(
+                    Billetera.usuario_id == usuario.id,
+                    Billetera.moneda == Moneda.ARS,
+                    Billetera.estado == EstadoBilletera.ACTIVA,
+                    Billetera.es_inversion == False,
+                )
+            ).scalars()
+        ),
+        ZERO,
+    )
     saldo_metas_ars = sum((m.monto_actual for m in db.execute(select(Meta).where(Meta.usuario_id == usuario.id, Meta.moneda == Moneda.ARS)).scalars()), ZERO)
     saldo_runway_ars = saldo_ars + saldo_metas_ars
     if datos_suficientes and gasto_tipico and gasto_tipico > ZERO:

@@ -833,6 +833,11 @@ def pagar_resumen_tarjeta(
         billetera_pago = db.get(Billetera, billetera_pago_id)
         if not billetera_pago:
             raise HTTPException(status_code=404, detail="No encontramos la billetera seleccionada.")
+        if getattr(billetera_pago, "es_inversion", False):
+            raise HTTPException(
+                status_code=400,
+                detail="Esta billetera no admite pagos de tarjeta ni cuotas."
+            )
         if billetera_pago.moneda != Moneda.ARS:
             raise HTTPException(status_code=400, detail="Para pagar en pesos debés seleccionar una billetera en pesos.")
         monto_debito = monto_pago
@@ -844,7 +849,8 @@ def pagar_resumen_tarjeta(
                 billeteras_usd = db.query(Billetera).filter(
                     Billetera.usuario_id == usuario_id,
                     Billetera.moneda == Moneda.USD,
-                    Billetera.estado == "activa"
+                    Billetera.estado == "activa",
+                    Billetera.es_inversion == False
                 ).all()
                 if not billeteras_usd:
                     raise HTTPException(
@@ -859,6 +865,11 @@ def pagar_resumen_tarjeta(
                 ).first()
                 if not billetera_pago:
                     raise HTTPException(status_code=404, detail="No encontramos la billetera seleccionada.")
+                if getattr(billetera_pago, "es_inversion", False):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Esta billetera no admite pagos de tarjeta ni cuotas."
+                    )
                 if billetera_pago.moneda != Moneda.USD:
                     raise HTTPException(
                         status_code=400,
@@ -874,6 +885,11 @@ def pagar_resumen_tarjeta(
             billetera_pago = db.get(Billetera, billetera_pago_id)
             if not billetera_pago:
                 raise HTTPException(status_code=404, detail="No encontramos la billetera seleccionada.")
+            if getattr(billetera_pago, "es_inversion", False):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Esta billetera no admite pagos de tarjeta ni cuotas."
+                )
             if billetera_pago.moneda != Moneda.ARS:
                 raise HTTPException(status_code=400, detail="Para pesificar consumos en dólares debés usar una billetera en pesos.")
 

@@ -19,6 +19,7 @@ class BilleteraBase(BaseModel):
     saldo_inicial: DecimalJSON = Field(default=Decimal("0"), ge=0, decimal_places=2, max_digits=15)
     es_principal: bool = False
     es_efectivo: bool = False
+    es_inversion: bool = False
     estado: EstadoBilletera = EstadoBilletera.ACTIVA
     bank_id: str | None = Field(default=None, max_length=50)
 
@@ -40,6 +41,7 @@ class BilleteraUpdate(BaseModel):
     moneda: Moneda | None = None
     es_principal: bool | None = None
     es_efectivo: bool | None = None
+    es_inversion: bool | None = None
     estado: EstadoBilletera | None = None
 
     @field_validator("nombre")

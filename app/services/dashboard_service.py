@@ -170,7 +170,8 @@ def calcular_saldo_disponible_ciclo_actual(
     else:
         b_stmt = select(Billetera.moneda, func.sum(Billetera.saldo_actual)).where(
             Billetera.usuario_id == usuario.id,
-            Billetera.estado == EstadoBilletera.ACTIVA
+            Billetera.estado == EstadoBilletera.ACTIVA,
+            Billetera.es_inversion == False
         )
         if billetera_ids:
             b_stmt = b_stmt.where(Billetera.id.in_(billetera_ids))
@@ -838,7 +839,7 @@ def get_resumen_completo(
     billeteras_data = []
     total_saldo_activa = {"ars": Decimal("0"), "usd": Decimal("0")}
     for b, has_tx in rows_billeteras:
-        if b.estado == EstadoBilletera.ACTIVA:
+        if b.estado == EstadoBilletera.ACTIVA and not b.es_inversion:
             if not billetera_ids or b.id in billetera_ids:
                 moneda_key = b.moneda.value.lower()
                 if moneda_key in total_saldo_activa:
@@ -851,6 +852,7 @@ def get_resumen_completo(
             "saldo_inicial": float(getattr(b, "saldo_inicial", Decimal("0")) or Decimal("0")),
             "es_principal": bool(b.es_principal),
             "es_efectivo": bool(b.es_efectivo),
+            "es_inversion": bool(getattr(b, "es_inversion", False)),
             "estado": b.estado.value,
             "fecha_creacion": b.fecha_creacion.isoformat() if getattr(b, "fecha_creacion", None) else None,
             "bank_id": getattr(b, "bank_id", None),

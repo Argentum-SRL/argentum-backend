@@ -26,6 +26,7 @@ class CrearBilleteraRequest(BaseModel):
     saldo_inicial: Decimal = Field(default=Decimal("0"), ge=0, decimal_places=2, max_digits=15)
     es_principal: bool = False
     es_efectivo: bool = False
+    es_inversion: bool = False
     bank_id: str | None = Field(default=None, max_length=50)
 
     @field_validator("nombre")
@@ -110,6 +111,7 @@ def create_billetera(
         saldo_actual=body.saldo_inicial,
         es_principal=body.es_principal,
         es_efectivo=body.es_efectivo,
+        es_inversion=body.es_inversion,
     )
     db.add(b)
     db.commit()
@@ -153,7 +155,7 @@ def update_billetera(
         if body.estado is not None:
             billetera.estado = body.estado
     else:
-        for attr in ('nombre', 'moneda', 'es_principal', 'es_efectivo', 'estado'):
+        for attr in ('nombre', 'moneda', 'es_principal', 'es_efectivo', 'es_inversion', 'estado'):
             val = getattr(body, attr, None)
             if val is not None:
                 setattr(billetera, attr, val)

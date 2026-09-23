@@ -235,6 +235,12 @@ def prepagar_grupo(
     if not billetera:
         raise HTTPException(status_code=404, detail="Billetera no encontrada")
 
+    if getattr(billetera, "es_inversion", False):
+        raise HTTPException(
+            status_code=400,
+            detail="Esta billetera no admite pagos de tarjeta ni cuotas."
+        )
+
     from app.services.transaccion_service import _validar_moneda_coincide
     _validar_moneda_coincide(grupo.moneda, billetera)
 

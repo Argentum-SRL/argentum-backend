@@ -120,6 +120,7 @@ class BilleteraDashboardItem(BaseModel):
     saldo_inicial: float = 0.0
     es_principal: bool = False
     es_efectivo: bool = False
+    es_inversion: bool = False
     estado: str = "activa"
     fecha_creacion: Optional[str] = None
     bank_id: Optional[str] = None

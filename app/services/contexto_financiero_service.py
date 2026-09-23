@@ -27,11 +27,18 @@ def _calcular_saldo_disponible_sync(
 
     # 1. Saldo de Billeteras activas
     if wallets_override is not None:
-        wallets = wallets_override
+        wallets = [
+            w for w in wallets_override
+            if getattr(w, "estado", EstadoBilletera.ACTIVA) == EstadoBilletera.ACTIVA
+            and not getattr(w, "es_inversion", False)
+        ]
+        if billetera_ids:
+            wallets = [w for w in wallets if w.id in billetera_ids]
     else:
         query_b = db.query(Billetera).filter(
             Billetera.usuario_id == usuario_id,
-            Billetera.estado == EstadoBilletera.ACTIVA
+            Billetera.estado == EstadoBilletera.ACTIVA,
+            Billetera.es_inversion == False,
         )
         if billetera_ids:
             query_b = query_b.filter(Billetera.id.in_(billetera_ids))
