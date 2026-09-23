@@ -444,7 +444,7 @@ def verificar_reconciliacion_billeteras(db: Session):
 SALDOS_REFERENCIA_21 = {
     ("testingadmin@argentum.com", "Efectivo ARS", "ARS"): Decimal("0.00"),
     ("testingadmin@argentum.com", "Efectivo USD", "USD"): Decimal("0.00"),
-    ("testingadmin@argentum.com", "Galicia", "ARS"): Decimal("1889058.71"),  # Actualizado 2026-09-16: cobro legítimo Spotify 15/09 (-$4.500)
+    ("testingadmin@argentum.com", "Galicia", "ARS"): Decimal("1879558.71"),  # Actualizado 23/09/2026: cobro legítimo Netflix Estándar 22/09 (-$9.500)
     ("testingadmin@argentum.com", "Santander", "ARS"): Decimal("84270.29"),
 }
 
