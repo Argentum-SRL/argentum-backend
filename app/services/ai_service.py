@@ -2,6 +2,7 @@
 app/services/ai_service.py — Servicio central de IA para Argentum.
 Único módulo autorizado para llamar a OpenAI. No importar openai en ningún otro archivo.
 """
+import copy
 import json
 import logging
 import re
@@ -22,6 +23,7 @@ from app.models.presupuesto import Presupuesto, EstadoPresupuesto
 from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
 from app.models.usuario import Usuario
 from app.services.dashboard_service import get_ciclo_fechas
+from app.services.evento_service import _cache_contexto_financiero
 from app.services.openai_client import get_openai_client
 from app.services import categoria_service
 from app.services import presupuesto_service
@@ -408,7 +410,7 @@ _MESES_ES = [
 ]
 
 
-def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
+def _construir_contexto_financiero_uncached(usuario: Usuario, db: Session) -> dict:
     from app.core.constants import CATEGORIAS_SISTEMA
 
     billeteras = db.execute(
@@ -528,6 +530,26 @@ def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
         logger.error(f"Error al inyectar perfil financiero en el AI bootstrap: {str(e)}", exc_info=True)
 
     return res
+
+
+_CONTEXTO_CACHE_TTL: float = 20.0
+
+
+def construir_contexto_financiero(usuario: Usuario, db: Session) -> dict:
+    """
+    Construye el contexto financiero del usuario con caché en memoria (TTL 20s).
+    El caché se invalida inmediatamente al llamarse emitir_evento_actualizacion para ese usuario.
+    """
+    ahora = time.time()
+    entrada = _cache_contexto_financiero.get(usuario.id)
+    if entrada is not None:
+        guardado_en, contexto_cacheado = entrada
+        if ahora - guardado_en <= _CONTEXTO_CACHE_TTL:
+            return copy.deepcopy(contexto_cacheado)
+
+    resultado = _construir_contexto_financiero_uncached(usuario, db)
+    _cache_contexto_financiero[usuario.id] = (ahora, copy.deepcopy(resultado))
+    return copy.deepcopy(resultado)
 
 
 _SCHEMA_CACHE: dict[str, Any] | None = None

@@ -3,7 +3,7 @@ from uuid import UUID
 from typing import List, Optional
 from datetime import date, timedelta
 from sqlalchemy import select, or_, and_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.usuario import Usuario, Moneda
 from app.models.billetera import Billetera, EstadoBilletera
@@ -51,11 +51,16 @@ def _calcular_saldo_disponible_sync(
     fecha_inicio_prox, fecha_fin_prox = get_ciclo_fechas(usuario, fecha_fin_curr + timedelta(days=1))
 
     # 3. Cuotas comprometidas del próximo ciclo (unpaid)
-    query_c = db.query(Cuota).join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id).filter(
-        GrupoCuotas.usuario_id == usuario_id,
-        Cuota.pagada == False,
-        Cuota.fecha_vencimiento >= fecha_inicio_prox,
-        Cuota.fecha_vencimiento <= fecha_fin_prox
+    query_c = (
+        db.query(Cuota)
+        .options(joinedload(Cuota.grupo))
+        .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
+        .filter(
+            GrupoCuotas.usuario_id == usuario_id,
+            Cuota.pagada == False,
+            Cuota.fecha_vencimiento >= fecha_inicio_prox,
+            Cuota.fecha_vencimiento <= fecha_fin_prox,
+        )
     )
 
     if billetera_ids:
