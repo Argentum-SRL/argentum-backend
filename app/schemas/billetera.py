@@ -20,6 +20,8 @@ class BilleteraBase(BaseModel):
     es_principal: bool = False
     es_efectivo: bool = False
     es_inversion: bool = False
+    tna: DecimalJSON | None = Field(default=None, ge=Decimal("0"), decimal_places=2, max_digits=6)
+    fecha_ultimo_rendimiento: datetime | None = None
     estado: EstadoBilletera = EstadoBilletera.ACTIVA
     bank_id: str | None = Field(default=None, max_length=50)
 
@@ -42,6 +44,7 @@ class BilleteraUpdate(BaseModel):
     es_principal: bool | None = None
     es_efectivo: bool | None = None
     es_inversion: bool | None = None
+    tna: Decimal | None = Field(default=None, ge=Decimal("0"), decimal_places=2, max_digits=6)
     estado: EstadoBilletera | None = None
 
     @field_validator("nombre")
@@ -61,3 +64,18 @@ class BilleteraRead(BilleteraBase):
     tiene_transacciones: bool = False
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class RendimientoEstimadoResponse(BaseModel):
+    billetera_id: UUID
+    tiene_tna: bool
+    tna: DecimalJSON | None = None
+    saldo_actual: DecimalJSON
+    dias_transcurridos: int | None = None
+    fecha_ultimo_rendimiento: datetime | None = None
+    rendimiento_estimado: DecimalJSON | None = None
+
+
+class ConfirmarRendimientoRequest(BaseModel):
+    monto: Decimal = Field(..., gt=Decimal("0"), decimal_places=2, max_digits=15)
+    fecha: datetime | None = None

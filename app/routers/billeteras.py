@@ -1,21 +1,28 @@
 from __future__ import annotations
 
 from typing import List
+from datetime import datetime, timezone
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select, update, delete, exists
+from sqlalchemy import select, update, delete, exists, or_
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.models.usuario import Usuario, Moneda
 from app.models.billetera import Billetera, EstadoBilletera
+from app.models.rendimiento_billetera import RendimientoBilletera
 from app.models.transaccion import Transaccion
 from app.models.transferencia_interna import TransferenciaInterna
 from app.models.tarjeta_credito import TarjetaCredito
-from app.schemas.billetera import BilleteraRead, BilleteraUpdate
-from app.services import usuario_service
+from app.schemas.billetera import (
+    BilleteraRead,
+    BilleteraUpdate,
+    RendimientoEstimadoResponse,
+    ConfirmarRendimientoRequest,
+)
+from app.services import usuario_service, rendimiento_billetera_service
 
 router = APIRouter(prefix="/billeteras", tags=["billeteras"])
 
@@ -27,6 +34,7 @@ class CrearBilleteraRequest(BaseModel):
     es_principal: bool = False
     es_efectivo: bool = False
     es_inversion: bool = False
+    tna: Decimal | None = Field(default=None, ge=Decimal("0"), decimal_places=2, max_digits=6)
     bank_id: str | None = Field(default=None, max_length=50)
 
     @field_validator("nombre")
@@ -46,14 +54,15 @@ def list_billeteras(
     # Failsafe: asegurar que tenga las billeteras de efectivo default
     usuario_service.crear_billeteras_efectivo_default(db, current_user.id)
     
-    # Optimización N+1: Usar subqueries correlacionadas para verificar transacciones y transferencias
+    # Optimización N+1: Usar subqueries correlacionadas para verificar transacciones, transferencias y rendimientos
     exists_tx = exists().where(Transaccion.billetera_id == Billetera.id)
     exists_tr = exists().where(
         (TransferenciaInterna.billetera_origen_id == Billetera.id) | 
         (TransferenciaInterna.billetera_destino_id == Billetera.id)
     )
+    exists_rend = exists().where(RendimientoBilletera.billetera_id == Billetera.id)
     
-    stmt = select(Billetera, (exists_tx | exists_tr).label("has_tx")).where(Billetera.usuario_id == current_user.id)
+    stmt = select(Billetera, (exists_tx | exists_tr | exists_rend).label("has_tx")).where(Billetera.usuario_id == current_user.id)
     rows = db.execute(stmt).all()
     
     results = []
@@ -72,23 +81,55 @@ def get_billetera(
     current_user: Usuario = Depends(get_current_user),
 ):
     """Obtiene una billetera específica por ID."""
-    from sqlalchemy import or_
-    
     stmt = select(Billetera).where(Billetera.id == billetera_id, Billetera.usuario_id == current_user.id)
     billetera = db.execute(stmt).scalars().one_or_none()
     
     if not billetera:
         raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
     
-    # Verificamos transacciones y transferencias por separado para mayor seguridad
+    # Verificamos transacciones, transferencias y rendimientos por separado para mayor seguridad
     has_tx = db.query(exists().where(Transaccion.billetera_id == billetera_id)).scalar()
     has_tr = db.query(exists().where(or_(
         TransferenciaInterna.billetera_origen_id == billetera_id,
         TransferenciaInterna.billetera_destino_id == billetera_id
     ))).scalar()
+    has_rend = db.query(exists().where(RendimientoBilletera.billetera_id == billetera_id)).scalar()
     
     b_read = BilleteraRead.model_validate(billetera)
-    b_read.tiene_transacciones = bool(has_tx or has_tr)
+    b_read.tiene_transacciones = bool(has_tx or has_tr or has_rend)
+    return b_read
+
+
+@router.get("/{billetera_id}/rendimiento-estimado", response_model=RendimientoEstimadoResponse)
+def get_rendimiento_estimado(
+    billetera_id: str,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Calcula y devuelve el rendimiento estimado de una billetera de inversión."""
+    return rendimiento_billetera_service.calcular_rendimiento_estimado(db, current_user.id, billetera_id)
+
+
+@router.post("/{billetera_id}/rendimiento", response_model=BilleteraRead)
+def registrar_rendimiento(
+    billetera_id: str,
+    body: ConfirmarRendimientoRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Registra y acredita un rendimiento manual en una billetera de inversión."""
+    billetera = rendimiento_billetera_service.confirmar_rendimiento(
+        db, current_user.id, billetera_id, monto=body.monto, fecha=body.fecha
+    )
+    has_tx = db.query(exists().where(Transaccion.billetera_id == billetera.id)).scalar()
+    has_tr = db.query(exists().where(or_(
+        TransferenciaInterna.billetera_origen_id == billetera.id,
+        TransferenciaInterna.billetera_destino_id == billetera.id
+    ))).scalar()
+    has_rend = db.query(exists().where(RendimientoBilletera.billetera_id == billetera.id)).scalar()
+
+    b_read = BilleteraRead.model_validate(billetera)
+    b_read.tiene_transacciones = bool(has_tx or has_tr or has_rend)
     return b_read
 
 
@@ -98,6 +139,17 @@ def create_billetera(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
+    if body.es_efectivo and body.tna is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Una billetera de efectivo no puede tener tasa",
+        )
+
+    if body.tna is not None:
+        fecha_ultimo_rendimiento = datetime.now(timezone.utc)
+    else:
+        fecha_ultimo_rendimiento = None
+
     if body.es_principal:
         db.execute(
             update(Billetera).where(Billetera.usuario_id == current_user.id).values(es_principal=False)
@@ -112,6 +164,8 @@ def create_billetera(
         es_principal=body.es_principal,
         es_efectivo=body.es_efectivo,
         es_inversion=body.es_inversion,
+        tna=body.tna,
+        fecha_ultimo_rendimiento=fecha_ultimo_rendimiento,
     )
     db.add(b)
     db.commit()
@@ -131,6 +185,27 @@ def update_billetera(
     if not billetera:
         raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
 
+    es_efectivo_target = body.es_efectivo if body.es_efectivo is not None else billetera.es_efectivo
+    if es_efectivo_target and body.tna is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Una billetera de efectivo no puede tener tasa",
+        )
+    if body.es_efectivo is True and billetera.tna is not None and body.tna is None and "tna" not in body.model_fields_set:
+        raise HTTPException(
+            status_code=400,
+            detail="Una billetera de efectivo no puede tener tasa",
+        )
+
+    if "tna" in body.model_fields_set:
+        if body.tna is not None:
+            billetera.tna = body.tna
+            if billetera.fecha_ultimo_rendimiento is None:
+                billetera.fecha_ultimo_rendimiento = datetime.now(timezone.utc)
+        else:
+            billetera.tna = None
+            billetera.fecha_ultimo_rendimiento = None
+
     if body.es_principal:
         db.execute(
             update(Billetera).where(Billetera.usuario_id == current_user.id).values(es_principal=False)
@@ -142,7 +217,8 @@ def update_billetera(
             (TransferenciaInterna.billetera_origen_id == billetera_id) |
             (TransferenciaInterna.billetera_destino_id == billetera_id)
         )).scalar()
-        if has_tx or has_tr:
+        has_rend = db.query(exists().where(RendimientoBilletera.billetera_id == billetera_id)).scalar()
+        if has_tx or has_tr or has_rend:
             raise HTTPException(
                 status_code=400,
                 detail="No podés cambiar la moneda de una billetera que ya tiene transacciones o transferencias asociadas."
@@ -189,8 +265,14 @@ def delete_billetera(
         (TransferenciaInterna.billetera_destino_id == billetera_id)
     )
     exists_sub = exists().where(Suscripcion.billetera_id == billetera_id)
+    exists_rend = exists().where(RendimientoBilletera.billetera_id == billetera_id)
     
-    check_stmt = select(exists_tx.label("has_tx"), exists_tr.label("has_tr"), exists_sub.label("has_sub"))
+    check_stmt = select(
+        exists_tx.label("has_tx"),
+        exists_tr.label("has_tr"),
+        exists_sub.label("has_sub"),
+        exists_rend.label("has_rend")
+    )
     check_res = db.execute(check_stmt).one()
     
     if check_res.has_tx:
@@ -209,6 +291,12 @@ def delete_billetera(
         raise HTTPException(
             status_code=400,
             detail="No se puede eliminar la billetera porque tiene suscripciones activas asociadas. Por favor, archivala o cancelá las suscripciones."
+        )
+
+    if check_res.has_rend:
+        raise HTTPException(
+            status_code=400,
+            detail="No se puede eliminar la billetera porque tiene rendimientos asociados. Por favor, archivala."
         )
 
     # Chequear las tarjetas de crédito asociadas

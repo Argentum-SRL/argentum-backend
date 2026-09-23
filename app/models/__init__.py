@@ -23,6 +23,7 @@ from app.models.suscripcion import Suscripcion
 from app.models.tarjeta_credito import TarjetaCredito
 from app.models.transaccion import Transaccion
 from app.models.transferencia_interna import TransferenciaInterna
+from app.models.rendimiento_billetera import RendimientoBilletera
 from app.models.usuario import Usuario
 from app.models.tools import IPCCache
 from app.models.feriado import FeriadoAR
@@ -63,6 +64,7 @@ __all__ = [
     "Suscripcion",
     "Transaccion",
     "TransferenciaInterna",
+    "RendimientoBilletera",
     "IPCCache",
     "FeriadoAR",
     "EventoActualizacion",
