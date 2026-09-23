@@ -1,0 +1,40 @@
+{
+  "escenario_id": "P11.13",
+  "fecha_grabacion": "2026-09-23T17:20:02.172711+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "le transferí 5000 a mi hermano y también gasté 3000 en el kiosco",
+      "respuesta": {
+        "intent": "desconocido",
+        "entidades": {
+          "monto": null,
+          "moneda": null,
+          "tipo": null,
+          "categoria": null,
+          "descripcion": null,
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": null,
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "meta": null,
+          "transacciones_adicionales": []
+        },
+        "confianza": 1.0,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Las transferencias y los gastos deben enviarse en mensajes separados. Por favor, envía cada operación por separado."
+      }
+    }
+  ]
+}

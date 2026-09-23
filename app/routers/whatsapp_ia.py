@@ -219,17 +219,15 @@ MSG_NO_MEZCLAR_TRANSFERENCIAS = (
     "en mensajes separados de los gastos o ingresos. Por favor mandalas por separado."
 )
 
-
-
-
-
-
-
-
-
-
-
-
+TERMINOS_BLOQUEO_MEZCLA = (
+    "transferi", "transferir", "transferencia", "pase a", "pasé a",
+    "extraje", "extraccion", "extracción", "cajero",
+    "compre dolares", "compré dólares", "vendi dolares", "vendí dólares",
+    "comprar dolares", "comprar dólares", "vender dolares", "vender dólares",
+)
+PATRON_BLOQUEO_MEZCLA = re.compile(
+    rf"\b(?:{'|'.join(re.escape(p) for p in TERMINOS_BLOQUEO_MEZCLA)})\b"
+)
 
 
 PREFIJOS_CORRECCION = [
@@ -4151,12 +4149,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                         resultado_ia["slot_filling"] = False
                         resultado_ia["respuesta_usuario"] = MSG_TOPE_MOVIMIENTOS_SUPERADO
                         resultado_ia["entidades"] = {}
-                    elif any(p in m_norm for p in (
-                        "transferi", "transferir", "transferencia", "pase a", "pasé a",
-                        "extraje", "extraccion", "extracción", "cajero",
-                        "compre dolares", "compré dólares", "vendi dolares", "vendí dólares",
-                        "comprar dolares", "comprar dólares", "vender dolares", "vender dólares",
-                    )):
+                    elif PATRON_BLOQUEO_MEZCLA.search(m_norm):
                         resultado_ia["intent"] = "mezcla_transferencia_invalida"
                         resultado_ia["slot_filling"] = False
                         resultado_ia["respuesta_usuario"] = MSG_NO_MEZCLAR_TRANSFERENCIAS

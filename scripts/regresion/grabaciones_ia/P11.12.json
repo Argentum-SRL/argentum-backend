@@ -1,0 +1,81 @@
+{
+  "escenario_id": "P11.12",
+  "fecha_grabacion": "2026-09-23T17:19:09.261471+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "Hoy me pagaron 50.000 pesos porque le arreglé la compa a una amiga, con esos 50.000 pesos gasté 10 en la verdulería, me compré un maple de huevos por 4.500, fui a la carnicería y compré por 10.000 pesos más pechugas de pollo, pasé al kiosco y me compré un chocolate por 2.790.",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 50000,
+          "moneda": "ARS",
+          "tipo": "ingreso",
+          "categoria": "Sueldo",
+          "descripcion": "Sueldo",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": null,
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "meta": null,
+          "transacciones_adicionales": [
+            {
+              "monto": 10,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Verdulería",
+              "descripcion": "Verdulería",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            },
+            {
+              "monto": 4500,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Otros",
+              "descripcion": "Maple de huevos",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            },
+            {
+              "monto": 10000,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Carnicería",
+              "descripcion": "Carnicería",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            },
+            {
+              "monto": 2790,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Kiosco",
+              "descripcion": "Kiosco",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            }
+          ]
+        },
+        "confianza": 0.9,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Listo. Se registraron las transacciones."
+      }
+    }
+  ]
+}

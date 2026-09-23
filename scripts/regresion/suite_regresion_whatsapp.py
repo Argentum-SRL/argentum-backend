@@ -2454,6 +2454,90 @@ def p11_caso_11(datos):
         )
     return run_isolated(test)
 
+def p11_caso_12(datos):
+    """Falso positivo corregido: lote con 'pasé al kiosco' no bloquea por transferencia y registra movimientos"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+
+        tx_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+
+        texto_real = (
+            "Hoy me pagaron 50.000 pesos porque le arreglé la compa a una amiga, "
+            "con esos 50.000 pesos gasté 10 en la verdulería, me compré un maple de huevos por 4.500, "
+            "fui a la carnicería y compré por 10.000 pesos más pechugas de pollo, "
+            "pasé al kiosco y me compré un chocolate por 2.790."
+        )
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(
+            make_payload(TELEFONO_TEST, texto_real),
+            time.perf_counter()
+        )
+        resp_inicial = respuestas[-1][1] if respuestas else ""
+
+        tx_despues_1 = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        if tx_despues_1 == tx_antes and ("¿Confirmás" in resp_inicial or "confirmar" in resp_inicial.lower()):
+            _procesar_webhook_whatsapp_sync(
+                make_payload(TELEFONO_TEST, "sí"),
+                time.perf_counter()
+            )
+
+        tx_final = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        tx_creadas = tx_final - tx_antes
+
+        conv = conn.execute(
+            text("SELECT intent_detectado, mensaje_bot FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+
+        no_bloqueado = "mandalas por separado" not in (conv["mensaje_bot"] if conv else "")
+        sin_intent_invalido = (conv["intent_detectado"] != "mezcla_transferencia_invalida") if conv else False
+
+        return (
+            f"Falso positivo evitado: {no_bloqueado and sin_intent_invalido} | "
+            f"Txs creadas ok: {tx_creadas >= 1}"
+        )
+    return run_isolated(test)
+
+def p11_caso_13(datos):
+    """Verdadero positivo: lote mixto con transferencia real y gasto bloquea con MSG_NO_MEZCLAR_TRANSFERENCIAS"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+
+        tx_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(
+            make_payload(TELEFONO_TEST, "le transferí 5000 a mi hermano y también gasté 3000 en el kiosco"),
+            time.perf_counter()
+        )
+        resp = respuestas[-1][1] if respuestas else ""
+
+        tx_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        tx_creadas = tx_despues - tx_antes
+
+        conv = conn.execute(
+            text("SELECT intent_detectado, mensaje_bot FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+
+        bloqueado = (
+            conv is not None
+            and (
+                conv["intent_detectado"] in ("mezcla_transferencia_invalida", "no_mezclar_transferencias")
+                or "mandalas por separado" in conv["mensaje_bot"]
+            )
+        )
+
+        return (
+            f"Bloqueado: {bloqueado} | "
+            f"Cero txs: {tx_creadas == 0}"
+        )
+    return run_isolated(test)
+
 # ==============================================================================
 # ESCENARIOS PUNTO 12: Consultas y Dashboard (Balance y Cotización)
 # ==============================================================================
@@ -4780,6 +4864,22 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             "nombre": "Lote de 3 gastos en un solo mensaje: confirma, crea 3 txs, valida accion_ejecutada > 100 caracteres",
             "ejecutar": lambda: p11_caso_11(datos),
             "esperado": "Txs creadas: 3 | Accion len ok: True | Sin error: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P11.12",
+            "punto": "Punto 11",
+            "nombre": "Falso positivo corregido: lote con 'pasé al kiosco' no bloquea por transferencia y registra movimientos",
+            "ejecutar": lambda: p11_caso_12(datos),
+            "esperado": "Falso positivo evitado: True | Txs creadas ok: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P11.13",
+            "punto": "Punto 11",
+            "nombre": "Verdadero positivo: lote mixto con transferencia real y gasto bloquea con MSG_NO_MEZCLAR_TRANSFERENCIAS",
+            "ejecutar": lambda: p11_caso_13(datos),
+            "esperado": "Bloqueado: True | Cero txs: True",
             "match": "exacto",
         },
         # --- PUNTO 12: Consultas y Dashboard (Balance y Cotización) ---
