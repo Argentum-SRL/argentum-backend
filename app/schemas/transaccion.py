@@ -41,7 +41,7 @@ class TransaccionBase(BaseModel):
     monto: DecimalJSON = Field(gt=0, max_digits=15, decimal_places=2, description="Monto mayor a 0")
     moneda: Moneda
     fecha: date
-    descripcion: str = Field(default="", max_length=300)
+    descripcion: str | None = Field(default="", max_length=300)
     categoria_id: UUID
     subcategoria_id: UUID | None = None
     metodo_pago: MetodoPago
@@ -70,7 +70,7 @@ class TransaccionCreate(TransaccionBase):
 
     @field_validator("descripcion")
     @classmethod
-    def validar_descripcion(cls, v: str) -> str:
+    def validar_descripcion(cls, v: str | None) -> str:
         return v.strip() if v else ""
 
 
