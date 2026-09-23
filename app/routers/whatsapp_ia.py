@@ -45,6 +45,10 @@ from app.models.usuario import EstadoUsuario, Moneda, Usuario
 from app.models.transferencia_interna import TransferenciaInterna
 from app.schemas.transferencia_interna import TransferenciaInternaCreate
 from app.services import transferencia_service
+from app.models.meta import Meta, EstadoMeta
+from app.models.movimiento_meta import MovimientoMeta, TipoMovimientoMeta
+from app.schemas.movimiento_meta import MovimientoMetaCreate
+from app.services import meta_service
 from app.services import ai_service
 from app.services import presupuesto_service
 from app.services.evento_service import emitir_evento_actualizacion
@@ -130,6 +134,7 @@ from app.routers.whatsapp.db_lookups import (
     PLAZO_EXPIRACION_ESTADO_MINUTOS,
     VENTANA_RATE_LIMIT_WPP_SEGUNDOS,
     VENTANA_VINCULACION_SEGUNDOS,
+    _buscar_meta_activa_por_nombre,
     _buscar_propuesta_baja_suscripcion_pendiente,
     _buscar_propuesta_cambio_precio_pendiente,
     _buscar_propuesta_confirmable_mas_reciente,
@@ -1505,6 +1510,512 @@ def _confirmar_propuesta_transferencia(
     return tr, msg_resp, False
 
 
+def _confirmar_propuesta_aporte_meta(
+    usuario: Usuario,
+    db: Session,
+    propuesta_id: UUID | None = None,
+) -> tuple[MovimientoMeta | None, str, bool]:
+    limite_tiempo = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+
+    stmt_conv = (
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario.id,
+            ConversacionWpp.intent_detectado == "aportar_meta",
+            ConversacionWpp.slot_filling_activo == False,
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite_tiempo,
+        )
+    )
+    if propuesta_id:
+        stmt_conv = stmt_conv.where(ConversacionWpp.id == propuesta_id)
+
+    conv_previa = db.execute(
+        stmt_conv.order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc()).with_for_update()
+    ).scalars().first()
+
+    if not conv_previa:
+        limite_reciente = datetime.now(timezone.utc) - timedelta(minutes=10)
+        candidatas = db.execute(
+            select(ConversacionWpp)
+            .where(
+                ConversacionWpp.usuario_id == usuario.id,
+                ConversacionWpp.intent_detectado == "aportar_meta",
+                ConversacionWpp.accion_ejecutada.is_not(None),
+                ConversacionWpp.fecha >= limite_reciente,
+            )
+            .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+        ).scalars().all()
+
+        for c in candidatas:
+            if c.accion_ejecutada and str(c.accion_ejecutada).startswith("aporte_meta:"):
+                return None, "Esa operación ya fue confirmada.", True
+        return None, "No tenés ningún aporte a meta pendiente para confirmar.", False
+
+    entidades = conv_previa.entidades or {}
+    meta_id_str = entidades.get("meta_id")
+    billetera_id_str = entidades.get("billetera_id")
+    monto_val = entidades.get("monto")
+    moneda_str = entidades.get("moneda", "ARS")
+
+    if not meta_id_str or not billetera_id_str or not monto_val:
+        return None, "No pude procesar el aporte a la meta.", False
+
+    meta_id = UUID(str(meta_id_str))
+    billetera_id = UUID(str(billetera_id_str))
+    monto = Decimal(str(monto_val))
+    moneda_mov = Moneda.USD if moneda_str == "USD" else Moneda.ARS
+
+    meta = db.get(Meta, meta_id)
+    if not meta or meta.usuario_id != usuario.id:
+        return None, "No encontré la meta seleccionada.", False
+
+    billetera = db.get(Billetera, billetera_id)
+    if not billetera or billetera.usuario_id != usuario.id:
+        return None, "No encontré la billetera seleccionada.", False
+
+    data_mov = MovimientoMetaCreate(
+        tipo=TipoMovimientoMeta.APORTE,
+        monto=monto,
+        moneda_movimiento=moneda_mov,
+        billetera_id=billetera_id,
+        fecha=hoy_argentina(),
+    )
+
+    try:
+        nuevo_mov = meta_service.registrar_movimiento(db, usuario.id, meta_id, data_mov)
+        conv_previa.accion_ejecutada = f"aporte_meta:{nuevo_mov.id}"
+        emitir_evento_actualizacion(db, usuario.id, "metas")
+        emitir_evento_actualizacion(db, usuario.id, "transacciones")
+        emitir_evento_actualizacion(db, usuario.id, "billeteras")
+        db.commit()
+    except HTTPException as exc:
+        db.rollback()
+        return None, str(exc.detail), False
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"Error al confirmar aporte a meta: {exc}")
+        return None, "Hubo un problema al procesar el aporte a la meta.", False
+
+    monto_fmt = formatear_monto(float(monto), moneda_mov)
+    if meta.monto_actual >= meta.monto_objetivo:
+        msg_resp = f"Listo. Aporté {monto_fmt} a tu meta '{meta.nombre}'. ¡Felicitaciones! Completaste tu meta."
+    else:
+        msg_resp = f"Listo. Aporté {monto_fmt} a tu meta '{meta.nombre}' desde {billetera.nombre}."
+
+    return nuevo_mov, msg_resp, False
+
+
+def manejar_confirmacion_aporte_meta(
+    mensaje_texto: str,
+    usuario: Usuario,
+    db: Session,
+    from_number: str,
+    wamid: str | None = None,
+) -> bool:
+    if not _es_confirmacion(mensaje_texto):
+        return False
+
+    propuesta = _buscar_propuesta_confirmable_mas_reciente(usuario.id, db)
+    if not propuesta or propuesta.intent_detectado != "aportar_meta":
+        return False
+
+    mov_creado, msg_confirm, ya_conf = _confirmar_propuesta_aporte_meta(usuario, db)
+    nueva_conv = ConversacionWpp(
+        usuario_id=usuario.id,
+        wamid=wamid,
+        mensaje_usuario=mensaje_texto,
+        tipo_mensaje=TipoMensajeWpp.TEXTO,
+        transcripcion=None,
+        mensaje_bot=msg_confirm,
+        intent_detectado="confirmar_aporte_meta",
+        entidades={},
+        accion_ejecutada=f"aporte_meta:{mov_creado.id}" if mov_creado else ("ya_confirmado" if ya_conf else None),
+        confianza=Decimal("1.000"),
+        slot_filling_activo=False,
+        slot_filling_estado=None,
+    )
+    db.add(nueva_conv)
+    db.commit()
+    enviar_whatsapp(from_number, msg_confirm)
+    return True
+
+
+def manejar_cancelacion_aporte_meta(
+    mensaje_texto: str,
+    usuario: Usuario,
+    db: Session,
+    from_number: str,
+    wamid: str | None = None,
+) -> bool:
+    if not _es_cancelacion(mensaje_texto):
+        return False
+
+    limite_tiempo = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+    propuesta = db.execute(
+        select(ConversacionWpp)
+        .where(
+            ConversacionWpp.usuario_id == usuario.id,
+            ConversacionWpp.intent_detectado == "aportar_meta",
+            ConversacionWpp.accion_ejecutada.is_(None),
+            ConversacionWpp.fecha >= limite_tiempo,
+        )
+        .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+    ).scalars().first()
+
+    if not propuesta:
+        return False
+
+    propuesta.accion_ejecutada = "cancelada"
+    propuesta.slot_filling_activo = False
+
+    msg_cancel = "Listo, cancelado."
+    nueva_conv = ConversacionWpp(
+        usuario_id=usuario.id,
+        wamid=wamid,
+        mensaje_usuario=mensaje_texto,
+        tipo_mensaje=TipoMensajeWpp.TEXTO,
+        transcripcion=None,
+        mensaje_bot=msg_cancel,
+        intent_detectado="cancelar",
+        entidades={},
+        accion_ejecutada="cancelada",
+        confianza=Decimal("1.000"),
+        slot_filling_activo=False,
+        slot_filling_estado=None,
+    )
+    db.add(nueva_conv)
+    db.commit()
+    enviar_whatsapp(from_number, msg_cancel)
+    return True
+
+
+def manejar_aporte_meta(
+    mensaje_texto: str,
+    usuario: Usuario,
+    db: Session,
+    from_number: str,
+    wamid: str | None = None,
+    conv_activa: ConversacionWpp | None = None,
+    estado_previo: dict | None = None,
+) -> bool:
+    """
+    Detección determinística o procesamiento de aporte a meta de ahorro.
+    Siempre pide confirmación antes de ejecutar.
+    """
+    billeteras_usuario = _obtener_billeteras_activas(usuario.id, db)
+
+    # 1. Si hay un slot-filling activo de meta esperando elegir cuál (ambigüedad)
+    if estado_previo and estado_previo.get("intent_origen") == "aportar_meta":
+        if "meta_ambigua_cands" in estado_previo:
+            cands_ids = estado_previo.get("meta_ambigua_cands", [])
+            metas_cands = db.query(Meta).filter(Meta.id.in_([UUID(cid) for cid in cands_ids])).all()
+            meta_elegida = None
+            if mensaje_texto.strip().isdigit():
+                idx = int(mensaje_texto.strip()) - 1
+                if 0 <= idx < len(metas_cands):
+                    meta_elegida = metas_cands[idx]
+            else:
+                m_txt_norm = normalizar_texto(mensaje_texto)
+                for mc in metas_cands:
+                    mc_norm = normalizar_texto(mc.nombre)
+                    if m_txt_norm in mc_norm or mc_norm in m_txt_norm:
+                        meta_elegida = mc
+                        break
+
+            if meta_elegida:
+                monto = Decimal(str(estado_previo["monto"]))
+                bill_id_str = estado_previo.get("billetera_id")
+                billetera = db.get(Billetera, UUID(bill_id_str)) if bill_id_str else None
+                if not billetera:
+                    bills_mon = [b for b in billeteras_usuario if b.moneda == meta_elegida.moneda]
+                    billetera = next((b for b in bills_mon if b.es_principal), None) or (bills_mon[0] if len(bills_mon) == 1 else None)
+
+                if conv_activa:
+                    conv_activa.slot_filling_activo = False
+                    db.flush()
+
+                if not billetera:
+                    bills_mon = [b for b in billeteras_usuario if b.moneda == meta_elegida.moneda]
+                    enc = f"¿Desde qué billetera querés aportar a '{meta_elegida.nombre}'?"
+                    pregunta = _generar_menu_billeteras(bills_mon, tipo="egreso", encabezado=enc)
+                    entidades_sf = {
+                        "intent_origen": "aportar_meta",
+                        "meta_id": str(meta_elegida.id),
+                        "meta_nombre": meta_elegida.nombre,
+                        "monto": float(monto),
+                        "moneda": meta_elegida.moneda.value,
+                    }
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=pregunta,
+                        intent_detectado="aportar_meta",
+                        entidades=entidades_sf,
+                        accion_ejecutada=None,
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=True,
+                        slot_filling_estado=entidades_sf,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    enviar_whatsapp(from_number, pregunta)
+                    return True
+
+                monto_fmt = formatear_monto(float(monto), meta_elegida.moneda)
+                prop = f"Voy a aportar {monto_fmt} a tu meta '{meta_elegida.nombre}' desde {billetera.nombre}. ¿Confirmás?"
+                entidades_prop = {
+                    "meta_id": str(meta_elegida.id),
+                    "meta_nombre": meta_elegida.nombre,
+                    "billetera_id": str(billetera.id),
+                    "billetera_nombre": billetera.nombre,
+                    "monto": float(monto),
+                    "moneda": meta_elegida.moneda.value,
+                }
+                nueva_conv = ConversacionWpp(
+                    usuario_id=usuario.id,
+                    wamid=wamid,
+                    mensaje_usuario=mensaje_texto,
+                    tipo_mensaje=TipoMensajeWpp.TEXTO,
+                    transcripcion=None,
+                    mensaje_bot=prop,
+                    intent_detectado="aportar_meta",
+                    entidades=entidades_prop,
+                    accion_ejecutada=None,
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=False,
+                    slot_filling_estado=None,
+                )
+                db.add(nueva_conv)
+                db.commit()
+                enviar_whatsapp(from_number, prop)
+                return True
+
+    # Parsear mensaje para aporte a meta
+    m_norm = normalizar_texto(mensaje_texto)
+    signals = ["meta", "metas", "aporte", "aportar", "aporta"]
+    tiene_senal = any(s in m_norm for s in signals) or bool(re.search(r"\b(?:puse|guarde|separe|mande|meter)\b.*\b(?:meta|para la|a la)\b", m_norm))
+    if not tiene_senal:
+        return False
+
+    # Extraer monto
+    m_monto = re.search(r"(\$?\s*\d+(?:[.,]\d+)?(?:\s*(?:mil|k))?)\b", m_norm)
+    if not m_monto:
+        return False
+    monto_val = _parsear_monto_argentino(m_monto.group(1))
+    if not monto_val or monto_val <= Decimal("0"):
+        return False
+
+    # Extraer billetera mencionada
+    billetera_encontrada = None
+    for b in billeteras_usuario:
+        b_low = normalizar_texto(b.nombre)
+        if re.search(rf"\b(?:desde|con|en|de)\s+{re.escape(b_low)}\b", m_norm):
+            billetera_encontrada = b
+            break
+        elif re.search(rf"\b{re.escape(b_low)}\b", m_norm) and b_low not in ("pesos", "dolares", "dólares", "efectivo"):
+            if any(p in m_norm for p in [f"con {b_low}", f"desde {b_low}", f"por {b_low}"]):
+                billetera_encontrada = b
+                break
+
+    # Extraer nombre de meta
+    clean_text = mensaje_texto
+    if billetera_encontrada:
+        clean_text = re.sub(rf"\b(?:desde|con|en|de)\s+{re.escape(billetera_encontrada.nombre)}\b", "", clean_text, flags=re.IGNORECASE)
+        clean_text = re.sub(rf"\b{re.escape(billetera_encontrada.nombre)}\b", "", clean_text, flags=re.IGNORECASE)
+
+    m_meta = re.search(r"\b(?:a|para)\s+(?:la\s+|mi\s+)?meta\s+([a-zA-Z0-9_áéíóúÁÉÍÓÚñÑ\s]+)", clean_text, re.IGNORECASE)
+    meta_name = None
+    if m_meta:
+        meta_name = m_meta.group(1).strip()
+    else:
+        m_meta2 = re.search(r"\b(?:aportar|aporte|aporta|aporté)\s+.*?\s+(?:a|para)\s+([a-zA-Z0-9_áéíóúÁÉÍÓÚñÑ\s]+)", clean_text, re.IGNORECASE)
+        if m_meta2:
+            cand = m_meta2.group(1).strip()
+            cand = re.sub(r"^(?:mi|la|el)\s+", "", cand, flags=re.IGNORECASE).strip()
+            meta_name = cand
+
+    if meta_name:
+        meta_name = re.sub(r"[.,;:!?]+$", "", meta_name).strip()
+        meta_name = re.sub(r"\$?\s*\d+(?:[.,]\d+)?(?:\s*(?:mil|k))?", "", meta_name).strip()
+
+    # Resolver meta
+    meta, estado_meta, cands = _buscar_meta_activa_por_nombre(usuario.id, meta_name, db)
+
+    if estado_meta == "no_metas":
+        msg_resp = "No tenés metas activas."
+        nueva_conv = ConversacionWpp(
+            usuario_id=usuario.id,
+            wamid=wamid,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            transcripcion=None,
+            mensaje_bot=msg_resp,
+            intent_detectado="aportar_meta",
+            entidades={},
+            accion_ejecutada="sin_efecto",
+            confianza=Decimal("1.000"),
+            slot_filling_activo=False,
+            slot_filling_estado=None,
+        )
+        db.add(nueva_conv)
+        db.commit()
+        enviar_whatsapp(from_number, msg_resp)
+        return True
+
+    if estado_meta == "no_encontrada":
+        nombre_disp = meta_name or "esa"
+        msg_resp = f"No encontré ninguna meta con el nombre '{nombre_disp}'. Podés consultar tus metas con 'mis metas'."
+        nueva_conv = ConversacionWpp(
+            usuario_id=usuario.id,
+            wamid=wamid,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            transcripcion=None,
+            mensaje_bot=msg_resp,
+            intent_detectado="aportar_meta",
+            entidades={},
+            accion_ejecutada="sin_efecto",
+            confianza=Decimal("1.000"),
+            slot_filling_activo=False,
+            slot_filling_estado=None,
+        )
+        db.add(nueva_conv)
+        db.commit()
+        enviar_whatsapp(from_number, msg_resp)
+        return True
+
+    if estado_meta == "ambigua":
+        nombres = ", ".join(f"'{m.nombre}'" for m in cands)
+        msg_resp = f"Encontré más de una meta parecida: {nombres}. ¿A cuál querés aportar?"
+        entidades_sf = {
+            "intent_origen": "aportar_meta",
+            "meta_ambigua_cands": [str(m.id) for m in cands],
+            "monto": float(monto_val),
+            "billetera_id": str(billetera_encontrada.id) if billetera_encontrada else None,
+        }
+        if conv_activa:
+            conv_activa.slot_filling_activo = False
+            db.flush()
+        nueva_conv = ConversacionWpp(
+            usuario_id=usuario.id,
+            wamid=wamid,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            transcripcion=None,
+            mensaje_bot=msg_resp,
+            intent_detectado="aportar_meta",
+            entidades=entidades_sf,
+            accion_ejecutada=None,
+            confianza=Decimal("1.000"),
+            slot_filling_activo=True,
+            slot_filling_estado=entidades_sf,
+        )
+        db.add(nueva_conv)
+        db.commit()
+        enviar_whatsapp(from_number, msg_resp)
+        return True
+
+    # Resolver billetera de origen en la moneda de la meta
+    bills_mon = [b for b in billeteras_usuario if b.moneda == meta.moneda]
+    billetera = billetera_encontrada
+    if not billetera:
+        billetera = next((b for b in bills_mon if b.es_principal), None) or (bills_mon[0] if len(bills_mon) == 1 else None)
+
+    if not billetera:
+        enc = f"¿Desde qué billetera querés aportar a '{meta.nombre}'?"
+        pregunta = _generar_menu_billeteras(bills_mon, tipo="egreso", encabezado=enc)
+        entidades_sf = {
+            "intent_origen": "aportar_meta",
+            "meta_id": str(meta.id),
+            "meta_nombre": meta.nombre,
+            "monto": float(monto_val),
+            "moneda": meta.moneda.value,
+        }
+        if conv_activa:
+            conv_activa.slot_filling_activo = False
+            db.flush()
+        nueva_conv = ConversacionWpp(
+            usuario_id=usuario.id,
+            wamid=wamid,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            transcripcion=None,
+            mensaje_bot=pregunta,
+            intent_detectado="aportar_meta",
+            entidades=entidades_sf,
+            accion_ejecutada=None,
+            confianza=Decimal("1.000"),
+            slot_filling_activo=True,
+            slot_filling_estado=entidades_sf,
+        )
+        db.add(nueva_conv)
+        db.commit()
+        enviar_whatsapp(from_number, pregunta)
+        return True
+
+    # Validar saldo suficiente
+    if billetera.saldo_actual < monto_val:
+        monto_disp = formatear_monto(float(billetera.saldo_actual), billetera.moneda)
+        msg_resp = f"Saldo insuficiente en la billetera '{billetera.nombre}'. Tenés {monto_disp}."
+        nueva_conv = ConversacionWpp(
+            usuario_id=usuario.id,
+            wamid=wamid,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            transcripcion=None,
+            mensaje_bot=msg_resp,
+            intent_detectado="aportar_meta",
+            entidades={},
+            accion_ejecutada="sin_efecto",
+            confianza=Decimal("1.000"),
+            slot_filling_activo=False,
+            slot_filling_estado=None,
+        )
+        db.add(nueva_conv)
+        db.commit()
+        enviar_whatsapp(from_number, msg_resp)
+        return True
+
+    # Armar propuesta de confirmación
+    monto_fmt = formatear_monto(float(monto_val), meta.moneda)
+    prop = f"Voy a aportar {monto_fmt} a tu meta '{meta.nombre}' desde {billetera.nombre}. ¿Confirmás?"
+    entidades_prop = {
+        "meta_id": str(meta.id),
+        "meta_nombre": meta.nombre,
+        "billetera_id": str(billetera.id),
+        "billetera_nombre": billetera.nombre,
+        "monto": float(monto_val),
+        "moneda": meta.moneda.value,
+    }
+
+    if conv_activa:
+        conv_activa.slot_filling_activo = False
+        db.flush()
+
+    nueva_conv = ConversacionWpp(
+        usuario_id=usuario.id,
+        wamid=wamid,
+        mensaje_usuario=mensaje_texto,
+        tipo_mensaje=TipoMensajeWpp.TEXTO,
+        transcripcion=None,
+        mensaje_bot=prop,
+        intent_detectado="aportar_meta",
+        entidades=entidades_prop,
+        accion_ejecutada=None,
+        confianza=Decimal("1.000"),
+        slot_filling_activo=False,
+        slot_filling_estado=None,
+    )
+    db.add(nueva_conv)
+    db.commit()
+    enviar_whatsapp(from_number, prop)
+    return True
+
+
 def _interpretar_transferencia(
     mensaje_texto: str,
     usuario: Usuario,
@@ -2293,6 +2804,22 @@ def _confirmar_propuesta_deshacer(
         db.commit()
         return None, "El movimiento ya fue eliminado.", False
 
+    if tx.movimiento_meta_id is not None:
+        mov = db.get(MovimientoMeta, tx.movimiento_meta_id)
+        if mov:
+            try:
+                meta_service.eliminar_movimiento(db, usuario.id, mov.meta_id, mov.id)
+                conv_undo.accion_ejecutada = f"deshecho:{tx_id}"
+                emitir_evento_actualizacion(db, usuario.id, "metas")
+                emitir_evento_actualizacion(db, usuario.id, "transacciones")
+                emitir_evento_actualizacion(db, usuario.id, "billeteras")
+                db.commit()
+                return tx, "Listo, movimiento eliminado.", False
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Error al anular aporte a meta {tx_id}: {e}")
+                return None, "Hubo un problema al anular el movimiento, no se modificó nada.", False
+
     try:
         eliminar_transaccion(db, usuario.id, tx.id, commit=False)
         conv_undo.accion_ejecutada = f"deshecho:{tx_id}"
@@ -2520,6 +3047,11 @@ def _construir_propuesta_deshacer(tx_actual: Transaccion | TransferenciaInterna 
         bill_dest_nom = billetera_dest.nombre if billetera_dest else "destino"
         monto_fmt = formatear_monto(float(tx_actual.monto_origen), tx_actual.moneda_origen)
         return f"¿Querés anular la transferencia de {monto_fmt} de {bill_orig_nom} a {bill_dest_nom}? ¿Confirmás?"
+
+    if hasattr(tx_actual, "movimiento_meta_id") and (tx_actual.movimiento_meta_id is not None or (tx_actual.descripcion and tx_actual.descripcion.startswith("Aporte a la meta:"))):
+        meta_nom = tx_actual.descripcion.replace("Aporte a la meta:", "").strip() if tx_actual.descripcion else "tu meta"
+        monto_fmt = formatear_monto(float(tx_actual.monto), tx_actual.moneda)
+        return f"¿Querés eliminar el aporte de {monto_fmt} a tu meta '{meta_nom}'? ¿Confirmás?"
 
     monto_fmt = formatear_monto(float(tx_actual.monto), tx_actual.moneda)
     billetera = db.get(Billetera, tx_actual.billetera_id) if tx_actual.billetera_id else None
@@ -2824,6 +3356,11 @@ def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str |
                 tx, msg_resp, ya_conf = _confirmar_propuesta_corregir(usuario, db)
                 resultado_ia["_mensaje_confirmacion_directo"] = msg_resp
                 return str(tx.id) if tx else None
+
+            elif intent_ganador == "aportar_meta":
+                mov, msg_resp, ya_conf = _confirmar_propuesta_aporte_meta(usuario, db)
+                resultado_ia["_mensaje_confirmacion_directo"] = msg_resp
+                return str(mov.id) if mov else None
 
             elif intent_ganador == "transferir_fondos":
                 tr, msg_resp, ya_conf = _confirmar_propuesta_transferencia(usuario, db)
@@ -3366,6 +3903,10 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                         enviar_whatsapp(from_number, nuevo_msg)
                         return
 
+            # Chequeo determinístico de cancelación para aporte a meta
+            if manejar_cancelacion_aporte_meta(mensaje_texto, usuario, db, from_number, wamid=wamid):
+                return
+
             # 3. Chequeo determinístico de cancelación (Tarea 5)
             if manejar_cancelacion(mensaje_texto, usuario, db, from_number, wamid=wamid):
                 return
@@ -3374,6 +3915,10 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
             if manejar_verificaciones_slot_filling(
                 mensaje_texto, usuario, db, from_number, wamid=wamid
             ):
+                return
+
+            # Chequeo determinístico de confirmación para aporte a meta
+            if manejar_confirmacion_aporte_meta(mensaje_texto, usuario, db, from_number, wamid=wamid):
                 return
 
             # 4. Chequeo determinístico de confirmación con bloqueo de concurrencia (Tarea 2)
@@ -3448,6 +3993,12 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                 return
             # 7.7 Detección determinística de transferencias / cajero / dólares (Punto 9B)
             if manejar_transferencias(
+                mensaje_texto, usuario, db, from_number, wamid=wamid, conv_activa=conv_activa, estado_previo=estado_previo
+            ):
+                return
+
+            # 7.7b Detección determinística de aporte a meta
+            if manejar_aporte_meta(
                 mensaje_texto, usuario, db, from_number, wamid=wamid, conv_activa=conv_activa, estado_previo=estado_previo
             ):
                 return
@@ -4090,6 +4641,56 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
             intent_detectado = enriquecer_respuesta_por_intent(
                 intent_detectado, resultado_ia, mensaje_texto, usuario, db
             )
+
+            if intent_detectado == "aportar_meta":
+                entidades_ia = resultado_ia.get("entidades") or {}
+                monto_ia = entidades_ia.get("monto")
+                meta_ia = entidades_ia.get("meta") or entidades_ia.get("descripcion")
+                bill_ia = entidades_ia.get("billetera_origen") or entidades_ia.get("billetera")
+                monto_val = Decimal(str(monto_ia)) if monto_ia else None
+                meta_obj, estado_meta, cands = _buscar_meta_activa_por_nombre(usuario.id, meta_ia, db)
+                if estado_meta == "no_metas":
+                    resultado_ia["respuesta_usuario"] = "No tenés metas activas."
+                    resultado_ia["slot_filling"] = False
+                elif estado_meta == "no_encontrada":
+                    nombre_disp = meta_ia or "esa"
+                    resultado_ia["respuesta_usuario"] = f"No encontré ninguna meta con el nombre '{nombre_disp}'. Podés consultar tus metas con 'mis metas'."
+                    resultado_ia["slot_filling"] = False
+                elif estado_meta == "ambigua":
+                    nombres = ", ".join(f"'{m.nombre}'" for m in cands)
+                    resultado_ia["respuesta_usuario"] = f"Encontré más de una meta parecida: {nombres}. ¿A cuál querés aportar?"
+                    resultado_ia["slot_filling"] = True
+                    resultado_ia["entidades"]["intent_origen"] = "aportar_meta"
+                    resultado_ia["entidades"]["meta_ambigua_cands"] = [str(m.id) for m in cands]
+                    if monto_val:
+                        resultado_ia["entidades"]["monto"] = float(monto_val)
+                elif meta_obj and monto_val:
+                    bills_mon = _obtener_billeteras_activas(usuario.id, db, moneda=meta_obj.moneda)
+                    billetera_obj = None
+                    if bill_ia:
+                        billetera_obj, _ = resolver_billetera_cascada(bill_ia, bills_mon)
+                    if not billetera_obj:
+                        billetera_obj = next((b for b in bills_mon if b.es_principal), None) or (bills_mon[0] if len(bills_mon) == 1 else None)
+                    if not billetera_obj:
+                        enc = f"¿Desde qué billetera querés aportar a '{meta_obj.nombre}'?"
+                        resultado_ia["respuesta_usuario"] = _generar_menu_billeteras(bills_mon, tipo="egreso", encabezado=enc)
+                        resultado_ia["slot_filling"] = True
+                    elif billetera_obj.saldo_actual < monto_val:
+                        monto_disp = formatear_monto(float(billetera_obj.saldo_actual), billetera_obj.moneda)
+                        resultado_ia["respuesta_usuario"] = f"Saldo insuficiente en la billetera '{billetera_obj.nombre}'. Tenés {monto_disp}."
+                        resultado_ia["slot_filling"] = False
+                    else:
+                        monto_fmt = formatear_monto(float(monto_val), meta_obj.moneda)
+                        resultado_ia["respuesta_usuario"] = f"Voy a aportar {monto_fmt} a tu meta '{meta_obj.nombre}' desde {billetera_obj.nombre}. ¿Confirmás?"
+                        resultado_ia["entidades"] = {
+                            "meta_id": str(meta_obj.id),
+                            "meta_nombre": meta_obj.nombre,
+                            "billetera_id": str(billetera_obj.id),
+                            "billetera_nombre": billetera_obj.nombre,
+                            "monto": float(monto_val),
+                            "moneda": meta_obj.moneda.value,
+                        }
+                        resultado_ia["slot_filling"] = False
 
             transaccion_id = _ejecutar_intent(resultado_ia, usuario, db)
 

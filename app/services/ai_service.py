@@ -259,6 +259,7 @@ INTENTS VÁLIDOS — respondé siempre con exactamente uno de estos:
 - consultar_balance
 - consultar_proyeccion
 - consultar_meta
+- aportar_meta
 - consultar_presupuesto
 - agregar_suscripcion
 - cancelar_suscripcion
@@ -291,6 +292,10 @@ REGLAS DE CLASIFICACIÓN DE INTENTS:
   * Cargar la SUBE: NO es transferencia interna, es un gasto común en Transporte público. Cargar Mercado Pago: SÍ es transferencia interna si el usuario tiene billetera Mercado Pago.
   * Una transferencia interna NUNCA es un gasto ni un ingreso.
 - "puse X", "metí X", "deposité X" SIN contexto claro → slot_filling=true, preguntá "¿Fue un gasto, ingreso o transferencia?"
+- APORTE A METAS DE AHORRO (intent="aportar_meta"):
+  * Señales: "aportar a la meta", "aporté a mi meta", "puse para la meta", "separé para la meta", "guardé para mi meta", "mandé a la meta".
+  * Entidades: monto, meta (nombre de la meta), billetera_origen (si la especifica).
+  * NUNCA clasifiques como gasto común ni como transferencia interna un aporte a una meta explícita.
 - "cuánta plata tengo", "cuánto tengo", "mi saldo" → consultar_saldo
 - "cómo voy", "cómo estoy este mes" → consultar_balance
 - Consultas de gastos o totales por un concepto, comercio, categoría específica o por un período de tiempo (ej: "cuánto gasté en pizza", "cuánto gasté en el super", "cuánto se me fue en salidas", "cuánto gasté hoy", "cuánto gasté ayer", "cuánto llevo esta semana", "cuánto gasté este mes", "cuánto llevo gastado esta semana") NO están soportadas → intent="desconocido", confianza=1.0, slot_filling=false.
@@ -621,6 +626,7 @@ def _construir_schema_estricto(db: Session) -> dict[str, Any]:
         "consultar_balance",
         "consultar_proyeccion",
         "consultar_meta",
+        "aportar_meta",
         "consultar_presupuesto",
         "agregar_suscripcion",
         "cancelar_suscripcion",
@@ -669,6 +675,7 @@ def _construir_schema_estricto(db: Session) -> dict[str, Any]:
                             "monto_comision": {"type": ["number", "null"]},
                             "confirmado": {"type": ["boolean", "null"]},
                             "tarjeta": {"type": ["string", "null"]},
+                            "meta": {"type": ["string", "null"]},
                             "transacciones_adicionales": {
                                 "type": "array",
                                 "items": {
@@ -709,6 +716,7 @@ def _construir_schema_estricto(db: Session) -> dict[str, Any]:
                             "billetera_origen",
                             "billetera_destino",
                             "tarjeta",
+                            "meta",
                             "cantidad_cuotas",
                             "fecha",
                             "destinatario",

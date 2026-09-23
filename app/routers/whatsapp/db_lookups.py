@@ -18,6 +18,7 @@ from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria, EstadoCategoria, TipoCategoria
 from app.models.conversacion_wpp import ConversacionWpp
 from app.models.cotizacion_dolar import CotizacionDolar
+from app.models.meta import EstadoMeta, Meta
 from app.models.subcategoria import EstadoSubcategoria, Subcategoria
 from app.models.suscripcion import EstadoSuscripcion, Suscripcion
 from app.models.tarjeta_credito import EstadoTarjeta, TarjetaCredito
@@ -414,6 +415,7 @@ def _buscar_propuesta_confirmable_mas_reciente(usuario_id: UUID, db: Session) ->
         "dar_baja_suscripcion",
         "cambiar_precio_suscripcion",
         "agregar_suscripcion",
+        "aportar_meta",
         "registrar_transaccion",
     ]
     return db.execute(
@@ -542,6 +544,23 @@ def _buscar_ultimo_movimiento_whatsapp(usuario_id: UUID, db: Session) -> tuple[T
                 if tr.fecha_creacion < limite:
                     return None, "PLAZO_VENCIDO"
                 return tr, None
+            except ValueError:
+                pass
+        if accion.startswith("aporte_meta:"):
+            try:
+                mov_id = UUID(accion.replace("aporte_meta:", ""))
+                tx = db.execute(
+                    select(Transaccion).where(
+                        Transaccion.movimiento_meta_id == mov_id,
+                        Transaccion.usuario_id == usuario_id,
+                    )
+                ).scalar_one_or_none()
+                if not tx:
+                    return None, "YA_BORRADO"
+                limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_DESHACER_CORREGIR_MINUTOS)
+                if tx.fecha_creacion < limite:
+                    return None, "PLAZO_VENCIDO"
+                return tx, None
             except ValueError:
                 pass
         try:
@@ -724,6 +743,95 @@ def _buscar_suscripcion_activa_por_nombre(usuario_id: UUID, nombre: str | None, 
             if any(v in norm or norm in v for v in variantes):
                 return s
     return None
+
+_STOPWORDS_META = {"de", "la", "el", "los", "las", "un", "una", "unos", "unas", "en", "para", "mi", "mis", "tu", "tus", "a", "al", "del"}
+
+def _max_subcadena_comun_str(s1: str, s2: str) -> int:
+    m = [[0] * (len(s2) + 1) for _ in range(len(s1) + 1)]
+    max_len = 0
+    for i in range(len(s1)):
+        for j in range(len(s2)):
+            if s1[i] == s2[j]:
+                m[i + 1][j + 1] = m[i][j] + 1
+                if m[i + 1][j + 1] > max_len:
+                    max_len = m[i + 1][j + 1]
+            else:
+                m[i + 1][j + 1] = 0
+    return max_len
+
+def _buscar_meta_activa_por_nombre(
+    usuario_id: UUID,
+    nombre: str | None,
+    db: Session,
+) -> tuple[Meta | None, str, list[Meta]]:
+    """
+    Busca una meta activa del usuario por nombre.
+    Retorna: (meta_encontrada_o_none, estado, candidatos)
+    Estados posibles: 'ok', 'no_metas', 'no_encontrada', 'ambigua'.
+    Reglas:
+    - Match exacto primero (normalizado).
+    - Si no hay match exacto: busca candidatos aproximados con 4+ caracteres comunes
+      (subcadena común >= 4 en palabras significativas) o inclusión.
+    - Si hay exactamente 1 candidato: retorna (cand, 'ok', [cand]).
+    - Si hay más de 1 candidato: retorna (None, 'ambigua', cands).
+    - Si hay 0 candidatos: retorna (None, 'no_encontrada', []).
+    """
+    metas = db.query(Meta).filter(
+        Meta.usuario_id == usuario_id,
+        Meta.estado == EstadoMeta.ACTIVA,
+    ).all()
+
+    if not metas:
+        return None, "no_metas", []
+
+    if not nombre or not nombre.strip():
+        if len(metas) == 1:
+            return metas[0], "ok", metas
+        return None, "ambigua", metas
+
+    n_norm = normalizar_texto(nombre).strip()
+
+    # 1. Match exacto
+    for m in metas:
+        if normalizar_texto(m.nombre) == n_norm:
+            return m, "ok", [m]
+
+    # Limpiar stopwords de palabras significativas
+    n_words = [w for w in n_norm.split() if w not in _STOPWORDS_META]
+    n_clean = " ".join(n_words)
+
+    # 2. Match aproximado
+    candidatos = []
+    for m in metas:
+        m_norm = normalizar_texto(m.nombre)
+        m_words = [w for w in m_norm.split() if w not in _STOPWORDS_META]
+        m_clean = " ".join(m_words)
+
+        match = False
+        if n_clean and m_clean:
+            if n_clean in m_clean or m_clean in n_clean:
+                match = True
+            else:
+                for w1 in n_words:
+                    if len(w1) >= 4:
+                        for w2 in m_words:
+                            if len(w2) >= 4 and _max_subcadena_comun_str(w1, w2) >= 4:
+                                match = True
+                                break
+                    if match:
+                        break
+        elif n_norm in m_norm or m_norm in n_norm:
+            match = True
+
+        if match:
+            candidatos.append(m)
+
+    if len(candidatos) == 1:
+        return candidatos[0], "ok", candidatos
+    elif len(candidatos) > 1:
+        return None, "ambigua", candidatos
+    else:
+        return None, "no_encontrada", []
 
 def _obtener_historial_reciente(usuario_id: UUID, db: Session, n: int = 6) -> list[dict]:
     """
