@@ -362,11 +362,18 @@ def _construir_propuesta_credito(
     return msg
 
 
-
-
-
-
-
+def _unir_items_multilinea(items: list[str], encabezado: str, cierre: str) -> str:
+    """
+    Une los items de un lote en formato multilinea:
+    encabezado
+    item 1
+    item 2
+    cierre
+    """
+    partes = [encabezado] + items
+    if cierre:
+        partes.append(cierre)
+    return "\n".join(partes)
 
 
 def _construir_propuesta_transaccion(
@@ -479,7 +486,9 @@ def _construir_propuesta_transaccion(
 
             tipo_comun = todos_items[0].get("tipo", "egreso")
             origen_str = f" a {b_comun}" if tipo_comun == "ingreso" else f" desde {b_comun}"
-            texto = f"Voy a anotar {total_movs} movimientos{origen_str}: {', '.join(items_desc)}. ¿Va?"
+            mov_palabra = "movimientos" if total_movs != 1 else "movimiento"
+            encabezado = f"Voy a anotar {total_movs} {mov_palabra}{origen_str}:"
+            texto = _unir_items_multilinea(items_desc, encabezado, "¿Va?")
         else:
             items_desc = []
             for it in todos_items:
@@ -512,7 +521,9 @@ def _construir_propuesta_transaccion(
                     else:
                         orig_s = f" desde {b_nom}" if b_nom else ""
                         items_desc.append(f"{m_fmt} en {cat_d}{orig_s}{f_disp}")
-            texto = f"Voy a anotar {total_movs} movimientos: {', '.join(items_desc)}. ¿Va?"
+            mov_palabra = "movimientos" if total_movs != 1 else "movimiento"
+            encabezado = f"Voy a anotar {total_movs} {mov_palabra}:"
+            texto = _unir_items_multilinea(items_desc, encabezado, "¿Va?")
     else:
         moneda_prop = Moneda.USD if item_ppal_limpio.get("moneda") == "USD" else Moneda.ARS
         cat_display = _nombre_corto_categoria(item_ppal_limpio.get("categoria"))
@@ -916,7 +927,7 @@ def _confirmar_propuesta_transaccion(
 
         total_registrados = len(txs_registradas)
         mov_palabra = "movimientos" if total_registrados != 1 else "movimiento"
-        reg_palabra = "registrados" if total_registrados != 1 else "registrado"
+        reg_palabra = "Registrados." if total_registrados != 1 else "Registrado."
 
         b_map = {b.id: b for b in billeteras_todas}
         t_map = {t.id: t for t in tarjetas_todas}
@@ -952,7 +963,8 @@ def _confirmar_propuesta_transaccion(
                 f_nat = _formatear_fecha_natural(t.fecha)
                 f_disp = f" ({f_nat})" if f_nat else ""
                 items_str.append(f"{m_fmt} en {cat_d}{f_disp}")
-            msg_resp = f"Listo. {total_registrados} {mov_palabra}{origen_str}: {', '.join(items_str)} — {reg_palabra}."
+            encabezado = f"Listo, {total_registrados} {mov_palabra}{origen_str}:"
+            msg_resp = _unir_items_multilinea(items_str, encabezado, reg_palabra)
         else:
             items_str = []
             for t, it_d in zip(txs_registradas, items_registrados):
@@ -983,7 +995,8 @@ def _confirmar_propuesta_transaccion(
                     else:
                         orig_s = f" desde {b_nom}" if b_nom else ""
                         items_str.append(f"{m_fmt} en {cat_d}{orig_s}{f_disp}")
-            msg_resp = f"Listo. {total_registrados} {mov_palabra}: {', '.join(items_str)} — {reg_palabra}."
+            encabezado = f"Listo, {total_registrados} {mov_palabra}:"
+            msg_resp = _unir_items_multilinea(items_str, encabezado, reg_palabra)
 
         if descartadas:
             msg_resp += "\n" + "\n".join(descartadas)
@@ -1183,8 +1196,9 @@ def _confirmar_propuesta_transaccion(
             )
         origen_str = f" desde {bill_nombre}" if bill_nombre else (f" a {bill_nombre}" if transaccion.tipo == TipoTransaccion.INGRESO else "")
         mov_palabra = "movimientos" if total_registrados != 1 else "movimiento"
-        reg_palabra = "registrados" if total_registrados != 1 else "registrado"
-        msg_resp = f"Listo. {total_registrados} {mov_palabra}{origen_str}: {', '.join(items_str)} — {reg_palabra}."
+        reg_palabra = "Registrados." if total_registrados != 1 else "Registrado."
+        encabezado = f"Listo, {total_registrados} {mov_palabra}{origen_str}:"
+        msg_resp = _unir_items_multilinea(items_str, encabezado, reg_palabra)
     else:
         cat_nombre = None
         if transaccion.categoria_id:
@@ -2580,8 +2594,9 @@ def _registrar_movimiento_directo(
             )
         origen_str = f" desde {bill_nombre}" if bill_nombre else (f" a {bill_nombre}" if tx.tipo == TipoTransaccion.INGRESO else "")
         mov_palabra = "movimientos" if total_registrados != 1 else "movimiento"
-        reg_palabra = "registrados" if total_registrados != 1 else "registrado"
-        msg_resp = f"Listo. {total_registrados} {mov_palabra}{origen_str}: {', '.join(items_str)} — {reg_palabra}."
+        reg_palabra = "Registrados." if total_registrados != 1 else "Registrado."
+        encabezado = f"Listo, {total_registrados} {mov_palabra}{origen_str}:"
+        msg_resp = _unir_items_multilinea(items_str, encabezado, reg_palabra)
     else:
         cat_nombre = None
         if tx.categoria_id:

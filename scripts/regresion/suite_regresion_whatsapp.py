@@ -2257,7 +2257,7 @@ def p11_caso_1(datos):
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp_conf = respuestas[-1][1] if respuestas else ""
-        ok_prop = "Listo." in resp_prop and "5.000 en Kiosco desde Galicia" in resp_prop and "8.000 en Verdulería desde Santander" in resp_prop
+        ok_prop = "Listo," in resp_prop and "5.000 en Kiosco desde Galicia" in resp_prop and "8.000 en Verdulería desde Santander" in resp_prop
         ok_conf = (resp_conf.strip() == "Ya quedó anotado. Si hay algo mal, decime qué corregir.")
         return (
             f"Propuesta: {ok_prop} | "
@@ -2275,7 +2275,7 @@ def p11_caso_2(datos):
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco y 8000 en la verdulería"), time.perf_counter())
         resp_prop = respuestas[-1][1] if respuestas else ""
         return (
-            f"Propuesta principal: {'2 movimientos desde Galicia: $5.000 en Kiosco, $8.000 en Verdulería' in resp_prop and 'Si fue con otra, decime cuál.' in resp_prop}"
+            f"Propuesta principal: {'2 movimientos desde Galicia:\n$5.000 en Kiosco\n$8.000 en Verdulería' in resp_prop and 'Si fue con otra, decime cuál.' in resp_prop}"
         )
     return run_isolated(test)
 
@@ -2293,7 +2293,7 @@ def p11_caso_3(datos):
         resp_prop = respuestas[-1][1] if respuestas else ""
         return (
             f"Pregunta una vez: {'¿Desde qué billetera salieron los gastos?' in resp_preg} | "
-            f"Propuesta resuelta: {'2 movimientos desde Galicia: $5.000 en Kiosco, $8.000 en Verdulería' in resp_prop}"
+            f"Propuesta resuelta: {'2 movimientos desde Galicia:\n$5.000 en Kiosco\n$8.000 en Verdulería' in resp_prop}"
         )
     return run_isolated(test)
 
@@ -2327,7 +2327,7 @@ def p11_caso_5(datos):
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp_conf = respuestas[-1][1] if respuestas else ""
-        ok_prop = "Listo." in resp_prop and "+$100.000" in resp_prop and "-$30.000" in resp_prop
+        ok_prop = "Listo," in resp_prop and "+$100.000" in resp_prop and "-$30.000" in resp_prop
         ok_conf = (resp_conf.strip() == "Ya quedó anotado. Si hay algo mal, decime qué corregir.")
         return (
             f"Propuesta signos: {ok_prop} | "
@@ -2960,7 +2960,7 @@ def p14_caso_2(datos):
 
         accion_val = row["accion_ejecutada"] if row else ""
         es_lote_accion = accion_val.startswith("lote:") and len(accion_val.replace("lote:", "").split(",")) == 2
-        resp_ok = resp.startswith("Listo. 2 movimientos")
+        resp_ok = resp.startswith("Listo, 2 movimientos")
 
         return f"Resp ok: {resp_ok} | Txs: {txs_creadas} | Accion lote: {es_lote_accion}"
     return run_isolated(test)
@@ -4175,7 +4175,7 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
                     {"monto": 10, "moneda": "USD", "tipo": "egreso", "categoria": "Farmacia", "fecha": hoy.isoformat()}
                 ]
             }),
-            "esperado": "Propuesta:\nNo se pudo registrar Farmacia de US$10 porque es en dólares y la billetera Efectivo ARS es en pesos.\nVoy a anotar 2 movimientos desde Efectivo ARS: $1.000 en Kiosco, $2.000 en Panadería (ayer). ¿Va?\nConfirmación:\nListo. 2 movimientos desde Efectivo ARS: $1.000 en Kiosco, $2.000 en Panadería (ayer) — registrados.\nLa billetera quedó en negativo.",
+            "esperado": "Propuesta:\nNo se pudo registrar Farmacia de US$10 porque es en dólares y la billetera Efectivo ARS es en pesos.\nVoy a anotar 2 movimientos desde Efectivo ARS:\n$1.000 en Kiosco\n$2.000 en Panadería (ayer)\n¿Va?\nConfirmación:\nListo, 2 movimientos desde Efectivo ARS:\n$1.000 en Kiosco\n$2.000 en Panadería (ayer)\nRegistrados.\nLa billetera quedó en negativo.",
             "match": "exacto",
         },
         {
