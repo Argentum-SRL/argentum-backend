@@ -901,8 +901,15 @@ def evaluar_gasto_inusual(db: Session, usuario_id: UUID, transaccion: Transaccio
     montos_historicos = []
     if transaccion.moneda == Moneda.ARS:
         from app.services.tools_service import ajustar_por_ipc
+        from app.models.tools import IPCCache
+        ipc_records = db.execute(select(IPCCache).order_by(IPCCache.fecha_dato.asc())).scalars().all()
         for tx in historial:
-            adjusted = ajustar_por_ipc(monto=float(tx.monto), fecha_origen=tx.fecha.strftime("%Y-%m-%d"), db=db)
+            adjusted = ajustar_por_ipc(
+                monto=float(tx.monto),
+                fecha_origen=tx.fecha.strftime("%Y-%m-%d"),
+                db=db,
+                ipc_records=ipc_records
+            )
             montos_historicos.append(float(adjusted))
     else:
         montos_historicos = [float(tx.monto) for tx in historial]

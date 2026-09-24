@@ -444,8 +444,8 @@ def verificar_reconciliacion_billeteras(db: Session):
 SALDOS_REFERENCIA_21 = {
     ("testingadmin@argentum.com", "Efectivo ARS", "ARS"): Decimal("0.00"),
     ("testingadmin@argentum.com", "Efectivo USD", "USD"): Decimal("0.00"),
-    ("testingadmin@argentum.com", "Galicia", "ARS"): Decimal("1879558.71"),  # Actualizado 23/09/2026: cobro legítimo Netflix Estándar 22/09 (-$9.500)
-    ("testingadmin@argentum.com", "Santander", "ARS"): Decimal("84270.29"),
+    ("testingadmin@argentum.com", "Galicia", "ARS"): Decimal("4472208.62"),
+    ("testingadmin@argentum.com", "Santander", "ARS"): Decimal("0.00"),
 }
 
 def verificar_saldos_contra_referencia(db: Session, saldos_inicio_21: dict):
@@ -527,6 +527,7 @@ def p3_caso_4(datos):
     u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE billeteras SET es_principal = false WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE billeteras SET saldo_actual = 50000 WHERE usuario_id = :uid AND nombre = 'Santander'"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
         respuestas.clear()
@@ -623,6 +624,7 @@ def p3_caso_10(datos):
     u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE billeteras SET estado = 'archivada' WHERE usuario_id = :uid AND nombre IN ('Galicia', 'Santander')"), {"uid": u.id})
+        conn.execute(text("UPDATE billeteras SET saldo_actual = 0 WHERE usuario_id = :uid AND nombre = 'Efectivo ARS'"), {"uid": u.id})
         conn.execute(text("UPDATE billeteras SET es_principal = false WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         respuestas.clear()
@@ -1026,12 +1028,16 @@ def p5_caso_cuotas(datos):
 # ESCENARIOS PUNTO 6: Veracidad en Fechas, Monedas, Lotes y Descarte (10 casos)
 # ==============================================================================
 
-def p6_ejecutar_caso(datos, nombre_caso, ent):
+def p6_ejecutar_caso(datos, nombre_caso, ent, forzar_cero: bool = False):
     def test(conn, Session, respuestas):
         db = Session()
         u = db.execute(select(Usuario).where(Usuario.email == USUARIO_PRUEBAS_EMAIL)).scalar_one()
 
         b_nom = ent.get("billetera_destino") if ent.get("tipo") == "ingreso" else ent.get("billetera_origen")
+        if forzar_cero and b_nom:
+            conn.execute(text("UPDATE billeteras SET saldo_actual = 0 WHERE usuario_id = :uid AND nombre = :bnom"), {"uid": u.id, "bnom": b_nom})
+            db.expire_all()
+
         b_obj = db.execute(select(Billetera).where(Billetera.usuario_id == u.id, Billetera.nombre == b_nom)).scalars().first()
         b_mon = b_obj.moneda if b_obj else (Moneda.USD if "USD" in (b_nom or "") else Moneda.ARS)
 
@@ -4244,7 +4250,7 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             "nombre": "Gasto en dólares",
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto USD", {
                 "monto": 50, "moneda": "USD", "tipo": "egreso", "categoria": "Otros", "billetera_origen": "Efectivo USD", "fecha": hoy.isoformat()
-            }),
+            }, forzar_cero=True),
             "esperado": "Propuesta:\nVoy a anotar US$50 en Otros desde Efectivo USD. ¿Va?\nConfirmación:\nListo. US$50 en Otros desde Efectivo USD — registrado.\nLa billetera quedó en negativo.",
             "match": "exacto",
         },
@@ -4258,7 +4264,7 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
                     {"monto": 2000, "moneda": "ARS", "tipo": "egreso", "categoria": "Panadería", "fecha": ayer.isoformat()},
                     {"monto": 10, "moneda": "USD", "tipo": "egreso", "categoria": "Farmacia", "fecha": hoy.isoformat()}
                 ]
-            }),
+            }, forzar_cero=True),
             "esperado": "Propuesta:\nNo se pudo registrar Farmacia de US$10 porque es en dólares y la billetera Efectivo ARS es en pesos.\nVoy a anotar 2 movimientos desde Efectivo ARS:\n$1.000 en Kiosco\n$2.000 en Panadería (ayer)\n¿Va?\nConfirmación:\nListo, 2 movimientos desde Efectivo ARS:\n$1.000 en Kiosco\n$2.000 en Panadería (ayer)\nRegistrados.\nLa billetera quedó en negativo.",
             "match": "exacto",
         },

@@ -303,6 +303,7 @@ def _obtener_billeteras_activas(usuario_id: UUID, db: Session, moneda: Moneda | 
     query = select(Billetera).where(
         Billetera.usuario_id == usuario_id,
         Billetera.estado == EstadoBilletera.ACTIVA,
+        Billetera.es_inversion == False,
     )
     if moneda:
         query = query.where(Billetera.moneda == moneda)
