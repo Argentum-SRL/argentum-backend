@@ -2059,27 +2059,48 @@ def _interpretar_transferencia(
                 if m_num:
                     m_cot = _parsear_monto_argentino(m_num.group(1))
             if m_cot:
-                dolares = Decimal(str(estado_previo["monto_usd"]))
-                # Candidato 1: m_cot interpretado como cotización unitaria
-                c1_cotiz = m_cot
-                c1_pesos = (dolares * c1_cotiz).quantize(Decimal("0.01"))
+                if "monto_usd" in estado_previo:
+                    dolares = Decimal(str(estado_previo["monto_usd"]))
+                    # Candidato 1: m_cot interpretado como cotización unitaria
+                    c1_cotiz = m_cot
+                    c1_pesos = (dolares * c1_cotiz).quantize(Decimal("0.01"))
 
-                # Candidato 2: m_cot interpretado como monto total en pesos
-                c2_pesos = m_cot
-                c2_cotiz = (c2_pesos / dolares).quantize(Decimal("0.01"))
+                    # Candidato 2: m_cot interpretado como monto total en pesos
+                    c2_pesos = m_cot
+                    c2_cotiz = (c2_pesos / dolares).quantize(Decimal("0.01"))
+                else:
+                    pesos_base = Decimal(str(estado_previo["monto_pesos"]))
+                    # Candidato 1: m_cot interpretado como cotización unitaria
+                    c1_cotiz = m_cot
+                    c1_pesos = pesos_base
+                    c1_dolares = (pesos_base / c1_cotiz).quantize(Decimal("0.01")) if c1_cotiz > Decimal("0") else Decimal("0")
+
+                    # Candidato 2: m_cot interpretado como monto total en dólares recibidos
+                    c2_pesos = pesos_base
+                    c2_dolares = m_cot
+                    c2_cotiz = (pesos_base / m_cot).quantize(Decimal("0.01")) if m_cot > Decimal("0") else Decimal("0")
 
                 cot_ref = _obtener_cotizacion_referencia_usuario(usuario, db)
 
                 if cot_ref is None:
                     # Sin cotización de referencia: preguntar al usuario mostrando ambas opciones
                     c1_c_str = formatear_monto(float(c1_cotiz), Moneda.ARS)
-                    c1_p_str = formatear_monto(float(c1_pesos), Moneda.ARS)
-                    c2_p_str = formatear_monto(float(c2_pesos), Moneda.ARS)
-                    c2_c_str = formatear_monto(float(c2_cotiz), Moneda.ARS)
-                    pregunta = (
-                        f"¿Te referís a una cotización de {c1_c_str} por dólar (total {c1_p_str}) "
-                        f"o a un total de {c2_p_str} ({c2_c_str} por dólar)?"
-                    )
+                    if "monto_usd" in estado_previo:
+                        c1_p_str = formatear_monto(float(c1_pesos), Moneda.ARS)
+                        c2_p_str = formatear_monto(float(c2_pesos), Moneda.ARS)
+                        c2_c_str = formatear_monto(float(c2_cotiz), Moneda.ARS)
+                        pregunta = (
+                            f"¿Te referís a una cotización de {c1_c_str} por dólar (total {c1_p_str}) "
+                            f"o a un total de {c2_p_str} ({c2_c_str} por dólar)?"
+                        )
+                    else:
+                        c1_d_str = f"{int(c1_dolares)}" if c1_dolares == int(c1_dolares) else f"{c1_dolares:g}"
+                        c2_d_str = f"{int(c2_dolares)}" if c2_dolares == int(c2_dolares) else f"{c2_dolares:g}"
+                        c2_c_str = formatear_monto(float(c2_cotiz), Moneda.ARS)
+                        pregunta = (
+                            f"¿Te referís a una cotización de {c1_c_str} por dólar (recibís USD {c1_d_str}) "
+                            f"o a recibir USD {c2_d_str} ({c2_c_str} por dólar)?"
+                        )
                     return True, "slot_filling", estado_previo, pregunta
 
                 # Con cotización de referencia: evaluar plausibilidad y cercanía
@@ -2097,26 +2118,39 @@ def _interpretar_transferencia(
                     umbral_ambiguedad = cot_ref * Decimal("0.25")
                     if abs(d1 - d2) < umbral_ambiguedad:
                         c1_c_str = formatear_monto(float(c1_cotiz), Moneda.ARS)
-                        c1_p_str = formatear_monto(float(c1_pesos), Moneda.ARS)
-                        c2_p_str = formatear_monto(float(c2_pesos), Moneda.ARS)
-                        c2_c_str = formatear_monto(float(c2_cotiz), Moneda.ARS)
-                        pregunta = (
-                            f"¿Te referís a una cotización de {c1_c_str} por dólar (total {c1_p_str}) "
-                            f"o a un total de {c2_p_str} ({c2_c_str} por dólar)?"
-                        )
+                        if "monto_usd" in estado_previo:
+                            c1_p_str = formatear_monto(float(c1_pesos), Moneda.ARS)
+                            c2_p_str = formatear_monto(float(c2_pesos), Moneda.ARS)
+                            c2_c_str = formatear_monto(float(c2_cotiz), Moneda.ARS)
+                            pregunta = (
+                                f"¿Te referís a una cotización de {c1_c_str} por dólar (total {c1_p_str}) "
+                                f"o a un total de {c2_p_str} ({c2_c_str} por dólar)?"
+                            )
+                        else:
+                            c1_d_str = f"{int(c1_dolares)}" if c1_dolares == int(c1_dolares) else f"{c1_dolares:g}"
+                            c2_d_str = f"{int(c2_dolares)}" if c2_dolares == int(c2_dolares) else f"{c2_dolares:g}"
+                            c2_c_str = formatear_monto(float(c2_cotiz), Moneda.ARS)
+                            pregunta = (
+                                f"¿Te referís a una cotización de {c1_c_str} por dólar (recibís USD {c1_d_str}) "
+                                f"o a recibir USD {c2_d_str} ({c2_c_str} por dólar)?"
+                            )
                         return True, "slot_filling", estado_previo, pregunta
                     if d1 <= d2:
                         cotiz = c1_cotiz
                         pesos = c1_pesos
+                        dolares = c1_dolares if "monto_pesos" in estado_previo else dolares
                     else:
                         cotiz = c2_cotiz
                         pesos = c2_pesos
+                        dolares = c2_dolares if "monto_pesos" in estado_previo else dolares
                 elif c1_valida and not c2_valida:
                     cotiz = c1_cotiz
                     pesos = c1_pesos
+                    dolares = c1_dolares if "monto_pesos" in estado_previo else dolares
                 elif c2_valida and not c1_valida:
                     cotiz = c2_cotiz
                     pesos = c2_pesos
+                    dolares = c2_dolares if "monto_pesos" in estado_previo else dolares
                 else:
                     # Fuera de rango plausible
                     candidato_elegido = c1_cotiz if d1 <= d2 else c2_cotiz
@@ -2133,6 +2167,18 @@ def _interpretar_transferencia(
                 ars_wallets = [w for w in billeteras_usuario if w.moneda == Moneda.ARS and w.estado == EstadoBilletera.ACTIVA]
                 b_usd = usd_wallets[0] if usd_wallets else None
                 b_ars = next((w for w in ars_wallets if not w.es_efectivo and w.es_principal), (ars_wallets[0] if ars_wallets else None))
+
+                # Respetar billeteras si ya venían especificadas en estado_previo
+                if estado_previo.get("billetera_origen_id") and estado_previo.get("billetera_destino_id"):
+                    b_orig_prev = next((w for w in billeteras_usuario if str(w.id) == str(estado_previo["billetera_origen_id"])), None)
+                    b_dest_prev = next((w for w in billeteras_usuario if str(w.id) == str(estado_previo["billetera_destino_id"])), None)
+                    if b_orig_prev and b_dest_prev:
+                        if tipo_op == "compra_usd":
+                            b_ars = b_orig_prev
+                            b_usd = b_dest_prev
+                        else:
+                            b_usd = b_orig_prev
+                            b_ars = b_dest_prev
 
                 if not b_usd or not b_ars:
                     return True, "error", {}, "No se encontraron las billeteras necesarias para operar en dólares."
@@ -2383,21 +2429,157 @@ def _interpretar_transferencia(
             return True, "misma_billetera", {}, "La billetera de origen y destino no pueden ser la misma."
 
         if b_orig and b_dest and monto:
-            monto_fmt = formatear_monto(float(monto), b_orig.moneda)
-            prop = f"Voy a transferir {monto_fmt} de {b_orig.nombre} a {b_dest.nombre}. ¿Confirmás?"
+            if b_orig.moneda == b_dest.moneda:
+                monto_fmt = formatear_monto(float(monto), b_orig.moneda)
+                prop = f"Voy a transferir {monto_fmt} de {b_orig.nombre} a {b_dest.nombre}. ¿Confirmás?"
+                entidades = {
+                    "tipo_operacion": "transferencia",
+                    "billetera_origen_id": str(b_orig.id),
+                    "billetera_destino_id": str(b_dest.id),
+                    "billetera_origen": b_orig.nombre,
+                    "billetera_destino": b_dest.nombre,
+                    "monto": float(monto),
+                    "monto_origen": float(monto),
+                    "monto_destino": float(monto),
+                    "moneda_origen": b_orig.moneda.value,
+                    "moneda_destino": b_dest.moneda.value,
+                }
+                return True, "propuesta", entidades, prop
+
+            # Transferencia entre billeteras de distinta moneda (ARS <-> USD)
+            es_compra = (b_orig.moneda == Moneda.ARS and b_dest.moneda == Moneda.USD)
+            tipo_op = "compra_usd" if es_compra else "venta_usd"
+
+            # 1. Detectar si el usuario ya dio ambos montos o cotización explícita en el mismo mensaje
+            m_usd = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\s*(?:d[oó]lares|verdes|usd)\b", m_norm)
+            dolares_explicit = _parsear_monto_argentino(m_usd.group(1)) if m_usd else None
+
+            m_ars = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?)\s*(?:pesos|ars)\b", m_norm)
+            pesos_explicit = _parsear_monto_argentino(m_ars.group(1)) if m_ars else None
+
+            m_cotiz = None
+            for m_c in re.finditer(r"\ba\s+(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\b", m_norm):
+                val_c = _parsear_monto_argentino(m_c.group(1))
+                if val_c and val_c > Decimal("100"):
+                    m_cotiz = val_c
+                    break
+
+            m_son = re.search(r"(?:son|que\s+son|equivalen\s+a|por|recib[ií])\s+(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?)\b", m_norm)
+            segundo_monto = _parsear_monto_argentino(m_son.group(1)) if m_son else None
+
+            pesos = None
+            dolares = None
+            cotiz = None
+
+            if dolares_explicit and pesos_explicit:
+                dolares = dolares_explicit
+                pesos = pesos_explicit
+            elif dolares_explicit and monto and monto != dolares_explicit:
+                dolares = dolares_explicit
+                pesos = monto
+            elif pesos_explicit and monto and monto != pesos_explicit:
+                pesos = pesos_explicit
+                dolares = monto
+            elif dolares_explicit and m_cotiz:
+                dolares = dolares_explicit
+                cotiz = m_cotiz
+                pesos = (dolares * cotiz).quantize(Decimal("0.01"))
+            elif pesos_explicit and m_cotiz:
+                pesos = pesos_explicit
+                cotiz = m_cotiz
+                dolares = (pesos / cotiz).quantize(Decimal("0.01")) if cotiz > Decimal("0") else None
+            elif m_cotiz and monto:
+                cotiz = m_cotiz
+                if es_compra:
+                    pesos = monto
+                    dolares = (pesos / cotiz).quantize(Decimal("0.01")) if cotiz > Decimal("0") else None
+                else:
+                    dolares = monto
+                    pesos = (dolares * cotiz).quantize(Decimal("0.01"))
+            elif segundo_monto and monto and segundo_monto != monto:
+                if es_compra:
+                    pesos = monto
+                    dolares = segundo_monto
+                else:
+                    dolares = monto
+                    pesos = segundo_monto
+
+            if pesos is not None and dolares is not None and dolares > Decimal("0") and cotiz is None:
+                cotiz = (pesos / dolares).quantize(Decimal("0.01"))
+
+            # Si ya tenemos ambos montos y cotización, validar plausibilidad y armar propuesta
+            if pesos is not None and dolares is not None and cotiz is not None and cotiz > Decimal("0"):
+                cot_ref = _obtener_cotizacion_referencia_usuario(usuario, db)
+                if cot_ref is not None:
+                    rango_min = (cot_ref * FACTOR_MIN_COTIZACION_DOLAR).quantize(Decimal("0.01"))
+                    rango_max = (cot_ref * FACTOR_MAX_COTIZACION_DOLAR).quantize(Decimal("0.01"))
+                    if cotiz < rango_min or cotiz > rango_max:
+                        c_str = str(int(cotiz)) if cotiz == int(cotiz) else str(cotiz)
+                        ref_str = str(int(cot_ref)) if cot_ref == int(cot_ref) else str(cot_ref)
+                        return (
+                            True,
+                            "absurda",
+                            {},
+                            f"La cotización de ${c_str} por dólar no parece razonable (la cotización de referencia es de ${ref_str}). Por favor verificá el valor e intentá de nuevo.",
+                        )
+
+                cotiz_fmt = formatear_monto(float(cotiz), Moneda.ARS)
+                pesos_fmt = formatear_monto(float(pesos), Moneda.ARS)
+                dolares_str = f"{int(dolares)}" if dolares == int(dolares) else f"{dolares:g}"
+
+                if es_compra:
+                    prop = f"Voy a registrar una compra de USD {dolares_str} a {cotiz_fmt}: salen {pesos_fmt} de {b_orig.nombre} y entran USD {dolares_str} a {b_dest.nombre}. ¿Confirmás?"
+                    entidades = {
+                        "tipo_operacion": "compra_usd",
+                        "billetera_origen_id": str(b_orig.id),
+                        "billetera_destino_id": str(b_dest.id),
+                        "monto": float(pesos),
+                        "monto_origen": float(pesos),
+                        "monto_destino": float(dolares),
+                        "moneda_origen": "ARS",
+                        "moneda_destino": "USD",
+                        "cotizacion": float(cotiz),
+                    }
+                else:
+                    prop = f"Voy a registrar una venta de USD {dolares_str} a {cotiz_fmt}: salen USD {dolares_str} de {b_orig.nombre} y entran {pesos_fmt} a {b_dest.nombre}. ¿Confirmás?"
+                    entidades = {
+                        "tipo_operacion": "venta_usd",
+                        "billetera_origen_id": str(b_orig.id),
+                        "billetera_destino_id": str(b_dest.id),
+                        "monto": float(dolares),
+                        "monto_origen": float(dolares),
+                        "monto_destino": float(pesos),
+                        "moneda_origen": "USD",
+                        "moneda_destino": "ARS",
+                        "cotizacion": float(cotiz),
+                    }
+                return True, "propuesta", entidades, prop
+
+            # 2. Si no se especificó cotización ni segundo monto: activar slot-filling
             entidades = {
-                "tipo_operacion": "transferencia",
+                "intent_origen": "transferir_fondos",
+                "tipo_operacion": tipo_op,
                 "billetera_origen_id": str(b_orig.id),
                 "billetera_destino_id": str(b_dest.id),
-                "billetera_origen": b_orig.nombre,
-                "billetera_destino": b_dest.nombre,
-                "monto": float(monto),
-                "monto_origen": float(monto),
-                "monto_destino": float(monto),
-                "moneda_origen": b_orig.moneda.value,
-                "moneda_destino": b_dest.moneda.value,
+                "datos_faltantes": ["cotizacion"]
             }
-            return True, "propuesta", entidades, prop
+            if es_compra:
+                if dolares_explicit:
+                    entidades["monto_usd"] = float(dolares_explicit)
+                    pregunta = "¿A qué cotización compraste o cuántos pesos pagaste?"
+                else:
+                    entidades["monto_pesos"] = float(monto)
+                    pregunta = f"¿A qué cotización compraste o cuántos dólares recibís en {b_dest.nombre}?"
+            else:
+                if dolares_explicit:
+                    entidades["monto_usd"] = float(dolares_explicit)
+                elif b_orig.moneda == Moneda.USD:
+                    entidades["monto_usd"] = float(monto)
+                else:
+                    entidades["monto_pesos"] = float(monto)
+                pregunta = f"¿A qué cotización vendiste o cuántos pesos recibís en {b_dest.nombre}?"
+
+            return True, "slot_filling", entidades, pregunta
 
         if b_dest and monto and not b_orig:
             entidades = {

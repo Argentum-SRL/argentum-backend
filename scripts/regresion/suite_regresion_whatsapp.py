@@ -1925,6 +1925,71 @@ def p9b_caso_17(datos):
     return run_isolated(test)
 
 
+def p9b_caso_18(datos):
+    """pasé 50000 de Galicia a Efectivo USD: intent genérico multi-moneda sin cotización debe preguntar, no acreditar 1:1"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        s = Session()
+        trs_ini = s.execute(select(func.count(TransferenciaInterna.id)).where(TransferenciaInterna.usuario_id == u.id)).scalar()
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "pasé 50000 de Galicia a Efectivo USD"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+
+        trs_fin = s.execute(select(func.count(TransferenciaInterna.id)).where(TransferenciaInterna.usuario_id == u.id)).scalar()
+        no_acredito_1a1 = (trs_ini == trs_fin)
+        return f"Pregunta: {resp} | Sin acreditar 1a1: {no_acredito_1a1}"
+    return run_isolated(test)
+
+
+def p9b_caso_19(datos):
+    """pasé 50 de Efectivo USD a Galicia: intent genérico USD->ARS sin cotización debe preguntar, no acreditar 1:1"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        s = Session()
+        trs_ini = s.execute(select(func.count(TransferenciaInterna.id)).where(TransferenciaInterna.usuario_id == u.id)).scalar()
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "pasé 50 de Efectivo USD a Galicia"), time.perf_counter())
+        resp = respuestas[-1][1] if respuestas else ""
+
+        trs_fin = s.execute(select(func.count(TransferenciaInterna.id)).where(TransferenciaInterna.usuario_id == u.id)).scalar()
+        no_acredito_1a1 = (trs_ini == trs_fin)
+        return f"Pregunta: {resp} | Sin acreditar 1a1: {no_acredito_1a1}"
+    return run_isolated(test)
+
+
+def p9b_caso_20(datos):
+    """pasé 15000 de Galicia a Santander: transferencia misma moneda funciona directo sin preguntas adicionales"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        s = Session()
+        txs_ini = s.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        bg_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
+        bs_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Santander", Billetera.usuario_id == u.id)).scalar()
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "pasé 15000 de Galicia a Santander"), time.perf_counter())
+        prop = respuestas[-1][1] if respuestas else ""
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        conf = respuestas[-1][1] if respuestas else ""
+
+        bg_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
+        bs_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Santander", Billetera.usuario_id == u.id)).scalar()
+        txs_fin = s.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+
+        cero_gastos = (txs_ini == txs_fin)
+        saldos_ok = (bg_fin == bg_ini - Decimal("15000") and bs_fin == bs_ini + Decimal("15000"))
+        return f"Propuesta: {prop} | Confirmación: {conf} | Saldos ajustados: {saldos_ok} | Cero gastos: {cero_gastos}"
+    return run_isolated(test)
+
+
 def p10_caso_1(datos):
     """empecé a pagar 5000 de Disney+: pregunta la frecuencia, crea la suscripción, no cobra nada"""
     u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
@@ -4683,6 +4748,30 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             "nombre": "compré 100 dólares a 1500 con la tabla de cotizaciones vacía: no rechaza, pide confirmación",
             "ejecutar": lambda: p9b_caso_17(datos),
             "esperado": "Voy a registrar una compra de USD 100 a $1.500: salen $150.000",
+            "match": "contiene",
+        },
+        {
+            "id": "P9B.18",
+            "punto": "Punto 9B",
+            "nombre": "pasé 50000 de Galicia a Efectivo USD: no transfiere 1:1, pregunta cotización o dólares",
+            "ejecutar": lambda: p9b_caso_18(datos),
+            "esperado": "¿A qué cotización compraste o cuántos dólares recibís en Efectivo USD? | Sin acreditar 1a1: True",
+            "match": "contiene",
+        },
+        {
+            "id": "P9B.19",
+            "punto": "Punto 9B",
+            "nombre": "pasé 50 de Efectivo USD a Galicia: no transfiere 1:1, pregunta cotización o pesos",
+            "ejecutar": lambda: p9b_caso_19(datos),
+            "esperado": "¿A qué cotización vendiste o cuántos pesos recibís en Galicia? | Sin acreditar 1a1: True",
+            "match": "contiene",
+        },
+        {
+            "id": "P9B.20",
+            "punto": "Punto 9B",
+            "nombre": "pasé 15000 de Galicia a Santander: misma moneda funciona directo sin preguntas",
+            "ejecutar": lambda: p9b_caso_20(datos),
+            "esperado": "Saldos ajustados: True | Cero gastos: True",
             "match": "contiene",
         },
 
