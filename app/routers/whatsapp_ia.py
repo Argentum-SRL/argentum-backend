@@ -362,16 +362,27 @@ def _construir_propuesta_credito(
 
 def _unir_items_multilinea(items: list[str], encabezado: str, cierre: str) -> str:
     """
-    Une los items de un lote en formato multilinea:
+    Une los items de un lote en formato de lista con viñetas nativas de WhatsApp:
     encabezado
-    item 1
-    item 2
+
+    - item 1
+    - item 2
+
     cierre
     """
-    partes = [encabezado] + items
+    def _limpiar(it: str) -> str:
+        if it.startswith("- "):
+            return it[2:]
+        if it.startswith("• "):
+            return it[2:]
+        return it
+
+    items_formateados = [f"- {_limpiar(it)}" for it in items]
+    bloque_items = "\n".join(items_formateados)
+    partes = [encabezado, bloque_items]
     if cierre:
         partes.append(cierre)
-    return "\n".join(partes)
+    return "\n\n".join(partes)
 
 
 def _construir_propuesta_transaccion(
