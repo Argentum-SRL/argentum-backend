@@ -480,24 +480,42 @@ def _construir_propuesta_transaccion(
         mismo_tipo = len(set(it.get("tipo", "egreso") for it in todos_items)) == 1
         tipos_mezclados = any(it.get("tipo") == "ingreso" for it in todos_items) and any(it.get("tipo", "egreso") == "egreso" for it in todos_items)
 
-        if misma_billetera and mismo_tipo and b_comun:
-            items_desc = []
-            for it in todos_items:
-                mon_it = Moneda.USD if it.get("moneda") == "USD" else Moneda.ARS
-                m_fmt = formatear_monto(float(it["monto"]), mon_it)
-                cat_d = _nombre_corto_categoria(it.get("categoria"))
-                fecha_obj, av = _resolver_y_validar_fecha(it.get("fecha"))
-                if av and av not in avisos_fechas:
-                    avisos_fechas.append(av)
-                f_nat = _formatear_fecha_natural(fecha_obj)
-                f_disp = f" ({f_nat})" if f_nat else ""
-                items_desc.append(f"{m_fmt} en {cat_d}{f_disp}")
+        if misma_billetera and b_comun:
+            if mismo_tipo:
+                items_desc = []
+                for it in todos_items:
+                    mon_it = Moneda.USD if it.get("moneda") == "USD" else Moneda.ARS
+                    m_fmt = formatear_monto(float(it["monto"]), mon_it)
+                    cat_d = _nombre_corto_categoria(it.get("categoria"))
+                    fecha_obj, av = _resolver_y_validar_fecha(it.get("fecha"))
+                    if av and av not in avisos_fechas:
+                        avisos_fechas.append(av)
+                    f_nat = _formatear_fecha_natural(fecha_obj)
+                    f_disp = f" ({f_nat})" if f_nat else ""
+                    items_desc.append(f"{m_fmt} en {cat_d}{f_disp}")
 
-            tipo_comun = todos_items[0].get("tipo", "egreso")
-            origen_str = f" a {b_comun}" if tipo_comun == "ingreso" else f" desde {b_comun}"
-            mov_palabra = "movimientos" if total_movs != 1 else "movimiento"
-            encabezado = f"Voy a anotar {total_movs} {mov_palabra}{origen_str}:"
-            texto = _unir_items_multilinea(items_desc, encabezado, "¿Va?")
+                tipo_comun = todos_items[0].get("tipo", "egreso")
+                origen_str = f" a {b_comun}" if tipo_comun == "ingreso" else f" desde {b_comun}"
+                mov_palabra = "movimientos" if total_movs != 1 else "movimiento"
+                encabezado = f"Voy a anotar {total_movs} {mov_palabra}{origen_str}:"
+                texto = _unir_items_multilinea(items_desc, encabezado, "¿Va?")
+            else:
+                items_desc = []
+                for it in todos_items:
+                    mon_it = Moneda.USD if it.get("moneda") == "USD" else Moneda.ARS
+                    m_fmt = formatear_monto(float(it["monto"]), mon_it)
+                    cat_d = _nombre_corto_categoria(it.get("categoria"))
+                    fecha_obj, av = _resolver_y_validar_fecha(it.get("fecha"))
+                    if av and av not in avisos_fechas:
+                        avisos_fechas.append(av)
+                    f_nat = _formatear_fecha_natural(fecha_obj)
+                    f_disp = f" ({f_nat})" if f_nat else ""
+                    signo = "+" if it.get("tipo") == "ingreso" else "-"
+                    items_desc.append(f"*{signo}{m_fmt}* en {cat_d}{f_disp}")
+
+                mov_palabra = "movimientos" if total_movs != 1 else "movimiento"
+                encabezado = f"Voy a anotar {total_movs} {mov_palabra} en *{b_comun}*:"
+                texto = _unir_items_multilinea(items_desc, encabezado, "¿Va?")
         else:
             items_desc = []
             for it in todos_items:
@@ -960,20 +978,32 @@ def _confirmar_propuesta_transaccion(
                     return c_obj.nombre
             return _nombre_corto_categoria(tx_item.descripcion) or "Otros"
 
-        if todas_misma_billetera and mismo_tipo and b_ids:
+        if todas_misma_billetera and b_ids:
             b_comun = b_map.get(b_ids[0])
             nom_b = b_comun.nombre if b_comun else "tu billetera"
-            tipo_comun = txs_registradas[0].tipo
-            origen_str = f" a {nom_b}" if tipo_comun == TipoTransaccion.INGRESO else f" desde {nom_b}"
-            items_str = []
-            for t, it_d in zip(txs_registradas, items_registrados):
-                m_fmt = formatear_monto(float(t.monto), t.moneda)
-                cat_d = _cat_disp_item(it_d, t)
-                f_nat = _formatear_fecha_natural(t.fecha)
-                f_disp = f" ({f_nat})" if f_nat else ""
-                items_str.append(f"{m_fmt} en {cat_d}{f_disp}")
-            encabezado = f"Listo, {total_registrados} {mov_palabra}{origen_str}:"
-            msg_resp = _unir_items_multilinea(items_str, encabezado, reg_palabra)
+            if mismo_tipo:
+                tipo_comun = txs_registradas[0].tipo
+                origen_str = f" a {nom_b}" if tipo_comun == TipoTransaccion.INGRESO else f" desde {nom_b}"
+                items_str = []
+                for t, it_d in zip(txs_registradas, items_registrados):
+                    m_fmt = formatear_monto(float(t.monto), t.moneda)
+                    cat_d = _cat_disp_item(it_d, t)
+                    f_nat = _formatear_fecha_natural(t.fecha)
+                    f_disp = f" ({f_nat})" if f_nat else ""
+                    items_str.append(f"{m_fmt} en {cat_d}{f_disp}")
+                encabezado = f"Listo, {total_registrados} {mov_palabra}{origen_str}:"
+                msg_resp = _unir_items_multilinea(items_str, encabezado, reg_palabra)
+            else:
+                items_str = []
+                for t, it_d in zip(txs_registradas, items_registrados):
+                    m_fmt = formatear_monto(float(t.monto), t.moneda)
+                    cat_d = _cat_disp_item(it_d, t)
+                    f_nat = _formatear_fecha_natural(t.fecha)
+                    f_disp = f" ({f_nat})" if f_nat else ""
+                    signo = "+" if t.tipo == TipoTransaccion.INGRESO else "-"
+                    items_str.append(f"*{signo}{m_fmt}* en {cat_d}{f_disp}")
+                encabezado = f"Listo, {total_registrados} {mov_palabra} en *{nom_b}*:"
+                msg_resp = _unir_items_multilinea(items_str, encabezado, reg_palabra)
         else:
             items_str = []
             for t, it_d in zip(txs_registradas, items_registrados):

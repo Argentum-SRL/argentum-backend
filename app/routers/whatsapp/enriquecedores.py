@@ -116,9 +116,9 @@ def enriquecer_respuesta_por_intent(
             usd_total = float(disp_ctx["usd"]["total_billeteras"])
             usd_disp = float(disp_ctx["usd"]["saldo_disponible"])
 
-            msg = f"Tenés {_fmt(ars_total)} en tus billeteras en pesos. Disponible real (descontando cuotas): {_fmt(ars_disp)}."
+            msg = f"Tus saldos en pesos:\n- Total en billeteras: {_fmt(ars_total)}\n- Disponible real: {_fmt(ars_disp)} (descontando cuotas)"
             if usd_total > 0 or usd_disp > 0:
-                msg += f" Y tenés {_fmt(usd_total, Moneda.USD)} en tus billeteras en dólares. Disponible real: {_fmt(usd_disp, Moneda.USD)}."
+                msg += f"\n\nEn dólares:\n- Total en billeteras: {_fmt(usd_total, Moneda.USD)}\n- Disponible real: {_fmt(usd_disp, Moneda.USD)}"
             resultado_ia["respuesta_usuario"] = msg
         except Exception:
             logger.exception("Error al calcular saldo para WhatsApp")
@@ -142,7 +142,7 @@ def enriquecer_respuesta_por_intent(
             bal_usd = b_usd.get("balance", 0.0)
             if ing_usd > 0 or egr_usd > 0:
                 signo_usd = "+" if bal_usd > 0 else ""
-                msg += f" En dólares: ingresos {_fmt(ing_usd, Moneda.USD)}, gastos {_fmt(egr_usd, Moneda.USD)} (balance: {signo_usd}{_fmt(bal_usd, Moneda.USD)})."
+                msg += f"\n\nEn dólares:\n- Ingresos: {_fmt(ing_usd, Moneda.USD)}\n- Gastos: {_fmt(egr_usd, Moneda.USD)}\n- Balance: {signo_usd}{_fmt(bal_usd, Moneda.USD)}"
 
             resultado_ia["respuesta_usuario"] = msg
         except Exception:
@@ -167,7 +167,8 @@ def enriquecer_respuesta_por_intent(
                 msg_parts.append(f"Oficial: {formatear_monto(oficial['venta'], Moneda.ARS)}")
 
             if msg_parts:
-                resultado_ia["respuesta_usuario"] = "Cotizaciones del dólar: " + " | ".join(msg_parts)
+                items_cots = "\n".join(f"- {p}" for p in msg_parts)
+                resultado_ia["respuesta_usuario"] = f"Cotizaciones del dólar:\n\n{items_cots}"
             else:
                 resultado_ia["respuesta_usuario"] = "No pude obtener la cotización del dólar en este momento. Probá de nuevo en unos minutos."
         except Exception:
@@ -184,13 +185,11 @@ def enriquecer_respuesta_por_intent(
                 partes_meta = []
                 for meta_i in metas_res[:8]:
                     mon_meta = Moneda.USD if meta_i["moneda"] == "USD" else Moneda.ARS
-                    parte_meta = f"{meta_i['nombre']}: {_fmt(meta_i['acumulado'], mon_meta)} de {_fmt(meta_i['objetivo'], mon_meta)}"
-                    if meta_i["objetivo"] > 0:
-                        parte_meta += f" ({round(meta_i['acumulado'] / meta_i['objetivo'] * 100)}%)"
-                    partes_meta.append(parte_meta)
+                    pct = f" ({round(meta_i['acumulado'] / meta_i['objetivo'] * 100)}%)" if meta_i["objetivo"] > 0 else ""
+                    partes_meta.append(f"- *{meta_i['nombre']}:* {_fmt(meta_i['acumulado'], mon_meta)} de {_fmt(meta_i['objetivo'], mon_meta)}{pct}")
                 if len(metas_res) > 8:
-                    partes_meta.append(f"y {len(metas_res) - 8} más")
-                resultado_ia["respuesta_usuario"] = "Tus metas activas: " + " | ".join(partes_meta)
+                    partes_meta.append(f"- y {len(metas_res) - 8} más")
+                resultado_ia["respuesta_usuario"] = "Tus metas activas:\n\n" + "\n".join(partes_meta)
         except Exception:
             logger.exception("Error al consultar metas para WhatsApp")
             resultado_ia["respuesta_usuario"] = "No pude consultar tus metas en este momento. Probá de nuevo en unos minutos."
@@ -209,10 +208,10 @@ def enriquecer_respuesta_por_intent(
                         detalle_pres = f"te pasaste por {_fmt(pres_i['usado'] - pres_i['limite'], mon_pres)}"
                     else:
                         detalle_pres = f"te quedan {_fmt(pres_i['limite'] - pres_i['usado'], mon_pres)}"
-                    partes_pres.append(f"{pres_i['nombre']}: usaste {_fmt(pres_i['usado'], mon_pres)} de {_fmt(pres_i['limite'], mon_pres)} ({detalle_pres})")
+                    partes_pres.append(f"- *{pres_i['nombre']}:* usaste {_fmt(pres_i['usado'], mon_pres)} de {_fmt(pres_i['limite'], mon_pres)} ({detalle_pres})")
                 if len(pres_res) > 8:
-                    partes_pres.append(f"y {len(pres_res) - 8} más")
-                resultado_ia["respuesta_usuario"] = "Tus presupuestos activos: " + " | ".join(partes_pres)
+                    partes_pres.append(f"- y {len(pres_res) - 8} más")
+                resultado_ia["respuesta_usuario"] = "Tus presupuestos activos:\n\n" + "\n".join(partes_pres)
         except Exception:
             logger.exception("Error al consultar presupuestos para WhatsApp")
             resultado_ia["respuesta_usuario"] = "No pude consultar tus presupuestos en este momento. Probá de nuevo en unos minutos."

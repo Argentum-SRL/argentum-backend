@@ -52,7 +52,7 @@ def formatear_inactividad(dias: int) -> str:
     return f"Hace {dias} días que no registrás movimientos. ¿Todo bien?"
 
 def formatear_resumen_diario(mensajes: list[str]) -> str:
-    items = "\n".join(f"• {m}" for m in mensajes)
+    items = "\n".join(f"- {m.lstrip('•- ')}" for m in mensajes)
     return f"*Argentum — resumen de hoy*\n\n{items}"
 
 def formatear_resumen_ciclo(
@@ -66,14 +66,15 @@ def formatear_resumen_ciclo(
 ) -> str:
     signo = "+" if balance >= 0 else ""
     lineas = [
-        f"*Cerraste el ciclo*\n",
-        f"Ingresos: {formatear_monto(total_ingresos, moneda)}",
-        f"Egresos: {formatear_monto(total_egresos, moneda)}",
-        f"Balance: {signo}{formatear_monto(balance, moneda)}",
+        "*Cerraste el ciclo*\n",
+        f"- Ingresos: *{formatear_monto(total_ingresos, moneda)}*",
+        f"- Egresos: *{formatear_monto(total_egresos, moneda)}*",
+        f"- Balance: *{signo}{formatear_monto(balance, moneda)}*",
     ]
     if categoria_top and monto_categoria_top:
         lineas.append(f"\nMás gastaste en *{categoria_top}*: {formatear_monto(monto_categoria_top, moneda)}")
     if gastos_hormiga:
+        lineas.append("\nGastos frecuentes:")
         for g in gastos_hormiga[:2]:
-            lineas.append(f"• {g['categoria']}: {formatear_monto(g['total'], moneda)} en {g['cantidad']} compras")
+            lineas.append(f"- {g['categoria']}: {formatear_monto(g['total'], moneda)} en {g['cantidad']} compras")
     return "\n".join(lineas)
