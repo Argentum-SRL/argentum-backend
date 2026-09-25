@@ -197,11 +197,14 @@ def calcular_fecha_cobro_sync(
     """
     Versión sincrónica de cálculo de fecha de cobro para modo DIA_FIJO.
     Ajusta si el día no existe en el mes y luego aplica la regla de día hábil
-    según la dirección ('anterior' o 'posterior').
+    según la dirección ('anterior' o 'posterior'). Si direccion es None o vacía,
+    no aplica ajuste (mismo día).
     """
     ultimo_dia_mes = calendar.monthrange(anio, mes)[1]
     dia_real = min(dia_nominal, ultimo_dia_mes)
     fecha = date(anio, mes, dia_real)
+    if not direccion:
+        return fecha
     return ajustar_fecha_habil_sync(fecha, direccion=direccion)
 
 
@@ -212,7 +215,8 @@ async def calcular_fecha_cobro(
     Dado un día nominal, mes y año, calcula la fecha real aplicando
     la regla de día hábil (anterior o posterior).
     """
-    await obtener_feriados_argentina(anio)
+    if direccion:
+        await obtener_feriados_argentina(anio)
     return calcular_fecha_cobro_sync(dia_nominal, mes, anio, direccion=direccion)
 
 

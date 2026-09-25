@@ -261,11 +261,15 @@ def actualizar_ciclo_financiero(
     
     usuario.ciclo_tipo = datos.ciclo_tipo
     usuario.ciclo_valor = datos.ciclo_valor
-    if datos.ciclo_ajuste_direccion is not None:
+    if datos.ciclo_tipo == CicloTipo.REGLA:
+        val = datos.ciclo_valor.lower()
+        if val in ("ultimo_dia_habil", "primer_dia_habil") or val.startswith("dia_habil_"):
+            usuario.ciclo_ajuste_direccion = None
+        else:
+            from app.models.usuario import CicloAjusteDireccion
+            usuario.ciclo_ajuste_direccion = datos.ciclo_ajuste_direccion or CicloAjusteDireccion.ANTERIOR
+    else:
         usuario.ciclo_ajuste_direccion = datos.ciclo_ajuste_direccion
-    elif usuario.ciclo_ajuste_direccion is None:
-        from app.models.usuario import CicloAjusteDireccion
-        usuario.ciclo_ajuste_direccion = CicloAjusteDireccion.ANTERIOR
     db.commit()
     db.refresh(usuario)
     return usuario

@@ -27,8 +27,41 @@ from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
 from app.services.tarjeta_service import calcular_resumen_actual
 
 def get_date_by_rule(rule: str, month: int, year: int) -> date:
-    """Calcula la fecha exacta segun una regla (ej: ultimo_viernes)."""
-    parts = rule.lower().split("_")
+    """Calcula la fecha exacta segun una regla (ej: ultimo_viernes, ultimo_dia_habil, dia_habil_4)."""
+    from app.services.dias_habiles_service import _get_feriados_cached_sync, es_dia_habil
+
+    rule_lower = rule.lower()
+    feriados = _get_feriados_cached_sync(year)
+    num_days = calendar.monthrange(year, month)[1]
+
+    if rule_lower == "ultimo_dia_habil":
+        for day in range(num_days, 0, -1):
+            d = date(year, month, day)
+            if es_dia_habil(d, feriados):
+                return d
+        return date(year, month, num_days)
+
+    if rule_lower == "primer_dia_habil" or rule_lower.startswith("dia_habil_"):
+        if rule_lower == "primer_dia_habil":
+            target_n = 1
+        else:
+            try:
+                target_n = int(rule_lower.split("_")[-1])
+            except ValueError:
+                target_n = 1
+
+        count = 0
+        last_found = None
+        for day in range(1, num_days + 1):
+            d = date(year, month, day)
+            if es_dia_habil(d, feriados):
+                count += 1
+                last_found = d
+                if count == target_n:
+                    return d
+        return last_found or date(year, month, 1)
+
+    parts = rule_lower.split("_")
     if len(parts) != 2:
         return date(year, month, 1)
     
@@ -81,7 +114,10 @@ def calcular_inicio_ciclo_para_mes_ancla(usuario: Usuario, anio: int, mes: int) 
 
     elif usuario.ciclo_tipo == CicloTipo.REGLA:
         from app.services.dias_habiles_service import ajustar_fecha_habil_sync
-        fecha_nominal = get_date_by_rule(usuario.ciclo_valor or "primer_lunes", mes, anio)
+        val = (usuario.ciclo_valor or "").lower()
+        fecha_nominal = get_date_by_rule(val or "primer_lunes", mes, anio)
+        if val in ("ultimo_dia_habil", "primer_dia_habil") or val.startswith("dia_habil_"):
+            return fecha_nominal
         if direccion:
             return ajustar_fecha_habil_sync(fecha_nominal, direccion=direccion)
         return fecha_nominal

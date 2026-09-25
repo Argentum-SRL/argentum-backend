@@ -43,6 +43,20 @@ class CicloTipo(str, Enum):
 
 
 class CicloRegla(str, Enum):
+    # Reglas de días hábiles bancarios
+    ULTIMO_DIA_HABIL = "ultimo_dia_habil"
+    PRIMER_DIA_HABIL = "primer_dia_habil"
+    DIA_HABIL_2 = "dia_habil_2"
+    DIA_HABIL_3 = "dia_habil_3"
+    DIA_HABIL_4 = "dia_habil_4"
+    DIA_HABIL_5 = "dia_habil_5"
+    DIA_HABIL_6 = "dia_habil_6"
+    DIA_HABIL_7 = "dia_habil_7"
+    DIA_HABIL_8 = "dia_habil_8"
+    DIA_HABIL_9 = "dia_habil_9"
+    DIA_HABIL_10 = "dia_habil_10"
+
+    # Retrocompatibilidad con reglas semanales históricas
     PRIMER_LUNES = "primer_lunes"
     PRIMER_MARTES = "primer_martes"
     PRIMER_MIERCOLES = "primer_miercoles"

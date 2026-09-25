@@ -100,7 +100,14 @@ def post_ciclo_financiero(
         
     current_user.ciclo_tipo = body.ciclo_tipo
     current_user.ciclo_valor = body.ciclo_valor
-    current_user.ciclo_ajuste_direccion = body.ciclo_ajuste_direccion or CicloAjusteDireccion.ANTERIOR
+    if body.ciclo_tipo == CicloTipo.REGLA:
+        val = body.ciclo_valor.lower()
+        if val in ("ultimo_dia_habil", "primer_dia_habil") or val.startswith("dia_habil_"):
+            current_user.ciclo_ajuste_direccion = None
+        else:
+            current_user.ciclo_ajuste_direccion = body.ciclo_ajuste_direccion or CicloAjusteDireccion.ANTERIOR
+    else:
+        current_user.ciclo_ajuste_direccion = body.ciclo_ajuste_direccion
     db.commit()
     db.refresh(current_user)
     
@@ -166,7 +173,7 @@ def post_moneda(
 async def preview_fecha_cobro(
     tipo: CicloTipo,
     valor: str,
-    direccion: CicloAjusteDireccion = CicloAjusteDireccion.ANTERIOR,
+    direccion: str | None = None,
     current_user: Usuario = Depends(get_current_user)
 ):
     _ = current_user
@@ -174,7 +181,9 @@ async def preview_fecha_cobro(
     from datetime import date
     import calendar
 
-    dir_val = direccion.value if isinstance(direccion, CicloAjusteDireccion) else str(direccion)
+    dir_val = None
+    if direccion and str(direccion).lower() in ("anterior", "posterior"):
+        dir_val = str(direccion).lower()
 
     if tipo == CicloTipo.DIA_FIJO:
         try:
@@ -189,7 +198,7 @@ async def preview_fecha_cobro(
             ultimo_dia_mes = calendar.monthrange(proxima_fecha.year, proxima_fecha.month)[1]
             dia_real_nominal = min(dia, ultimo_dia_mes)
             fecha_nominal = date(proxima_fecha.year, proxima_fecha.month, dia_real_nominal)
-            fue_ajustada = (proxima_fecha != fecha_nominal)
+            fue_ajustada = (proxima_fecha != fecha_nominal) if dir_val else False
 
             return {
                 "tipo": tipo.value,
@@ -213,11 +222,20 @@ async def preview_fecha_cobro(
             from app.utils.fecha import hoy_argentina
             hoy = hoy_argentina()
 
+            val = valor.lower()
+            es_dia_habil_regla = val in ("ultimo_dia_habil", "primer_dia_habil") or val.startswith("dia_habil_")
+            if es_dia_habil_regla:
+                dir_val = None
+
             await dias_habiles_service.obtener_feriados_argentina(hoy.year)
             fecha_nominal_este_mes = get_date_by_rule(valor, hoy.month, hoy.year)
-            fecha_ajustada_este_mes = dias_habiles_service.ajustar_fecha_habil_sync(
-                fecha_nominal_este_mes, direccion=dir_val
-            )
+            
+            if es_dia_habil_regla:
+                fecha_ajustada_este_mes = fecha_nominal_este_mes
+            else:
+                fecha_ajustada_este_mes = dias_habiles_service.ajustar_fecha_habil_sync(
+                    fecha_nominal_este_mes, direccion=dir_val or "anterior"
+                )
 
             if fecha_ajustada_este_mes >= hoy:
                 proxima_fecha = fecha_ajustada_este_mes
@@ -230,12 +248,15 @@ async def preview_fecha_cobro(
 
                 await dias_habiles_service.obtener_feriados_argentina(prox_year)
                 fecha_nominal_prox = get_date_by_rule(valor, prox_month, prox_year)
-                proxima_fecha = dias_habiles_service.ajustar_fecha_habil_sync(
-                    fecha_nominal_prox, direccion=dir_val
-                )
+                if es_dia_habil_regla:
+                    proxima_fecha = fecha_nominal_prox
+                else:
+                    proxima_fecha = dias_habiles_service.ajustar_fecha_habil_sync(
+                        fecha_nominal_prox, direccion=dir_val or "anterior"
+                    )
                 fecha_nominal = fecha_nominal_prox
 
-            fue_ajustada = (proxima_fecha != fecha_nominal)
+            fue_ajustada = (proxima_fecha != fecha_nominal) if not es_dia_habil_regla else False
             return {
                 "tipo": tipo.value,
                 "valor": valor,

@@ -668,6 +668,148 @@ def test_proyeccion_desglose_cuando_ciclo_finalizado(db_session, monkeypatch):
         assert super_item["proyectado"] == 15000.0
 
 
+# 8. Tests para Nuevas Reglas de Días Hábiles (Rediseño Ciclo Financiero)
+
+def test_get_date_by_rule_ultimo_dia_habil():
+    """Mayo 2026 termina en domingo 31. Sábado 30 no es hábil. Debe devolver viernes 29."""
+    res = get_date_by_rule("ultimo_dia_habil", 5, 2026)
+    assert res == date(2026, 5, 29)
+
+
+def test_get_date_by_rule_primer_dia_habil():
+    """Agosto 2026 arranca en sábado 1 y domingo 2. Primer día hábil es lunes 3."""
+    res = get_date_by_rule("primer_dia_habil", 8, 2026)
+    assert res == date(2026, 8, 3)
+
+
+def test_get_date_by_rule_dia_habil_4():
+    """
+    Agosto 2025 arranca en viernes 1 (1° hábil), sáb 2 y dom 3 no hábiles,
+    lunes 4 (2° hábil), martes 5 (3° hábil), miércoles 6 (4° hábil).
+    """
+    res = get_date_by_rule("dia_habil_4", 8, 2025)
+    assert res == date(2025, 8, 6)
+
+
+def test_get_date_by_rule_con_feriados():
+    """Mayo 2025: 1 de mayo es feriado nacional. El primer día hábil es viernes 2."""
+    from unittest.mock import patch
+    with patch("app.services.dias_habiles_service._get_feriados_cached_sync", return_value=[date(2025, 5, 1)]):
+        res = get_date_by_rule("primer_dia_habil", 5, 2025)
+        assert res == date(2025, 5, 2)
+
+
+def test_get_ciclo_fechas_dia_fijo_28_ajuste_anterior(db_session):
+    """Usuario cobra el 28 con ajuste anterior. Febrero 2026 cae sábado 28 -> ajusta al viernes 27."""
+    user = Usuario(
+        id=uuid4(),
+        email=f"user_28_{uuid4()}@test.com",
+        nombre="Test 28",
+        rol=RolUsuario.USUARIO,
+        estado=EstadoUsuario.ACTIVO,
+        auth_provider=AuthProvider.EMAIL,
+        ciclo_tipo=CicloTipo.DIA_FIJO,
+        ciclo_valor="28",
+        ciclo_ajuste_direccion=CicloAjusteDireccion.ANTERIOR,
+        onboarding_completo=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    ini, fin = get_ciclo_fechas(user, date(2026, 2, 27))
+    assert ini == date(2026, 2, 27)
+
+
+def test_get_ciclo_fechas_dia_fijo_mismo_dia_sin_ajuste(db_session):
+    """Usuario cobra el 28 sin ajuste (mismo día). Febrero 2026 sábado 28 -> arranca el sábado 28."""
+    user = Usuario(
+        id=uuid4(),
+        email=f"user_mismo_{uuid4()}@test.com",
+        nombre="Test Mismo Dia",
+        rol=RolUsuario.USUARIO,
+        estado=EstadoUsuario.ACTIVO,
+        auth_provider=AuthProvider.EMAIL,
+        ciclo_tipo=CicloTipo.DIA_FIJO,
+        ciclo_valor="28",
+        ciclo_ajuste_direccion=None,
+        onboarding_completo=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    ini, fin = get_ciclo_fechas(user, date(2026, 2, 28))
+    assert ini == date(2026, 2, 28)
+
+
+def test_get_ciclo_fechas_regla_ultimo_dia_habil(db_session):
+    """Usuario con regla ultimo_dia_habil. En mayo 2026 debe iniciar el 29/05/2026."""
+    user = Usuario(
+        id=uuid4(),
+        email=f"user_udh_{uuid4()}@test.com",
+        nombre="Test UDH",
+        rol=RolUsuario.USUARIO,
+        estado=EstadoUsuario.ACTIVO,
+        auth_provider=AuthProvider.EMAIL,
+        ciclo_tipo=CicloTipo.REGLA,
+        ciclo_valor="ultimo_dia_habil",
+        ciclo_ajuste_direccion=None,
+        onboarding_completo=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    ini, fin = get_ciclo_fechas(user, date(2026, 5, 29))
+    assert ini == date(2026, 5, 29)
+
+
+def test_preview_fecha_cobro_nuevas_reglas(client):
+    """GET /onboarding/preview-fecha-cobro con ultimo_dia_habil y dia_habil_4."""
+    resp1 = client.get("/onboarding/preview-fecha-cobro?tipo=regla&valor=ultimo_dia_habil")
+    assert resp1.status_code == 200
+    data1 = resp1.json()
+    assert data1["tipo"] == "regla"
+    assert data1["valor"] == "ultimo_dia_habil"
+    assert data1["fue_ajustada"] is False
+    assert data1["proxima_fecha_cobro"] is not None
+
+    resp2 = client.get("/onboarding/preview-fecha-cobro?tipo=regla&valor=dia_habil_4")
+    assert resp2.status_code == 200
+    data2 = resp2.json()
+    assert data2["valor"] == "dia_habil_4"
+    assert data2["fue_ajustada"] is False
+
+
+def test_actualizar_ciclo_fuerza_none_en_dias_habiles(client, db_session):
+    """Al guardar una regla de día hábil, ciclo_ajuste_direccion debe quedar en None."""
+    user = db_session.query(Usuario).first()
+    if not user:
+        user = Usuario(
+            id=uuid4(),
+            email="user_update@test.com",
+            rol=RolUsuario.USUARIO,
+            estado=EstadoUsuario.ACTIVO,
+            auth_provider=AuthProvider.EMAIL,
+            onboarding_completo=True,
+        )
+        db_session.add(user)
+        db_session.commit()
+
+    from app.services import usuario_service
+    from app.schemas.usuario import EditarCicloFinanciero
+    
+    updated = usuario_service.actualizar_ciclo_financiero(
+        db_session,
+        user,
+        EditarCicloFinanciero(
+            ciclo_tipo=CicloTipo.REGLA,
+            ciclo_valor="dia_habil_4",
+            ciclo_ajuste_direccion=CicloAjusteDireccion.POSTERIOR
+        )
+    )
+    assert updated.ciclo_ajuste_direccion is None
+
+
+
 
 
 
