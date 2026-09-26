@@ -1,0 +1,498 @@
+[
+  {
+    "id": "e3d032fc-aa7f-41c6-880a-992d5db137e4",
+    "nombre": "Ahorro",
+    "tipo": "egreso",
+    "estado": "activa",
+    "subcategorias": []
+  },
+  {
+    "id": "f2b2f202-97aa-4fef-aaa4-45d650a08f88",
+    "nombre": "Ahorro",
+    "tipo": "ingreso",
+    "estado": "activa",
+    "subcategorias": []
+  },
+  {
+    "id": "9fe6becc-226f-47c1-92ef-383c7aa11da7",
+    "nombre": "Alimentación",
+    "tipo": "egreso",
+    "estado": "activa",
+    "subcategorias": [
+      {
+        "id": "648345de-db9f-4106-8b83-0d4825e37bc0",
+        "categoria_id": "9fe6becc-226f-47c1-92ef-383c7aa11da7",
+        "nombre": "Carnicería",
+        "estado": "activa"
+      },
+      {
+        "id": "38cef4fe-1fe4-4af0-b528-628447eed91e",
+        "categoria_id": "9fe6becc-226f-47c1-92ef-383c7aa11da7",
+        "nombre": "Kiosco",
+        "estado": "activa"
+      },
+      {
+        "id": "37573047-2ce8-4e71-8ea1-92f0d4814dd5",
+        "categoria_id": "9fe6becc-226f-47c1-92ef-383c7aa11da7",
+        "nombre": "Supermercado",
+        "estado": "activa"
+      },
+      {
+        "id": "d31708f7-3d31-4fae-b5ef-5d180cd19049",
+        "categoria_id": "9fe6becc-226f-47c1-92ef-383c7aa11da7",
+        "nombre": "Verdulería",
+        "estado": "activa"
+      }
+    ]
+  },
+  {
+    "id": "31ed2801-1bce-4d8c-8ae6-9cdc6ff87a00",
+    "nombre": "Banco",
+    "tipo": "egreso",
+    "estado": "activa",
+    "subcategorias": [
+      {
+        "id": "ad143387-586b-43c4-a3b2-cb1bbb076146",
+        "categoria_id": "31ed2801-1bce-4d8c-8ae6-9cdc6ff87a00",
+        "nombre": "Comisiones y gastos bancarios",
+        "estado": "activa"
+      },
+      {
+        "id": "8a793d9f-27a0-456f-b59d-808f18b2eb08",
+        "categoria_id": "31ed2801-1bce-4d8c-8ae6-9cdc6ff87a00",
+        "nombre": "Impuesto al cheque / movimientos",
+        "estado": "activa"
+      },
+      {
+        "id": "428a053c-2717-4544-9d2c-e59414fdb530",
+        "categoria_id": "31ed2801-1bce-4d8c-8ae6-9cdc6ff87a00",
+        "nombre": "Impuestos",
+        "estado": "activa"
+      },
+      {
+        "id": "4010f837-e9f5-4931-b31f-5cc15e6bad36",
+        "categoria_id": "31ed2801-1bce-4d8c-8ae6-9cdc6ff87a00",
+        "nombre": "Intereses pagados",
+        "estado": "activa"
+      },
+      {
+        "id": "a02e53e1-25e0-4d74-8845-0811b995e72b",
+        "categoria_id": "31ed2801-1bce-4d8c-8ae6-9cdc6ff87a00",
+        "nombre": "Préstamos",
+        "estado": "activa"
+      },
+      {
+        "id": "08e826bb-021b-41d5-9753-8ce9ac9584e0",
+        "categoria_id": "31ed2801-1bce-4d8c-8ae6-9cdc6ff87a00",
+        "nombre": "Tarjeta de crédito",
+        "estado": "activa"
+      }
+    ]
+  },
+  {
+    "id": "d442169d-b483-46d3-8fb3-02c5bb15fb06",
+    "nombre": "Comunicación",
+    "tipo": "egreso",
+    "estado": "activa",
+    "subcategorias": [
+      {
+        "id": "b52af810-d529-47e9-84a0-d3729f63db76",
+        "categoria_id": "d442169d-b483-46d3-8fb3-02c5bb15fb06",
+        "nombre": "Celular",
+        "estado": "activa"
+      },
+      {
+        "id": "5a14442d-3b37-4523-aaa4-48104a35140b",
+        "categoria_id": "d442169d-b483-46d3-8fb3-02c5bb15fb06",
+        "nombre": "Internet y cable",
+        "estado": "activa"
+      }
+    ]
+  },
+  {
+    "id": "be899ca1-6b72-43a7-972d-aaf02ac36e2f",
+    "nombre": "Educación",
+    "tipo": "egreso",
+    "estado": "activa",
+    "subcategorias": [
+      {
+        "id": "26a5b505-3640-452f-af7a-124a1b627c24",
+        "categoria_id": "be899ca1-6b72-43a7-972d-aaf02ac36e2f",
+        "nombre": "Cuotas",
+        "estado": "activa"
+      },
+      {
+        "id": "dabaf265-b8d8-476e-b707-eaf4c7f813a9",
+        "categoria_id": "be899ca1-6b72-43a7-972d-aaf02ac36e2f",
+        "nombre": "Idiomas",
+        "estado": "activa"
+      },
+      {
+        "id": "d2c42e34-0df2-4465-aece-66c728493294",
+        "categoria_id": "be899ca1-6b72-43a7-972d-aaf02ac36e2f",
+        "nombre": "Materiales y libros",
+        "estado": "activa"
+      }
+    ]
+  },
+  {
+    "id": "68cc2847-e0c8-40b4-9376-547f0cab88ae",
+    "nombre": "Empleo",
+    "tipo": "ingreso",
+    "estado": "activa",
+    "subcategorias": [
+      {
+        "id": "74f35ce8-a571-48ed-97e6-dfcef8279728",
+        "categoria_id": "68cc2847-e0c8-40b4-9376-547f0cab88ae",
+        "nombre": "Aguinaldo",
+        "estado": "activa"
+      },
+      {
+        "id": "efc8c8ab-25ef-4de1-8555-8bd388e1fa31",
+        "categoria_id": "68cc2847-e0c8-40b4-9376-547f0cab88ae",
+        "nombre": "Bonos y horas extras",
+        "estado": "activa"
+      },
+      {
+        "id": "3f09662c-f1c5-4d5f-ad26-69544ddde091",
+        "categoria_id": "68cc2847-e0c8-40b4-9376-547f0cab88ae",
+        "nombre": "Sueldo",
+        "estado": "activa"
+      }
+    ]
+  },
+  {
+    "id": "8ac14298-e46f-44b4-9033-ed98e7c2837b",
+    "nombre": "Equipamiento del hogar",
+    "tipo": "egreso",
+    "estado": "activa",
+    "subcategorias": [
+      {
+        "id": "5ad0ae17-debf-44b6-9eeb-e5d6a5cf3ab4",
+        "categoria_id": "8ac14298-e46f-44b4-9033-ed98e7c2837b",
+        "nombre": "Limpieza",
+        "estado": "activa"
+      },
+      {
+        "id": "ca83e02e-420d-4c82-82ec-8e4d47c8bc97",
+        "categoria_id": "8ac14298-e46f-44b4-9033-ed98e7c2837b",
+        "nombre": "Muebles y electrodomésticos",
+        "estado": "activa"
+      },
+      {
+        "id": "166514b4-3296-4e14-b082-5ef1eb18851f",
+        "categoria_id": "8ac14298-e46f-44b4-9033-ed98e7c2837b",
+        "nombre": "Reparaciones",
+        "estado": "activa"
+      }
+    ]
+  },
+  {
+    "id": "c2992157-ae86-483d-8399-92d73eceac24",
+    "nombre": "Gastronomía",
+    "tipo": "egreso",
+    "estado": "activa",
+    "subcategorias": [
+      {
+        "id": "7ad06de9-b425-48dd-95cd-197bd67e2a02",
+        "categoria_id": "c2992157-ae86-483d-8399-92d73eceac24",
+        "nombre": "Cafetería",
+        "estado": "activa"
+      },
+      {
+        "id": "8d00a1c5-4f82-42f9-b9cc-94067345c83e",
+        "categoria_id": "c2992157-ae86-483d-8399-92d73eceac24",
+        "nombre": "Delivery",
+        "estado": "activa"
+      },
+      {
+        "id": "87f05c81-9e7a-4374-b12f-6718341e3576",
+        "categoria_id": "c2992157-ae86-483d-8399-92d73eceac24",
+        "nombre": "Restaurantes",
+        "estado": "activa"
+      }
+    ]
+  },
+  {
+    "id": "45a9f580-16ef-4679-9d78-a27aad2e9c4a",
+    "nombre": "Indumentaria",
+    "tipo": "egreso",
+    "estado": "activa",
+    "subcategorias": [
+      {
+        "id": "c5c22775-14bf-4cf8-9516-70da971d0b59",
+        "categoria_id": "45a9f580-16ef-4679-9d78-a27aad2e9c4a",
+        "nombre": "Accesorios",
+        "estado": "activa"
+      },
+      {
+        "id": "d8c34cf0-0191-4709-ba8a-3b7874023dc7",
+        "categoria_id": "45a9f580-16ef-4679-9d78-a27aad2e9c4a",
+        "nombre": "Calzado",
+        "estado": "activa"
+      },
+      {
+        "id": "91bfe01c-327d-4782-b746-1d88f2e3e62a",
+        "categoria_id": "45a9f580-16ef-4679-9d78-a27aad2e9c4a",
+        "nombre": "Ropa",
+        "estado": "activa"
+      }
+    ]
+  },
+  {
+    "id": "bc1efe6b-846c-4469-bb3c-1dc80bf40396",
+    "nombre": "Inversiones y rentas",
+    "tipo": "ingreso",
+    "estado": "activa",
+    "subcategorias": [
+      {
+        "id": "ac5e615f-33cf-4af2-b6cd-33993f659703",
+        "categoria_id": "bc1efe6b-846c-4469-bb3c-1dc80bf40396",
+        "nombre": "Alquileres cobrados",
+        "estado": "activa"
+      },
+      {
+        "id": "980abc31-43b3-45be-88cb-426c5a48cdfd",
+        "categoria_id": "bc1efe6b-846c-4469-bb3c-1dc80bf40396",
+        "nombre": "Dividendos e intereses",
+        "estado": "activa"
+      }
+    ]
+  },
+  {
+    "id": "f987fcb2-10bb-4456-9a48-b4ff4e7f28b0",
+    "nombre": "Otros",
+    "tipo": "ingreso",
+    "estado": "activa",
+    "subcategorias": [
+      {
+        "id": "2b594587-1e75-44d2-aeda-e2e4a35667e1",
+        "categoria_id": "f987fcb2-10bb-4456-9a48-b4ff4e7f28b0",
+        "nombre": "Regalos",
+        "estado": "activa"
+      },
+      {
+        "id": "b0dc4251-0d4a-4415-ad7c-aecd3daf71ff",
+        "categoria_id": "f987fcb2-10bb-4456-9a48-b4ff4e7f28b0",
+        "nombre": "Reintegros",
+        "estado": "activa"
+      }
+    ]
+  },
+  {
+    "id": "79e2a6cb-41a8-4298-8e8d-70107f7f5bbf",
+    "nombre": "Otros",
+    "tipo": "egreso",
+    "estado": "activa",
+    "subcategorias": [
+      {
+        "id": "be5e0c2e-7141-4b2f-9029-49894de6b43f",
+        "categoria_id": "79e2a6cb-41a8-4298-8e8d-70107f7f5bbf",
+        "nombre": "Cuidado personal",
+        "estado": "activa"
+      },
+      {
+        "id": "312b94ff-ed15-4db5-874e-06ee6bd67067",
+        "categoria_id": "79e2a6cb-41a8-4298-8e8d-70107f7f5bbf",
+        "nombre": "Mascotas",
+        "estado": "activa"
+      },
+      {
+        "id": "db477aad-775b-461b-9620-df273d2e8146",
+        "categoria_id": "79e2a6cb-41a8-4298-8e8d-70107f7f5bbf",
+        "nombre": "Regalos",
+        "estado": "activa"
+      }
+    ]
+  },
+  {
+    "id": "1d4c6cd9-aa5e-4d66-9456-cb08d552e1c7",
+    "nombre": "Recreativo",
+    "tipo": "egreso",
+    "estado": "activa",
+    "subcategorias": [
+      {
+        "id": "20ff1543-2cc8-47e5-920b-4dc93ae853db",
+        "categoria_id": "1d4c6cd9-aa5e-4d66-9456-cb08d552e1c7",
+        "nombre": "Hobbies y juegos",
+        "estado": "activa"
+      },
+      {
+        "id": "06b3c113-dd07-4a5a-8ea3-d64c92b1a3ef",
+        "categoria_id": "1d4c6cd9-aa5e-4d66-9456-cb08d552e1c7",
+        "nombre": "Salidas",
+        "estado": "activa"
+      },
+      {
+        "id": "f869db4d-b9b9-446a-904c-4bdce44a1a1a",
+        "categoria_id": "1d4c6cd9-aa5e-4d66-9456-cb08d552e1c7",
+        "nombre": "Viajes",
+        "estado": "activa"
+      }
+    ]
+  },
+  {
+    "id": "68e60900-31d9-409e-a960-acfd881bbf0c",
+    "nombre": "Salud",
+    "tipo": "egreso",
+    "estado": "activa",
+    "subcategorias": [
+      {
+        "id": "8fb0bf2a-f677-49f3-91b9-2f2d76321aed",
+        "categoria_id": "68e60900-31d9-409e-a960-acfd881bbf0c",
+        "nombre": "Deportes y gimnasio",
+        "estado": "activa"
+      },
+      {
+        "id": "a343b41a-1006-4a55-8615-888f78ffcbce",
+        "categoria_id": "68e60900-31d9-409e-a960-acfd881bbf0c",
+        "nombre": "Estudios y análisis",
+        "estado": "activa"
+      },
+      {
+        "id": "23cc15d0-4b55-409a-bde1-0ba835905089",
+        "categoria_id": "68e60900-31d9-409e-a960-acfd881bbf0c",
+        "nombre": "Farmacia",
+        "estado": "activa"
+      },
+      {
+        "id": "d21681bd-a2c3-466d-a29a-246ed719b063",
+        "categoria_id": "68e60900-31d9-409e-a960-acfd881bbf0c",
+        "nombre": "Médico / Consulta",
+        "estado": "activa"
+      },
+      {
+        "id": "0e0c1d32-c9d7-49bd-81aa-0850a461bfe5",
+        "categoria_id": "68e60900-31d9-409e-a960-acfd881bbf0c",
+        "nombre": "Obra social / Prepaga",
+        "estado": "activa"
+      },
+      {
+        "id": "d3c296ba-b65f-4f72-a29f-93e18def320c",
+        "categoria_id": "68e60900-31d9-409e-a960-acfd881bbf0c",
+        "nombre": "Odontología",
+        "estado": "activa"
+      },
+      {
+        "id": "8b39b528-0d63-405e-8f40-fb38823efa5b",
+        "categoria_id": "68e60900-31d9-409e-a960-acfd881bbf0c",
+        "nombre": "Terapias",
+        "estado": "activa"
+      }
+    ]
+  },
+  {
+    "id": "483e9d96-53ff-49f4-ace0-3db83ad10cf5",
+    "nombre": "Trabajo independiente",
+    "tipo": "ingreso",
+    "estado": "activa",
+    "subcategorias": [
+      {
+        "id": "27ba2eba-80c2-4f24-8c94-1a20da3cddb5",
+        "categoria_id": "483e9d96-53ff-49f4-ace0-3db83ad10cf5",
+        "nombre": "Honorarios",
+        "estado": "activa"
+      },
+      {
+        "id": "2220bb4f-c6bd-4282-87b2-16c92b26441c",
+        "categoria_id": "483e9d96-53ff-49f4-ace0-3db83ad10cf5",
+        "nombre": "Venta de productos/servicios",
+        "estado": "activa"
+      }
+    ]
+  },
+  {
+    "id": "a953cbf5-3fcb-4bf8-b665-0e16db1158ed",
+    "nombre": "Transporte",
+    "tipo": "egreso",
+    "estado": "activa",
+    "subcategorias": [
+      {
+        "id": "cf3c97bf-9616-4241-a9d1-f212a5f05f65",
+        "categoria_id": "a953cbf5-3fcb-4bf8-b665-0e16db1158ed",
+        "nombre": "Combustible",
+        "estado": "activa"
+      },
+      {
+        "id": "caf89c1a-96d5-4318-b459-c9b349c11c4d",
+        "categoria_id": "a953cbf5-3fcb-4bf8-b665-0e16db1158ed",
+        "nombre": "Estacionamiento",
+        "estado": "activa"
+      },
+      {
+        "id": "3877d414-7047-4bbd-8239-166ab96cfb14",
+        "categoria_id": "a953cbf5-3fcb-4bf8-b665-0e16db1158ed",
+        "nombre": "Mantenimiento y seguro del auto",
+        "estado": "activa"
+      },
+      {
+        "id": "a322152f-08f4-4846-bbd9-852118c465e9",
+        "categoria_id": "a953cbf5-3fcb-4bf8-b665-0e16db1158ed",
+        "nombre": "Peajes",
+        "estado": "activa"
+      },
+      {
+        "id": "4994e88f-fad3-4463-93f9-3b66e16e0c29",
+        "categoria_id": "a953cbf5-3fcb-4bf8-b665-0e16db1158ed",
+        "nombre": "Taxi / Apps",
+        "estado": "activa"
+      },
+      {
+        "id": "3cfaca4b-de8c-4543-9f66-8f0defa507da",
+        "categoria_id": "a953cbf5-3fcb-4bf8-b665-0e16db1158ed",
+        "nombre": "Transporte público",
+        "estado": "activa"
+      }
+    ]
+  },
+  {
+    "id": "a77c2c5c-3794-4a6c-8c92-7749511653d4",
+    "nombre": "Vivienda",
+    "tipo": "egreso",
+    "estado": "activa",
+    "subcategorias": [
+      {
+        "id": "ea7e683f-5f24-4ee9-a54d-c6eaa44d075c",
+        "categoria_id": "a77c2c5c-3794-4a6c-8c92-7749511653d4",
+        "nombre": "Agua",
+        "estado": "activa"
+      },
+      {
+        "id": "0947f9e8-6850-4b2f-bcaf-33face4e94f1",
+        "categoria_id": "a77c2c5c-3794-4a6c-8c92-7749511653d4",
+        "nombre": "Alquiler",
+        "estado": "activa"
+      },
+      {
+        "id": "4add9843-6d95-4d9d-a410-dd752c400d53",
+        "categoria_id": "a77c2c5c-3794-4a6c-8c92-7749511653d4",
+        "nombre": "Expensas",
+        "estado": "activa"
+      },
+      {
+        "id": "b4ac4f83-825b-44a3-a8e8-09e83fadb79b",
+        "categoria_id": "a77c2c5c-3794-4a6c-8c92-7749511653d4",
+        "nombre": "Gas",
+        "estado": "activa"
+      },
+      {
+        "id": "f08ad29b-6d1d-4b9c-90d4-67c58501abd4",
+        "categoria_id": "a77c2c5c-3794-4a6c-8c92-7749511653d4",
+        "nombre": "Impuestos",
+        "estado": "activa"
+      },
+      {
+        "id": "6450518a-c112-4be6-8fb8-926b61fc9f6c",
+        "categoria_id": "a77c2c5c-3794-4a6c-8c92-7749511653d4",
+        "nombre": "Luz",
+        "estado": "activa"
+      },
+      {
+        "id": "2ae70d7a-80eb-4b82-a9a6-d24187ac969f",
+        "categoria_id": "a77c2c5c-3794-4a6c-8c92-7749511653d4",
+        "nombre": "Seguros",
+        "estado": "activa"
+      }
+    ]
+  }
+]

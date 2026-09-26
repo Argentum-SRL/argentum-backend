@@ -1,0 +1,704 @@
+[
+  {
+    "fecha_dato": "2016-12",
+    "indice_acumulado": 100.0,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2017-01",
+    "indice_acumulado": 101.5859,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2017-02",
+    "indice_acumulado": 103.6859,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2017-03",
+    "indice_acumulado": 106.1476,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2017-04",
+    "indice_acumulado": 108.9667,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2017-05",
+    "indice_acumulado": 110.5301,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2017-06",
+    "indice_acumulado": 111.8477,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2017-07",
+    "indice_acumulado": 113.7852,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2017-08",
+    "indice_acumulado": 115.3819,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2017-09",
+    "indice_acumulado": 117.5719,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2017-10",
+    "indice_acumulado": 119.3528,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2017-11",
+    "indice_acumulado": 120.994,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2017-12",
+    "indice_acumulado": 124.7956,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2018-01",
+    "indice_acumulado": 126.9887,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2018-02",
+    "indice_acumulado": 130.0606,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2018-03",
+    "indice_acumulado": 133.1054,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2018-04",
+    "indice_acumulado": 136.7512,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2018-05",
+    "indice_acumulado": 139.5893,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2018-06",
+    "indice_acumulado": 144.8053,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2018-07",
+    "indice_acumulado": 149.2966,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2018-08",
+    "indice_acumulado": 155.1034,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2018-09",
+    "indice_acumulado": 165.2383,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2018-10",
+    "indice_acumulado": 174.1473,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2018-11",
+    "indice_acumulado": 179.6388,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2018-12",
+    "indice_acumulado": 184.2552,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2019-01",
+    "indice_acumulado": 189.6101,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2019-02",
+    "indice_acumulado": 196.7501,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2019-03",
+    "indice_acumulado": 205.9571,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2019-04",
+    "indice_acumulado": 212.9596414,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2019-05",
+    "indice_acumulado": 219.5691,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2019-06",
+    "indice_acumulado": 225.537,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2019-07",
+    "indice_acumulado": 230.494,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2019-08",
+    "indice_acumulado": 239.6077,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2019-09",
+    "indice_acumulado": 253.7102,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2019-10",
+    "indice_acumulado": 262.0661,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2019-11",
+    "indice_acumulado": 273.2158,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2019-12",
+    "indice_acumulado": 283.4442,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2020-01",
+    "indice_acumulado": 289.8299,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2020-02",
+    "indice_acumulado": 295.666,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2020-03",
+    "indice_acumulado": 305.5515,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2020-04",
+    "indice_acumulado": 310.1243,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2020-05",
+    "indice_acumulado": 314.9087,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2020-06",
+    "indice_acumulado": 321.9738,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2020-07",
+    "indice_acumulado": 328.2014,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2020-08",
+    "indice_acumulado": 337.0632,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2020-09",
+    "indice_acumulado": 346.6207,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2020-10",
+    "indice_acumulado": 359.657,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2020-11",
+    "indice_acumulado": 371.0211,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2020-12",
+    "indice_acumulado": 385.8826,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2021-01",
+    "indice_acumulado": 401.5071,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2021-02",
+    "indice_acumulado": 415.8595,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2021-03",
+    "indice_acumulado": 435.8657,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2021-04",
+    "indice_acumulado": 453.6503,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2021-05",
+    "indice_acumulado": 468.725,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2021-06",
+    "indice_acumulado": 483.6049,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2021-07",
+    "indice_acumulado": 498.0987,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2021-08",
+    "indice_acumulado": 510.3942,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2021-09",
+    "indice_acumulado": 528.4968,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2021-10",
+    "indice_acumulado": 547.0802,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2021-11",
+    "indice_acumulado": 560.9184,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2021-12",
+    "indice_acumulado": 582.4575,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2022-01",
+    "indice_acumulado": 605.0317,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2022-02",
+    "indice_acumulado": 633.4341,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2022-03",
+    "indice_acumulado": 676.0566,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2022-04",
+    "indice_acumulado": 716.9399,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2022-05",
+    "indice_acumulado": 753.147,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2022-06",
+    "indice_acumulado": 793.0278,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2022-07",
+    "indice_acumulado": 851.761,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2022-08",
+    "indice_acumulado": 911.1316,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2022-09",
+    "indice_acumulado": 967.3076,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2022-10",
+    "indice_acumulado": 1028.706,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2022-11",
+    "indice_acumulado": 1079.2787,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2022-12",
+    "indice_acumulado": 1134.5875,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2023-01",
+    "indice_acumulado": 1202.979,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2023-02",
+    "indice_acumulado": 1282.7091,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2023-03",
+    "indice_acumulado": 1381.1601,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2023-04",
+    "indice_acumulado": 1497.2147,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2023-05",
+    "indice_acumulado": 1613.5895,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2023-06",
+    "indice_acumulado": 1709.6115,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2023-07",
+    "indice_acumulado": 1818.0838,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2023-08",
+    "indice_acumulado": 2044.2832,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2023-09",
+    "indice_acumulado": 2304.9242,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2023-10",
+    "indice_acumulado": 2496.273,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2023-11",
+    "indice_acumulado": 2816.0628,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2023-12",
+    "indice_acumulado": 3533.1922,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2024-01",
+    "indice_acumulado": 4261.5324,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2024-02",
+    "indice_acumulado": 4825.7881,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2024-03",
+    "indice_acumulado": 5357.0929,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2024-04",
+    "indice_acumulado": 5830.2271,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2024-05",
+    "indice_acumulado": 6073.7,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2024-06",
+    "indice_acumulado": 6351.7145,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2024-07",
+    "indice_acumulado": 6607.7479,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2024-08",
+    "indice_acumulado": 6883.4412,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2024-09",
+    "indice_acumulado": 7122.2421,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2024-10",
+    "indice_acumulado": 7313.9542,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2024-11",
+    "indice_acumulado": 7491.4314,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2024-12",
+    "indice_acumulado": 7694.0075,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2025-01",
+    "indice_acumulado": 7864.1257,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2025-02",
+    "indice_acumulado": 8052.9927,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2025-03",
+    "indice_acumulado": 8353.3158,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2025-04",
+    "indice_acumulado": 8585.6078,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2025-05",
+    "indice_acumulado": 8714.4871,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2025-06",
+    "indice_acumulado": 8855.5681,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2025-07",
+    "indice_acumulado": 9023.973,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2025-08",
+    "indice_acumulado": 9193.2441,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2025-09",
+    "indice_acumulado": 9384.0922,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2025-10",
+    "indice_acumulado": 9603.8623,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2025-11",
+    "indice_acumulado": 9841.3581,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2025-12",
+    "indice_acumulado": 10121.3715,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2026-01",
+    "indice_acumulado": 10413.0309,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2026-02",
+    "indice_acumulado": 10714.6255,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2026-03",
+    "indice_acumulado": 11077.0608,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2026-04",
+    "indice_acumulado": 11363.0904,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2026-05",
+    "indice_acumulado": 11607.3937,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2026-06",
+    "indice_acumulado": 11826.4103,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2026-07",
+    "indice_acumulado": 12076.3937,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  },
+  {
+    "fecha_dato": "2026-08",
+    "indice_acumulado": 12276.766,
+    "fuente": "datos.gob.ar",
+    "es_estimado": false
+  }
+]
