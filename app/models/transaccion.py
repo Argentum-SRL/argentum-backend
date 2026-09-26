@@ -39,7 +39,6 @@ class MetodoPago(str, Enum):
 class OrigenTransaccion(str, Enum):
     MANUAL = "manual"
     IA_WPP = "ia_wpp"
-    IA_CHAT = "ia_chat"
     IA_PDF = "ia_pdf"
     RECURRENTE = "recurrente"
 

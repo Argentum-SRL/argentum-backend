@@ -164,6 +164,9 @@ def obtener_cotizacion_por_fecha(
         tipo_normalizado,
         fecha_consulta,
     )
+    return None
+
+
 def obtener_cotizaciones_por_fechas(
     db: Session,
     tipo: str,
@@ -246,6 +249,7 @@ def guardar_cotizaciones_del_dia(db: Session) -> list[CotizacionDolar]:
         if promedio is None:
             promedio = venta
 
+        # Búsqueda de registro existente para upsert idempotente por (fecha, tipo)
         stmt = select(CotizacionDolar).where(
             CotizacionDolar.fecha == fecha_hoy,
             CotizacionDolar.tipo == tipo_norm,
@@ -253,12 +257,14 @@ def guardar_cotizaciones_del_dia(db: Session) -> list[CotizacionDolar]:
         existente = db.execute(stmt).scalar_one_or_none()
 
         if existente is not None:
+            # Actualización idempotente: actualiza montos y timestamp sin generar duplicados
             existente.compra = compra
             existente.venta = venta
             existente.promedio = promedio
             existente.fecha_registro = datetime.now(timezone.utc)
             guardadas.append(existente)
         else:
+            # Inserción de nueva fila para tipo y fecha
             nueva = CotizacionDolar(
                 fecha=fecha_hoy,
                 tipo=tipo_norm,

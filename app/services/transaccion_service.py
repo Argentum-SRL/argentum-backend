@@ -850,7 +850,6 @@ def obtener_pendientes_ia(db: Session, usuario_id: UUID, skip: int = 0, limit: i
             Transaccion.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE,
             Transaccion.origen.in_([
                 OrigenTransaccion.IA_WPP,
-                OrigenTransaccion.IA_CHAT,
                 OrigenTransaccion.IA_PDF,
             ]),
             Transaccion.es_padre_cuotas == False,

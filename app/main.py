@@ -429,7 +429,7 @@ async def _job_refresh_feriados():
 
 
 def _job_guardar_cotizaciones_diarias():
-    """Tarea programada diaria: persiste cotizaciones de cierre de mercado a las 21:00 UTC (18:00 ART)."""
+    """Tarea programada horaria: persiste cotizaciones del dólar cada hora en el minuto 5."""
     from app.services.dolar_service import guardar_cotizaciones_del_dia
     db = SessionLocal()
     lock_adquirido = False
@@ -671,11 +671,11 @@ async def lifespan(app: FastAPI):
             max_instances=1,
             replace_existing=True,
         )
+        # Persiste cotizaciones del dólar cada hora en el minuto 5
         scheduler.add_job(
             _job_guardar_cotizaciones_diarias,
             "cron",
-            hour=21,
-            minute=0,
+            minute=5,
             id="guardar_cotizaciones_diarias",
             misfire_grace_time=300,
             max_instances=1,

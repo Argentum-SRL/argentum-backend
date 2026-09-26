@@ -507,29 +507,14 @@ def medir_bloque_f(db: Session, usuario: Usuario) -> dict[str, str]:
         res["perfil.guardado.tasa_ahorro_usd"] = _fmt_monto(
             perf_row.tasa_ahorro_usd
         )
-        res["perfil.guardado.score_impulsividad_ars"] = _fmt_val(
-            perf_row.score_impulsividad_ars
-        )
-        res["perfil.guardado.score_impulsividad_usd"] = _fmt_val(
-            perf_row.score_impulsividad_usd
-        )
         res["perfil.guardado.ratio_cuotas_ars"] = _fmt_monto(
             perf_row.ratio_cuotas_ars
         )
         res["perfil.guardado.ratio_cuotas_usd"] = _fmt_monto(
             perf_row.ratio_cuotas_usd
         )
-        res["perfil.guardado.cumplimiento_presupuesto"] = _fmt_monto(
-            perf_row.cumplimiento_presupuesto
-        )
         res["perfil.guardado.consistencia_registro"] = _fmt_monto(
             perf_row.consistencia_registro
-        )
-        res["perfil.guardado.porcentaje_suscripciones_ars"] = _fmt_monto(
-            perf_row.porcentaje_suscripciones_ars
-        )
-        res["perfil.guardado.porcentaje_suscripciones_usd"] = _fmt_monto(
-            perf_row.porcentaje_suscripciones_usd
         )
         res["perfil.guardado.ultima_actualizacion"] = _fmt_val(
             perf_row.ultima_actualizacion

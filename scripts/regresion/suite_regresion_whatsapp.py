@@ -1887,8 +1887,30 @@ def p9b_caso_17(datos):
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("DELETE FROM cotizaciones_dolar"))
 
-        respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "compré 100 dólares a 1500"), time.perf_counter())
+        # Captura temporal del aviso esperado de cotización histórica no encontrada
+        dolar_logger = logging.getLogger("app.services.dolar_service")
+        prop_original = dolar_logger.propagate
+        registros_capturados = []
+
+        class _HandlerAviso(logging.Handler):
+            def emit(self, record):
+                registros_capturados.append(record)
+
+        handler = _HandlerAviso()
+        dolar_logger.addHandler(handler)
+        dolar_logger.propagate = False
+
+        try:
+            respuestas.clear()
+            _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "compré 100 dólares a 1500"), time.perf_counter())
+        finally:
+            dolar_logger.removeHandler(handler)
+            dolar_logger.propagate = prop_original
+
+        # Verificar que el aviso esperado se haya emitido efectivamente
+        aviso_emitido = any("No se encontró cotización histórica" in rec.getMessage() for rec in registros_capturados)
+        assert aviso_emitido, "Se esperaba el aviso de cotización histórica no encontrada para la tabla vacía."
+
         return respuestas[-1][1] if respuestas else ""
     return run_isolated(test)
 

@@ -14,14 +14,9 @@ class PerfilFinancieroBase(BaseModel):
     usuario_id: UUID | None = None
     tasa_ahorro_ars: DecimalJSON | None = None
     tasa_ahorro_usd: DecimalJSON | None = None
-    score_impulsividad_ars: int | None = None
-    score_impulsividad_usd: int | None = None
     ratio_cuotas_ars: DecimalJSON | None = None
     ratio_cuotas_usd: DecimalJSON | None = None
-    cumplimiento_presupuesto: DecimalJSON | None = None
     consistencia_registro: DecimalJSON | None = None
-    porcentaje_suscripciones_ars: DecimalJSON | None = None
-    porcentaje_suscripciones_usd: DecimalJSON | None = None
     ultima_actualizacion: datetime | None = None
 
 
@@ -32,14 +27,9 @@ class PerfilFinancieroCreate(PerfilFinancieroBase):
 class PerfilFinancieroUpdate(BaseModel):
     tasa_ahorro_ars: DecimalJSON | None = None
     tasa_ahorro_usd: DecimalJSON | None = None
-    score_impulsividad_ars: int | None = None
-    score_impulsividad_usd: int | None = None
     ratio_cuotas_ars: DecimalJSON | None = None
     ratio_cuotas_usd: DecimalJSON | None = None
-    cumplimiento_presupuesto: DecimalJSON | None = None
     consistencia_registro: DecimalJSON | None = None
-    porcentaje_suscripciones_ars: DecimalJSON | None = None
-    porcentaje_suscripciones_usd: DecimalJSON | None = None
     ultima_actualizacion: datetime | None = None
 
 
@@ -87,14 +77,9 @@ class HistorialPerfilFinancieroRead(BaseModel):
     periodo_fin: date
     tasa_ahorro_ars: DecimalJSON | None = None
     tasa_ahorro_usd: DecimalJSON | None = None
-    score_impulsividad_ars: int | None = None
-    score_impulsividad_usd: int | None = None
     ratio_cuotas_ars: DecimalJSON | None = None
     ratio_cuotas_usd: DecimalJSON | None = None
-    cumplimiento_presupuesto: DecimalJSON | None = None
     consistencia_registro: DecimalJSON | None = None
-    porcentaje_suscripciones_ars: DecimalJSON | None = None
-    porcentaje_suscripciones_usd: DecimalJSON | None = None
     fecha_snapshot: datetime
 
     model_config = ConfigDict(from_attributes=True)

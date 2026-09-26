@@ -51,10 +51,10 @@ def calcular_saldo_teorico(
        - Se excluyen transacciones en estado de verificación 'pendiente', ya que no han sido
          confirmadas y por tanto transaccion_service._afecta_saldo no las impacta en saldo_actual.
        - Filtro de fecha (fecha <= hasta):
-         Tal como documenta la regla formal de transaccion_service._afecta_saldo (ver C1), cuando
-         se carga un movimiento con fecha futura (fecha > hoy), este NO afecta el saldo_actual de
-         la billetera al momento de la carga. Por ende, para que el saldo teórico refleje fielmente
-         la realidad de saldo_actual a la fecha de corte, solo se computan movimientos con fecha <= hasta.
+         Según la regla de negocio en transaccion_service._afecta_saldo, cuando se carga un
+         movimiento con fecha futura (fecha > hoy), este no afecta el saldo_actual de la
+         billetera al momento del registro. Por lo tanto, para que el saldo teórico refleje
+         fielmente el saldo_actual a la fecha de corte, solo se computan transacciones con fecha <= hasta.
     3. Transferencias internas:
        - Entrantes: transferencias donde billetera_destino_id == billetera_id y fecha <= hasta.
        - Salientes: transferencias donde billetera_origen_id == billetera_id y fecha <= hasta.

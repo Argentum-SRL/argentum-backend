@@ -226,14 +226,9 @@ def _calcular_y_persistir_perfil_sync(db: Session, usuario_id: UUID) -> PerfilFi
         db.add(perfil)
     perfil.tasa_ahorro_ars = nuevo["capacidad_ahorro"]
     perfil.tasa_ahorro_usd = None
-    perfil.score_impulsividad_ars = None  # Eliminado: constructo conductual no validable
-    perfil.score_impulsividad_usd = None
     perfil.ratio_cuotas_ars = nuevo["gasto_comprometido_ratio"]
     perfil.ratio_cuotas_usd = None
-    perfil.cumplimiento_presupuesto = None  # Eliminado: métrica de uso de la app
     perfil.consistencia_registro = nuevo["cobertura_registro"]
-    perfil.porcentaje_suscripciones_ars = None  # Integrado en gasto comprometido
-    perfil.porcentaje_suscripciones_usd = None
     perfil.ultima_actualizacion = datetime.now(timezone.utc)
     db.commit()
     db.refresh(perfil)
@@ -300,14 +295,9 @@ def calcular_y_persistir_perfil(db: Session, usuario_id: UUID) -> PerfilFinancie
             usuario_id=usuario_id,
             tasa_ahorro_ars=None,
             tasa_ahorro_usd=None,
-            score_impulsividad_ars=None,
-            score_impulsividad_usd=None,
             ratio_cuotas_ars=None,
             ratio_cuotas_usd=None,
-            cumplimiento_presupuesto=None,
             consistencia_registro=None,
-            porcentaje_suscripciones_ars=None,
-            porcentaje_suscripciones_usd=None,
             ultima_actualizacion=None,
             fecha_creacion=datetime.now(timezone.utc)
         )
@@ -330,14 +320,9 @@ def obtener_perfil(db: Session, usuario_id: UUID) -> PerfilFinanciero | None:
             usuario_id=usuario_id,
             tasa_ahorro_ars=None,
             tasa_ahorro_usd=None,
-            score_impulsividad_ars=None,
-            score_impulsividad_usd=None,
             ratio_cuotas_ars=None,
             ratio_cuotas_usd=None,
-            cumplimiento_presupuesto=None,
             consistencia_registro=None,
-            porcentaje_suscripciones_ars=None,
-            porcentaje_suscripciones_usd=None,
             ultima_actualizacion=None,
             fecha_creacion=datetime.now(timezone.utc)
         )
@@ -403,14 +388,9 @@ def guardar_snapshot_historial(
         periodo_fin=periodo_fin,
         tasa_ahorro_ars=perfil.tasa_ahorro_ars,
         tasa_ahorro_usd=perfil.tasa_ahorro_usd,
-        score_impulsividad_ars=perfil.score_impulsividad_ars,
-        score_impulsividad_usd=perfil.score_impulsividad_usd,
         ratio_cuotas_ars=perfil.ratio_cuotas_ars,
         ratio_cuotas_usd=perfil.ratio_cuotas_usd,
-        cumplimiento_presupuesto=perfil.cumplimiento_presupuesto,
         consistencia_registro=perfil.consistencia_registro,
-        porcentaje_suscripciones_ars=perfil.porcentaje_suscripciones_ars,
-        porcentaje_suscripciones_usd=perfil.porcentaje_suscripciones_usd,
         fecha_snapshot=datetime.now(timezone.utc)
     )
     db.add(snapshot)
