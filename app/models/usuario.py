@@ -56,16 +56,7 @@ class CicloRegla(str, Enum):
     DIA_HABIL_9 = "dia_habil_9"
     DIA_HABIL_10 = "dia_habil_10"
 
-    # Retrocompatibilidad con reglas semanales históricas
-    PRIMER_LUNES = "primer_lunes"
-    PRIMER_MARTES = "primer_martes"
-    PRIMER_MIERCOLES = "primer_miercoles"
-    PRIMER_JUEVES = "primer_jueves"
-    PRIMER_VIERNES = "primer_viernes"
-    ULTIMO_LUNES = "ultimo_lunes"
-    ULTIMO_MARTES = "ultimo_martes"
-    ULTIMO_MIERCOLES = "ultimo_miercoles"
-    ULTIMO_JUEVES = "ultimo_jueves"
+    # Regla semanal mantenida por uso activo (Fase 1c)
     ULTIMO_VIERNES = "ultimo_viernes"
 
 

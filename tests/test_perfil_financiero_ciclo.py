@@ -195,8 +195,8 @@ def test_ratio_cuotas_con_ciclo_regla(db_session):
 
 def test_frecuencia_financiera_con_ciclo_regla_no_rompe(db_session):
     """
-    Usuario con ciclo_tipo=REGLA (primer_lunes).
-    Antes rompía con int("primer_lunes"). Ahora get_ciclo_fechas resuelve correctamente.
+    Usuario con ciclo_tipo=REGLA (ultimo_viernes).
+    Verifica que get_ciclo_fechas resuelve correctamente y no intenta castear a int.
     """
     usuario = Usuario(
         id=uuid4(),
@@ -205,7 +205,7 @@ def test_frecuencia_financiera_con_ciclo_regla_no_rompe(db_session):
         rol=RolUsuario.USUARIO,
         estado=EstadoUsuario.ACTIVO,
         ciclo_tipo=CicloTipo.REGLA,
-        ciclo_valor="primer_lunes",
+        ciclo_valor="ultimo_viernes",
         ciclo_ajuste_direccion=CicloAjusteDireccion.ANTERIOR,
     )
     db_session.add(usuario)

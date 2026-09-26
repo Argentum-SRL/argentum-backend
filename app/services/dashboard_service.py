@@ -61,30 +61,16 @@ def get_date_by_rule(rule: str, month: int, year: int) -> date:
                     return d
         return last_found or date(year, month, 1)
 
-    parts = rule_lower.split("_")
-    if len(parts) != 2:
-        return date(year, month, 1)
-    
-    when, weekday_str = parts[0], parts[1]
-    weekdays = {"lunes": 0, "martes": 1, "miercoles": 2, "jueves": 3, "viernes": 4, "sabado": 5, "domingo": 6}
-    target_weekday = weekdays.get(weekday_str)
-    if target_weekday is None:
-        return date(year, month, 1)
-        
-    first_day = date(year, month, 1)
-    last_day = (first_day + relativedelta(months=1)) - timedelta(days=1)
-    
-    if when == "primer":
-        d = first_day
-        while d.weekday() != target_weekday:
-            d += timedelta(days=1)
-        return d
-    elif when == "ultimo":
+    if rule_lower == "ultimo_viernes":
+        # Regla semanal mantenida: ultimo viernes del mes (4 = viernes)
+        last_day = date(year, month, num_days)
         d = last_day
-        while d.weekday() != target_weekday:
+        while d.weekday() != 4:
             d -= timedelta(days=1)
         return d
-    return first_day
+
+    # Respaldo seguro para cualquier otra regla no reconocida: mes calendario (primer dia del mes)
+    return date(year, month, 1)
 
 def calcular_inicio_ciclo_para_mes_ancla(usuario: Usuario, anio: int, mes: int) -> date:
     """
@@ -115,7 +101,10 @@ def calcular_inicio_ciclo_para_mes_ancla(usuario: Usuario, anio: int, mes: int) 
     elif usuario.ciclo_tipo == CicloTipo.REGLA:
         from app.services.dias_habiles_service import ajustar_fecha_habil_sync
         val = (usuario.ciclo_valor or "").lower()
-        fecha_nominal = get_date_by_rule(val or "primer_lunes", mes, anio)
+        if not val:
+            # Respaldo de mes calendario si la regla no esta configurada (mismo que usuarios sin ciclo)
+            return date(anio, mes, 1)
+        fecha_nominal = get_date_by_rule(val, mes, anio)
         if val in ("ultimo_dia_habil", "primer_dia_habil") or val.startswith("dia_habil_"):
             return fecha_nominal
         if direccion:

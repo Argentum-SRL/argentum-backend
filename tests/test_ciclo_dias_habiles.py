@@ -25,8 +25,7 @@ from app.services.dias_habiles_service import (
     calcular_fecha_cobro_sync,
     _feriados_cache,
 )
-from app.services.dashboard_service import get_date_by_rule, get_ciclo_fechas
-
+from app.services.dashboard_service import get_date_by_rule, get_ciclo_fechas, calcular_inicio_ciclo_para_mes_ancla
 # In-memory SQLite database setup
 engine = create_engine(
     "sqlite:///:memory:",
@@ -219,25 +218,72 @@ def test_ajustar_fecha_habil_semana_santa_malvinas(db_session):
 # 3. Tests para get_date_by_rule (dashboard_service.py)
 # ==============================================================================
 
-def test_get_date_by_rule_primer_lunes():
-    """Primer lunes de Agosto 2026: el 1/8 es sábado, por lo que es el 3/8."""
-    assert get_date_by_rule("primer_lunes", 8, 2026) == date(2026, 8, 3)
+def test_get_date_by_rule_ultimo_viernes_septiembre_2026():
+    """Último viernes de Septiembre 2026: 30/9 es miércoles, el último viernes es el 25/09/2026."""
+    assert get_date_by_rule("ultimo_viernes", 9, 2026) == date(2026, 9, 25)
 
-def test_get_date_by_rule_ultimo_viernes_diciembre_2026():
-    """Último viernes de Diciembre 2026: 31/12 es jueves, el último viernes es 25/12."""
+def test_get_date_by_rule_ultimo_viernes_octubre_2026():
+    """Último viernes de Octubre 2026: 31/10 es sábado, el último viernes es el 30/10/2026."""
+    assert get_date_by_rule("ultimo_viernes", 10, 2026) == date(2026, 10, 30)
+
+def test_get_date_by_rule_ultimo_viernes_feriado_diciembre_2026():
+    """
+    Último viernes de Diciembre 2026: 25/12/2026 es Navidad (feriado nacional).
+    get_date_by_rule calcula la fecha nominal matemática (25/12/2026) manteniendo
+    el comportamiento existente y delegando el ajuste a días hábiles según la dirección del usuario.
+    """
     assert get_date_by_rule("ultimo_viernes", 12, 2026) == date(2026, 12, 25)
 
-def test_get_date_by_rule_primer_miercoles():
-    """Primer miércoles de Enero 2026: 1/1 es jueves, primer miércoles es 7/1."""
-    assert get_date_by_rule("primer_miercoles", 1, 2026) == date(2026, 1, 7)
-
-def test_get_date_by_rule_ultimo_jueves():
-    """Último jueves de Diciembre 2026: 31/12 es jueves, devuelve 31/12."""
-    assert get_date_by_rule("ultimo_jueves", 12, 2026) == date(2026, 12, 31)
-
-def test_get_date_by_rule_invalida_fallback():
-    """Una regla inválida debe devolver el primer día del mes como fallback seguro."""
+def test_get_date_by_rule_invalida_o_borrada_fallback():
+    """Reglas inválidas o borradas (ej: primer_lunes, regla_inexistente) devuelven el día 1 (mes calendario)."""
     assert get_date_by_rule("regla_inexistente", 8, 2026) == date(2026, 8, 1)
+    assert get_date_by_rule("primer_lunes", 8, 2026) == date(2026, 8, 1)
+    assert get_date_by_rule("primer_miercoles", 1, 2026) == date(2026, 1, 1)
+    assert get_date_by_rule("ultimo_jueves", 12, 2026) == date(2026, 12, 1)
+
+def test_calcular_inicio_ciclo_regla_sin_valor_fallback_mes_calendario():
+    """
+    Usuario con ciclo_tipo=REGLA pero sin ciclo_valor (None o vacío).
+    calcular_inicio_ciclo_para_mes_ancla debe aplicar el respaldo de mes calendario (día 1 del mes).
+    """
+    usuario_sin_valor = Usuario(
+        id=uuid4(),
+        email="test_fallback_none@argentum.com",
+        rol=RolUsuario.USUARIO,
+        estado=EstadoUsuario.ACTIVO,
+        auth_provider=AuthProvider.EMAIL,
+        ciclo_tipo=CicloTipo.REGLA,
+        ciclo_valor=None,
+    )
+    assert calcular_inicio_ciclo_para_mes_ancla(usuario_sin_valor, 2026, 9) == date(2026, 9, 1)
+
+    usuario_valor_vacio = Usuario(
+        id=uuid4(),
+        email="test_fallback_empty@argentum.com",
+        rol=RolUsuario.USUARIO,
+        estado=EstadoUsuario.ACTIVO,
+        auth_provider=AuthProvider.EMAIL,
+        ciclo_tipo=CicloTipo.REGLA,
+        ciclo_valor="",
+    )
+    assert calcular_inicio_ciclo_para_mes_ancla(usuario_valor_vacio, 2026, 9) == date(2026, 9, 1)
+
+def test_get_ciclo_fechas_regla_sin_valor_fallback_mes_calendario():
+    """
+    Usuario con ciclo_tipo=REGLA pero sin ciclo_valor: get_ciclo_fechas debe devolver mes calendario.
+    """
+    usuario = Usuario(
+        id=uuid4(),
+        email="test_fallback_ciclo@argentum.com",
+        rol=RolUsuario.USUARIO,
+        estado=EstadoUsuario.ACTIVO,
+        auth_provider=AuthProvider.EMAIL,
+        ciclo_tipo=CicloTipo.REGLA,
+        ciclo_valor=None,
+    )
+    ini, fin = get_ciclo_fechas(usuario, date(2026, 9, 15))
+    assert ini == date(2026, 9, 1)
+    assert fin == date(2026, 9, 30)
 
 
 # ==============================================================================
@@ -319,6 +365,25 @@ def test_get_ciclo_fechas_regla_direccion_posterior(db_session):
     hoy = date(2026, 12, 28)
     inicio, fin = get_ciclo_fechas(usuario, hoy)
     assert inicio == date(2026, 12, 28)
+
+def test_get_ciclo_fechas_regla_ultimo_viernes_feriado_anterior(db_session):
+    """
+    Usuario REGLA ultimo_viernes con direccion anterior en Diciembre 2026 (Navidad 25/12).
+    El 25/12 es viernes feriado, por lo que con direccion anterior debe ajustarse al jueves 24/12/2026.
+    """
+    usuario = Usuario(
+        id=uuid4(),
+        email="user_test_uv_ant@argentum.com",
+        rol=RolUsuario.USUARIO,
+        estado=EstadoUsuario.ACTIVO,
+        auth_provider=AuthProvider.EMAIL,
+        ciclo_tipo=CicloTipo.REGLA,
+        ciclo_valor="ultimo_viernes",
+        ciclo_ajuste_direccion=CicloAjusteDireccion.ANTERIOR,
+    )
+    hoy = date(2026, 12, 26)
+    inicio, fin = get_ciclo_fechas(usuario, hoy)
+    assert inicio == date(2026, 12, 24)
 
 
 # ==============================================================================
