@@ -1,3 +1,6 @@
+"""
+Servicio de análisis financiero, proyección probabilística calibrada y diagnóstico.
+"""
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -27,17 +30,7 @@ from app.utils.finanzas import (
 )
 
 
-CONFIDENCE_BY_CYCLES = {0: "sin_datos", 1: "inicial", 2: "baja", 3: "media"}
 
-
-def _ciclos(usuario: Usuario, fecha_inicio: date, hasta: date, maximo: int | None = None) -> list[tuple[date, date]]:
-    result: list[tuple[date, date]] = []
-    cursor = fecha_inicio
-    while cursor <= hasta and (maximo is None or len(result) < maximo):
-        inicio, fin = get_ciclo_fechas(usuario, cursor)
-        result.append((inicio, min(fin, hasta)))
-        cursor = fin + timedelta(days=1)
-    return result
 
 
 def _ciclos_anteriores(usuario: Usuario, hoy: date, cantidad: int = 12) -> list[tuple[date, date]]:
@@ -105,18 +98,6 @@ def _ciclos_montos(txs: list[Any], ciclos: list[tuple[date, date]], ipc: list[An
     ]
 
 
-def _confidence(ciclos: int, cobertura: Decimal) -> str:
-    if ciclos == 0:
-        return "sin_datos"
-    if ciclos == 1:
-        return "inicial"
-    if ciclos == 2:
-        return "baja"
-    if ciclos == 3 or cobertura < Decimal("0.75"):
-        return "media"
-    if ciclos >= 6 and cobertura >= Decimal("0.80"):
-        return "alto"
-    return "media"
 
 
 def _determinar_confianza_perfil(

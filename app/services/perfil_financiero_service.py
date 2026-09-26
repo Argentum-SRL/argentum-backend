@@ -1,5 +1,11 @@
+"""
+Servicio de perfil financiero de Argentum.
+
+Administra el cálculo, persistencia y consulta del perfil financiero del usuario.
+"""
+from __future__ import annotations
+
 import logging
-import statistics
 import calendar as cal
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
@@ -14,9 +20,6 @@ from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificac
 
 from app.models.cuota import Cuota
 from app.models.grupo_cuotas import GrupoCuotas
-from app.models.presupuesto import Presupuesto, EstadoPresupuesto
-from app.models.periodo_presupuesto import PeriodoPresupuesto
-from app.services.suscripcion_service import obtener_total_mensual
 from app.services.dashboard_service import get_ciclo_fechas
 from app.utils.fecha import hoy_argentina
 
@@ -90,55 +93,6 @@ def _calcular_tasa_ahorro_sync_moneda(db: Session, usuario_id: UUID, fecha_inici
     return (total_ingresos - total_gastos) / total_ingresos
 
 
-def _calcular_score_impulsividad_sync_moneda(db: Session, usuario_id: UUID, fecha_inicio: date, moneda: Moneda) -> int | None:
-    hoy = hoy_argentina()
-
-    # Solo gastos (egresos) confirmados/no pendientes y no padres de cuotas
-    gastos = db.execute(
-        select(Transaccion)
-        .where(
-            Transaccion.usuario_id == usuario_id,
-            Transaccion.moneda == moneda,
-            Transaccion.tipo == TipoTransaccion.EGRESO,
-            Transaccion.movimiento_meta_id.is_(None),
-            or_(
-                Transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE,
-                Transaccion.estado_verificacion.is_(None)
-            ),
-            Transaccion.es_padre_cuotas == False,
-            Transaccion.pago_resumen_vencimiento.is_(None),
-            Transaccion.fecha >= fecha_inicio,
-            Transaccion.fecha <= hoy
-        )
-    ).scalars().all()
-
-    # Mínimo 20 transacciones en esta moneda para calcular score_impulsividad
-    if len(gastos) < 20:
-        return None
-
-    # Group expenses by day in the range [fecha_inicio, hoy]
-    daily_spending = {}
-    curr_date = fecha_inicio
-    while curr_date <= hoy:
-        daily_spending[curr_date] = Decimal("0")
-        curr_date += timedelta(days=1)
-
-    for g in gastos:
-        daily_spending[g.fecha] += g.monto
-
-    # Calcular coeficiente de variación (CV)
-    valores = [float(v) for v in daily_spending.values()]
-    mean = statistics.mean(valores)
-    if mean <= 0:
-        return None
-    stdev = statistics.stdev(valores) if len(valores) > 1 else 0.0
-    cv = stdev / mean
-
-    # Normalización a escala 0-100 con un factor razonable (ej. 15.0) y acotado
-    factor = 15.0
-    score = round(cv * factor)
-    return min(100, max(0, score))
-
 
 def _calcular_ratio_cuotas_sync_moneda(db: Session, usuario_id: UUID, fecha_inicio: date, moneda: Moneda) -> Decimal | None:
     hoy = hoy_argentina()
@@ -209,35 +163,6 @@ def _calcular_ratio_cuotas_sync_moneda(db: Session, usuario_id: UUID, fecha_inic
     return suma_cuotas / denominador
 
 
-def _calcular_cumplimiento_presupuesto_sync(db: Session, usuario_id: UUID, fecha_inicio: date) -> Decimal | None:
-    presupuestos = db.execute(
-        select(Presupuesto).where(
-            Presupuesto.usuario_id == usuario_id,
-            Presupuesto.estado == EstadoPresupuesto.ACTIVO
-        )
-    ).scalars().all()
-
-    if not presupuestos:
-        return None
-
-    presupuesto_ids = [p.id for p in presupuestos]
-
-    periodos = db.execute(
-        select(PeriodoPresupuesto)
-        .where(
-            PeriodoPresupuesto.presupuesto_id.in_(presupuesto_ids),
-            PeriodoPresupuesto.fecha_inicio >= fecha_inicio
-        )
-    ).scalars().all()
-
-    if not periodos:
-        return None
-
-    ciclos_dentro_del_limite = sum(1 for p in periodos if not p.superado)
-    total_ciclos_evaluados = len(periodos)
-
-    return Decimal(str(ciclos_dentro_del_limite)) / Decimal(str(total_ciclos_evaluados))
-
 
 def _calcular_consistencia_registro_sync(
     db: Session, usuario_id: UUID, fecha_inicio: date, primera_fecha: date | datetime | None = None
@@ -283,45 +208,6 @@ def _calcular_consistencia_registro_sync(
     return min(Decimal("1.0"), consistencia)
 
 
-def _calcular_porcentaje_suscripciones_sync_moneda(db: Session, usuario_id: UUID, fecha_inicio: date, moneda: Moneda) -> Decimal | None:
-    suscripciones_data = obtener_total_mensual(db, usuario_id)
-    if moneda == Moneda.ARS:
-        total_subs = Decimal(str(suscripciones_data.get("total_ars") or 0))
-    else:
-        total_subs = Decimal(str(suscripciones_data.get("total_usd") or 0))
-
-    if total_subs == 0:
-        return None
-
-    hoy = hoy_argentina()
-    gastos = db.execute(
-        select(Transaccion)
-        .where(
-            Transaccion.usuario_id == usuario_id,
-            Transaccion.moneda == moneda,
-            Transaccion.tipo == TipoTransaccion.EGRESO,
-            Transaccion.movimiento_meta_id.is_(None),
-            or_(
-                Transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE,
-                Transaccion.estado_verificacion.is_(None)
-            ),
-            Transaccion.es_padre_cuotas == False,
-            Transaccion.pago_resumen_vencimiento.is_(None),
-            Transaccion.fecha >= fecha_inicio,
-            Transaccion.fecha <= hoy
-        )
-    ).scalars().all()
-
-    total_gastos = Decimal("0")
-    for tx in gastos:
-        total_gastos += tx.monto
-
-    cant_meses = Decimal(str(max(1.0, (hoy - fecha_inicio).days / 30.0)))
-    gasto_promedio_mensual = total_gastos / cant_meses
-    if gasto_promedio_mensual == 0:
-        return None
-
-    return total_subs / gasto_promedio_mensual
 
 
 def _calcular_y_persistir_perfil_sync(db: Session, usuario_id: UUID) -> PerfilFinanciero | None:
@@ -366,7 +252,7 @@ def _obtener_perfil_sync(db: Session, usuario_id: UUID) -> PerfilFinanciero | No
     return perfil
 
 
-# --- INTERFACES ASÍNCRONAS PÚBLICAS REQUERIDAS ---
+# --- INTERFACES ASÍNCRONAS DE COMPATIBILIDAD ---
 
 async def calcular_tasa_ahorro(db: Session, usuario_id: UUID, fecha_inicio: date | None = None) -> dict[str, Decimal | None]:
     if fecha_inicio is None:
@@ -376,17 +262,6 @@ async def calcular_tasa_ahorro(db: Session, usuario_id: UUID, fecha_inicio: date
         res["ars"] = _calcular_tasa_ahorro_sync_moneda(db, usuario_id, fecha_inicio, Moneda.ARS)
     if _validar_historial_minimo(db, usuario_id, Moneda.USD):
         res["usd"] = _calcular_tasa_ahorro_sync_moneda(db, usuario_id, fecha_inicio, Moneda.USD)
-    return res
-
-
-async def calcular_score_impulsividad(db: Session, usuario_id: UUID, fecha_inicio: date | None = None) -> dict[str, int | None]:
-    if fecha_inicio is None:
-        fecha_inicio = hoy_argentina() - timedelta(days=90)
-    res = {"ars": None, "usd": None}
-    if _validar_historial_minimo(db, usuario_id, Moneda.ARS):
-        res["ars"] = _calcular_score_impulsividad_sync_moneda(db, usuario_id, fecha_inicio, Moneda.ARS)
-    if _validar_historial_minimo(db, usuario_id, Moneda.USD):
-        res["usd"] = _calcular_score_impulsividad_sync_moneda(db, usuario_id, fecha_inicio, Moneda.USD)
     return res
 
 
@@ -401,31 +276,12 @@ async def calcular_ratio_cuotas(db: Session, usuario_id: UUID, fecha_inicio: dat
     return res
 
 
-async def calcular_cumplimiento_presupuesto(db: Session, usuario_id: UUID, fecha_inicio: date | None = None) -> Decimal | None:
-    if not _validar_historial_minimo(db, usuario_id, None):
-        return None
-    if fecha_inicio is None:
-        fecha_inicio = hoy_argentina() - timedelta(days=90)
-    return _calcular_cumplimiento_presupuesto_sync(db, usuario_id, fecha_inicio)
-
-
 async def calcular_consistencia_registro(db: Session, usuario_id: UUID, fecha_inicio: date | None = None) -> Decimal | None:
     if not _validar_historial_minimo(db, usuario_id, None):
         return None
     if fecha_inicio is None:
         fecha_inicio = hoy_argentina() - timedelta(days=30)
     return _calcular_consistencia_registro_sync(db, usuario_id, fecha_inicio)
-
-
-async def calcular_porcentaje_suscripciones(db: Session, usuario_id: UUID, fecha_inicio: date | None = None) -> dict[str, Decimal | None]:
-    if fecha_inicio is None:
-        fecha_inicio = hoy_argentina() - timedelta(days=90)
-    res = {"ars": None, "usd": None}
-    if _validar_historial_minimo(db, usuario_id, Moneda.ARS):
-        res["ars"] = _calcular_porcentaje_suscripciones_sync_moneda(db, usuario_id, fecha_inicio, Moneda.ARS)
-    if _validar_historial_minimo(db, usuario_id, Moneda.USD):
-        res["usd"] = _calcular_porcentaje_suscripciones_sync_moneda(db, usuario_id, fecha_inicio, Moneda.USD)
-    return res
 
 
 def calcular_y_persistir_perfil(db: Session, usuario_id: UUID) -> PerfilFinanciero | None:
