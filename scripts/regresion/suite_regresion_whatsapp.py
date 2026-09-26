@@ -356,10 +356,9 @@ def obtener_saldos_21(db: Session):
     }
 
 # Baseline documentado de diferencias aceptadas en reconciliación.
-# Proviene del alta histórica de datos (junio 2026), donde las billeteras
-# Galicia del usuario de pruebas tienen saldo_inicial en 0
-# pero sus movimientos bancarios acumulados difieren en -$800.941 respecto al saldo guardado.
-# (testingadmin@argentum.com reconcilia con diff=0.00 tras el enriquecimiento histórico del 2026-09-05).
+# La billetera Galicia de mrm291201@gmail.com presenta una diferencia histórica
+# conocida de -$941.00 entre su saldo guardado y su saldo teórico.
+# testingadmin@argentum.com y todas las demás billeteras de los demás usuarios concilian con diferencia 0.00.
 # La suite fallará si aparece una diferencia NUEVA o si alguna de estas cambia.
 DIFERENCIAS_RECONCILIACION_BASELINE = {
     ("mrm291201@gmail.com", "Galicia"): Decimal("-941.00"),
@@ -367,16 +366,14 @@ DIFERENCIAS_RECONCILIACION_BASELINE = {
 
 def verificar_reconciliacion_billeteras(db: Session):
     """
-    Compara el saldo_actual guardado de cada una de las 21 billeteras contra
-    el saldo calculado a partir de sus movimientos confirmados y transferencias:
-      saldo_inicial + sum(ingresos) - sum(egresos) + sum(tr_in) - sum(tr_out)
-    donde las transacciones computadas son aquellas que afectan saldo (no crédito,
-    no pendientes, fecha <= hoy).
-    Compara contra el baseline conocido de diferencias históricas y reporta
-    discrepancias solo si surge una diferencia NUEVA o cambia una existente.
+    Compara el saldo_actual guardado de cada billetera contra el saldo teórico calculado
+    mediante la función oficial calcular_saldo_teorico (app.services.conciliacion_service).
+    Compara contra el baseline conocido de diferencias históricas (-$941 en Galicia de mrm291201@gmail.com)
+    y reporta discrepancias solo si surge una diferencia NUEVA o cambia una existente.
     """
     from app.models.billetera import Billetera
     from app.models.usuario import Usuario
+    from app.services.conciliacion_service import calcular_saldo_teorico
     from app.utils.fecha import hoy_argentina
     
     hoy = hoy_argentina()
@@ -391,37 +388,7 @@ def verificar_reconciliacion_billeteras(db: Session):
     
     for b, email in billeteras:
         s_guardado = b.saldo_actual
-        s_inicial = b.saldo_inicial or Decimal("0.00")
-        
-        tx_row = db.execute(text("""
-            SELECT 
-                coalesce(sum(case when tipo = 'ingreso' then monto else 0 end), 0) as ingresos,
-                coalesce(sum(case when tipo = 'egreso' then monto else 0 end), 0) as egresos
-            FROM transacciones
-            WHERE billetera_id = :bid
-              AND (metodo_pago != 'credito' OR metodo_pago IS NULL)
-              AND es_padre_cuotas = false
-              AND es_cuota_hija = false
-              AND (estado_verificacion IS NULL OR estado_verificacion != 'pendiente')
-              AND fecha <= :hoy
-        """), {"bid": b.id, "hoy": hoy}).mappings().fetchone()
-        
-        ingresos = Decimal(str(tx_row["ingresos"]))
-        egresos = Decimal(str(tx_row["egresos"]))
-        
-        tr_in = Decimal(str(db.execute(text("""
-            SELECT coalesce(sum(monto_destino), 0) 
-            FROM transferencias_internas 
-            WHERE billetera_destino_id = :bid
-        """), {"bid": b.id}).scalar() or 0))
-        
-        tr_out = Decimal(str(db.execute(text("""
-            SELECT coalesce(sum(monto_origen), 0) 
-            FROM transferencias_internas 
-            WHERE billetera_origen_id = :bid
-        """), {"bid": b.id}).scalar() or 0))
-        
-        s_calc = s_inicial + ingresos - egresos + tr_in - tr_out
+        s_calc = calcular_saldo_teorico(db, b.id, hasta=hoy)
         diff = s_guardado - s_calc
         esperado_diff = DIFERENCIAS_RECONCILIACION_BASELINE.get((email, b.nombre), Decimal("0.00"))
         coincide_con_baseline = (diff == esperado_diff)
@@ -442,10 +409,11 @@ def verificar_reconciliacion_billeteras(db: Session):
     return len(discrepancias_no_esperadas) == 0, discrepancias_no_esperadas, detalles
 
 SALDOS_REFERENCIA_21 = {
-    ("testingadmin@argentum.com", "Efectivo ARS", "ARS"): Decimal("0.00"),
-    ("testingadmin@argentum.com", "Efectivo USD", "USD"): Decimal("0.00"),
-    ("testingadmin@argentum.com", "Galicia", "ARS"): Decimal("4472208.62"),
-    ("testingadmin@argentum.com", "Santander", "ARS"): Decimal("0.00"),
+    ("testingadmin@argentum.com", "Ahorro con rendimiento", "ARS"): Decimal("2082358.73"),
+    ("testingadmin@argentum.com", "Efectivo ARS", "ARS"): Decimal("566340.50"),
+    ("testingadmin@argentum.com", "Efectivo USD", "USD"): Decimal("388.00"),
+    ("testingadmin@argentum.com", "Galicia", "ARS"): Decimal("3554871.05"),
+    ("testingadmin@argentum.com", "Santander", "ARS"): Decimal("404460.37"),
 }
 
 def verificar_saldos_contra_referencia(db: Session, saldos_inicio_21: dict):

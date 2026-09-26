@@ -1,0 +1,1171 @@
+{
+  "usuario": {
+    "email": "testingadmin@argentum.com",
+    "id": "4c2ed62e-c22e-4d21-9bf9-ec6705f2c6fa",
+    "semilla": 2026,
+    "periodo_historial": {
+      "inicio": "2025-07-30",
+      "fin": "2026-09-29",
+      "total_ciclos": 14
+    }
+  },
+  "ingresos": {
+    "tipo_ingreso_principal": "Relación de dependencia (CABA)",
+    "sueldo_neto_inicial": "2600000.00",
+    "sueldos_por_ciclo": [
+      {
+        "ciclo": 1,
+        "fecha": "2025-07-30",
+        "monto": "2600000.00"
+      },
+      {
+        "ciclo": 2,
+        "fecha": "2025-08-29",
+        "monto": "2600000.00"
+      },
+      {
+        "ciclo": 3,
+        "fecha": "2025-09-30",
+        "monto": "2704000.00"
+      },
+      {
+        "ciclo": 4,
+        "fecha": "2025-10-30",
+        "monto": "2704000.00"
+      },
+      {
+        "ciclo": 5,
+        "fecha": "2025-11-28",
+        "monto": "2704000.00"
+      },
+      {
+        "ciclo": 6,
+        "fecha": "2025-12-30",
+        "monto": "2812160.00"
+      },
+      {
+        "ciclo": 7,
+        "fecha": "2026-01-30",
+        "monto": "2812160.00"
+      },
+      {
+        "ciclo": 8,
+        "fecha": "2026-02-27",
+        "monto": "2924646.40"
+      },
+      {
+        "ciclo": 9,
+        "fecha": "2026-03-30",
+        "monto": "2924646.40"
+      },
+      {
+        "ciclo": 10,
+        "fecha": "2026-04-30",
+        "monto": "3070878.72"
+      },
+      {
+        "ciclo": 11,
+        "fecha": "2026-05-29",
+        "monto": "3070878.72"
+      },
+      {
+        "ciclo": 12,
+        "fecha": "2026-06-30",
+        "monto": "3193713.87"
+      },
+      {
+        "ciclo": 13,
+        "fecha": "2026-07-30",
+        "monto": "3193713.87"
+      },
+      {
+        "ciclo": 14,
+        "fecha": "2026-08-28",
+        "monto": "3321462.42"
+      }
+    ],
+    "aguinaldos": [
+      {
+        "semestre": "2025-S2",
+        "fecha": "2025-12-18",
+        "monto": "1406080.00"
+      },
+      {
+        "semestre": "2026-S1",
+        "fecha": "2026-06-30",
+        "monto": "1596856.94"
+      }
+    ],
+    "freelance_extra": [
+      {
+        "fecha": "2025-09-12",
+        "monto": "320000.00",
+        "moneda": "ARS",
+        "descripcion": "Honorarios consultoría técnica backend freelance",
+        "billetera": "Galicia"
+      },
+      {
+        "fecha": "2025-12-05",
+        "monto": "450000.00",
+        "moneda": "ARS",
+        "descripcion": "Desarrollo y entrega de módulo web cliente exterior",
+        "billetera": "Galicia"
+      },
+      {
+        "fecha": "2026-03-18",
+        "monto": "500.00",
+        "moneda": "USD",
+        "descripcion": "Cobro freelance diseño de arquitectura cloud USD",
+        "billetera": "Efectivo USD"
+      },
+      {
+        "fecha": "2026-07-14",
+        "monto": "380000.00",
+        "moneda": "ARS",
+        "descripcion": "Auditoría de seguridad y optimización de base de datos",
+        "billetera": "Galicia"
+      }
+    ],
+    "es_recurrente_en_ingresos": false
+  },
+  "gastos_fijos": {
+    "alquiler": {
+      "frecuencia": "mensual",
+      "ajuste": "trimestral por IPC acumulado real de ipc_cache",
+      "pagos": [
+        {
+          "ciclo": 1,
+          "periodo": "2025-08",
+          "fecha": "2025-08-05",
+          "monto": "680000.00"
+        },
+        {
+          "ciclo": 2,
+          "periodo": "2025-09",
+          "fecha": "2025-09-05",
+          "monto": "680000.00"
+        },
+        {
+          "ciclo": 3,
+          "periodo": "2025-10",
+          "fecha": "2025-10-05",
+          "monto": "680000.00"
+        },
+        {
+          "ciclo": 4,
+          "periodo": "2025-11",
+          "fecha": "2025-11-05",
+          "monto": "723724.00"
+        },
+        {
+          "ciclo": 5,
+          "periodo": "2025-12",
+          "fecha": "2025-12-05",
+          "monto": "723724.00"
+        },
+        {
+          "ciclo": 6,
+          "periodo": "2026-01",
+          "fecha": "2026-01-05",
+          "monto": "723724.00"
+        },
+        {
+          "ciclo": 7,
+          "periodo": "2026-02",
+          "fecha": "2026-02-05",
+          "monto": "784733.93"
+        },
+        {
+          "ciclo": 8,
+          "periodo": "2026-03",
+          "fecha": "2026-03-05",
+          "monto": "784733.93"
+        },
+        {
+          "ciclo": 9,
+          "periodo": "2026-04",
+          "fecha": "2026-04-05",
+          "monto": "784733.93"
+        },
+        {
+          "ciclo": 10,
+          "periodo": "2026-05",
+          "fecha": "2026-05-05",
+          "monto": "856301.66"
+        },
+        {
+          "ciclo": 11,
+          "periodo": "2026-06",
+          "fecha": "2026-06-05",
+          "monto": "856301.66"
+        },
+        {
+          "ciclo": 12,
+          "periodo": "2026-07",
+          "fecha": "2026-07-05",
+          "monto": "856301.66"
+        },
+        {
+          "ciclo": 13,
+          "periodo": "2026-08",
+          "fecha": "2026-08-05",
+          "monto": "910077.40"
+        },
+        {
+          "ciclo": 14,
+          "periodo": "2026-09",
+          "fecha": "2026-09-05",
+          "monto": "910077.40"
+        }
+      ]
+    },
+    "expensas": {
+      "frecuencia": "mensual",
+      "pagos": [
+        {
+          "ciclo": 1,
+          "fecha": "2025-08-10",
+          "monto": "94275.00"
+        },
+        {
+          "ciclo": 2,
+          "fecha": "2025-09-10",
+          "monto": "101292.00"
+        },
+        {
+          "ciclo": 3,
+          "fecha": "2025-10-10",
+          "monto": "102729.00"
+        },
+        {
+          "ciclo": 4,
+          "fecha": "2025-11-10",
+          "monto": "109187.00"
+        },
+        {
+          "ciclo": 5,
+          "fecha": "2025-12-10",
+          "monto": "113304.00"
+        },
+        {
+          "ciclo": 6,
+          "fecha": "2026-01-10",
+          "monto": "112320.00"
+        },
+        {
+          "ciclo": 7,
+          "fecha": "2026-02-10",
+          "monto": "117007.00"
+        },
+        {
+          "ciclo": 8,
+          "fecha": "2026-03-10",
+          "monto": "123583.00"
+        },
+        {
+          "ciclo": 9,
+          "fecha": "2026-04-10",
+          "monto": "129265.00"
+        },
+        {
+          "ciclo": 10,
+          "fecha": "2026-05-10",
+          "monto": "130754.00"
+        },
+        {
+          "ciclo": 11,
+          "fecha": "2026-06-10",
+          "monto": "134221.00"
+        },
+        {
+          "ciclo": 12,
+          "fecha": "2026-07-10",
+          "monto": "140324.00"
+        },
+        {
+          "ciclo": 13,
+          "fecha": "2026-08-10",
+          "monto": "139634.00"
+        },
+        {
+          "ciclo": 14,
+          "fecha": "2026-09-10",
+          "monto": "145056.00"
+        }
+      ]
+    },
+    "servicios_bimestrales": {
+      "descripcion": "Luz y Gas bimestrales alternados con mayor consumo en invierno",
+      "pagos": [
+        {
+          "servicio": "Luz (Edesur)",
+          "ciclo": 1,
+          "fecha": "2025-08-16",
+          "monto": "47417.00",
+          "es_invierno": true
+        },
+        {
+          "servicio": "Gas (Metrogas)",
+          "ciclo": 2,
+          "fecha": "2025-09-19",
+          "monto": "16550.00",
+          "es_invierno": false
+        },
+        {
+          "servicio": "Luz (Edesur)",
+          "ciclo": 3,
+          "fecha": "2025-10-16",
+          "monto": "34845.00",
+          "es_invierno": false
+        },
+        {
+          "servicio": "Gas (Metrogas)",
+          "ciclo": 4,
+          "fecha": "2025-11-19",
+          "monto": "18750.00",
+          "es_invierno": false
+        },
+        {
+          "servicio": "Luz (Edesur)",
+          "ciclo": 5,
+          "fecha": "2025-12-16",
+          "monto": "36613.00",
+          "es_invierno": false
+        },
+        {
+          "servicio": "Gas (Metrogas)",
+          "ciclo": 6,
+          "fecha": "2026-01-19",
+          "monto": "19215.00",
+          "es_invierno": false
+        },
+        {
+          "servicio": "Luz (Edesur)",
+          "ciclo": 7,
+          "fecha": "2026-02-16",
+          "monto": "36953.00",
+          "es_invierno": false
+        },
+        {
+          "servicio": "Gas (Metrogas)",
+          "ciclo": 8,
+          "fecha": "2026-03-19",
+          "monto": "18147.00",
+          "es_invierno": false
+        },
+        {
+          "servicio": "Luz (Edesur)",
+          "ciclo": 9,
+          "fecha": "2026-04-16",
+          "monto": "38774.00",
+          "es_invierno": false
+        },
+        {
+          "servicio": "Gas (Metrogas)",
+          "ciclo": 10,
+          "fecha": "2026-05-19",
+          "monto": "54530.00",
+          "es_invierno": true
+        },
+        {
+          "servicio": "Luz (Edesur)",
+          "ciclo": 11,
+          "fecha": "2026-06-16",
+          "monto": "55883.00",
+          "es_invierno": true
+        },
+        {
+          "servicio": "Gas (Metrogas)",
+          "ciclo": 12,
+          "fecha": "2026-07-19",
+          "monto": "55212.00",
+          "es_invierno": true
+        },
+        {
+          "servicio": "Luz (Edesur)",
+          "ciclo": 13,
+          "fecha": "2026-08-16",
+          "monto": "58807.00",
+          "es_invierno": true
+        },
+        {
+          "servicio": "Gas (Metrogas)",
+          "ciclo": 14,
+          "fecha": "2026-09-19",
+          "monto": "24173.00",
+          "es_invierno": false
+        }
+      ]
+    },
+    "comunicaciones": {
+      "descripcion": "Internet y Celular con subas en 4 escalones",
+      "escalones": [
+        {
+          "ciclo": 1,
+          "internet": "32000.00",
+          "celular": "18500.00"
+        },
+        {
+          "ciclo": 2,
+          "internet": "32000.00",
+          "celular": "18500.00"
+        },
+        {
+          "ciclo": 3,
+          "internet": "32000.00",
+          "celular": "18500.00"
+        },
+        {
+          "ciclo": 4,
+          "internet": "32000.00",
+          "celular": "18500.00"
+        },
+        {
+          "ciclo": 5,
+          "internet": "37500.00",
+          "celular": "22000.00"
+        },
+        {
+          "ciclo": 6,
+          "internet": "37500.00",
+          "celular": "22000.00"
+        },
+        {
+          "ciclo": 7,
+          "internet": "37500.00",
+          "celular": "22000.00"
+        },
+        {
+          "ciclo": 8,
+          "internet": "37500.00",
+          "celular": "22000.00"
+        },
+        {
+          "ciclo": 9,
+          "internet": "44000.00",
+          "celular": "26500.00"
+        },
+        {
+          "ciclo": 10,
+          "internet": "44000.00",
+          "celular": "26500.00"
+        },
+        {
+          "ciclo": 11,
+          "internet": "44000.00",
+          "celular": "26500.00"
+        },
+        {
+          "ciclo": 12,
+          "internet": "49800.00",
+          "celular": "31000.00"
+        },
+        {
+          "ciclo": 13,
+          "internet": "49800.00",
+          "celular": "31000.00"
+        },
+        {
+          "ciclo": 14,
+          "internet": "49800.00",
+          "celular": "31000.00"
+        }
+      ]
+    },
+    "prepaga": {
+      "descripcion": "Prepaga de salud con suba mensual sostenida",
+      "pagos": [
+        {
+          "ciclo": 1,
+          "fecha": "2025-08-08",
+          "monto": "131558.00"
+        },
+        {
+          "ciclo": 2,
+          "fecha": "2025-09-08",
+          "monto": "135420.00"
+        },
+        {
+          "ciclo": 3,
+          "fecha": "2025-10-08",
+          "monto": "142845.00"
+        },
+        {
+          "ciclo": 4,
+          "fecha": "2025-11-08",
+          "monto": "148010.00"
+        },
+        {
+          "ciclo": 5,
+          "fecha": "2025-12-08",
+          "monto": "152482.00"
+        },
+        {
+          "ciclo": 6,
+          "fecha": "2026-01-08",
+          "monto": "157330.00"
+        },
+        {
+          "ciclo": 7,
+          "fecha": "2026-02-08",
+          "monto": "162901.00"
+        },
+        {
+          "ciclo": 8,
+          "fecha": "2026-03-08",
+          "monto": "170008.00"
+        },
+        {
+          "ciclo": 9,
+          "fecha": "2026-04-08",
+          "monto": "174361.00"
+        },
+        {
+          "ciclo": 10,
+          "fecha": "2026-05-08",
+          "monto": "180424.00"
+        },
+        {
+          "ciclo": 11,
+          "fecha": "2026-06-08",
+          "monto": "186603.00"
+        },
+        {
+          "ciclo": 12,
+          "fecha": "2026-07-08",
+          "monto": "191394.00"
+        },
+        {
+          "ciclo": 13,
+          "fecha": "2026-08-08",
+          "monto": "196696.00"
+        },
+        {
+          "ciclo": 14,
+          "fecha": "2026-09-08",
+          "monto": "201577.00"
+        }
+      ]
+    },
+    "servicio_escalones_guitarra": {
+      "nombre": "Clases de guitarra",
+      "descripcion": "Arranca en 60.000 y sube 5.000 cada 2 a 3 meses",
+      "pagos": [
+        {
+          "ciclo": 1,
+          "fecha": "2025-08-07",
+          "monto": "60000.00"
+        },
+        {
+          "ciclo": 2,
+          "fecha": "2025-09-07",
+          "monto": "60000.00"
+        },
+        {
+          "ciclo": 3,
+          "fecha": "2025-10-07",
+          "monto": "60000.00"
+        },
+        {
+          "ciclo": 4,
+          "fecha": "2025-11-07",
+          "monto": "65000.00"
+        },
+        {
+          "ciclo": 5,
+          "fecha": "2025-12-07",
+          "monto": "65000.00"
+        },
+        {
+          "ciclo": 6,
+          "fecha": "2026-01-07",
+          "monto": "70000.00"
+        },
+        {
+          "ciclo": 7,
+          "fecha": "2026-02-07",
+          "monto": "70000.00"
+        },
+        {
+          "ciclo": 8,
+          "fecha": "2026-03-07",
+          "monto": "70000.00"
+        },
+        {
+          "ciclo": 9,
+          "fecha": "2026-04-07",
+          "monto": "75000.00"
+        },
+        {
+          "ciclo": 10,
+          "fecha": "2026-05-07",
+          "monto": "75000.00"
+        },
+        {
+          "ciclo": 11,
+          "fecha": "2026-06-07",
+          "monto": "75000.00"
+        },
+        {
+          "ciclo": 12,
+          "fecha": "2026-07-07",
+          "monto": "80000.00"
+        },
+        {
+          "ciclo": 13,
+          "fecha": "2026-08-07",
+          "monto": "80000.00"
+        },
+        {
+          "ciclo": 14,
+          "fecha": "2026-09-07",
+          "monto": "80000.00"
+        }
+      ]
+    }
+  },
+  "gastos_variables_y_costumbres": {
+    "gastos_dia_a_dia": {
+      "supermercado_frecuencia_media": 5.714285714285714,
+      "almacen_frecuencia_media": 7.214285714285714,
+      "farmacia_frecuencia_media": 2.0714285714285716,
+      "sube_frecuencia_media": 5.071428571428571,
+      "nafta_frecuencia_media": 2.357142857142857
+    },
+    "costumbres": {
+      "delivery_frecuencia_media": 7.214285714285714,
+      "cafe_frecuencia_media": 13.0,
+      "salidas_frecuencia_media": 3.9285714285714284,
+      "taxi_app_frecuencia_media": 4.214285714285714
+    },
+    "ciclo_carga_incompleta": {
+      "numero_ciclo": 10,
+      "periodo": "Mayo 2026",
+      "porcentaje_registrado": "40%"
+    },
+    "temporadas": {
+      "diciembre": "Mayor gasto en salidas, regalos navideños y fin de año",
+      "enero": "Vacaciones con alojamiento y combustible"
+    }
+  },
+  "tarjetas_y_suscripciones": {
+    "suscripciones": [
+      {
+        "nombre": "Netflix Estándar",
+        "medio_pago": "Visa Galicia (•••• 1506)",
+        "precio_original": "8500.00",
+        "precio_actual": "13500.00",
+        "fecha_aumento": "2026-03-01"
+      },
+      {
+        "nombre": "Spotify Individual",
+        "medio_pago": "Visa Galicia (•••• 1506)",
+        "precio": "6200.00",
+        "cobro_editado": {
+          "fecha": "2026-06-12",
+          "monto_cobrado": "6900.00",
+          "precio_guardado": "6200.00"
+        }
+      },
+      {
+        "nombre": "Google One Nube 2TB",
+        "frecuencia": "anual",
+        "medio_pago": "Visa Galicia (•••• 1506)",
+        "precio": "42000.00",
+        "fecha_cobro": "2025-11-20"
+      }
+    ],
+    "compras_cuotas": [
+      {
+        "descripcion": "Heladera No Frost Whirlpool",
+        "cuotas": 12,
+        "interes": false,
+        "tarjeta": "Visa Galicia (•••• 1506)",
+        "monto_total": "1200000.00",
+        "primer_vto": "2025-11-13"
+      },
+      {
+        "descripcion": "Zapatillas deportivas Nike",
+        "cuotas": 3,
+        "interes": false,
+        "tarjeta": "Visa Galicia (•••• 1506)",
+        "monto_total": "150000.00",
+        "primer_vto": "2026-06-13"
+      },
+      {
+        "descripcion": "Smart TV 55 Pulgadas 4K",
+        "cuotas": 12,
+        "interes": true,
+        "tasa_interes": "4.50%",
+        "tarjeta": "Visa Santander (•••• 5077)",
+        "monto_total": "780000.00",
+        "primer_vto": "2026-09-02"
+      }
+    ],
+    "pago_parcial_saldo_arrastrado": {
+      "tarjeta": "Visa Galicia (•••• 1506)",
+      "mes_parcial": "2026-04",
+      "mes_cancelacion_total": "2026-05"
+    },
+    "resumenes_pagados": [
+      {
+        "tarjeta": "Visa Galicia (•••• 1506)",
+        "vencimiento": "2025-09-15",
+        "tipo": "pago_total",
+        "monto_pagado": "94700.00"
+      },
+      {
+        "tarjeta": "Visa Galicia (•••• 1506)",
+        "vencimiento": "2025-10-13",
+        "tipo": "pago_total",
+        "monto_pagado": "76700.00"
+      },
+      {
+        "tarjeta": "Amex Galicia (•••• 2745)",
+        "vencimiento": "2025-10-13",
+        "tipo": "pago_total_usd",
+        "monto_pagado": "35.00"
+      },
+      {
+        "tarjeta": "Visa Santander (•••• 5077)",
+        "vencimiento": "2025-10-02",
+        "tipo": "pago_total",
+        "monto_pagado": "39000.00"
+      },
+      {
+        "tarjeta": "Visa Galicia (•••• 1506)",
+        "vencimiento": "2025-11-13",
+        "tipo": "pago_total",
+        "monto_pagado": "155700.00"
+      },
+      {
+        "tarjeta": "Visa Galicia (•••• 1506)",
+        "vencimiento": "2025-12-15",
+        "tipo": "pago_total",
+        "monto_pagado": "211700.00"
+      },
+      {
+        "tarjeta": "Visa Galicia (•••• 1506)",
+        "vencimiento": "2026-01-13",
+        "tipo": "pago_total",
+        "monto_pagado": "199700.00"
+      },
+      {
+        "tarjeta": "Visa Santander (•••• 5077)",
+        "vencimiento": "2026-01-02",
+        "tipo": "pago_total",
+        "monto_pagado": "54000.00"
+      },
+      {
+        "tarjeta": "Visa Galicia (•••• 1506)",
+        "vencimiento": "2026-02-13",
+        "tipo": "pago_total",
+        "monto_pagado": "186700.00"
+      },
+      {
+        "tarjeta": "Amex Galicia (•••• 2745)",
+        "vencimiento": "2026-02-13",
+        "tipo": "pago_total_usd",
+        "monto_pagado": "48.00"
+      },
+      {
+        "tarjeta": "Visa Galicia (•••• 1506)",
+        "vencimiento": "2026-03-13",
+        "tipo": "pago_total",
+        "monto_pagado": "152700.00"
+      },
+      {
+        "tarjeta": "Visa Galicia (•••• 1506)",
+        "vencimiento": "2026-04-13",
+        "tipo": "pago_parcial",
+        "monto_pagado": "125090.00",
+        "total_resumen": "178700.00"
+      },
+      {
+        "tarjeta": "Visa Santander (•••• 5077)",
+        "vencimiento": "2026-04-06",
+        "tipo": "pago_total",
+        "monto_pagado": "46000.00"
+      },
+      {
+        "tarjeta": "Visa Galicia (•••• 1506)",
+        "vencimiento": "2026-05-13",
+        "tipo": "pago_total",
+        "monto_pagado": "220310.00"
+      },
+      {
+        "tarjeta": "Visa Galicia (•••• 1506)",
+        "vencimiento": "2026-06-16",
+        "tipo": "pago_total",
+        "monto_pagado": "221700.00"
+      },
+      {
+        "tarjeta": "Visa Galicia (•••• 1506)",
+        "vencimiento": "2026-07-13",
+        "tipo": "pago_total",
+        "monto_pagado": "238400.00"
+      },
+      {
+        "tarjeta": "Amex Galicia (•••• 2745)",
+        "vencimiento": "2026-07-13",
+        "tipo": "pago_total_usd",
+        "monto_pagado": "29.00"
+      },
+      {
+        "tarjeta": "Visa Galicia (•••• 1506)",
+        "vencimiento": "2026-08-13",
+        "tipo": "pago_total",
+        "monto_pagado": "213700.00"
+      },
+      {
+        "tarjeta": "Visa Santander (•••• 5077)",
+        "vencimiento": "2026-08-03",
+        "tipo": "pago_total",
+        "monto_pagado": "61000.00"
+      },
+      {
+        "tarjeta": "Visa Galicia (•••• 1506)",
+        "vencimiento": "2026-09-14",
+        "tipo": "pago_total",
+        "monto_pagado": "177700.00"
+      },
+      {
+        "tarjeta": "Visa Santander (•••• 5077)",
+        "vencimiento": "2026-09-02",
+        "tipo": "pago_total",
+        "monto_pagado": "85539.63"
+      }
+    ]
+  },
+  "metas_e_inversiones": {
+    "meta_fondo_emergencia": {
+      "nombre": "Fondo de Emergencia",
+      "objetivo": "3500000.00",
+      "monto_alcanzado": "1300000.00",
+      "aportes": [
+        {
+          "ciclo": 1,
+          "fecha": "2025-08-06",
+          "monto": "100000.00"
+        },
+        {
+          "ciclo": 2,
+          "fecha": "2025-09-06",
+          "monto": "100000.00"
+        },
+        {
+          "ciclo": 3,
+          "fecha": "2025-10-06",
+          "monto": "100000.00"
+        },
+        {
+          "ciclo": 4,
+          "fecha": "2025-11-06",
+          "monto": "100000.00"
+        },
+        {
+          "ciclo": 5,
+          "fecha": "2025-12-06",
+          "monto": "100000.00"
+        },
+        {
+          "ciclo": 7,
+          "fecha": "2026-02-06",
+          "monto": "100000.00"
+        },
+        {
+          "ciclo": 8,
+          "fecha": "2026-03-06",
+          "monto": "100000.00"
+        },
+        {
+          "ciclo": 9,
+          "fecha": "2026-04-06",
+          "monto": "100000.00"
+        },
+        {
+          "ciclo": 10,
+          "fecha": "2026-05-06",
+          "monto": "100000.00"
+        },
+        {
+          "ciclo": 11,
+          "fecha": "2026-06-06",
+          "monto": "100000.00"
+        },
+        {
+          "ciclo": 12,
+          "fecha": "2026-07-06",
+          "monto": "100000.00"
+        },
+        {
+          "ciclo": 13,
+          "fecha": "2026-08-06",
+          "monto": "100000.00"
+        },
+        {
+          "ciclo": 14,
+          "fecha": "2026-09-06",
+          "monto": "100000.00"
+        }
+      ],
+      "mes_sin_aporte": "Enero 2026 (Ciclo 7)"
+    },
+    "meta_viaje_bariloche": {
+      "nombre": "Viaje a Bariloche",
+      "objetivo": "1400000.00",
+      "monto_alcanzado": "650000.00",
+      "aportes": [
+        {
+          "ciclo": 1,
+          "fecha": "2025-08-06",
+          "monto": "50000.00"
+        },
+        {
+          "ciclo": 2,
+          "fecha": "2025-09-06",
+          "monto": "50000.00"
+        },
+        {
+          "ciclo": 3,
+          "fecha": "2025-10-06",
+          "monto": "50000.00"
+        },
+        {
+          "ciclo": 4,
+          "fecha": "2025-11-06",
+          "monto": "50000.00"
+        },
+        {
+          "ciclo": 5,
+          "fecha": "2025-12-06",
+          "monto": "50000.00"
+        },
+        {
+          "ciclo": 6,
+          "fecha": "2026-01-06",
+          "monto": "50000.00"
+        },
+        {
+          "ciclo": 7,
+          "fecha": "2026-02-06",
+          "monto": "50000.00"
+        },
+        {
+          "ciclo": 8,
+          "fecha": "2026-03-06",
+          "monto": "50000.00"
+        },
+        {
+          "ciclo": 9,
+          "fecha": "2026-04-06",
+          "monto": "50000.00"
+        },
+        {
+          "ciclo": 11,
+          "fecha": "2026-06-06",
+          "monto": "50000.00"
+        },
+        {
+          "ciclo": 12,
+          "fecha": "2026-07-06",
+          "monto": "50000.00"
+        },
+        {
+          "ciclo": 13,
+          "fecha": "2026-08-06",
+          "monto": "50000.00"
+        },
+        {
+          "ciclo": 14,
+          "fecha": "2026-09-06",
+          "monto": "50000.00"
+        }
+      ],
+      "mes_sin_aporte": "Mayo 2026 (Ciclo 10)"
+    },
+    "billetera_inversion": {
+      "nombre": "Ahorro con rendimiento",
+      "tna": "34.00%",
+      "depositos_mensuales": [
+        {
+          "ciclo": 1,
+          "fecha": "2025-08-10",
+          "monto": "144000"
+        },
+        {
+          "ciclo": 2,
+          "fecha": "2025-09-10",
+          "monto": "119000"
+        },
+        {
+          "ciclo": 3,
+          "fecha": "2025-10-10",
+          "monto": "122000"
+        },
+        {
+          "ciclo": 4,
+          "fecha": "2025-11-10",
+          "monto": "130000"
+        },
+        {
+          "ciclo": 5,
+          "fecha": "2025-12-10",
+          "monto": "137000"
+        },
+        {
+          "ciclo": 6,
+          "fecha": "2026-01-10",
+          "monto": "105000"
+        },
+        {
+          "ciclo": 7,
+          "fecha": "2026-02-10",
+          "monto": "101000"
+        },
+        {
+          "ciclo": 8,
+          "fecha": "2026-03-10",
+          "monto": "107000"
+        },
+        {
+          "ciclo": 9,
+          "fecha": "2026-04-10",
+          "monto": "124000"
+        },
+        {
+          "ciclo": 10,
+          "fecha": "2026-05-10",
+          "monto": "137000"
+        },
+        {
+          "ciclo": 11,
+          "fecha": "2026-06-10",
+          "monto": "136000"
+        },
+        {
+          "ciclo": 12,
+          "fecha": "2026-07-10",
+          "monto": "111000"
+        },
+        {
+          "ciclo": 13,
+          "fecha": "2026-08-10",
+          "monto": "139000"
+        },
+        {
+          "ciclo": 14,
+          "fecha": "2026-09-10",
+          "monto": "113000"
+        }
+      ],
+      "rendimientos_mensuales": [
+        {
+          "ciclo": 1,
+          "fecha": "2025-08-28",
+          "monto": "4024.11"
+        },
+        {
+          "ciclo": 2,
+          "fecha": "2025-09-29",
+          "monto": "7959.51"
+        },
+        {
+          "ciclo": 3,
+          "fecha": "2025-10-29",
+          "monto": "11093.79"
+        },
+        {
+          "ciclo": 4,
+          "fecha": "2025-11-27",
+          "monto": "14535.46"
+        },
+        {
+          "ciclo": 5,
+          "fecha": "2025-12-29",
+          "monto": "20556.13"
+        },
+        {
+          "ciclo": 6,
+          "fecha": "2026-01-29",
+          "monto": "23539.40"
+        },
+        {
+          "ciclo": 7,
+          "fecha": "2026-02-26",
+          "monto": "24509.65"
+        },
+        {
+          "ciclo": 8,
+          "fecha": "2026-03-29",
+          "monto": "30933.26"
+        },
+        {
+          "ciclo": 9,
+          "fecha": "2026-04-29",
+          "monto": "35407.22"
+        },
+        {
+          "ciclo": 10,
+          "fecha": "2026-05-28",
+          "monto": "37780.24"
+        },
+        {
+          "ciclo": 11,
+          "fecha": "2026-06-29",
+          "monto": "46868.62"
+        },
+        {
+          "ciclo": 12,
+          "fecha": "2026-07-29",
+          "monto": "48351.00"
+        },
+        {
+          "ciclo": 13,
+          "fecha": "2026-08-27",
+          "monto": "51800.34"
+        }
+      ]
+    },
+    "presupuestos": {
+      "gastronomia_y_salidas": {
+        "limite": "200000.00",
+        "excedido_en_3_de_ultimos_4": [
+          {
+            "ciclo": 11,
+            "gasto": "583350.53",
+            "excedido": true
+          },
+          {
+            "ciclo": 12,
+            "gasto": "559955.20",
+            "excedido": true
+          },
+          {
+            "ciclo": 13,
+            "gasto": "621917.68",
+            "excedido": true
+          },
+          {
+            "ciclo": 14,
+            "gasto": "583247.00",
+            "excedido": true
+          }
+        ]
+      },
+      "indumentaria": {
+        "limite": "150000.00",
+        "comportamiento": "Casi siempre por debajo del límite"
+      }
+    }
+  },
+  "estadisticas_generacion": {
+    "total_transacciones": 1006,
+    "total_transferencias": 48,
+    "total_movimientos_meta": 26,
+    "total_cuotas": 78,
+    "cuotas_pagadas": 63,
+    "cuotas_impagas": 15,
+    "total_envios_interceptados": 233
+  }
+}
