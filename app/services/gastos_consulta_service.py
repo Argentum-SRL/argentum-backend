@@ -16,22 +16,11 @@ from app.models.transaccion import (
 from app.models.usuario import Moneda
 
 
+from app.services.definiciones_service import condicion_gasto
+
+
 def _condicion_gasto(usuario_id, desde, hasta):
-    return and_(
-        Transaccion.usuario_id == usuario_id,
-        Transaccion.tipo == TipoTransaccion.EGRESO,
-        Transaccion.fecha >= desde,
-        Transaccion.fecha <= hasta,
-        Transaccion.es_padre_cuotas == False,
-        Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
-        Transaccion.movimiento_meta_id.is_(None),
-        ~Transaccion.descripcion.ilike("Aporte a la meta:%"),
-        ~Transaccion.descripcion.ilike("Retiro de la meta:%"),
-        or_(
-            Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
-            Transaccion.estado_verificacion == None,
-        ),
-    )
+    return condicion_gasto(usuario_id=usuario_id, desde=desde, hasta=hasta)
 
 
 def calcular_gastos_periodo(

@@ -111,7 +111,7 @@ class Transaccion(Base):
     primer_vencimiento_manual: Mapped[date | None] = mapped_column(Date, nullable=True)
     es_recurrente: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     es_cuota_hija: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # Estas transacciones se excluyen de dashboard/graficos en la capa de consulta.
+    # En cuotas > 1 se excluyen de gastos; en 1 pago computan como gasto de consumo.
     es_padre_cuotas: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     grupo_cuotas_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("grupos_cuotas.id"), nullable=True

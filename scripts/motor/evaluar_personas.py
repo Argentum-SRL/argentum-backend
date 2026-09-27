@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections import defaultdict
 from datetime import date
@@ -10,7 +11,11 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+# Asegurar raíz del backend en sys.path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+
 from app.models.transaccion import TipoTransaccion
+from app.services.definiciones_service import ContextoDefiniciones
 from app.utils.finanzas import clasificar_gastos
 from tests.motor.personas import DEFINICION_PERSONAS, generar_todas_las_personas
 from tests.motor.personas.catalogo import IPC_MAP
@@ -30,11 +35,21 @@ class EvaluadorPersonas:
         txs = persona.movimientos
         ciclos = persona.ciclos
 
+        ctx = ContextoDefiniciones(
+            grupos_cuotas_cantidades={},
+            billeteras_inversion_ids=set(),
+            categoria_ahorro_ids=set(),
+            subcategoria_tarjeta_id=None,
+            subcategoria_tarjeta_ids=set(),
+            hoy=self.fecha_destino,
+        )
+
         resultado = clasificar_gastos(
             transacciones=txs,
             ciclos=ciclos,
             ipc_records=IPC_MAP,
             fecha_destino=self.fecha_destino,
+            ctx=ctx,
         )
 
         compromiso_ids = {tx.id for tx in resultado.comprometidos}

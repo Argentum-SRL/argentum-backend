@@ -93,7 +93,7 @@ def _es_consulta_gastos(mensaje: str) -> bool:
     return True
 
 
-def _rango_periodo(clave: str, hoy: date, ciclo: tuple[date, date] | None = None) -> tuple[date, date]:
+def _rango_periodo(clave: str, hoy: date, ciclo: tuple[date, date] | None = None, usuario: Usuario | None = None) -> tuple[date, date]:
     if clave == "hoy":
         return hoy, hoy
     if clave == "ayer":
@@ -104,17 +104,33 @@ def _rango_periodo(clave: str, hoy: date, ciclo: tuple[date, date] | None = None
     if clave == "semana_pasada":
         ini = hoy - timedelta(days=hoy.weekday() + 7)
         return ini, ini + timedelta(days=6)
-    if clave == "mes":
-        return hoy.replace(day=1), hoy
+    if clave in ("mes", "ciclo"):
+        if ciclo is None:
+            if usuario is not None:
+                ciclo = get_ciclo_fechas(usuario, hoy)
+            else:
+                raise ValueError("El período 'mes'/'ciclo' requiere las fechas del ciclo o el usuario")
+        return ciclo[0], hoy
     if clave == "mes_pasado":
-        fin = hoy.replace(day=1) - timedelta(days=1)
-        return fin.replace(day=1), fin
+        if ciclo is None and usuario is not None:
+            ciclo = get_ciclo_fechas(usuario, hoy)
+        if ciclo is None and usuario is None:
+            raise ValueError("El período 'mes_pasado' requiere ciclo o usuario")
+        if usuario is not None:
+            return get_ciclo_fechas(usuario, ciclo[0] - timedelta(days=1))
+        return ciclo[0] - timedelta(days=30), ciclo[0] - timedelta(days=1)
     if ciclo is None:
-        raise ValueError("El período 'ciclo' requiere las fechas del ciclo")
+        raise ValueError(f"Período desconocido: {clave}")
     return ciclo
 
 
-def _formatear_respuesta_gastos(etiqueta, concepto_txt, por_descripcion, ars_total, ars_cant, usd_total, usd_cant, top) -> str:
+def _formatear_respuesta_gastos(
+    etiqueta, concepto_txt, por_descripcion, ars_total, ars_cant, usd_total, usd_cant, top,
+    desde: date | None = None, hasta: date | None = None,
+) -> str:
+    etiqueta_salida = etiqueta
+    if desde and hasta and etiqueta in ("Este mes", "En este ciclo", "El mes pasado"):
+        etiqueta_salida = f"{etiqueta} ({desde.strftime('%d/%m')} al {hasta.strftime('%d/%m')})"
     partes = []
     if ars_cant > 0:
         partes.append(f"{_fmt(ars_total)} ({ars_cant} {'movimiento' if ars_cant == 1 else 'movimientos'})")
@@ -122,12 +138,12 @@ def _formatear_respuesta_gastos(etiqueta, concepto_txt, por_descripcion, ars_tot
         partes.append(f"{_fmt(usd_total, Moneda.USD)} ({usd_cant} {'movimiento' if usd_cant == 1 else 'movimientos'})")
     if not partes:
         if concepto_txt and por_descripcion:
-            return f"{etiqueta} no encontré gastos que mencionen {concepto_txt}."
+            return f"{etiqueta_salida} no encontré gastos que mencionen {concepto_txt}."
         if concepto_txt:
-            return f"{etiqueta} no registraste gastos en {concepto_txt}."
-        return f"{etiqueta} no registraste gastos."
+            return f"{etiqueta_salida} no registraste gastos en {concepto_txt}."
+        return f"{etiqueta_salida} no registraste gastos."
     sufijo = f" en {concepto_txt}" if concepto_txt else ""
-    msg = f"{etiqueta} gastaste {' y '.join(partes)}{sufijo}."
+    msg = f"{etiqueta_salida} gastaste {' y '.join(partes)}{sufijo}."
     if not concepto_txt and ars_cant > 0 and len(top) >= 2:
         msg += " Lo que más pesó: " + " | ".join(f"{nombre} {_fmt(monto)}" for nombre, monto in top) + "."
     return msg
@@ -142,8 +158,8 @@ def manejar_consulta_gastos(mensaje_texto: str, usuario: Usuario, db: Session, f
     concepto = _extraer_concepto_gastos(mensaje_texto)
     try:
         hoy = hoy_argentina()
-        ciclo = get_ciclo_fechas(usuario, hoy) if clave == "ciclo" else None
-        desde, hasta = _rango_periodo(clave, hoy, ciclo)
+        ciclo = get_ciclo_fechas(usuario, hoy)
+        desde, hasta = _rango_periodo(clave, hoy, ciclo, usuario=usuario)
         categoria_id = subcategoria_id = texto_desc = concepto_txt = None
         por_descripcion = False
         if concepto:
@@ -161,6 +177,7 @@ def manejar_consulta_gastos(mensaje_texto: str, usuario: Usuario, db: Session, f
             ETIQUETAS_PERIODO[clave], concepto_txt, por_descripcion,
             float(res["ars"]["total"]), res["ars"]["cantidad"], float(res["usd"]["total"]), res["usd"]["cantidad"],
             res["top_categorias_ars"],
+            desde=desde, hasta=hasta,
         )
     except Exception:
         logger.exception("Error al consultar gastos para WhatsApp")

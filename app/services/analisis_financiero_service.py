@@ -18,10 +18,11 @@ from app.models.tools import IPCCache
 from app.models.transaccion import EstadoVerificacionTransaccion, TipoTransaccion, Transaccion
 from app.models.usuario import Moneda, Usuario
 from app.services.dashboard_service import get_ciclo_fechas
+from app.services.definiciones_service import ContextoDefiniciones, cargar_contexto, es_gasto, es_ingreso
 from app.utils.fecha import hoy_argentina
 from app.utils.finanzas import (
     ClasificacionGasto, StreamRecurrente, ZERO, ONE, clasificar_gastos,
-    deflactar_monto, es_gasto_consumo, gasto_ciclo, mad, mediana, percentil,
+    deflactar_monto, gasto_ciclo, mad, mediana, percentil,
     posicion_relativa, monto_mensual_deflactado_stream, pinball_loss,
     estimar_gasto_diario_basico_robusto, student_t_critical, weighted_quantile,
     evaluar_puerta_calibracion, MINIMO_CICLOS_EVALUABLES_CALIBRACION,
@@ -69,31 +70,39 @@ def _carga(db: Session, usuario: Usuario, fecha_referencia: date | None = None) 
     historial_subs = db.execute(
         select(HistorialSuscripcion).join(Suscripcion).where(Suscripcion.usuario_id == usuario.id)
     ).scalars().all()
-    return {"hoy": hoy, "txs": txs, "ipc": ipc, "cuotas": cuotas, "suscripciones": suscripciones, "historial_subs": historial_subs}
+    ctx = cargar_contexto(db, usuario.id, hoy)
+    return {"hoy": hoy, "txs": txs, "ipc": ipc, "cuotas": cuotas, "suscripciones": suscripciones, "historial_subs": historial_subs, "ctx": ctx}
 
 
 def _tx_valido(tx: Any) -> bool:
     return tx.estado_verificacion in (None, EstadoVerificacionTransaccion.CONFIRMADA) and not tx.es_padre_cuotas
 
 
-def _suma_deflactada(txs: list[Any], ipc: Any, destino: date, moneda: Moneda, tipo: TipoTransaccion | None = None) -> Decimal:
+def _suma_deflactada(txs: list[Any], ipc: Any, destino: date, moneda: Moneda, tipo: TipoTransaccion | None = None, *, ctx: ContextoDefiniciones) -> Decimal:
     ipc_map = ipc if isinstance(ipc, dict) else _indice_por_mes(ipc)
     if tipo == TipoTransaccion.EGRESO:
-        return gasto_ciclo(txs, min((tx.fecha for tx in txs), default=destino), max((tx.fecha for tx in txs), default=destino), destino, ipc_map, moneda).deflactado
+        return gasto_ciclo(txs, min((tx.fecha for tx in txs), default=destino), max((tx.fecha for tx in txs), default=destino), destino, ipc_map, moneda, ctx=ctx).deflactado
     total = ZERO
     for tx in txs:
-        if tx.moneda != moneda or not _tx_valido(tx) or (tipo is not None and tx.tipo != tipo):
+        if tx.moneda != moneda:
             continue
-        if tipo == TipoTransaccion.EGRESO and not es_gasto_consumo(tx):
-            continue
+        if tipo == TipoTransaccion.INGRESO:
+            if not es_ingreso(tx, ctx):
+                continue
+        elif tipo == TipoTransaccion.EGRESO:
+            if not es_gasto(tx, ctx):
+                continue
+        else:
+            if not (es_gasto(tx, ctx) or es_ingreso(tx, ctx)):
+                continue
         ajuste = deflactar_monto(tx.monto, tx.fecha, destino, ipc_map, moneda)
         total += ajuste.monto
     return total
 
 
-def _ciclos_montos(txs: list[Any], ciclos: list[tuple[date, date]], ipc: list[Any], destino: date, moneda: Moneda, tipo: TipoTransaccion) -> list[Decimal]:
+def _ciclos_montos(txs: list[Any], ciclos: list[tuple[date, date]], ipc: list[Any], destino: date, moneda: Moneda, tipo: TipoTransaccion, *, ctx: ContextoDefiniciones) -> list[Decimal]:
     return [
-        _suma_deflactada([tx for tx in txs if inicio <= tx.fecha <= fin], ipc, destino, moneda, tipo)
+        _suma_deflactada([tx for tx in txs if inicio <= tx.fecha <= fin], ipc, destino, moneda, tipo, ctx=ctx)
         for inicio, fin in ciclos
     ]
 
@@ -178,9 +187,10 @@ def calcular_perfil_nuevo(db: Session, usuario: Usuario, data: dict[str, Any] | 
         *(cuota for cuota, _ in data["cuotas"] if not cuota.pagada and cuota.fecha_vencimiento >= hoy),
         *data["suscripciones"],
     ]
-    clasificacion = clasificar_gastos(txs, ciclos, ipc, hoy, comprometidos_externos)
+    ctx = data["ctx"]
+    clasificacion = clasificar_gastos(txs, ciclos, ipc, hoy, comprometidos_externos, ctx=ctx)
 
-    ingresos = _ciclos_montos(txs, ciclos, ipc, hoy, Moneda.ARS, TipoTransaccion.INGRESO)
+    ingresos = _ciclos_montos(txs, ciclos, ipc, hoy, Moneda.ARS, TipoTransaccion.INGRESO, ctx=ctx)
     ingresos_con_datos = [v for v in ingresos if v > ZERO]
     tiene_ingresos = len(ingresos_con_datos) > 0
 
@@ -188,8 +198,8 @@ def calcular_perfil_nuevo(db: Session, usuario: Usuario, data: dict[str, Any] | 
     variables = []
     for inicio, fin in ciclos:
         ciclo_txs = [tx for tx in txs if inicio <= tx.fecha <= fin]
-        gastos.append(_suma_deflactada([tx for tx in ciclo_txs if tx in list(clasificacion.comprometidos) or tx in list(clasificacion.habitos) or tx in list(clasificacion.variables)], ipc, hoy, Moneda.ARS, TipoTransaccion.EGRESO))
-        variables.append(_suma_deflactada([tx for tx in ciclo_txs if tx in list(clasificacion.variables)], ipc, hoy, Moneda.ARS, TipoTransaccion.EGRESO))
+        gastos.append(_suma_deflactada([tx for tx in ciclo_txs if tx in list(clasificacion.comprometidos) or tx in list(clasificacion.habitos) or tx in list(clasificacion.variables)], ipc, hoy, Moneda.ARS, TipoTransaccion.EGRESO, ctx=ctx))
+        variables.append(_suma_deflactada([tx for tx in ciclo_txs if tx in list(clasificacion.variables)], ipc, hoy, Moneda.ARS, TipoTransaccion.EGRESO, ctx=ctx))
 
     nivel_confianza = _determinar_confianza_perfil(cant_ciclos, continuidad, densidad, tiene_ingresos)
 
@@ -206,8 +216,8 @@ def calcular_perfil_nuevo(db: Session, usuario: Usuario, data: dict[str, Any] | 
 
     # Estimadores centrales sobre observaciones con datos
     inicio_actual, fin_actual = get_ciclo_fechas(usuario, hoy)
-    actual_ingreso = _suma_deflactada([tx for tx in txs if inicio_actual <= tx.fecha <= hoy], ipc, hoy, Moneda.ARS, TipoTransaccion.INGRESO)
-    actual_gasto = _suma_deflactada([tx for tx in txs if inicio_actual <= tx.fecha <= hoy], ipc, hoy, Moneda.ARS, TipoTransaccion.EGRESO)
+    actual_ingreso = _suma_deflactada([tx for tx in txs if inicio_actual <= tx.fecha <= hoy], ipc, hoy, Moneda.ARS, TipoTransaccion.INGRESO, ctx=ctx)
+    actual_gasto = _suma_deflactada([tx for tx in txs if inicio_actual <= tx.fecha <= hoy], ipc, hoy, Moneda.ARS, TipoTransaccion.EGRESO, ctx=ctx)
 
     observaciones_completas = [(ingreso, gasto) for ingreso, gasto in zip(ingresos, gastos) if ingreso > ZERO and gasto > ZERO]
     ingresos_completos = [ingreso for ingreso, _ in observaciones_completas]
@@ -461,14 +471,15 @@ def evaluar_calibracion_usuario(
 
     compr_ids = set(compromiso_tx_ids or set())
     resultados_ciclos: list[dict[str, Any]] = []
+    ctx = data["ctx"]
 
     for inicio_k, fin_k in cerrados:
         fecha_corte_k = inicio_k - timedelta(days=1)
         txs_previas = [tx for tx in data["txs"] if tx.fecha <= fecha_corte_k and tx.moneda == moneda]
 
         # Consumo real del ciclo k
-        txs_k = [tx for tx in data["txs"] if inicio_k <= tx.fecha <= fin_k and tx.moneda == moneda and es_gasto_consumo(tx)]
-        gc = gasto_ciclo(txs_k, inicio_k, fin_k, fin_k, data["ipc"], moneda)
+        txs_k = [tx for tx in data["txs"] if inicio_k <= tx.fecha <= fin_k and tx.moneda == moneda and es_gasto(tx, ctx)]
+        gc = gasto_ciclo(txs_k, inicio_k, fin_k, fin_k, data["ipc"], moneda, ctx=ctx)
         y_real = gc.deflactado
         if y_real <= ZERO:
             continue
@@ -486,7 +497,7 @@ def evaluar_calibracion_usuario(
             *(c for c, _ in data["cuotas"] if not c.pagada and c.fecha_vencimiento >= inicio_k),
             *data["suscripciones"]
         ]
-        clasif_k = clasificar_gastos(txs_previas, anteriores_k, data["ipc"], inicio_k, comprometidos_ext)
+        clasif_k = clasificar_gastos(txs_previas, anteriores_k, data["ipc"], inicio_k, comprometidos_ext, ctx=ctx)
         compr_ids_k = {tx_id for s in clasif_k.streams if s.clase == "COMPROMISO" for tx_id in s.transacciones_ids}
         compr_ids_k.update(
             tx.id for tx in txs_previas
@@ -514,7 +525,7 @@ def evaluar_calibracion_usuario(
 
         vars_hist: list[Decimal] = []
         for cp_ini, cp_fin in ciclos_con_datos:
-            txs_c = [tx for tx in txs_previas if cp_ini <= tx.fecha <= cp_fin and es_gasto_consumo(tx)]
+            txs_c = [tx for tx in txs_previas if cp_ini <= tx.fecha <= cp_fin and es_gasto(tx, ctx)]
             txs_v = [tx for tx in txs_c if tx.id not in compr_ids_k]
             dias_c = Decimal((cp_fin - cp_ini).days + 1)
             t_base, tot_base, tot_shock = estimar_gasto_diario_basico_robusto(txs_v, dias_c, fin_k, data["ipc"], moneda)
@@ -646,7 +657,8 @@ def calcular_proyeccion_nueva(
         *(cuota for cuota, _ in data["cuotas"] if not cuota.pagada and cuota.fecha_vencimiento >= hoy),
         *data["suscripciones"],
     ]
-    clasificacion = clasificar_gastos(data["txs"], anteriores, data["ipc"], hoy, comprometidos_externos)
+    ctx = data["ctx"]
+    clasificacion = clasificar_gastos(data["txs"], anteriores, data["ipc"], hoy, comprometidos_externos, ctx=ctx)
     resultado: dict[str, Any] = {}
 
     # IDs de transacciones de compromisos
@@ -709,7 +721,7 @@ def calcular_proyeccion_nueva(
         # ----------------------------------------------------------------------
         txs_ciclo_actual = [
             tx for tx in data["txs"]
-            if inicio <= tx.fecha <= hoy and tx.moneda == moneda and es_gasto_consumo(tx)
+            if inicio <= tx.fecha <= hoy and tx.moneda == moneda and es_gasto(tx, ctx)
         ]
         txs_compr_ocurridas = [tx for tx in txs_ciclo_actual if tx.id in compromiso_tx_ids]
         recurrente_ya_ocurrido = sum((tx.monto for tx in txs_compr_ocurridas), ZERO)
@@ -737,7 +749,7 @@ def calcular_proyeccion_nueva(
         for cp_ini, cp_fin in ciclos_con_datos_moneda:
             txs_c = [
                 tx for tx in data["txs"]
-                if cp_ini <= tx.fecha <= cp_fin and tx.moneda == moneda and es_gasto_consumo(tx)
+                if cp_ini <= tx.fecha <= cp_fin and tx.moneda == moneda and es_gasto(tx, ctx)
             ]
             txs_v = [tx for tx in txs_c if tx.id not in compromiso_tx_ids]
             dias_c = Decimal((cp_fin - cp_ini).days + 1)
@@ -840,7 +852,7 @@ def calcular_proyeccion_nueva(
                         "rango_techo": float(monto),
                         "fuera_de_patron": False,
                     })
-                ingreso_actual = _suma_deflactada([tx for tx in data["txs"] if inicio <= tx.fecha <= hoy], data["ipc"], hoy, moneda, TipoTransaccion.INGRESO)
+                ingreso_actual = _suma_deflactada([tx for tx in data["txs"] if inicio <= tx.fecha <= hoy], data["ipc"], hoy, moneda, TipoTransaccion.INGRESO, ctx=data["ctx"])
                 resultado[moneda.value.lower()] = {
                     "periodo": {
                         "fecha_inicio": inicio.isoformat(),
@@ -997,7 +1009,7 @@ def calcular_proyeccion_nueva(
                         "fuera_de_patron": False,
                     })
 
-                ingreso_actual = _suma_deflactada([tx for tx in data["txs"] if inicio <= tx.fecha <= hoy], data["ipc"], hoy, moneda, TipoTransaccion.INGRESO)
+                ingreso_actual = _suma_deflactada([tx for tx in data["txs"] if inicio <= tx.fecha <= hoy], data["ipc"], hoy, moneda, TipoTransaccion.INGRESO, ctx=data["ctx"])
                 resultado[moneda.value.lower()] = {
                     "periodo": {
                         "fecha_inicio": inicio.isoformat(),
@@ -1331,6 +1343,7 @@ def proyectar_ingreso_ciclo(
             fecha_ciclo,
             Moneda.ARS,
             TipoTransaccion.INGRESO,
+            ctx=data["ctx"],
         )
         if valor > ZERO:
             ingresos_hist.append(valor)
@@ -1390,7 +1403,8 @@ def backtest_probabilistico_ciclo(
             Transaccion.fecha <= fin,
         )
     ).scalars().all()
-    gc_real = gasto_ciclo(txs_eval, inicio, fin, fin, ipc, Moneda.ARS)
+    ctx_eval = cargar_contexto(db, usuario.id, fin)
+    gc_real = gasto_ciclo(txs_eval, inicio, fin, fin, ipc, Moneda.ARS, ctx=ctx_eval)
     y_real = gc_real.deflactado
 
     # Correr la proyección probabilística evaluada para el ciclo completo con historial previo

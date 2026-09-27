@@ -9,6 +9,7 @@ import unicodedata
 
 from app.models.transaccion import EstadoVerificacionTransaccion, MetodoPago, TipoTransaccion
 from app.models.usuario import Moneda
+from app.services.definiciones_service import ContextoDefiniciones, es_gasto
 
 
 ZERO = Decimal("0")
@@ -288,68 +289,6 @@ def posicion_relativa(valor: Decimal | None, historia: Iterable[Decimal]) -> Dec
     return (Decimal(menores) + Decimal(iguales) / Decimal("2")) / Decimal(len(valores))
 
 
-def _es_confirmada(tx: Any) -> bool:
-    return tx.estado_verificacion in (None, EstadoVerificacionTransaccion.CONFIRMADA)
-
-
-def _nombre_categoria(tx: Any) -> str:
-    categoria = getattr(tx, "categoria", None)
-    return (getattr(categoria, "nombre", "") or "").strip().casefold()
-
-
-def _nombre_subcategoria(tx: Any) -> str:
-    subcategoria = getattr(tx, "subcategoria", None)
-    return (getattr(subcategoria, "nombre", "") or "").strip().casefold()
-
-
-def es_aporte_meta(tx: Any) -> bool:
-    if getattr(tx, "movimiento_meta_id", None) is not None:
-        return True
-    if _nombre_categoria(tx) in {"ahorro", "metas", "meta", "ahorros"}:
-        return True
-    desc = (getattr(tx, "descripcion", "") or "").casefold()
-    return "aporte a la meta" in desc or "aporte meta" in desc or "a la meta:" in desc
-
-
-def es_pago_resumen(tx: Any) -> bool:
-    if getattr(tx, "pago_resumen_vencimiento", None) is not None:
-        return True
-    desc = (getattr(tx, "descripcion", "") or "").casefold()
-    cat = _nombre_categoria(tx)
-    subcat = _nombre_subcategoria(tx)
-    if any(k in desc for k in ("pago resumen", "pago de resumen", "pago tarjeta", "pago de tarjeta", "pago resumen tarjeta", "tarjeta santiago", "tarjeta santi", "amex")):
-        return True
-    if "resumen" in desc:
-        return True
-    if cat == "banco" and (
-        "tarjeta" in subcat
-        or "préstamos" in subcat
-        or "prestamos" in subcat
-        or "tarjeta" in desc
-        or desc.strip() in ("", "(cuota 1/1)")
-    ):
-        return True
-    return False
-
-
-def es_transferencia(tx: Any) -> bool:
-    desc = (getattr(tx, "descripcion", "") or "").casefold()
-    if any(k in desc for k in ("compra usd", "compra dolares", "compra dólares", "dolares", "dólares", "tranf", "transf", "transferencia interna", "balanz")):
-        return True
-    return False
-
-
-def es_gasto_consumo(tx: Any) -> bool:
-    return (
-        tx.tipo == TipoTransaccion.EGRESO
-        and _es_confirmada(tx)
-        and not getattr(tx, "es_padre_cuotas", False)
-        and not es_aporte_meta(tx)
-        and not es_pago_resumen(tx)
-        and not es_transferencia(tx)
-    )
-
-
 def gasto_ciclo(
     transacciones: Iterable[Any],
     fecha_inicio: date,
@@ -357,13 +296,15 @@ def gasto_ciclo(
     fecha_destino: date,
     ipc_records: Iterable[Any],
     moneda: Moneda = Moneda.ARS,
+    *,
+    ctx: ContextoDefiniciones,
 ) -> GastoCiclo:
     """Devuelve el gasto elegible de un ciclo con la misma regla en todo el sistema."""
     filas = tuple(
         tx for tx in transacciones
         if fecha_inicio <= tx.fecha <= fecha_fin
         and tx.moneda == moneda
-        and es_gasto_consumo(tx)
+        and es_gasto(tx, ctx)
     )
     nominal = sum((tx.monto for tx in filas), ZERO)
     deflactado = ZERO
@@ -598,6 +539,8 @@ def clasificar_gastos(
     fecha_destino: date,
     recurrentes_declarados: Iterable[Any] = (),
     total_transacciones_usuario: int | None = None,
+    *,
+    ctx: ContextoDefiniciones,
 ) -> ClasificacionGasto:
     """Clasifica gastos mediante cascada de tres señales y categorización contractual.
 
@@ -611,9 +554,8 @@ def clasificar_gastos(
     total_txs = total_transacciones_usuario if total_transacciones_usuario is not None else len(txs_todos)
     txs = [
         tx for tx in txs_todos
-        if es_gasto_consumo(tx)
+        if es_gasto(tx, ctx)
         and not getattr(tx, "es_cuota_hija", False)
-        and not getattr(tx, "es_padre_cuotas", False)
     ]
     if not txs:
         return ClasificacionGasto(tuple(recurrentes_declarados), (), (), frozenset(), ())

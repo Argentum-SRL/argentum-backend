@@ -25,6 +25,7 @@ from app.models.grupo_cuotas import GrupoCuotas
 from app.models.historial_suscripcion import HistorialSuscripcion
 from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
 from app.services.tarjeta_service import calcular_resumen_actual
+from app.services.definiciones_service import condicion_gasto, condicion_ingreso
 
 def get_date_by_rule(rule: str, month: int, year: int) -> date:
     """Calcula la fecha exacta segun una regla (ej: ultimo_viernes, ultimo_dia_habil, dia_habil_4)."""
@@ -339,37 +340,8 @@ def get_dashboard_resumen(
     moneda_p = usuario.moneda_principal.value if usuario.moneda_principal else "ARS"
 
     # --- QUERY 1: Balances, Totales y Estadísticas Globales ---
-    cycle_actual_cond = and_(Transaccion.fecha >= fecha_inicio, Transaccion.fecha <= fecha_fin)
-    cycle_ant_cond = and_(Transaccion.fecha >= fecha_inicio_ant, Transaccion.fecha <= fecha_fin_ant)
-
-    res_stmt_where = and_(
-        Transaccion.usuario_id == usuario.id,
-        Transaccion.es_padre_cuotas == False,
-        Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
-        Transaccion.movimiento_meta_id.is_(None),
-        ~Transaccion.descripcion.ilike("Aporte a la meta:%"),
-        ~Transaccion.descripcion.ilike("Retiro de la meta:%"),
-        or_(Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA, Transaccion.estado_verificacion == None)
-    )
-    if billetera_ids:
-        res_stmt_where = and_(res_stmt_where, Transaccion.billetera_id.in_(billetera_ids))
-
-    res_stmt = select(
-        func.min(Transaccion.fecha).label("primera_tx"),
-        # ARS actual
-        func.sum(case((and_(cycle_actual_cond, Transaccion.moneda == Moneda.ARS, Transaccion.tipo == TipoTransaccion.INGRESO), Transaccion.monto), else_=0)).label("ing_actual_ars"),
-        func.sum(case((and_(cycle_actual_cond, Transaccion.moneda == Moneda.ARS, Transaccion.tipo == TipoTransaccion.EGRESO), Transaccion.monto), else_=0)).label("egr_actual_ars"),
-        # ARS anterior
-        func.sum(case((and_(cycle_ant_cond, Transaccion.moneda == Moneda.ARS, Transaccion.tipo == TipoTransaccion.INGRESO), Transaccion.monto), else_=0)).label("ing_ant_ars"),
-        func.sum(case((and_(cycle_ant_cond, Transaccion.moneda == Moneda.ARS, Transaccion.tipo == TipoTransaccion.EGRESO), Transaccion.monto), else_=0)).label("egr_ant_ars"),
-        # USD actual
-        func.sum(case((and_(cycle_actual_cond, Transaccion.moneda == Moneda.USD, Transaccion.tipo == TipoTransaccion.INGRESO), Transaccion.monto), else_=0)).label("ing_actual_usd"),
-        func.sum(case((and_(cycle_actual_cond, Transaccion.moneda == Moneda.USD, Transaccion.tipo == TipoTransaccion.EGRESO), Transaccion.monto), else_=0)).label("egr_actual_usd"),
-        # USD anterior
-        func.sum(case((and_(cycle_ant_cond, Transaccion.moneda == Moneda.USD, Transaccion.tipo == TipoTransaccion.INGRESO), Transaccion.monto), else_=0)).label("ing_ant_usd"),
-        func.sum(case((and_(cycle_ant_cond, Transaccion.moneda == Moneda.USD, Transaccion.tipo == TipoTransaccion.EGRESO), Transaccion.monto), else_=0)).label("egr_ant_usd")
-    ).where(res_stmt_where)
-    res = db.execute(res_stmt).one()
+    primera_tx = db.execute(select(func.min(Transaccion.fecha)).where(Transaccion.usuario_id == usuario.id)).scalar()
+    balance_res = calcular_balance_ciclo(db, usuario, fecha_desde_override=fecha_inicio, fecha_hasta_override=fecha_fin, billetera_ids=billetera_ids)
 
     # --- QUERY 2: Actividad Unificada (Movimientos + Pagos) ---
     latest_monto_sq = (
@@ -488,23 +460,7 @@ def get_dashboard_resumen(
     actividad = db.execute(m_stmt.union_all(s_stmt, c_stmt)).all()
 
     # --- Procesamiento de Resultados ---
-    # ARS
-    ing_actual_ars = res.ing_actual_ars or Decimal("0")
-    egr_actual_ars = res.egr_actual_ars or Decimal("0")
-    ing_ant_ars = res.ing_ant_ars or Decimal("0")
-    egr_ant_ars = res.egr_ant_ars or Decimal("0")
-    balance_ars = ing_actual_ars - egr_actual_ars
-    balance_ant_ars = ing_ant_ars - egr_ant_ars
-    variacion_ars = round(float(((balance_ars - balance_ant_ars) / abs(balance_ant_ars)) * 100), 1) if balance_ant_ars != 0 else None
-
-    # USD
-    ing_actual_usd = res.ing_actual_usd or Decimal("0")
-    egr_actual_usd = res.egr_actual_usd or Decimal("0")
-    ing_ant_usd = res.ing_ant_usd or Decimal("0")
-    egr_ant_usd = res.egr_ant_usd or Decimal("0")
-    balance_usd = ing_actual_usd - egr_actual_usd
-    balance_ant_usd = ing_ant_usd - egr_ant_usd
-    variacion_usd = round(float(((balance_usd - balance_ant_usd) / abs(balance_ant_usd)) * 100), 1) if balance_ant_usd != 0 else None
+    # Balance ya calculado por calcular_balance_ciclo con reglas canónicas
 
     movimientos_data = [{
         "id": r.id, "descripcion": r.nombre, "fecha": r.fecha.isoformat(), "monto": float(r.monto),
@@ -642,20 +598,11 @@ def get_dashboard_resumen(
     )
 
     # --- QUERY: Gastos Reales por Categoría en el Ciclo Actual ---
-    cat_where = and_(
-        Transaccion.usuario_id == usuario.id,
-        Transaccion.fecha >= fecha_inicio,
-        Transaccion.fecha <= fecha_fin,
-        Transaccion.tipo == TipoTransaccion.EGRESO,
-        Transaccion.es_padre_cuotas == False,
-        Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
-        Transaccion.movimiento_meta_id.is_(None),
-        ~Transaccion.descripcion.ilike("Aporte a la meta:%"),
-        ~Transaccion.descripcion.ilike("Retiro de la meta:%"),
-        or_(
-            Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
-            Transaccion.estado_verificacion == None
-        )
+    cat_where = condicion_gasto(
+        usuario_id=usuario.id,
+        desde=fecha_inicio,
+        hasta=min(fecha_fin, hoy),
+        hoy=hoy,
     )
     if billetera_ids:
         cat_where = and_(cat_where, Transaccion.billetera_id.in_(billetera_ids))
@@ -704,22 +651,9 @@ def get_dashboard_resumen(
     return {
         "periodo": {
             "fecha_inicio": fecha_inicio.isoformat(), "fecha_fin": fecha_fin.isoformat(),
-            "primera_transaccion": res.primera_tx.isoformat() if res.primera_tx else None
+            "primera_transaccion": primera_tx.isoformat() if primera_tx else None
         },
-        "balance": {
-            "ars": {
-                "ingresos": float(ing_actual_ars),
-                "egresos": float(egr_actual_ars),
-                "balance": float(balance_ars),
-                "variacion_vs_ciclo_anterior": variacion_ars
-            },
-            "usd": {
-                "ingresos": float(ing_actual_usd),
-                "egresos": float(egr_actual_usd),
-                "balance": float(balance_usd),
-                "variacion_vs_ciclo_anterior": variacion_usd
-            }
-        },
+        "balance": balance_res,
         "disponible_real": {
             "ars": {
                 "saldo_billeteras": float(disp_ctx["ars"]["total_billeteras"]),
@@ -755,46 +689,47 @@ def calcular_balance_ciclo(
     hoy = hoy_argentina()
     fecha_inicio, fecha_fin = (fecha_desde_override, fecha_hasta_override) if (fecha_desde_override and fecha_hasta_override) else get_ciclo_fechas(usuario, hoy)
     fecha_inicio_ant, fecha_fin_ant = get_ciclo_fechas(usuario, fecha_inicio - timedelta(days=1))
-    cycle_actual_cond = and_(Transaccion.fecha >= fecha_inicio, Transaccion.fecha <= fecha_fin)
-    cycle_ant_cond = and_(Transaccion.fecha >= fecha_inicio_ant, Transaccion.fecha <= fecha_fin_ant)
-    res_stmt_where = and_(
-        Transaccion.usuario_id == usuario.id,
-        Transaccion.es_padre_cuotas == False,
-        Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
-        Transaccion.movimiento_meta_id.is_(None),
-        ~Transaccion.descripcion.ilike("Aporte a la meta:%"),
-        ~Transaccion.descripcion.ilike("Retiro de la meta:%"),
-        or_(Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA, Transaccion.estado_verificacion == None)
-    )
+    hasta_act = min(fecha_fin, hoy)
+    hasta_ant = min(fecha_fin_ant, hoy)
+
+    cond_g_act = [condicion_gasto(usuario.id, desde=fecha_inicio, hasta=hasta_act, hoy=hoy)]
+    cond_i_act = [condicion_ingreso(usuario.id, desde=fecha_inicio, hasta=hasta_act, hoy=hoy)]
+    cond_g_ant = [condicion_gasto(usuario.id, desde=fecha_inicio_ant, hasta=hasta_ant, hoy=hoy)]
+    cond_i_ant = [condicion_ingreso(usuario.id, desde=fecha_inicio_ant, hasta=hasta_ant, hoy=hoy)]
+
     if billetera_ids:
-        res_stmt_where = and_(res_stmt_where, Transaccion.billetera_id.in_(billetera_ids))
-    res_stmt = select(
-        func.min(Transaccion.fecha).label("primera_tx"),
-        # ARS actual
-        func.sum(case((and_(cycle_actual_cond, Transaccion.moneda == Moneda.ARS, Transaccion.tipo == TipoTransaccion.INGRESO), Transaccion.monto), else_=0)).label("ing_actual_ars"),
-        func.sum(case((and_(cycle_actual_cond, Transaccion.moneda == Moneda.ARS, Transaccion.tipo == TipoTransaccion.EGRESO), Transaccion.monto), else_=0)).label("egr_actual_ars"),
-        # ARS anterior
-        func.sum(case((and_(cycle_ant_cond, Transaccion.moneda == Moneda.ARS, Transaccion.tipo == TipoTransaccion.INGRESO), Transaccion.monto), else_=0)).label("ing_ant_ars"),
-        func.sum(case((and_(cycle_ant_cond, Transaccion.moneda == Moneda.ARS, Transaccion.tipo == TipoTransaccion.EGRESO), Transaccion.monto), else_=0)).label("egr_ant_ars"),
-        # USD actual
-        func.sum(case((and_(cycle_actual_cond, Transaccion.moneda == Moneda.USD, Transaccion.tipo == TipoTransaccion.INGRESO), Transaccion.monto), else_=0)).label("ing_actual_usd"),
-        func.sum(case((and_(cycle_actual_cond, Transaccion.moneda == Moneda.USD, Transaccion.tipo == TipoTransaccion.EGRESO), Transaccion.monto), else_=0)).label("egr_actual_usd"),
-        # USD anterior
-        func.sum(case((and_(cycle_ant_cond, Transaccion.moneda == Moneda.USD, Transaccion.tipo == TipoTransaccion.INGRESO), Transaccion.monto), else_=0)).label("ing_ant_usd"),
-        func.sum(case((and_(cycle_ant_cond, Transaccion.moneda == Moneda.USD, Transaccion.tipo == TipoTransaccion.EGRESO), Transaccion.monto), else_=0)).label("egr_ant_usd")
-    ).where(res_stmt_where)
-    res = db.execute(res_stmt).one()
-    ing_actual_ars = res.ing_actual_ars or Decimal("0")
-    egr_actual_ars = res.egr_actual_ars or Decimal("0")
-    ing_ant_ars = res.ing_ant_ars or Decimal("0")
-    egr_ant_ars = res.egr_ant_ars or Decimal("0")
+        cond_g_act.append(Transaccion.billetera_id.in_(billetera_ids))
+        cond_i_act.append(Transaccion.billetera_id.in_(billetera_ids))
+        cond_g_ant.append(Transaccion.billetera_id.in_(billetera_ids))
+        cond_i_ant.append(Transaccion.billetera_id.in_(billetera_ids))
+
+    def _sumas(conds):
+        rows = db.execute(
+            select(Transaccion.moneda, func.coalesce(func.sum(Transaccion.monto), 0))
+            .where(and_(*conds))
+            .group_by(Transaccion.moneda)
+        ).all()
+        return {r[0]: Decimal(str(r[1])) for r in rows}
+
+    g_act = _sumas(cond_g_act)
+    i_act = _sumas(cond_i_act)
+    g_ant = _sumas(cond_g_ant)
+    i_ant = _sumas(cond_i_ant)
+
+    egr_actual_ars = g_act.get(Moneda.ARS, g_act.get("ARS", Decimal("0")))
+    ing_actual_ars = i_act.get(Moneda.ARS, i_act.get("ARS", Decimal("0")))
+    egr_ant_ars = g_ant.get(Moneda.ARS, g_ant.get("ARS", Decimal("0")))
+    ing_ant_ars = i_ant.get(Moneda.ARS, i_ant.get("ARS", Decimal("0")))
+
+    egr_actual_usd = g_act.get(Moneda.USD, g_act.get("USD", Decimal("0")))
+    ing_actual_usd = i_act.get(Moneda.USD, i_act.get("USD", Decimal("0")))
+    egr_ant_usd = g_ant.get(Moneda.USD, g_ant.get("USD", Decimal("0")))
+    ing_ant_usd = i_ant.get(Moneda.USD, i_ant.get("USD", Decimal("0")))
+
     balance_ars = ing_actual_ars - egr_actual_ars
     balance_ant_ars = ing_ant_ars - egr_ant_ars
     variacion_ars = round(float(((balance_ars - balance_ant_ars) / abs(balance_ant_ars)) * 100), 1) if balance_ant_ars != 0 else None
-    ing_actual_usd = res.ing_actual_usd or Decimal("0")
-    egr_actual_usd = res.egr_actual_usd or Decimal("0")
-    ing_ant_usd = res.ing_ant_usd or Decimal("0")
-    egr_ant_usd = res.egr_ant_usd or Decimal("0")
+
     balance_usd = ing_actual_usd - egr_actual_usd
     balance_ant_usd = ing_ant_usd - egr_ant_usd
     variacion_usd = round(float(((balance_usd - balance_ant_usd) / abs(balance_ant_usd)) * 100), 1) if balance_ant_usd != 0 else None
@@ -925,20 +860,8 @@ def get_subcategorias_gasto(
 
     # 2. Agrupar gastos de transacciones por subcategoria_id en el ciclo actual
     tx_where = and_(
-        Transaccion.usuario_id == usuario.id,
-        Transaccion.categoria_id == cat_uuid,
-        Transaccion.fecha >= fecha_inicio,
-        Transaccion.fecha <= fecha_fin,
-        Transaccion.tipo == TipoTransaccion.EGRESO,
-        Transaccion.es_padre_cuotas == False,
-        Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
-        Transaccion.movimiento_meta_id.is_(None),
-        ~Transaccion.descripcion.ilike("Aporte a la meta:%"),
-        ~Transaccion.descripcion.ilike("Retiro de la meta:%"),
-        or_(
-            Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
-            Transaccion.estado_verificacion == None
-        )
+        condicion_gasto(usuario.id, desde=fecha_inicio, hasta=min(fecha_fin, hoy), hoy=hoy),
+        Transaccion.categoria_id == cat_uuid
     )
     if billetera_ids:
         tx_where = and_(tx_where, Transaccion.billetera_id.in_(billetera_ids))

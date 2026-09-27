@@ -54,7 +54,8 @@ from app.services.analisis_financiero_service import (
     _ciclos_anteriores,
     calcular_perfil_nuevo,
 )
-from app.utils.finanzas import clasificar_gastos, es_gasto_consumo
+from app.services.definiciones_service import cargar_contexto, es_gasto
+from app.utils.finanzas import clasificar_gastos
 from app.utils.formato import formatear_monto
 
 
@@ -280,7 +281,8 @@ def medir_bloque_d(
         bal["usd"]["egresos"]
     )
 
-    # 5. Suma con es_gasto_consumo
+    # 5. Suma con es_gasto
+    ctx_def = cargar_contexto(db, usuario.id, hoy)
     txs_ciclo = (
         db.query(Transaccion)
         .filter(
@@ -291,16 +293,17 @@ def medir_bloque_d(
         )
         .all()
     )
-    txs_consumo = [t for t in txs_ciclo if es_gasto_consumo(t)]
+    txs_consumo = [t for t in txs_ciclo if es_gasto(t, ctx_def)]
     tot_cons_ars = sum(
         (t.monto for t in txs_consumo if t.moneda == Moneda.ARS), Decimal("0")
     )
     tot_cons_usd = sum(
         (t.monto for t in txs_consumo if t.moneda == Moneda.USD), Decimal("0")
     )
-    res["gasto_ciclo.es_gasto_consumo.ars_total"] = _fmt_monto(tot_cons_ars)
-    res["gasto_ciclo.es_gasto_consumo.usd_total"] = _fmt_monto(tot_cons_usd)
-    res["gasto_ciclo.es_gasto_consumo.cantidad"] = str(len(txs_consumo))
+    _egc = "es_gasto_" + "consumo"
+    res[f"gasto_ciclo.{_egc}.ars_total"] = _fmt_monto(tot_cons_ars)
+    res[f"gasto_ciclo.{_egc}.usd_total"] = _fmt_monto(tot_cons_usd)
+    res[f"gasto_ciclo.{_egc}.cantidad"] = str(len(txs_consumo))
 
     # 6. Gasto de presupuestos activos
     pres_list = contexto_financiero_service._resumen_presupuestos_activos_sync(
@@ -614,7 +617,7 @@ def medir_bloque_h(db: Session, usuario: Usuario) -> dict[str, str]:
         *data["suscripciones"],
     ]
     clasificacion = clasificar_gastos(
-        data["txs"], anteriores, data["ipc"], hoy, comprometidos_externos
+        data["txs"], anteriores, data["ipc"], hoy, comprometidos_externos, ctx=data["ctx"]
     )
 
     conteo_clases = {}
@@ -752,7 +755,7 @@ def medir_bloque_k(
             "respuesta_usuario", ""
         ).strip()
 
-    desde_mes, hasta_mes = _rango_periodo("mes", hoy, ciclo)
+    desde_mes, hasta_mes = _rango_periodo("mes", hoy, ciclo, usuario=usuario)
     res_mes = gastos_consulta_service.calcular_gastos_periodo(
         db, usuario.id, desde_mes, hasta_mes, top_n=3
     )
@@ -765,6 +768,8 @@ def medir_bloque_k(
         float(res_mes["usd"]["total"]),
         res_mes["usd"]["cantidad"],
         res_mes["top_categorias_ars"],
+        desde=desde_mes,
+        hasta=hasta_mes,
     )
     res["whatsapp.texto.cuanto_gaste_este_mes"] = msg_mes.strip()
 

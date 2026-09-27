@@ -44,9 +44,8 @@ def obtener_transacciones(
     busqueda: Optional[str] = None,
     es_cuota_hija: Optional[bool] = None
 ):
-    # El usuario solo ve transacciones normales e hijas. Nunca las "padre de cuotas".
-    # Las transacciones pagadas con crédito (compras en 1 pago o cuotas) se excluyen de la lista general
-    # para evitar duplicaciones; solo se cuenta el pago consolidado del resumen (que se registra como debito).
+    # El usuario ve transacciones normales e hijas (y compras con tarjeta en 1 pago que se registran como padre de 1 cuota).
+    # Las compras en múltiples cuotas muestran cada cuota individual en su vencimiento; el pago de resumen se excluye de gastos de consumo.
     query = select(Transaccion).where(
         Transaccion.usuario_id == usuario_id,
         Transaccion.es_padre_cuotas == False,
@@ -867,27 +866,21 @@ def evaluar_gasto_inusual(db: Session, usuario_id: UUID, transaccion: Transaccio
     Utiliza tres niveles de sensibilidad según el volumen de historial de la categoría.
     """
     from app.models.usuario import Moneda
-    if transaccion.categoria_id is None or transaccion.tipo != TipoTransaccion.EGRESO or transaccion.movimiento_meta_id is not None:
+    from app.services.definiciones_service import cargar_contexto, es_gasto, condicion_gasto
+    from app.utils.fecha import hoy_argentina
+
+    hoy = hoy_argentina()
+    ctx = cargar_contexto(db, usuario_id, hoy)
+    if not es_gasto(transaccion, ctx) or transaccion.categoria_id is None:
         return
 
     # 1. Obtener historial de transacciones de egreso en la misma categoría y moneda
-    # Excluyendo transacciones pendientes, aportes a metas y la transacción actual evaluada
     stmt = (
         select(Transaccion)
         .where(
-            and_(
-                Transaccion.usuario_id == usuario_id,
-                Transaccion.categoria_id == transaccion.categoria_id,
-                Transaccion.tipo == TipoTransaccion.EGRESO,
-                Transaccion.moneda == transaccion.moneda,
-                Transaccion.es_padre_cuotas == False,
-                Transaccion.movimiento_meta_id.is_(None),
-                or_(
-                    Transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE,
-                    Transaccion.estado_verificacion.is_(None)
-                ),
-                Transaccion.id != transaccion.id
-            )
+            condicion_gasto(usuario_id, moneda=transaccion.moneda, hoy=hoy),
+            Transaccion.categoria_id == transaccion.categoria_id,
+            Transaccion.id != transaccion.id
         )
     )
     historial = db.execute(stmt).scalars().all()

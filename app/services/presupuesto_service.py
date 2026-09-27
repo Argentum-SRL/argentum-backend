@@ -16,7 +16,7 @@ from app.models.categoria import Categoria, TipoCategoria
 from app.models.subcategoria import Subcategoria
 from app.models.notificacion import TipoNotificacion, NivelNotificacion
 from app.models.usuario import Usuario, Moneda
-from app.schemas.presupuesto import PresupuestoCreate, PresupuestoUpdate
+from app.services.definiciones_service import condicion_gasto
 from app.services.whatsapp_service import enviar_whatsapp_template, enviar_whatsapp
 from app.utils.fecha import hoy_argentina
 
@@ -166,22 +166,15 @@ def calcular_gasto_en_periodo(
         presu_moneda_str = moneda_enum.value if hasattr(moneda_enum, "value") else str(moneda_enum)
 
     # 1. Consultar transacciones en TODAS las monedas en una única consulta
+    hoy = hoy_argentina()
+    cond = condicion_gasto(usuario_id, desde=fecha_inicio, hasta=fecha_fin, hoy=hoy)
     query = select(
         Transaccion.monto,
         Transaccion.moneda,
         Transaccion.fecha,
         Transaccion.cotizacion_aplicada
     ).where(
-        Transaccion.usuario_id == usuario_id,
-        Transaccion.tipo == TipoTransaccion.EGRESO,
-        Transaccion.movimiento_meta_id.is_(None),
-        or_(
-            Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
-            Transaccion.estado_verificacion == None
-        ),
-        Transaccion.es_padre_cuotas == False,
-        Transaccion.fecha >= fecha_inicio,
-        Transaccion.fecha <= fecha_fin,
+        cond,
         or_(*conditions)
     )
     

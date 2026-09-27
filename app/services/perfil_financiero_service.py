@@ -21,6 +21,7 @@ from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificac
 from app.models.cuota import Cuota
 from app.models.grupo_cuotas import GrupoCuotas
 from app.services.dashboard_service import get_ciclo_fechas
+from app.services.definiciones_service import condicion_gasto, condicion_ingreso
 from app.utils.fecha import hoy_argentina
 
 logger = logging.getLogger(__name__)
@@ -58,33 +59,21 @@ def _validar_historial_minimo(db: Session, usuario_id: UUID, moneda: Moneda | No
 def _calcular_tasa_ahorro_sync_moneda(db: Session, usuario_id: UUID, fecha_inicio: date, moneda: Moneda) -> Decimal | None:
     hoy = hoy_argentina()
 
-    txs = db.execute(
-        select(Transaccion)
-        .where(
-            Transaccion.usuario_id == usuario_id,
-            Transaccion.moneda == moneda,
-            Transaccion.movimiento_meta_id.is_(None),
-            or_(
-                Transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE,
-                Transaccion.estado_verificacion.is_(None)
-            ),
-            Transaccion.es_padre_cuotas == False,
-            Transaccion.pago_resumen_vencimiento.is_(None),
-            Transaccion.fecha >= fecha_inicio,
-            Transaccion.fecha <= hoy
-        )
-    ).scalars().all()
+    cond_gas = condicion_gasto(usuario_id, desde=fecha_inicio, hasta=hoy, moneda=moneda, hoy=hoy)
+    cond_ing = condicion_ingreso(usuario_id, desde=fecha_inicio, hasta=hoy, moneda=moneda, hoy=hoy)
 
-    total_ingresos = Decimal("0")
-    total_gastos = Decimal("0")
-    tiene_ingreso = False
+    total_gastos = db.scalar(
+        select(func.coalesce(func.sum(Transaccion.monto), Decimal("0"))).where(cond_gas)
+    ) or Decimal("0")
 
-    for tx in txs:
-        if tx.tipo == TipoTransaccion.INGRESO:
-            total_ingresos += tx.monto
-            tiene_ingreso = True
-        elif tx.tipo == TipoTransaccion.EGRESO:
-            total_gastos += tx.monto
+    ing_res = db.execute(
+        select(
+            func.coalesce(func.sum(Transaccion.monto), Decimal("0")),
+            func.count(Transaccion.id)
+        ).where(cond_ing)
+    ).one()
+    total_ingresos = ing_res[0] or Decimal("0")
+    tiene_ingreso = ing_res[1] > 0
 
     # Restricción: tasa_ahorro requiere al menos 1 ingreso en el período
     if not tiene_ingreso or total_ingresos <= 0:
@@ -123,31 +112,16 @@ def _calcular_ratio_cuotas_sync_moneda(db: Session, usuario_id: UUID, fecha_inic
         suma_cuotas += monto
 
     # Calcular promedios mensuales desde fecha_inicio para la moneda dada
-    txs = db.execute(
-        select(Transaccion)
-        .where(
-            Transaccion.usuario_id == usuario_id,
-            Transaccion.moneda == moneda,
-            Transaccion.movimiento_meta_id.is_(None),
-            or_(
-                Transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE,
-                Transaccion.estado_verificacion.is_(None)
-            ),
-            Transaccion.es_padre_cuotas == False,
-            Transaccion.pago_resumen_vencimiento.is_(None),
-            Transaccion.fecha >= fecha_inicio,
-            Transaccion.fecha <= hoy
-        )
-    ).scalars().all()
+    cond_gas = condicion_gasto(usuario_id, desde=fecha_inicio, hasta=hoy, moneda=moneda, hoy=hoy)
+    cond_ing = condicion_ingreso(usuario_id, desde=fecha_inicio, hasta=hoy, moneda=moneda, hoy=hoy)
 
-    total_ingresos = Decimal("0")
-    total_gastos = Decimal("0")
+    total_gastos = db.scalar(
+        select(func.coalesce(func.sum(Transaccion.monto), Decimal("0"))).where(cond_gas)
+    ) or Decimal("0")
 
-    for tx in txs:
-        if tx.tipo == TipoTransaccion.INGRESO:
-            total_ingresos += tx.monto
-        elif tx.tipo == TipoTransaccion.EGRESO:
-            total_gastos += tx.monto
+    total_ingresos = db.scalar(
+        select(func.coalesce(func.sum(Transaccion.monto), Decimal("0"))).where(cond_ing)
+    ) or Decimal("0")
 
     cant_meses = Decimal(str(max(1.0, (hoy - fecha_inicio).days / 30.0)))
     ingreso_promedio_mensual = total_ingresos / cant_meses

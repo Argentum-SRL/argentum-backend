@@ -11,6 +11,7 @@ from app.services import notificacion_whatsapp_service as wpp_svc
 from app.utils.fecha import ahora_argentina, hoy_argentina
 from app.utils.formato import formatear_monto
 from app.core.job_lock import intentar_tomar_lock_job, liberar_lock_job
+from app.services.definiciones_service import condicion_gasto, condicion_ingreso
 
 logger = logging.getLogger(__name__)
 struct_logger = structlog.get_logger(__name__)
@@ -578,6 +579,7 @@ def _job_resumen_cierre_ciclo(db_session_factory):
         from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion
         from app.models.categoria import Categoria
         from app.services.dashboard_service import get_ciclo_fechas
+        from app.services.definiciones_service import condicion_gasto, condicion_ingreso
         from sqlalchemy import func
 
         hoy = hoy_argentina()
@@ -620,43 +622,19 @@ def _job_resumen_cierre_ciclo(db_session_factory):
 
                 # Calcular totales del ciclo cerrado separados por moneda
                 ingresos_ars = float(db.query(func.sum(Transaccion.monto)).filter(
-                    Transaccion.usuario_id == usuario.id,
-                    Transaccion.tipo == TipoTransaccion.INGRESO,
-                    Transaccion.moneda == Moneda.ARS,
-                    Transaccion.fecha >= fecha_inicio,
-                    Transaccion.fecha <= fecha_fin,
-                    Transaccion.es_padre_cuotas == False,
-                    Transaccion.movimiento_meta_id.is_(None),
+                    condicion_ingreso(usuario.id, desde=fecha_inicio, hasta=fecha_fin, moneda=Moneda.ARS, hoy=hoy),
                 ).scalar() or 0)
 
                 egresos_ars = float(db.query(func.sum(Transaccion.monto)).filter(
-                    Transaccion.usuario_id == usuario.id,
-                    Transaccion.tipo == TipoTransaccion.EGRESO,
-                    Transaccion.moneda == Moneda.ARS,
-                    Transaccion.fecha >= fecha_inicio,
-                    Transaccion.fecha <= fecha_fin,
-                    Transaccion.es_padre_cuotas == False,
-                    Transaccion.movimiento_meta_id.is_(None),
+                    condicion_gasto(usuario.id, desde=fecha_inicio, hasta=fecha_fin, moneda=Moneda.ARS, hoy=hoy),
                 ).scalar() or 0)
 
                 ingresos_usd = float(db.query(func.sum(Transaccion.monto)).filter(
-                    Transaccion.usuario_id == usuario.id,
-                    Transaccion.tipo == TipoTransaccion.INGRESO,
-                    Transaccion.moneda == Moneda.USD,
-                    Transaccion.fecha >= fecha_inicio,
-                    Transaccion.fecha <= fecha_fin,
-                    Transaccion.es_padre_cuotas == False,
-                    Transaccion.movimiento_meta_id.is_(None),
+                    condicion_ingreso(usuario.id, desde=fecha_inicio, hasta=fecha_fin, moneda=Moneda.USD, hoy=hoy),
                 ).scalar() or 0)
 
                 egresos_usd = float(db.query(func.sum(Transaccion.monto)).filter(
-                    Transaccion.usuario_id == usuario.id,
-                    Transaccion.tipo == TipoTransaccion.EGRESO,
-                    Transaccion.moneda == Moneda.USD,
-                    Transaccion.fecha >= fecha_inicio,
-                    Transaccion.fecha <= fecha_fin,
-                    Transaccion.es_padre_cuotas == False,
-                    Transaccion.movimiento_meta_id.is_(None),
+                    condicion_gasto(usuario.id, desde=fecha_inicio, hasta=fecha_fin, moneda=Moneda.USD, hoy=hoy),
                 ).scalar() or 0)
 
                 hay_ars = (ingresos_ars > 0 or egresos_ars > 0)
@@ -675,13 +653,7 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                     Categoria.nombre,
                     func.sum(Transaccion.monto).label("total")
                 ).join(Transaccion, Transaccion.categoria_id == Categoria.id).filter(
-                    Transaccion.usuario_id == usuario.id,
-                    Transaccion.tipo == TipoTransaccion.EGRESO,
-                    Transaccion.moneda == moneda_top,
-                    Transaccion.fecha >= fecha_inicio,
-                    Transaccion.fecha <= fecha_fin,
-                    Transaccion.es_padre_cuotas == False,
-                    Transaccion.movimiento_meta_id.is_(None),
+                    condicion_gasto(usuario.id, desde=fecha_inicio, hasta=fecha_fin, moneda=moneda_top, hoy=hoy),
                 ).group_by(Categoria.nombre).order_by(func.sum(Transaccion.monto).desc()).first()
 
                 # Gastos hormiga: categorías con muchas transacciones de monto bajo
@@ -691,13 +663,7 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                     func.count(Transaccion.id).label("cantidad"),
                     func.sum(Transaccion.monto).label("total")
                 ).join(Transaccion, Transaccion.categoria_id == Categoria.id).filter(
-                    Transaccion.usuario_id == usuario.id,
-                    Transaccion.tipo == TipoTransaccion.EGRESO,
-                    Transaccion.moneda == moneda_top,
-                    Transaccion.fecha >= fecha_inicio,
-                    Transaccion.fecha <= fecha_fin,
-                    Transaccion.es_padre_cuotas == False,
-                    Transaccion.movimiento_meta_id.is_(None),
+                    condicion_gasto(usuario.id, desde=fecha_inicio, hasta=fecha_fin, moneda=moneda_top, hoy=hoy),
                 ).group_by(Categoria.nombre).having(
                     func.count(Transaccion.id) >= hormiga_threshold
                 ).order_by(func.count(Transaccion.id).desc()).limit(3).all()
@@ -835,51 +801,28 @@ def _job_resumen_semanal(db_session_factory):
                     continue  # si el usuario desactivó el resumen, saltar
                 
                 # Calcular egresos e ingresos de la semana anterior separados por moneda
+                hoy = hoy_argentina()
                 egresos_ars = float(db.execute(
                     select(sa_func.sum(Transaccion.monto)).where(
-                        Transaccion.usuario_id == usuario.id,
-                        Transaccion.tipo == TipoTransaccion.EGRESO,
-                        Transaccion.moneda == Moneda.ARS,
-                        Transaccion.fecha >= lunes_pasado,
-                        Transaccion.fecha <= domingo_pasado,
-                        Transaccion.es_padre_cuotas == False,
-                        Transaccion.movimiento_meta_id.is_(None),
+                        condicion_gasto(usuario.id, desde=lunes_pasado, hasta=domingo_pasado, moneda=Moneda.ARS, hoy=hoy)
                     )
                 ).scalar() or 0)
 
                 ingresos_ars = float(db.execute(
                     select(sa_func.sum(Transaccion.monto)).where(
-                        Transaccion.usuario_id == usuario.id,
-                        Transaccion.tipo == TipoTransaccion.INGRESO,
-                        Transaccion.moneda == Moneda.ARS,
-                        Transaccion.fecha >= lunes_pasado,
-                        Transaccion.fecha <= domingo_pasado,
-                        Transaccion.es_padre_cuotas == False,
-                        Transaccion.movimiento_meta_id.is_(None),
+                        condicion_ingreso(usuario.id, desde=lunes_pasado, hasta=domingo_pasado, moneda=Moneda.ARS, hoy=hoy)
                     )
                 ).scalar() or 0)
 
                 egresos_usd = float(db.execute(
                     select(sa_func.sum(Transaccion.monto)).where(
-                        Transaccion.usuario_id == usuario.id,
-                        Transaccion.tipo == TipoTransaccion.EGRESO,
-                        Transaccion.moneda == Moneda.USD,
-                        Transaccion.fecha >= lunes_pasado,
-                        Transaccion.fecha <= domingo_pasado,
-                        Transaccion.es_padre_cuotas == False,
-                        Transaccion.movimiento_meta_id.is_(None),
+                        condicion_gasto(usuario.id, desde=lunes_pasado, hasta=domingo_pasado, moneda=Moneda.USD, hoy=hoy)
                     )
                 ).scalar() or 0)
 
                 ingresos_usd = float(db.execute(
                     select(sa_func.sum(Transaccion.monto)).where(
-                        Transaccion.usuario_id == usuario.id,
-                        Transaccion.tipo == TipoTransaccion.INGRESO,
-                        Transaccion.moneda == Moneda.USD,
-                        Transaccion.fecha >= lunes_pasado,
-                        Transaccion.fecha <= domingo_pasado,
-                        Transaccion.es_padre_cuotas == False,
-                        Transaccion.movimiento_meta_id.is_(None),
+                        condicion_ingreso(usuario.id, desde=lunes_pasado, hasta=domingo_pasado, moneda=Moneda.USD, hoy=hoy)
                     )
                 ).scalar() or 0)
 
@@ -897,14 +840,8 @@ def _job_resumen_semanal(db_session_factory):
                     select(Categoria.nombre, sa_func.sum(Transaccion.monto).label("total"))
                     .join(Categoria, Transaccion.categoria_id == Categoria.id)
                     .where(
-                        Transaccion.usuario_id == usuario.id,
-                        Transaccion.tipo == TipoTransaccion.EGRESO,
-                        Transaccion.moneda == moneda_top,
-                        Transaccion.fecha >= lunes_pasado,
-                        Transaccion.fecha <= domingo_pasado,
+                        condicion_gasto(usuario.id, desde=lunes_pasado, hasta=domingo_pasado, moneda=moneda_top, hoy=hoy),
                         Transaccion.categoria_id.isnot(None),
-                        Transaccion.es_padre_cuotas == False,
-                        Transaccion.movimiento_meta_id.is_(None),
                     )
                     .group_by(Categoria.nombre)
                     .order_by(sa_func.sum(Transaccion.monto).desc())

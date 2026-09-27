@@ -10,6 +10,7 @@ from app.schemas.tools import InstallmentConvenienceRequest
 from app.models.usuario import Usuario, Moneda
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion, MetodoPago
 from app.services.dashboard_service import get_ciclo_fechas
+from app.services.definiciones_service import condicion_gasto, condicion_ingreso
 from app.utils.fecha import hoy_argentina
 
 
@@ -455,21 +456,15 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
         divisor = 1
 
     # Incomes in range
+    cond_ing = condicion_ingreso(user_id, start_range, end_range, hoy=hoy)
     ingresos_total = db.query(func.sum(Transaccion.monto)).filter(
-        Transaccion.usuario_id == user_id,
-        Transaccion.tipo == TipoTransaccion.INGRESO,
-        Transaccion.moneda == Moneda.ARS,
-        Transaccion.movimiento_meta_id.is_(None),
-        or_(Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA, Transaccion.estado_verificacion == None),
-        Transaccion.fecha >= start_range,
-        Transaccion.fecha <= end_range
+        cond_ing,
+        Transaccion.moneda == Moneda.ARS
     ).scalar()
 
     tiene_ingresos_any = db.query(Transaccion.id).filter(
-        Transaccion.usuario_id == user_id,
-        Transaccion.tipo == TipoTransaccion.INGRESO,
-        Transaccion.moneda == Moneda.ARS,
-        Transaccion.movimiento_meta_id.is_(None)
+        condicion_ingreso(user_id, hoy=hoy),
+        Transaccion.moneda == Moneda.ARS
     ).first() is not None
 
     if not tiene_ingresos_any:
@@ -479,19 +474,10 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
         ingreso_promedio_mensual = float(ingresos_sum / Decimal(str(divisor)))
 
     # 4. Gasto promedio mensual variable
-    # Gasto total variable en el mismo rango de ciclos
-    # Excluyendo cuotas (installment parents: Transaccion.es_padre_cuotas == False)
-    # y transferencias (que ya están fuera de Transaccion table, pero excluyendo egresos en tarjeta de crédito MetodoPago.CREDITO)
+    cond_gas = condicion_gasto(user_id, start_range, end_range, hoy=hoy)
     gastos_total = db.query(func.sum(Transaccion.monto)).filter(
-        Transaccion.usuario_id == user_id,
-        Transaccion.tipo == TipoTransaccion.EGRESO,
-        Transaccion.moneda == Moneda.ARS,
-        Transaccion.es_padre_cuotas == False,
-        Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
-        Transaccion.movimiento_meta_id.is_(None),
-        or_(Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA, Transaccion.estado_verificacion == None),
-        Transaccion.fecha >= start_range,
-        Transaccion.fecha <= end_range
+        cond_gas,
+        Transaccion.moneda == Moneda.ARS
     ).scalar() or Decimal("0")
 
     gasto_promedio_variable = float(gastos_total / Decimal(str(divisor)))
