@@ -16,6 +16,7 @@ from app.models.categoria import Categoria, TipoCategoria
 from app.models.subcategoria import Subcategoria
 from app.models.notificacion import TipoNotificacion, NivelNotificacion
 from app.models.usuario import Usuario, Moneda
+from app.schemas.presupuesto import PresupuestoCreate, PresupuestoUpdate
 from app.services.definiciones_service import condicion_gasto
 from app.services.whatsapp_service import enviar_whatsapp_template, enviar_whatsapp
 from app.utils.fecha import hoy_argentina

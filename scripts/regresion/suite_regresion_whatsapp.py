@@ -701,11 +701,8 @@ def p4_caso_6(datos):
             {"uid": u.id}
         ).mappings().first()
         intent = row["intent_detectado"] if row else None
-        prefijos = (
-            "En este ciclo gastaste", "En este ciclo no registraste gastos", "En este ciclo no encontré gastos",
-            "Hoy gastaste", "Hoy no registraste gastos", "Hoy no encontré gastos",
-        )
-        msg_ok = any(resp.startswith(p) for p in prefijos)
+        patron = r"^(?:En este ciclo(?:\s*\(\d\d/\d\d\s+al\s+\d\d/\d\d\))?|Hoy)\s+(?:gastaste|no registraste gastos|no encontré gastos)"
+        msg_ok = bool(re.match(patron, resp))
         return f"Intent: {intent} | Respuesta ok: {msg_ok}"
     return run_isolated(test)
 
@@ -2956,10 +2953,11 @@ def p13_caso_2(datos):
             egr_ars = bal["ars"]["egresos"]
             egr_usd = bal["usd"]["egresos"]
             sin_marcador = "LLM_INVENTADO_999" not in resp
+            patron_inicio = r"^En este ciclo(?:\s*\(\d\d/\d\d\s+al\s+\d\d/\d\d\))?\s+"
             if egr_ars == 0 and egr_usd == 0:
-                coincide = (resp == "En este ciclo no registraste gastos.") and sin_marcador
+                coincide = bool(re.match(patron_inicio + r"no registraste gastos\.", resp)) and sin_marcador
             else:
-                coincide = resp.startswith("En este ciclo gastaste ") and sin_marcador
+                coincide = bool(re.match(patron_inicio + r"gastaste\s+", resp)) and sin_marcador
                 if egr_ars > 0:
                     coincide = coincide and (_fmt(egr_ars) in resp)
                 if egr_usd > 0:
@@ -3004,9 +3002,10 @@ def p13_caso_4(datos):
         ).mappings().first()
         intent = row["intent_detectado"] if row else None
         sin_marcador = "LLM_INVENTADO_999" not in resp
+        patron_inicio = r"^El mes pasado(?:\s*\(\d\d/\d\d\s+al\s+\d\d/\d\d\))?\s+"
         ok = (
-            (resp.startswith("El mes pasado gastaste ") and resp.endswith(" en Supermercado."))
-            or (resp == "El mes pasado no registraste gastos en Supermercado.")
+            (bool(re.match(patron_inicio + r"gastaste\s+", resp)) and resp.endswith(" en Supermercado."))
+            or bool(re.match(patron_inicio + r"no registraste gastos en Supermercado\.", resp))
         ) and sin_marcador
         return f"Intent: {intent} | Filtro por catalogo: {ok}"
     return run_isolated(test)

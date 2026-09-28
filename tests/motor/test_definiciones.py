@@ -475,3 +475,77 @@ def test_15_ingreso_normal_cuenta(db: Session, base_fixture):
         fecha=hoy,
     )
     _evaluar_paridad_ingreso(db, u.id, tx, hoy, esperado=True)
+
+
+def test_16_catalogo_sin_ahorro_ni_tarjeta_credito():
+    """Caso catálogo sin Ahorro ni Tarjeta de crédito: cargar_contexto no falla, y SQL y Python dan lo mismo."""
+    isolated_engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=isolated_engine)
+    IsolatedSession = sessionmaker(bind=isolated_engine)
+    session = IsolatedSession()
+    try:
+        hoy = date(2026, 9, 27)
+        u = Usuario(
+            id=uuid4(),
+            email=f"test_nocat_{uuid4().hex[:8]}@argentum.com",
+            auth_provider=AuthProvider.EMAIL,
+            rol=RolUsuario.USUARIO,
+            estado=EstadoUsuario.ACTIVO,
+            moneda_principal=Moneda.ARS,
+        )
+        session.add(u)
+        billetera = Billetera(
+            id=uuid4(),
+            usuario_id=u.id,
+            nombre="Billetera",
+            moneda=Moneda.ARS,
+            saldo_actual=Decimal("100000"),
+            estado=EstadoBilletera.ACTIVA,
+            es_inversion=False,
+        )
+        session.add(billetera)
+        cat_varios = Categoria(id=uuid4(), nombre="Varios", tipo=TipoCategoria.EGRESO)
+        subcat_varios = Subcategoria(id=uuid4(), categoria_id=cat_varios.id, nombre="Otros")
+        session.add_all([cat_varios, subcat_varios])
+        session.commit()
+
+        # 1. cargar_contexto no falla y devuelve conjuntos vacíos
+        ctx = cargar_contexto(session, u.id, hoy)
+        assert ctx.categoria_ahorro_ids == set()
+        assert ctx.subcategoria_tarjeta_ids == set()
+        assert ctx.subcategoria_tarjeta_id is None
+
+        # 2. Transacciones con y sin subcategoría
+        tx_egreso_subcat = _crear_tx(
+            session, u, billetera,
+            categoria_id=cat_varios.id,
+            subcategoria_id=subcat_varios.id,
+            tipo=TipoTransaccion.EGRESO,
+            fecha=hoy,
+        )
+        tx_egreso_sin_subcat = _crear_tx(
+            session, u, billetera,
+            categoria_id=cat_varios.id,
+            subcategoria_id=None,
+            tipo=TipoTransaccion.EGRESO,
+            fecha=hoy,
+        )
+        tx_ingreso = _crear_tx(
+            session, u, billetera,
+            categoria_id=cat_varios.id,
+            tipo=TipoTransaccion.INGRESO,
+            fecha=hoy,
+        )
+
+        # 3. Paridad SQL vs Python
+        _evaluar_paridad_gasto(session, u.id, tx_egreso_subcat, hoy, esperado=True)
+        _evaluar_paridad_gasto(session, u.id, tx_egreso_sin_subcat, hoy, esperado=True)
+        _evaluar_paridad_ingreso(session, u.id, tx_ingreso, hoy, esperado=True)
+    finally:
+        session.close()
+        Base.metadata.drop_all(bind=isolated_engine)
+
