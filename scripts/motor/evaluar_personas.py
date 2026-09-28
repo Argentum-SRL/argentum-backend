@@ -15,12 +15,29 @@ from typing import Any
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from app.models.transaccion import TipoTransaccion
-from app.services.definiciones_service import ContextoDefiniciones
+from app.services.definiciones_service import ContextoDefiniciones, es_ingreso
+from app.services.ingreso_habitual_service import (
+    calcular_ingreso_habitual_en_memoria,
+    ResultadoIngresoHabitual,
+)
 from app.utils.finanzas import clasificar_gastos
 from tests.motor.personas import DEFINICION_PERSONAS, generar_todas_las_personas
 from tests.motor.personas.catalogo import IPC_MAP
 from tests.motor.personas.generador import FECHA_FIN_HISTORIA
 from tests.motor.personas.modelos import Persona
+
+ESPERADOS_INGRESO_9_1: dict[str, dict[str, Any]] = {
+    "P01": {"tipo": "regular", "moneda": "ARS", "monto": Decimal("1200000.00"), "aguinaldo": False},
+    "P02": {"tipo": "regular", "moneda": "ARS", "monto": Decimal("3800000.00"), "aguinaldo": True},
+    "P03": {"tipo": "variable", "moneda": "ARS", "monto": Decimal("1116120.85"), "aguinaldo": False},
+    "P04": {"tipo": "regular", "moneda": "USD", "monto": Decimal("1500.00"), "aguinaldo": False, "ars_sin_datos": True},
+    "P05": {"tipo": "intermitente", "moneda": "ARS", "monto": Decimal("744322.44"), "aguinaldo": False},
+    "P06": {"tipo": "regular", "moneda": "ARS", "monto": Decimal("650000.00"), "aguinaldo": False},
+    "P07": {"tipo": "regular", "moneda": "ARS", "monto": Decimal("3270750.00"), "aguinaldo": False},
+    "P08": {"tipo": "regular", "moneda": "ARS", "monto": Decimal("476286.00"), "aguinaldo": False},
+    "P09": {"tipo": "regular", "moneda": "ARS", "monto": Decimal("1200000.00"), "aguinaldo": False},
+    "P10": {"tipo": "variable", "moneda": "ARS", "monto": Decimal("1560897.05"), "aguinaldo": False},
+}
 
 
 class EvaluadorPersonas:
@@ -205,6 +222,59 @@ class EvaluadorPersonas:
                 },
             },
             "reporte_grupos": reporte_grupos,
+            "evaluacion_ingreso": self._evaluar_ingreso_persona(persona, txs, ciclos, ctx),
+        }
+
+    def _evaluar_ingreso_persona(
+        self,
+        persona: Persona,
+        txs: list[Any],
+        ciclos: list[tuple[date, date]],
+        ctx: ContextoDefiniciones,
+    ) -> dict[str, Any]:
+        """Evalúa ingreso habitual y calcula totales por ciclo (9.1 y 9.2)."""
+        res_ing = calcular_ingreso_habitual_en_memoria(txs, ciclos, self.fecha_destino, ctx)
+        esp_ing = ESPERADOS_INGRESO_9_1.get(persona.id)
+
+        totales_ciclos: list[dict[str, Any]] = []
+        for c_ini, c_fin in ciclos:
+            txs_c = [t for t in txs if c_ini <= t.fecha <= c_fin and es_ingreso(t, ctx)]
+            tot_ars = sum((t.monto for t in txs_c if (getattr(t, "moneda", None).value if hasattr(getattr(t, "moneda", None), "value") else str(getattr(t, "moneda", None))) == "ARS"), Decimal("0"))
+            tot_usd = sum((t.monto for t in txs_c if (getattr(t, "moneda", None).value if hasattr(getattr(t, "moneda", None), "value") else str(getattr(t, "moneda", None))) == "USD"), Decimal("0"))
+            totales_ciclos.append({
+                "ciclo": f"{c_ini} a {c_fin}",
+                "total_ars": float(tot_ars),
+                "total_usd": float(tot_usd),
+            })
+
+        acierto = False
+        if esp_ing:
+            mon_key = esp_ing["moneda"].lower()
+            hab = res_ing[mon_key]
+            tipo_ok = (hab.tipo == esp_ing["tipo"])
+            monto_ok = False
+            if hab.monto is not None:
+                tol = esp_ing["monto"] * Decimal("0.005")
+                monto_ok = abs(hab.monto - esp_ing["monto"]) <= tol
+            ag_ok = (hab.tiene_aguinaldo == esp_ing.get("aguinaldo", False))
+            ars_sin_datos_ok = True
+            if esp_ing.get("ars_sin_datos"):
+                ars_sin_datos_ok = (res_ing["ars"].tipo == "sin_datos" and res_ing["ars"].monto is None)
+            acierto = (tipo_ok and monto_ok and ag_ok and ars_sin_datos_ok)
+
+        return {
+            "esperado": {
+                "tipo": esp_ing["tipo"],
+                "moneda": esp_ing["moneda"],
+                "monto": float(esp_ing["monto"]),
+                "aguinaldo": esp_ing.get("aguinaldo", False),
+            } if esp_ing else None,
+            "obtenido": {
+                "ars": res_ing["ars"].a_dict(),
+                "usd": res_ing["usd"].a_dict(),
+            },
+            "acierto": acierto,
+            "totales_por_ciclo": totales_ciclos,
         }
 
     def evaluar_todas(self) -> dict[str, Any]:
@@ -348,6 +418,21 @@ def formatear_reporte_legible(evaluacion: dict[str, Any], etiqueta: str) -> str:
             if grp["streams_asociados"]:
                 for s in grp["streams_asociados"]:
                     lineas.append(f"     -> Stream: '{s['descripcion']}' ({s['frecuencia']}, {s['estado']}, {s['ocurrencias']} occ, ${s['monto_mediano_deflactado']:.2f}) => Clase: {s['clase']}")
+
+        ev_ing = p.get("evaluacion_ingreso", {})
+        esp = ev_ing.get("esperado")
+        obt = ev_ing.get("obtenido", {})
+        acierto_ing = ev_ing.get("acierto", False)
+        icono_ing = "[ACIERTO]" if acierto_ing else "[FALLO]"
+        mon_p = esp["moneda"].lower() if esp else "ars"
+        hab_p = obt.get(mon_p, {})
+        monto_hab = f"${hab_p.get('monto'):,.2f}" if hab_p.get("monto") is not None else "None"
+        lineas.append(
+            f"Ingreso Habitual: {icono_ing} Esperado: {esp['tipo']} {esp['moneda']} ${esp['monto']:,.2f} (ag: {esp['aguinaldo']}) | Obtenido: {hab_p.get('tipo')} {monto_hab} (ag: {hab_p.get('tiene_aguinaldo')})"
+        )
+        lineas.append("  Totales de ingreso por ciclo (9.2):")
+        for tc in ev_ing.get("totales_por_ciclo", []):
+            lineas.append(f"    - {tc['ciclo']}: ARS ${tc['total_ars']:,.2f} | USD ${tc['total_usd']:,.2f}")
 
     return "\n".join(lineas)
 

@@ -19,6 +19,10 @@ from app.models.transaccion import EstadoVerificacionTransaccion, TipoTransaccio
 from app.models.usuario import Moneda, Usuario
 from app.services.dashboard_service import get_ciclo_fechas
 from app.services.definiciones_service import ContextoDefiniciones, cargar_contexto, es_gasto, es_ingreso
+from app.services.ingreso_habitual_service import (
+    calcular_ingreso_esperado_ciclo,
+    obtener_ingreso_habitual,
+)
 from app.utils.fecha import hoy_argentina
 from app.utils.finanzas import (
     ClasificacionGasto, StreamRecurrente, ZERO, ONE, clasificar_gastos,
@@ -224,7 +228,8 @@ def calcular_perfil_nuevo(db: Session, usuario: Usuario, data: dict[str, Any] | 
     gastos_completos = [gasto for _, gasto in observaciones_completas]
 
     if datos_suficientes:
-        ingreso_tipico = mediana(ingresos_completos or ingresos_con_datos)
+        res_hab = obtener_ingreso_habitual(db, usuario, hoy=hoy, ctx=ctx, txs_previa=txs, moneda=Moneda.ARS)
+        ingreso_tipico = res_hab.monto
         gasto_tipico = mediana(gastos_completos or [g for g in gastos if g > ZERO])
         variable_tipico = mediana([v for v in variables if v > ZERO])
         variable_mad = mad([v for v in variables if v > ZERO])
@@ -327,10 +332,7 @@ def calcular_perfil_nuevo(db: Session, usuario: Usuario, data: dict[str, Any] | 
         interp_relativas["volatilidad"] = f"Tus gastos variables fluctúan típicamente un ±{pct_vol}% respecto de tu mediana mensual (${variable_tipico:,.0f})."
 
     if ingreso_tipico is not None:
-        if posicion_ingreso is not None:
-            interp_relativas["ingreso_tipico"] = f"Mediana histórica deflactada. Ciclo actual en percentil {round(posicion_ingreso*100)}% de tus ciclos con ingreso."
-        else:
-            interp_relativas["ingreso_tipico"] = "Mediana histórica deflactada de tus ciclos con ingreso."
+        interp_relativas["ingreso_tipico"] = "Ingreso habitual estimado en ARS."
 
     return {
         "mostrar_card": datos_suficientes,
@@ -852,7 +854,19 @@ def calcular_proyeccion_nueva(
                         "rango_techo": float(monto),
                         "fuera_de_patron": False,
                     })
-                ingreso_actual = _suma_deflactada([tx for tx in data["txs"] if inicio <= tx.fecha <= hoy], data["ipc"], hoy, moneda, TipoTransaccion.INGRESO, ctx=data["ctx"])
+                ingreso_esp = calcular_ingreso_esperado_ciclo(
+                    db, usuario, inicio, fin, moneda, hoy=hoy, ctx=data["ctx"], txs_previa=data["txs"]
+                )
+                if ingreso_esp is None:
+                    ingreso_proy_val = None
+                    balance_proy_val = None
+                    msg_cobros = "Para calcular cómo terminás el ciclo necesitamos que cargues tus cobros."
+                    if msg_cobros not in advertencias_salida:
+                        advertencias_salida.append(msg_cobros)
+                else:
+                    ingreso_proy_val = float(ingreso_esp)
+                    balance_proy_val = float(ingreso_esp - total_sin_historia)
+
                 resultado[moneda.value.lower()] = {
                     "periodo": {
                         "fecha_inicio": inicio.isoformat(),
@@ -868,8 +882,8 @@ def calcular_proyeccion_nueva(
                         "techo": float(total_sin_historia),
                     },
                     "rango_poco_informativo": False,
-                    "balance_proyectado": float(ingreso_actual - total_sin_historia),
-                    "ingresos_proyectados": float(ingreso_actual),
+                    "balance_proyectado": balance_proy_val,
+                    "ingresos_proyectados": ingreso_proy_val,
                     "certezas": {
                         "cuotas_restantes": float(cuotas_pendientes),
                         "suscripciones_restantes": float(subs_pendientes),
@@ -1009,7 +1023,19 @@ def calcular_proyeccion_nueva(
                         "fuera_de_patron": False,
                     })
 
-                ingreso_actual = _suma_deflactada([tx for tx in data["txs"] if inicio <= tx.fecha <= hoy], data["ipc"], hoy, moneda, TipoTransaccion.INGRESO, ctx=data["ctx"])
+                ingreso_esp = calcular_ingreso_esperado_ciclo(
+                    db, usuario, inicio, fin, moneda, hoy=hoy, ctx=data["ctx"], txs_previa=data["txs"]
+                )
+                if ingreso_esp is None:
+                    ingreso_proy_val = None
+                    balance_proy_val = None
+                    msg_cobros = "Para calcular cómo terminás el ciclo necesitamos que cargues tus cobros."
+                    if msg_cobros not in advertencias_sin_disp:
+                        advertencias_sin_disp.append(msg_cobros)
+                else:
+                    ingreso_proy_val = float(ingreso_esp)
+                    balance_proy_val = float(ingreso_esp - total_sin_disp)
+
                 resultado[moneda.value.lower()] = {
                     "periodo": {
                         "fecha_inicio": inicio.isoformat(),
@@ -1025,8 +1051,8 @@ def calcular_proyeccion_nueva(
                         "techo": float(total_sin_disp),
                     },
                     "rango_poco_informativo": False,
-                    "balance_proyectado": float(ingreso_actual - total_sin_disp),
-                    "ingresos_proyectados": float(ingreso_actual),
+                    "balance_proyectado": balance_proy_val,
+                    "ingresos_proyectados": ingreso_proy_val,
                     "certezas": {
                         "cuotas_restantes": float(cuotas_pendientes),
                         "suscripciones_restantes": float(subs_pendientes),
@@ -1237,9 +1263,19 @@ def calcular_proyeccion_nueva(
                 c["rango_piso"] = float(max(ZERO, Decimal(str(c["rango_piso"])) * escala))
                 c["rango_techo"] = float(Decimal(str(c["rango_techo"])) * escala)
 
-        # Proyección de ingresos (reutilizando data_previa para no duplicar consultas)
-        ingreso_info = proyectar_ingreso_ciclo(db, usuario, fin, data_previa=data)
-        ingreso_proy = Decimal(str(ingreso_info.get("ingreso_proyectado", "0")))
+        # Proyección de ingresos mediante ingreso esperado del ciclo
+        ingreso_esp = calcular_ingreso_esperado_ciclo(
+            db, usuario, inicio, fin, moneda, hoy=hoy, ctx=data["ctx"], txs_previa=data["txs"]
+        )
+        if ingreso_esp is None:
+            ingreso_proy_val = None
+            balance_proy_val = None
+            msg_cobros = "Para calcular cómo terminás el ciclo necesitamos que cargues tus cobros."
+            if msg_cobros not in advertencias:
+                advertencias.append(msg_cobros)
+        else:
+            ingreso_proy_val = float(ingreso_esp)
+            balance_proy_val = float(ingreso_esp - q50)
 
         distribucion = {
             "q025": float(q025),
@@ -1271,8 +1307,8 @@ def calcular_proyeccion_nueva(
                 "techo": float(q90),
             },
             "rango_poco_informativo": (q90 - q10) > q50 if q50 > ZERO else False,
-            "balance_proyectado": float(ingreso_proy - q50),
-            "ingresos_proyectados": float(ingreso_proy),
+            "balance_proyectado": balance_proy_val,
+            "ingresos_proyectados": ingreso_proy_val,
             "certezas": {
                 "cuotas_restantes": float(cuotas_pendientes),
                 "suscripciones_restantes": float(subs_pendientes),
@@ -1317,58 +1353,6 @@ def calcular_proyeccion_nueva(
         or (resultado.get("usd") or {}).get("mostrar_card")
     )
     return resultado
-
-
-def proyectar_ingreso_ciclo(
-    db: Session,
-    usuario: Usuario,
-    fecha_ciclo: date,
-    data_previa: dict[str, Any] | None = None,
-) -> dict[str, Decimal | bool]:
-    """Proyecta ingresos distinguiendo certeza e incertidumbre, e incluyendo aguinaldo.
-
-    En Argentina, el Sueldo Anual Complementario (SAC) se cobra en junio y diciembre.
-    Si el ciclo objetivo es junio o diciembre, se agrega el 50% del ingreso típico mensual habitual.
-    """
-    data = data_previa if data_previa is not None else _carga(db, usuario, fecha_ciclo)
-    inicio, fin = get_ciclo_fechas(usuario, fecha_ciclo)
-    anteriores = _ciclos_anteriores(usuario, fecha_ciclo, 12)
-    # Ingresos históricos observados deflactados
-    ingresos_hist = []
-    ingresos_por_mes = []
-    for c_ini, c_fin in anteriores:
-        valor = _suma_deflactada(
-            [tx for tx in data["txs"] if c_ini <= tx.fecha <= c_fin],
-            data["ipc"],
-            fecha_ciclo,
-            Moneda.ARS,
-            TipoTransaccion.INGRESO,
-            ctx=data["ctx"],
-        )
-        if valor > ZERO:
-            ingresos_hist.append(valor)
-            ingresos_por_mes.append((c_fin.month, valor))
-
-    # Ingreso mensual regular de referencia (excluyendo aguinaldos de junio y diciembre)
-    regulares = [v for m, v in ingresos_por_mes if m not in (6, 12)]
-    ingreso_regular = mediana(regulares) if regulares else (mediana(ingresos_hist) or ZERO)
-
-    # Aguinaldo
-    aguinaldo_aplica = fin.month in (6, 12) and (ingreso_regular > ZERO)
-    aguinaldo = (ingreso_regular * Decimal("0.50")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if aguinaldo_aplica else ZERO
-
-    base_estimada = ingreso_regular
-    ingreso_total_proyectado = base_estimada + aguinaldo
-
-    return {
-        "fecha_inicio": inicio.isoformat(),
-        "fecha_fin": fin.isoformat(),
-        "ingreso_proyectado": ingreso_total_proyectado,
-        "estacionalidad_aplicada": aguinaldo_aplica,
-        "ciclos_estacionales": Decimal(len(ingresos_hist)),
-        "ingreso_regular_referencia": base_estimada,
-        "aguinaldo_incluido": aguinaldo,
-    }
 
 
 def backtest_probabilistico_ciclo(

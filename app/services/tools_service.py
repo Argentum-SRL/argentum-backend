@@ -432,17 +432,10 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
             else:
                 break
 
-    # 3. Ingreso promedio mensual e ingresos de los ciclos
-    # Rango de ciclos a consultar
-    ingreso_es_estimacion_parcial = (ciclos_con_historia == 0)
-    
+    # Rango de ciclos para promediar gastos (máximo 3)
     if ciclos_con_historia >= 1:
-        # Buscamos las fechas de los ciclos pasados a promediar (máximo 3)
-        # N = ciclos pasados disponibles
         n = min(ciclos_con_historia, 3)
-        # El ciclo -1 termina en fecha_fin_c1
         end_range = fecha_fin_c1
-        # Para encontrar el inicio del rango, retrocedemos N-1 ciclos
         start_date_c = end_range
         for _ in range(n - 1):
             inicio_c, _ = get_ciclo_fechas(usuario, start_date_c)
@@ -450,28 +443,15 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
         start_range, _ = get_ciclo_fechas(usuario, start_date_c)
         divisor = n
     else:
-        # Usamos el ciclo actual incompleto como estimación parcial
         start_range = fecha_inicio_curr
         end_range = hoy
         divisor = 1
 
-    # Incomes in range
-    cond_ing = condicion_ingreso(user_id, start_range, end_range, hoy=hoy)
-    ingresos_total = db.query(func.sum(Transaccion.monto)).filter(
-        cond_ing,
-        Transaccion.moneda == Moneda.ARS
-    ).scalar()
-
-    tiene_ingresos_any = db.query(Transaccion.id).filter(
-        condicion_ingreso(user_id, hoy=hoy),
-        Transaccion.moneda == Moneda.ARS
-    ).first() is not None
-
-    if not tiene_ingresos_any:
-        ingreso_promedio_mensual = None
-    else:
-        ingresos_sum = ingresos_total or Decimal("0")
-        ingreso_promedio_mensual = float(ingresos_sum / Decimal(str(divisor)))
+    # 3. Ingreso habitual mensual estimado en ARS (módulo unificado de ingreso habitual)
+    from app.services.ingreso_habitual_service import obtener_ingreso_habitual
+    res_hab_ars = obtener_ingreso_habitual(db, usuario, hoy=hoy, moneda=Moneda.ARS)
+    ingreso_promedio_mensual = float(res_hab_ars.monto) if res_hab_ars.monto is not None else None
+    ingreso_es_estimacion_parcial = (ciclos_con_historia == 0)
 
     # 4. Gasto promedio mensual variable
     cond_gas = condicion_gasto(user_id, start_range, end_range, hoy=hoy)

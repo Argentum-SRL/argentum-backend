@@ -68,7 +68,10 @@ def enriquecer_respuesta_por_intent(
             total_certezas_usd = certezas_usd.get("total", 0.0)
 
             if not pasa_ars or balance_ars is None:
-                msg_cierre = p_ars.get("mensaje") or (advertencias_ars[0] if advertencias_ars else "Mostramos tus compromisos ciertos.")
+                if p_ars.get("ingresos_proyectados") is None:
+                    msg_cierre = "No sabemos cuánto cobrás en pesos. Cargá tus cobros para calcular cómo terminás el ciclo."
+                else:
+                    msg_cierre = p_ars.get("mensaje") or (advertencias_ars[0] if advertencias_ars else "Mostramos tus compromisos ciertos.")
                 if total_certezas_ars > 0:
                     msg = f"{msg_cierre} Tenés compromisos ciertos pendientes por {_fmt(total_certezas_ars)} ({dias_rest} días restantes)."
                 else:
@@ -89,7 +92,10 @@ def enriquecer_respuesta_por_intent(
             tiene_usd = (gasto_proy_usd > 0 or ingresos_proy_usd > 0 or total_certezas_usd > 0)
             if tiene_usd:
                 if not pasa_usd or balance_usd is None:
-                    msg_cierre_usd = p_usd.get("mensaje") or (advertencias_usd[0] if advertencias_usd else "")
+                    if p_usd.get("ingresos_proyectados") is None and (gasto_proy_usd > 0 or total_certezas_usd > 0):
+                        msg_cierre_usd = "No tenemos registro de tus cobros en dólares. Cargá tus cobros para proyectar en dólares."
+                    else:
+                        msg_cierre_usd = p_usd.get("mensaje") or (advertencias_usd[0] if advertencias_usd else "")
                     if msg_cierre_usd:
                         msg += f" En dólares: {msg_cierre_usd}"
                 elif confianza_usd == "bajo":

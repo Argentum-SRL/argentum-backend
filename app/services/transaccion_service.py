@@ -995,46 +995,22 @@ def evaluar_gasto_inusual(db: Session, usuario_id: UUID, transaccion: Transaccio
         saldo_info = disponible_res.get(moneda_str)
         saldo_disponible = saldo_info.get("saldo_disponible") if saldo_info else None
 
-        # 3. Ingreso promedio mensual
+        # 3. Ingreso habitual mensual (módulo unificado)
+        from app.services.ingreso_habitual_service import obtener_ingreso_habitual
         usuario = db.get(Usuario, usuario_id)
         hoy_dt = hoy_argentina()
+        ingreso_habitual = None
         if usuario:
-            from app.services.dashboard_service import get_ciclo_fechas
-            inicio_ciclo, _ = get_ciclo_fechas(usuario, hoy_dt)
-            inicio_analisis = min(
-                inicio_ciclo - timedelta(days=60),
-                hoy_dt - timedelta(days=90)
-            )
-        else:
-            inicio_analisis = hoy_dt - timedelta(days=90)
-
-        from sqlalchemy import func
-        stmt_ingresos = (
-            select(func.sum(Transaccion.monto))
-            .where(
-                and_(
-                    Transaccion.usuario_id == usuario_id,
-                    Transaccion.tipo == TipoTransaccion.INGRESO,
-                    Transaccion.moneda == transaccion.moneda,
-                    or_(
-                        Transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE,
-                        Transaccion.estado_verificacion.is_(None)
-                    ),
-                    Transaccion.fecha >= inicio_analisis,
-                    Transaccion.fecha <= hoy_dt
-                )
-            )
-        )
-        total_ingresos = db.execute(stmt_ingresos).scalar() or Decimal("0")
-        cant_meses = Decimal(str(max(1.0, (hoy_dt - inicio_analisis).days / 30.0)))
-        ingreso_promedio_mensual = total_ingresos / cant_meses
+            res_hab = obtener_ingreso_habitual(db, usuario, hoy=hoy_dt, moneda=transaccion.moneda)
+            ingreso_habitual = res_hab.monto
 
         # Modulación del multiplicador y nivel (excluyente, prioridad a saldo bajo/negativo)
-        if (
+        cond_saldo_bajo = (
             saldo_disponible is None
-            or saldo_disponible < Decimal("0.10") * ingreso_promedio_mensual
             or saldo_disponible < Decimal("0")
-        ):
+            or (ingreso_habitual is not None and saldo_disponible < Decimal("0.10") * ingreso_habitual)
+        )
+        if cond_saldo_bajo:
             multiplicador = 2.0 - 0.75
             nivel = NivelNotificacion.FINANCIERA_IMPORTANTE
         elif (

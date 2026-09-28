@@ -55,6 +55,11 @@ from app.services.analisis_financiero_service import (
     calcular_perfil_nuevo,
 )
 from app.services.definiciones_service import cargar_contexto, es_gasto
+from app.services.ingreso_habitual_service import (
+    calcular_ingreso_esperado_ciclo,
+    obtener_ingreso_habitual,
+)
+from app.utils.fecha import hoy_argentina
 from app.utils.finanzas import clasificar_gastos
 from app.utils.formato import formatear_monto
 
@@ -177,98 +182,28 @@ def medir_bloque_d(
         res_wpp["usd"]["cantidad"]
     )
 
-    # 2. Resumen del dashboard (Query 1 egresos del ciclo)
-    cycle_actual_cond = and_(
-        Transaccion.fecha >= ini_act, Transaccion.fecha <= fin_act
-    )
-    res_stmt_where = and_(
-        Transaccion.usuario_id == usuario.id,
-        Transaccion.es_padre_cuotas == False,
-        Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
-        Transaccion.movimiento_meta_id.is_(None),
-        ~Transaccion.descripcion.ilike("Aporte a la meta:%"),
-        ~Transaccion.descripcion.ilike("Retiro de la meta:%"),
-        or_(
-            Transaccion.estado_verificacion
-            == EstadoVerificacionTransaccion.CONFIRMADA,
-            Transaccion.estado_verificacion == None,
-        ),
-    )
-    q_res = select(
-        func.sum(
-            case(
-                (
-                    and_(
-                        cycle_actual_cond,
-                        Transaccion.moneda == Moneda.ARS,
-                        Transaccion.tipo == TipoTransaccion.EGRESO,
-                    ),
-                    Transaccion.monto,
-                ),
-                else_=0,
-            )
-        ).label("egr_actual_ars"),
-        func.sum(
-            case(
-                (
-                    and_(
-                        cycle_actual_cond,
-                        Transaccion.moneda == Moneda.USD,
-                        Transaccion.tipo == TipoTransaccion.EGRESO,
-                    ),
-                    Transaccion.monto,
-                ),
-                else_=0,
-            )
-        ).label("egr_actual_usd"),
-    ).where(res_stmt_where)
-    row_dash = db.execute(q_res).one()
+    # 2. Resumen del dashboard (usando función real del dashboard)
+    dash = dashboard_service.get_dashboard_resumen(db, usuario)
     res["gasto_ciclo.dashboard_resumen.ars_egresos"] = _fmt_monto(
-        row_dash.egr_actual_ars
+        dash["balance"]["ars"]["egresos"]
     )
     res["gasto_ciclo.dashboard_resumen.usd_egresos"] = _fmt_monto(
-        row_dash.egr_actual_usd
+        dash["balance"]["usd"]["egresos"]
     )
 
-    # 3. Gastos por categoría (cat_where en dashboard_service)
-    cat_where = and_(
-        Transaccion.usuario_id == usuario.id,
-        Transaccion.fecha >= ini_act,
-        Transaccion.fecha <= fin_act,
-        Transaccion.tipo == TipoTransaccion.EGRESO,
-        Transaccion.es_padre_cuotas == False,
-        Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO),
-        Transaccion.movimiento_meta_id.is_(None),
-        ~Transaccion.descripcion.ilike("Aporte a la meta:%"),
-        ~Transaccion.descripcion.ilike("Retiro de la meta:%"),
-        or_(
-            Transaccion.estado_verificacion
-            == EstadoVerificacionTransaccion.CONFIRMADA,
-            Transaccion.estado_verificacion == None,
-        ),
-    )
-    cat_stmt = (
-        select(
-            Categoria.nombre.label("categoria_nombre"),
-            Transaccion.moneda,
-            func.sum(Transaccion.monto).label("total"),
-        )
-        .outerjoin(Categoria, Transaccion.categoria_id == Categoria.id)
-        .where(cat_where)
-        .group_by(Categoria.nombre, Transaccion.moneda)
-        .order_by(func.sum(Transaccion.monto).desc())
-    )
-    cat_rows = db.execute(cat_stmt).all()
+    # 3. Gastos por categoría reales del dashboard
     cat_tot_ars = Decimal("0")
     cat_tot_usd = Decimal("0")
-    for r in cat_rows:
-        nombre = (r.categoria_nombre or "General").lower().replace(" ", "_")
-        m_str = r.moneda.value.lower()
-        res[f"gasto_ciclo.categorias.{m_str}.{nombre}"] = _fmt_monto(r.total)
-        if r.moneda == Moneda.ARS:
-            cat_tot_ars += r.total or Decimal("0")
-        elif r.moneda == Moneda.USD:
-            cat_tot_usd += r.total or Decimal("0")
+    for item in dash["gastos_por_categoria"]["ars"]:
+        nombre = (item["categoria_nombre"] or "General").lower().replace(" ", "_")
+        monto = Decimal(str(item["monto"]))
+        res[f"gasto_ciclo.categorias.ars.{nombre}"] = _fmt_monto(monto)
+        cat_tot_ars += monto
+    for item in dash["gastos_por_categoria"]["usd"]:
+        nombre = (item["categoria_nombre"] or "General").lower().replace(" ", "_")
+        monto = Decimal(str(item["monto"]))
+        res[f"gasto_ciclo.categorias.usd.{nombre}"] = _fmt_monto(monto)
+        cat_tot_usd += monto
     res["gasto_ciclo.categorias.ars_total"] = _fmt_monto(cat_tot_ars)
     res["gasto_ciclo.categorias.usd_total"] = _fmt_monto(cat_tot_usd)
 
@@ -444,11 +379,15 @@ def medir_bloque_e(
     )
 
     proy = proyeccion_service.calcular_proyeccion(db, usuario)
-    res["ingreso.proyeccion.ars_ingresos_proyectados"] = _fmt_monto(
-        proy.get("ars", {}).get("ingresos_proyectados")
+    res["ingreso.proyeccion.ars_ingresos_proyectados"] = (
+        _fmt_val(proy.get("ars", {}).get("ingresos_proyectados"))
+        if proy.get("ars", {}).get("ingresos_proyectados") is None
+        else _fmt_monto(proy.get("ars", {}).get("ingresos_proyectados"))
     )
-    res["ingreso.proyeccion.usd_ingresos_proyectados"] = _fmt_monto(
-        proy.get("usd", {}).get("ingresos_proyectados")
+    res["ingreso.proyeccion.usd_ingresos_proyectados"] = (
+        _fmt_val(proy.get("usd", {}).get("ingresos_proyectados"))
+        if proy.get("usd", {}).get("ingresos_proyectados") is None
+        else _fmt_monto(proy.get("usd", {}).get("ingresos_proyectados"))
     )
 
     bal = dashboard_service.calcular_balance_ciclo(db, usuario)
@@ -458,6 +397,47 @@ def medir_bloque_e(
     res["ingreso.dashboard_balance.usd_ingresos"] = _fmt_monto(
         bal["usd"]["ingresos"]
     )
+
+    # Claves de ingreso habitual y esperado del ciclo (8.2)
+    hoy = hoy_argentina()
+    hab = obtener_ingreso_habitual(db, usuario, hoy)
+
+    for m in ["ars", "usd"]:
+        info_m = hab.get(m)
+        m_esp = calcular_ingreso_esperado_ciclo(
+            db=db,
+            usuario=usuario,
+            fecha_inicio=ini_act,
+            fecha_fin=fin_act,
+            moneda=m.upper(),
+            hoy=hoy,
+            ingreso_habitual_previo=info_m,
+        )
+        res[f"ingreso.habitual.{m}.tipo"] = _fmt_val(getattr(info_m, "tipo", None))
+        res[f"ingreso.habitual.{m}.monto"] = (
+            _fmt_monto(info_m.monto)
+            if info_m and info_m.monto is not None
+            else "null"
+        )
+        res[f"ingreso.habitual.{m}.motivo"] = _fmt_val(getattr(info_m, "motivo_sin_datos", None))
+        res[f"ingreso.habitual.{m}.tiene_aguinaldo"] = _fmt_val(
+            getattr(info_m, "tiene_aguinaldo", False)
+        )
+        if info_m and info_m.proximo_aguinaldo_fecha:
+            res[f"ingreso.habitual.{m}.proximo_aguinaldo_fecha"] = _fmt_val(
+                info_m.proximo_aguinaldo_fecha
+            )
+            res[f"ingreso.habitual.{m}.proximo_aguinaldo_monto"] = _fmt_monto(
+                info_m.proximo_aguinaldo_monto
+            )
+        else:
+            res[f"ingreso.habitual.{m}.proximo_aguinaldo_fecha"] = "null"
+            res[f"ingreso.habitual.{m}.proximo_aguinaldo_monto"] = "null"
+
+        res[f"ingreso.esperado_ciclo.{m}"] = (
+            _fmt_monto(m_esp) if m_esp is not None else "null"
+        )
+
     return res
 
 
@@ -539,14 +519,18 @@ def medir_bloque_g(db: Session, usuario: Usuario) -> dict[str, str]:
     for moneda in ["ars", "usd"]:
         p_m = proy.get(moneda, {})
         prefix = f"proyeccion.{moneda}"
-        res[f"{prefix}.balance_proyectado"] = _fmt_monto(
-            p_m.get("balance_proyectado")
+        res[f"{prefix}.balance_proyectado"] = (
+            _fmt_val(p_m.get("balance_proyectado"))
+            if p_m.get("balance_proyectado") is None
+            else _fmt_monto(p_m.get("balance_proyectado"))
         )
         res[f"{prefix}.gasto_proyectado_total"] = _fmt_monto(
             p_m.get("gasto_proyectado_total")
         )
-        res[f"{prefix}.ingresos_proyectados"] = _fmt_monto(
-            p_m.get("ingresos_proyectados")
+        res[f"{prefix}.ingresos_proyectados"] = (
+            _fmt_val(p_m.get("ingresos_proyectados"))
+            if p_m.get("ingresos_proyectados") is None
+            else _fmt_monto(p_m.get("ingresos_proyectados"))
         )
         res[f"{prefix}.nivel_confianza"] = _fmt_val(p_m.get("nivel_confianza"))
         res[f"{prefix}.datos_suficientes"] = _fmt_val(

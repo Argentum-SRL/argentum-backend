@@ -86,11 +86,10 @@ def _calcular_tasa_ahorro_sync_moneda(db: Session, usuario_id: UUID, fecha_inici
 def _calcular_ratio_cuotas_sync_moneda(db: Session, usuario_id: UUID, fecha_inicio: date, moneda: Moneda) -> Decimal | None:
     hoy = hoy_argentina()
     usuario = db.get(Usuario, usuario_id)
-    if usuario:
-        inicio_ciclo, fin_ciclo = get_ciclo_fechas(usuario, hoy)
-    else:
-        inicio_ciclo = date(hoy.year, hoy.month, 1)
-        fin_ciclo = date(hoy.year, hoy.month, cal.monthrange(hoy.year, hoy.month)[1])
+    if not usuario:
+        return None
+
+    inicio_ciclo, fin_ciclo = get_ciclo_fechas(usuario, hoy)
 
     # Cuotas no pagadas que vencen en el ciclo actual y corresponden al grupo de la moneda dada
     cuotas = db.execute(
@@ -111,30 +110,13 @@ def _calcular_ratio_cuotas_sync_moneda(db: Session, usuario_id: UUID, fecha_inic
         monto = c.monto_real if c.monto_real is not None else c.monto_proyectado or Decimal("0")
         suma_cuotas += monto
 
-    # Calcular promedios mensuales desde fecha_inicio para la moneda dada
-    cond_gas = condicion_gasto(usuario_id, desde=fecha_inicio, hasta=hoy, moneda=moneda, hoy=hoy)
-    cond_ing = condicion_ingreso(usuario_id, desde=fecha_inicio, hasta=hoy, moneda=moneda, hoy=hoy)
-
-    total_gastos = db.scalar(
-        select(func.coalesce(func.sum(Transaccion.monto), Decimal("0"))).where(cond_gas)
-    ) or Decimal("0")
-
-    total_ingresos = db.scalar(
-        select(func.coalesce(func.sum(Transaccion.monto), Decimal("0"))).where(cond_ing)
-    ) or Decimal("0")
-
-    cant_meses = Decimal(str(max(1.0, (hoy - fecha_inicio).days / 30.0)))
-    ingreso_promedio_mensual = total_ingresos / cant_meses
-    gasto_promedio_mensual = total_gastos / cant_meses
-
-    denominador = ingreso_promedio_mensual
-    if denominador == 0:
-        denominador = gasto_promedio_mensual
-
-    if denominador <= 0:
+    # Ratio sobre ingreso habitual: si es None, el ratio es None (se deja de usar el gasto como divisor)
+    from app.services.ingreso_habitual_service import obtener_ingreso_habitual
+    res_hab = obtener_ingreso_habitual(db, usuario, hoy=hoy, moneda=moneda)
+    if res_hab.monto is None or res_hab.monto <= Decimal("0"):
         return None
 
-    return suma_cuotas / denominador
+    return suma_cuotas / res_hab.monto
 
 
 
@@ -314,6 +296,9 @@ def generar_texto_contexto_ia(perfil: PerfilFinanciero) -> str:
     # Gasto comprometido sobre ingreso
     if perfil.ratio_cuotas_ars is not None:
         lineas.append(f"- Gasto comprometido sobre ingreso ARS: {float(perfil.ratio_cuotas_ars)*100:.1f}%")
+
+    if perfil.tasa_ahorro_ars is None and perfil.ratio_cuotas_ars is None:
+        lineas.append("- Ingresos: no sabemos cuánto cobra el usuario. Debe cargar sus cobros para habilitar métricas de ahorro y compromisos sobre ingreso.")
         
     # Cobertura de registro
     if perfil.consistencia_registro is not None:
