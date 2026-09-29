@@ -1,366 +1,852 @@
-[
-  {
-    "id": "netflix",
-    "nombre": "Netflix",
-    "logo": "netflix.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#E50914",
-    "colorTexto": "white",
-    "variantes": ["netflix", "netfli", "netflis", "netflik"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "hbomax",
-    "nombre": "HBO Max",
-    "logo": "hbomax.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#5822B4",
-    "colorTexto": "white",
-    "variantes": ["hbo max", "hbo", "max", "hbomax"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "primevideo",
-    "nombre": "Prime Video",
-    "logo": "primevideo.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#00A8E0",
-    "colorTexto": "white",
-    "variantes": ["prime video", "amazon prime", "prime", "amazon prime video"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "paramount",
-    "nombre": "Paramount+",
-    "logo": "paramount.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#0064FF",
-    "colorTexto": "white",
-    "variantes": ["paramount+", "paramount plus", "paramount", "paramoun"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "appletv",
-    "nombre": "Apple TV+",
-    "logo": "appletv.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#1C1C1E",
-    "colorTexto": "white",
-    "variantes": ["apple tv+", "apple tv", "apple tv plus", "appletv"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "crunchyroll",
-    "nombre": "Crunchyroll",
-    "logo": "crunchiroll.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#F47521",
-    "colorTexto": "white",
-    "variantes": ["crunchyroll", "crunchy", "crunchiroll"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "plutotv",
-    "nombre": "Pluto TV",
-    "logo": "plutotv.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#9900FF",
-    "colorTexto": "white",
-    "variantes": ["pluto tv", "pluto", "plutotv"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "peacock",
-    "nombre": "Peacock",
-    "logo": "peacock.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#000000",
-    "colorTexto": "white",
-    "variantes": ["peacock"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "spotify",
-    "nombre": "Spotify",
-    "logo": "spotify.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#1DB954",
-    "colorTexto": "white",
-    "variantes": ["spotify", "spoti", "spoty"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "applemusic",
-    "nombre": "Apple Music",
-    "logo": "applemusic.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#FC3C44",
-    "colorTexto": "white",
-    "variantes": ["apple music", "applemusic"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "youtubemusic",
-    "nombre": "YT Music",
-    "logo": "youtubemusic.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#FF0000",
-    "colorTexto": "white",
-    "variantes": ["yt music", "youtube music", "youtube premium", "yt premium"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "tidal",
-    "nombre": "Tidal",
-    "logo": "tidal.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#000000",
-    "colorTexto": "white",
-    "variantes": ["tidal"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "deezer",
-    "nombre": "Deezer",
-    "logo": "deezer.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#A238FF",
-    "colorTexto": "white",
-    "variantes": ["deezer", "dezer"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "icloud",
-    "nombre": "iCloud",
-    "logo": "icloud.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#3478F6",
-    "colorTexto": "white",
-    "variantes": ["icloud", "i cloud", "apple storage", "almacenamiento apple"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "googleone",
-    "nombre": "Google One",
-    "logo": "googleone.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#4285F4",
-    "colorTexto": "white",
-    "variantes": ["google one", "google drive", "googleone", "gsuite", "google workspace"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "microsoft365",
-    "nombre": "Microsoft 365",
-    "logo": "microsoft365.png",
-    "categoria": "Otros",
-    "subcategoria": "Otros",
-    "frecuenciaDefault": "anual",
-    "color": "#0078D4",
-    "colorTexto": "white",
-    "variantes": ["microsoft 365", "office 365", "microsoft office", "m365", "office"],
-    "categoria_sugerida": "Otros",
-    "frecuencia_tipica": "anual"
-  },
-  {
-    "id": "adobe",
-    "nombre": "Adobe CC",
-    "logo": "adobecreativecloude.png",
-    "categoria": "Otros",
-    "subcategoria": "Otros",
-    "frecuenciaDefault": "mensual",
-    "color": "#FF0000",
-    "colorTexto": "white",
-    "variantes": ["adobe cc", "adobe creative cloud", "adobe", "photoshop", "illustrator"],
-    "categoria_sugerida": "Otros",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "chatgpt",
-    "nombre": "ChatGPT Plus",
-    "logo": "chatgpt.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#10A37F",
-    "colorTexto": "white",
-    "variantes": ["chatgpt plus", "chatgpt", "chat gpt", "openai"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "canva",
-    "nombre": "Canva",
-    "logo": "canva.png",
-    "categoria": "Otros",
-    "subcategoria": "Otros",
-    "frecuenciaDefault": "mensual",
-    "color": "#00C4CC",
-    "colorTexto": "white",
-    "variantes": ["canva", "canva pro"],
-    "categoria_sugerida": "Otros",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "notion",
-    "nombre": "Notion",
-    "logo": "notion.png",
-    "categoria": "Otros",
-    "subcategoria": "Otros",
-    "frecuenciaDefault": "mensual",
-    "color": "#000000",
-    "colorTexto": "white",
-    "variantes": ["notion", "notion plus", "notion ai"],
-    "categoria_sugerida": "Otros",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "evernote",
-    "nombre": "Evernote",
-    "logo": "evernote.png",
-    "categoria": "Otros",
-    "subcategoria": "Otros",
-    "frecuenciaDefault": "mensual",
-    "color": "#00A82D",
-    "colorTexto": "white",
-    "variantes": ["evernote"],
-    "categoria_sugerida": "Otros",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "dropbox",
-    "nombre": "Dropbox",
-    "logo": "dropbox.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#0061FF",
-    "colorTexto": "white",
-    "variantes": ["dropbox", "drop box"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "grammarly",
-    "nombre": "Grammarly",
-    "logo": "grammerly.png",
-    "categoria": "Otros",
-    "subcategoria": "Otros",
-    "frecuenciaDefault": "anual",
-    "color": "#15C39A",
-    "colorTexto": "white",
-    "variantes": ["grammarly", "gramarly"],
-    "categoria_sugerida": "Otros",
-    "frecuencia_tipica": "anual"
-  },
-  {
-    "id": "xbox",
-    "nombre": "Xbox Pass",
-    "logo": "xbox.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#107C10",
-    "colorTexto": "white",
-    "variantes": ["xbox pass", "xbox game pass", "game pass", "xbox"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "playstation",
-    "nombre": "PlayStation+",
-    "logo": "playstation.png",
-    "categoria": "Recreativo",
-    "subcategoria": null,
-    "frecuenciaDefault": "mensual",
-    "color": "#003791",
-    "colorTexto": "white",
-    "variantes": ["playstation+", "playstation plus", "ps plus", "ps+", "play station plus"],
-    "categoria_sugerida": "Recreativo",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "rappi",
-    "nombre": "Rappi Prime",
-    "logo": "rappipro.png",
-    "categoria": "Gastronomía",
-    "subcategoria": "Delivery",
-    "frecuenciaDefault": "mensual",
-    "color": "#FF441F",
-    "colorTexto": "white",
-    "variantes": ["rappi prime", "rappi", "rappi pro"],
-    "categoria_sugerida": "Gastronomía",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "pedidosya",
-    "nombre": "PedidosYa Pass",
-    "logo": "pedidoya.png",
-    "categoria": "Gastronomía",
-    "subcategoria": "Delivery",
-    "frecuenciaDefault": "mensual",
-    "color": "#FF0050",
-    "colorTexto": "white",
-    "variantes": ["pedidosya pass", "pedidosya", "pedidos ya", "pedidos ya plus"],
-    "categoria_sugerida": "Gastronomía",
-    "frecuencia_tipica": "mensual"
-  },
-  {
-    "id": "duolingo",
-    "nombre": "Duolingo",
-    "logo": "duolingo.png",
-    "categoria": "Educación",
-    "subcategoria": "Idiomas",
-    "frecuenciaDefault": "mensual",
-    "color": "#58CC02",
-    "colorTexto": "white",
-    "variantes": ["duolingo", "duolingo plus", "duolingo super", "super duolingo"],
-    "categoria_sugerida": "Educación",
-    "frecuencia_tipica": "mensual"
-  }
-]
+{
+  "servicios": [
+    {
+      "id": "netflix",
+      "nombre": "Netflix",
+      "logo": "netflix.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#E50914",
+      "colorTexto": "white",
+      "variantes": [
+        "netflix",
+        "netfli",
+        "netflis",
+        "netflik"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "hbomax",
+      "nombre": "HBO Max",
+      "logo": "hbomax.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#5822B4",
+      "colorTexto": "white",
+      "variantes": [
+        "hbo max",
+        "hbo",
+        "max",
+        "hbomax"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "primevideo",
+      "nombre": "Prime Video",
+      "logo": "primevideo.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#00A8E0",
+      "colorTexto": "white",
+      "variantes": [
+        "prime video",
+        "amazon prime",
+        "prime",
+        "amazon prime video"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "paramount",
+      "nombre": "Paramount+",
+      "logo": "paramount.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#0064FF",
+      "colorTexto": "white",
+      "variantes": [
+        "paramount+",
+        "paramount plus",
+        "paramount",
+        "paramoun"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "appletv",
+      "nombre": "Apple TV+",
+      "logo": "appletv.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#1C1C1E",
+      "colorTexto": "white",
+      "variantes": [
+        "apple tv+",
+        "apple tv",
+        "apple tv plus",
+        "appletv"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "crunchyroll",
+      "nombre": "Crunchyroll",
+      "logo": "crunchiroll.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#F47521",
+      "colorTexto": "white",
+      "variantes": [
+        "crunchyroll",
+        "crunchy",
+        "crunchiroll"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "plutotv",
+      "nombre": "Pluto TV",
+      "logo": "plutotv.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#9900FF",
+      "colorTexto": "white",
+      "variantes": [
+        "pluto tv",
+        "pluto",
+        "plutotv"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "peacock",
+      "nombre": "Peacock",
+      "logo": "peacock.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#000000",
+      "colorTexto": "white",
+      "variantes": [
+        "peacock"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "spotify",
+      "nombre": "Spotify",
+      "logo": "spotify.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#1DB954",
+      "colorTexto": "white",
+      "variantes": [
+        "spotify",
+        "spoti",
+        "spoty"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "applemusic",
+      "nombre": "Apple Music",
+      "logo": "applemusic.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#FC3C44",
+      "colorTexto": "white",
+      "variantes": [
+        "apple music",
+        "applemusic"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "youtubemusic",
+      "nombre": "YT Music",
+      "logo": "youtubemusic.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#FF0000",
+      "colorTexto": "white",
+      "variantes": [
+        "yt music",
+        "youtube music",
+        "youtube premium",
+        "yt premium"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "tidal",
+      "nombre": "Tidal",
+      "logo": "tidal.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#000000",
+      "colorTexto": "white",
+      "variantes": [
+        "tidal"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "deezer",
+      "nombre": "Deezer",
+      "logo": "deezer.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#A238FF",
+      "colorTexto": "white",
+      "variantes": [
+        "deezer",
+        "dezer"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "icloud",
+      "nombre": "iCloud",
+      "logo": "icloud.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#3478F6",
+      "colorTexto": "white",
+      "variantes": [
+        "icloud",
+        "i cloud",
+        "apple storage",
+        "almacenamiento apple"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "googleone",
+      "nombre": "Google One",
+      "logo": "googleone.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#4285F4",
+      "colorTexto": "white",
+      "variantes": [
+        "google one",
+        "google drive",
+        "googleone",
+        "gsuite",
+        "google workspace"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "microsoft365",
+      "nombre": "Microsoft 365",
+      "logo": "microsoft365.png",
+      "categoria": "Otros",
+      "subcategoria": "Otros",
+      "frecuenciaDefault": "anual",
+      "color": "#0078D4",
+      "colorTexto": "white",
+      "variantes": [
+        "microsoft 365",
+        "office 365",
+        "microsoft office",
+        "m365",
+        "office"
+      ],
+      "categoria_sugerida": "Otros",
+      "frecuencia_tipica": "anual"
+    },
+    {
+      "id": "adobe",
+      "nombre": "Adobe CC",
+      "logo": "adobecreativecloude.png",
+      "categoria": "Otros",
+      "subcategoria": "Otros",
+      "frecuenciaDefault": "mensual",
+      "color": "#FF0000",
+      "colorTexto": "white",
+      "variantes": [
+        "adobe cc",
+        "adobe creative cloud",
+        "adobe",
+        "photoshop",
+        "illustrator"
+      ],
+      "categoria_sugerida": "Otros",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "chatgpt",
+      "nombre": "ChatGPT Plus",
+      "logo": "chatgpt.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#10A37F",
+      "colorTexto": "white",
+      "variantes": [
+        "chatgpt plus",
+        "chatgpt",
+        "chat gpt",
+        "openai"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "canva",
+      "nombre": "Canva",
+      "logo": "canva.png",
+      "categoria": "Otros",
+      "subcategoria": "Otros",
+      "frecuenciaDefault": "mensual",
+      "color": "#00C4CC",
+      "colorTexto": "white",
+      "variantes": [
+        "canva",
+        "canva pro"
+      ],
+      "categoria_sugerida": "Otros",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "notion",
+      "nombre": "Notion",
+      "logo": "notion.png",
+      "categoria": "Otros",
+      "subcategoria": "Otros",
+      "frecuenciaDefault": "mensual",
+      "color": "#000000",
+      "colorTexto": "white",
+      "variantes": [
+        "notion",
+        "notion plus",
+        "notion ai"
+      ],
+      "categoria_sugerida": "Otros",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "evernote",
+      "nombre": "Evernote",
+      "logo": "evernote.png",
+      "categoria": "Otros",
+      "subcategoria": "Otros",
+      "frecuenciaDefault": "mensual",
+      "color": "#00A82D",
+      "colorTexto": "white",
+      "variantes": [
+        "evernote"
+      ],
+      "categoria_sugerida": "Otros",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "dropbox",
+      "nombre": "Dropbox",
+      "logo": "dropbox.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#0061FF",
+      "colorTexto": "white",
+      "variantes": [
+        "dropbox",
+        "drop box"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "grammarly",
+      "nombre": "Grammarly",
+      "logo": "grammerly.png",
+      "categoria": "Otros",
+      "subcategoria": "Otros",
+      "frecuenciaDefault": "anual",
+      "color": "#15C39A",
+      "colorTexto": "white",
+      "variantes": [
+        "grammarly",
+        "gramarly"
+      ],
+      "categoria_sugerida": "Otros",
+      "frecuencia_tipica": "anual"
+    },
+    {
+      "id": "xbox",
+      "nombre": "Xbox Pass",
+      "logo": "xbox.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#107C10",
+      "colorTexto": "white",
+      "variantes": [
+        "xbox pass",
+        "xbox game pass",
+        "game pass",
+        "xbox"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "playstation",
+      "nombre": "PlayStation+",
+      "logo": "playstation.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#003791",
+      "colorTexto": "white",
+      "variantes": [
+        "playstation+",
+        "playstation plus",
+        "ps plus",
+        "ps+",
+        "play station plus"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "rappi",
+      "nombre": "Rappi Prime",
+      "logo": "rappipro.png",
+      "categoria": "Gastronomía",
+      "subcategoria": "Delivery",
+      "frecuenciaDefault": "mensual",
+      "color": "#FF441F",
+      "colorTexto": "white",
+      "variantes": [
+        "rappi prime",
+        "rappi",
+        "rappi pro"
+      ],
+      "categoria_sugerida": "Gastronomía",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "pedidosya",
+      "nombre": "PedidosYa Pass",
+      "logo": "pedidoya.png",
+      "categoria": "Gastronomía",
+      "subcategoria": "Delivery",
+      "frecuenciaDefault": "mensual",
+      "color": "#FF0050",
+      "colorTexto": "white",
+      "variantes": [
+        "pedidosya pass",
+        "pedidosya",
+        "pedidos ya",
+        "pedidos ya plus"
+      ],
+      "categoria_sugerida": "Gastronomía",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "duolingo",
+      "nombre": "Duolingo",
+      "logo": "duolingo.png",
+      "categoria": "Educación",
+      "subcategoria": "Idiomas",
+      "frecuenciaDefault": "mensual",
+      "color": "#58CC02",
+      "colorTexto": "white",
+      "variantes": [
+        "duolingo",
+        "duolingo plus",
+        "duolingo super",
+        "super duolingo"
+      ],
+      "categoria_sugerida": "Educación",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "gimnasio",
+      "nombre": "Gimnasio",
+      "logo": null,
+      "icono": "Dumbbell",
+      "generico": true,
+      "categoria": "Salud",
+      "subcategoria": "Deportes y gimnasio",
+      "frecuenciaDefault": "mensual",
+      "color": "#2563EB",
+      "colorTexto": "white",
+      "variantes": [
+        "gimnasio",
+        "gym"
+      ],
+      "categoria_sugerida": "Salud",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "prepaga",
+      "nombre": "Prepaga",
+      "logo": null,
+      "icono": "HeartPulse",
+      "generico": true,
+      "categoria": "Salud",
+      "subcategoria": "Obra social / Prepaga",
+      "frecuenciaDefault": "mensual",
+      "color": "#059669",
+      "colorTexto": "white",
+      "variantes": [
+        "prepaga",
+        "obra social"
+      ],
+      "categoria_sugerida": "Salud",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "seguro",
+      "nombre": "Seguro (auto, hogar o vida)",
+      "logo": null,
+      "icono": "Shield",
+      "generico": true,
+      "categoria": "Vivienda",
+      "subcategoria": "Seguros",
+      "frecuenciaDefault": "mensual",
+      "color": "#4F46E5",
+      "colorTexto": "white",
+      "variantes": [
+        "seguro",
+        "seguros"
+      ],
+      "categoria_sugerida": "Vivienda",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "club_clases",
+      "nombre": "Club o clases",
+      "logo": null,
+      "icono": "Users",
+      "generico": true,
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#D97706",
+      "colorTexto": "white",
+      "variantes": [
+        "club",
+        "clases"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "colegio",
+      "nombre": "Colegio o cuota escolar",
+      "logo": null,
+      "icono": "GraduationCap",
+      "generico": true,
+      "categoria": "Educación",
+      "subcategoria": "Cuotas",
+      "frecuenciaDefault": "mensual",
+      "color": "#7C3AED",
+      "colorTexto": "white",
+      "variantes": [
+        "colegio",
+        "escuela",
+        "cuota escolar"
+      ],
+      "categoria_sugerida": "Educación",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "internet_cable",
+      "nombre": "Internet y cable",
+      "logo": null,
+      "icono": "Wifi",
+      "generico": true,
+      "categoria": "Comunicación",
+      "subcategoria": "Internet y cable",
+      "frecuenciaDefault": "mensual",
+      "color": "#0284C7",
+      "colorTexto": "white",
+      "variantes": [
+        "internet",
+        "cable",
+        "wifi"
+      ],
+      "categoria_sugerida": "Comunicación",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "celular",
+      "nombre": "Celular",
+      "logo": null,
+      "icono": "Smartphone",
+      "generico": true,
+      "categoria": "Comunicación",
+      "subcategoria": "Celular",
+      "frecuenciaDefault": "mensual",
+      "color": "#0D9488",
+      "colorTexto": "white",
+      "variantes": [
+        "celular",
+        "telefono movil"
+      ],
+      "categoria_sugerida": "Comunicación",
+      "frecuencia_tipica": "mensual"
+    }
+  ],
+  "reglas_categoria": [
+    {
+      "id": 1,
+      "grupos": [
+        [
+          "movistar",
+          "claro",
+          "personal",
+          "telecom",
+          "telecentro"
+        ],
+        [
+          "fibra",
+          "hogar",
+          "internet",
+          "wifi",
+          "tv",
+          "cable"
+        ]
+      ],
+      "categoria": "Comunicación",
+      "subcategoria": "Internet y cable"
+    },
+    {
+      "id": 2,
+      "grupos": [
+        [
+          "internet",
+          "fibra",
+          "fibra optica",
+          "wifi",
+          "cable",
+          "cablevision",
+          "fibertel",
+          "flow",
+          "telecentro",
+          "directv",
+          "iplan",
+          "starlink"
+        ]
+      ],
+      "categoria": "Comunicación",
+      "subcategoria": "Internet y cable"
+    },
+    {
+      "id": 3,
+      "grupos": [
+        [
+          "seguro",
+          "seguros",
+          "la caja",
+          "mapfre",
+          "zurich",
+          "allianz",
+          "rivadavia",
+          "federacion patronal",
+          "sancor seguros",
+          "la segunda",
+          "san cristobal",
+          "mercantil andina"
+        ],
+        [
+          "auto",
+          "autos",
+          "moto",
+          "motos",
+          "vehiculo",
+          "automotor",
+          "coche",
+          "camioneta"
+        ]
+      ],
+      "categoria": "Transporte",
+      "subcategoria": "Mantenimiento y seguro del auto"
+    },
+    {
+      "id": 4,
+      "grupos": [
+        [
+          "prepaga",
+          "obra social",
+          "osde",
+          "swiss medical",
+          "galeno",
+          "medife",
+          "omint",
+          "sancor salud",
+          "medicus",
+          "accord salud",
+          "avalian",
+          "hospital italiano",
+          "hospital aleman",
+          "hospital britanico",
+          "plan de salud"
+        ]
+      ],
+      "categoria": "Salud",
+      "subcategoria": "Obra social / Prepaga"
+    },
+    {
+      "id": 5,
+      "grupos": [
+        [
+          "seguro",
+          "seguros",
+          "la caja",
+          "mapfre",
+          "zurich",
+          "allianz",
+          "rivadavia",
+          "federacion patronal",
+          "sancor seguros",
+          "la segunda",
+          "san cristobal",
+          "mercantil andina"
+        ]
+      ],
+      "categoria": "Vivienda",
+      "subcategoria": "Seguros"
+    },
+    {
+      "id": 6,
+      "grupos": [
+        [
+          "gimnasio",
+          "gym",
+          "megatlon",
+          "sportclub",
+          "sport club",
+          "smart fit",
+          "smartfit",
+          "crossfit",
+          "entrenador",
+          "funcional",
+          "musculacion"
+        ]
+      ],
+      "categoria": "Salud",
+      "subcategoria": "Deportes y gimnasio"
+    },
+    {
+      "id": 7,
+      "grupos": [
+        [
+          "club",
+          "natacion",
+          "yoga",
+          "pilates",
+          "futbol",
+          "tenis",
+          "padel",
+          "hockey",
+          "rugby",
+          "deporte",
+          "deportes",
+          "escuelita"
+        ]
+      ],
+      "categoria": "Salud",
+      "subcategoria": "Deportes y gimnasio"
+    },
+    {
+      "id": 8,
+      "grupos": [
+        [
+          "idioma",
+          "idiomas",
+          "ingles",
+          "frances",
+          "italiano",
+          "portugues",
+          "aleman",
+          "chino",
+          "japones"
+        ]
+      ],
+      "categoria": "Educación",
+      "subcategoria": "Idiomas"
+    },
+    {
+      "id": 9,
+      "grupos": [
+        [
+          "colegio",
+          "escuela",
+          "jardin",
+          "cuota escolar",
+          "universidad",
+          "facultad",
+          "instituto",
+          "secundario",
+          "primaria",
+          "guarderia"
+        ]
+      ],
+      "categoria": "Educación",
+      "subcategoria": "Cuotas"
+    },
+    {
+      "id": 10,
+      "grupos": [
+        [
+          "clase",
+          "clases",
+          "musica",
+          "danza",
+          "baile",
+          "canto",
+          "guitarra",
+          "piano",
+          "taller",
+          "arte",
+          "teatro",
+          "dibujo"
+        ]
+      ],
+      "categoria": "Recreativo",
+      "subcategoria": "Hobbies y juegos"
+    },
+    {
+      "id": 11,
+      "grupos": [
+        [
+          "celular",
+          "telefono",
+          "movil",
+          "personal",
+          "claro",
+          "movistar",
+          "tuenti"
+        ]
+      ],
+      "categoria": "Comunicación",
+      "subcategoria": "Celular"
+    }
+  ]
+}

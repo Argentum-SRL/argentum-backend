@@ -62,6 +62,7 @@ class CuotaResumen(BaseModel):
     moneda: str
     fecha_vencimiento: date
     pagada: bool
+    suscripcion_id: UUID | None = None
 
     class Config:
         from_attributes = True

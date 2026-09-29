@@ -87,15 +87,17 @@ def crear_suscripcion(db: Session, usuario_id: UUID, data: SuscripcionCreate) ->
         if not tarjeta:
             raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
 
-    # 4. Validar subcategoría (si fue enviada)
+    # 4. Validar categoría y subcategoría
+    if data.categoria_id:
+        from app.models.categoria import Categoria, TipoCategoria
+        cat = db.query(Categoria).filter(Categoria.id == data.categoria_id).first()
+        if not cat or cat.tipo != TipoCategoria.EGRESO:
+            raise HTTPException(status_code=400, detail="La categoría seleccionada no es válida o no es de egreso.")
+
     if data.subcategoria_id:
         from app.models.subcategoria import Subcategoria
-        sub = db.query(Subcategoria).filter(
-            Subcategoria.id == data.subcategoria_id
-        ).first()
-        if not sub:
-            raise HTTPException(status_code=404, detail="Subcategoría no encontrada.")
-        if data.categoria_id and sub.categoria_id != data.categoria_id:
+        sub = db.query(Subcategoria).filter(Subcategoria.id == data.subcategoria_id).first()
+        if not sub or (data.categoria_id and sub.categoria_id != data.categoria_id):
             raise HTTPException(status_code=400, detail="La subcategoría seleccionada no pertenece a la categoría.")
 
     # 5. Crear suscripción
@@ -218,14 +220,16 @@ def actualizar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID, 
     nueva_cat_id = update_data['categoria_id'] if 'categoria_id' in update_data else suscripcion.categoria_id
     nueva_sub_id = update_data['subcategoria_id'] if 'subcategoria_id' in update_data else suscripcion.subcategoria_id
 
+    if 'categoria_id' in update_data and nueva_cat_id:
+        from app.models.categoria import Categoria, TipoCategoria
+        cat = db.query(Categoria).filter(Categoria.id == nueva_cat_id).first()
+        if not cat or cat.tipo != TipoCategoria.EGRESO:
+            raise HTTPException(status_code=400, detail="La categoría seleccionada no es válida o no es de egreso.")
+
     if nueva_sub_id:
         from app.models.subcategoria import Subcategoria
-        sub = db.query(Subcategoria).filter(
-            Subcategoria.id == nueva_sub_id
-        ).first()
-        if not sub:
-            raise HTTPException(status_code=404, detail="Subcategoría no encontrada.")
-        if nueva_cat_id and sub.categoria_id != nueva_cat_id:
+        sub = db.query(Subcategoria).filter(Subcategoria.id == nueva_sub_id).first()
+        if not sub or (nueva_cat_id and sub.categoria_id != nueva_cat_id):
             raise HTTPException(status_code=400, detail="La subcategoría seleccionada no pertenece a la categoría.")
 
     if 'categoria_id' in update_data:

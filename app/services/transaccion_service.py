@@ -44,8 +44,8 @@ def obtener_transacciones(
     busqueda: Optional[str] = None,
     es_cuota_hija: Optional[bool] = None
 ):
-    # El usuario ve transacciones normales e hijas (y compras con tarjeta en 1 pago que se registran como padre de 1 cuota).
-    # Las compras en múltiples cuotas muestran cada cuota individual en su vencimiento; el pago de resumen se excluye de gastos de consumo.
+    # Se consultan transacciones directas que no sean padres de cuotas y se excluyen cuotas hijas
+    # de tarjeta de crédito (las operaciones y cobros con tarjeta se gestionan en su respectivo módulo).
     query = select(Transaccion).where(
         Transaccion.usuario_id == usuario_id,
         Transaccion.es_padre_cuotas == False,

@@ -192,7 +192,7 @@ from app.models.suscripcion import Suscripcion, EstadoSuscripcion
 from app.models.historial_suscripcion import HistorialSuscripcion
 from app.schemas.suscripcion import SuscripcionCreate, ActualizarPrecioRequest
 from app.services import suscripcion_service
-from app.core.catalogo_suscripciones import buscar_servicio_por_texto, identificar_servicio_en_texto
+from app.core.catalogo_suscripciones import buscar_servicio_por_texto, identificar_servicio_en_texto, resolver_categoria_sugerida
 import structlog
 
 from app.core.constants import CATEGORIAS_SISTEMA
@@ -3432,13 +3432,7 @@ def _confirmar_propuesta_suscripcion(
     billetera_id = UUID(billetera_id_str) if billetera_id_str else None
     tarjeta_id = UUID(tarjeta_id_str) if tarjeta_id_str else None
 
-    cat_id = None
-    subcat_id = None
-    cat_sugerida = entidades.get("categoria")
-    if cat_sugerida:
-        c_id, s_id = _resolver_categoria_y_subcategoria(cat_sugerida, usuario.id, db, tipo="egreso")
-        cat_id = c_id
-        subcat_id = s_id
+    cat_id, subcat_id = resolver_categoria_sugerida(db, nombre)
 
     data_create = SuscripcionCreate(
         nombre=nombre,
@@ -3463,7 +3457,20 @@ def _confirmar_propuesta_suscripcion(
     medio_pago_txt = entidades.get("medio_pago_txt", "")
     fecha_fmt = f"{proximo_cobro.day} de {MESES_ES_GEN[proximo_cobro.month - 1]}"
 
-    msg_resp = f"Listo. Suscripción a {nombre} por {monto_fmt} {frecuencia_val} programada {medio_pago_txt} (primer cobro el {fecha_fmt})."
+    # Armado de la frase de categoría asignada
+    from app.models.categoria import Categoria
+    from app.models.subcategoria import Subcategoria
+    cat_obj = db.get(Categoria, nueva_sub.categoria_id) if nueva_sub.categoria_id else None
+    cat_nom = cat_obj.nombre if cat_obj else "Otros"
+    subcat_obj = db.get(Subcategoria, nueva_sub.subcategoria_id) if nueva_sub.subcategoria_id else None
+    subcat_nom = subcat_obj.nombre if subcat_obj else None
+
+    if subcat_nom:
+        frase_cat = f"La anoté en {cat_nom} / {subcat_nom}. Si va en otra, la cambiás desde Suscripciones en la web."
+    else:
+        frase_cat = f"La anoté en {cat_nom}. Si va en otra, la cambiás desde Suscripciones en la web."
+
+    msg_resp = f"Listo. Suscripción a {nombre} por {monto_fmt} {frecuencia_val} programada {medio_pago_txt} (primer cobro el {fecha_fmt}). {frase_cat}"
     return nueva_sub, msg_resp, False
 
 

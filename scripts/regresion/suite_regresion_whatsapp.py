@@ -2288,6 +2288,30 @@ def p10_caso_12(datos):
     return run_isolated(test)
 
 
+def p10_caso_13(datos):
+    """alta de gimnasio por WhatsApp con categoría sugerida Salud / Deportes y gimnasio"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        db = Session()
+        _limpiar_subs(conn, u.id)
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "Pago el gimnasio 45000 por mes"), time.perf_counter())
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        resp_conf = respuestas[-1][1] if respuestas else ""
+        sub = db.execute(select(Suscripcion).where(Suscripcion.usuario_id == u.id, Suscripcion.nombre.ilike("%gimnasio%"))).scalars().first()
+        cat = db.get(Categoria, sub.categoria_id) if sub and sub.categoria_id else None
+        subcat = db.get(Subcategoria, sub.subcategoria_id) if sub and sub.subcategoria_id else None
+        _limpiar_subs(conn, u.id)
+        return (
+            f"Cat: {cat.nombre if cat else ''} / {subcat.nombre if subcat else ''} | "
+            f"Conf: {'Categoría: Salud / Deportes y gimnasio' in resp_conf}"
+        )
+    return run_isolated(test)
+
+
 # ==============================================================================
 # RUNNER GENERAL DE SUITE
 # ==============================================================================
@@ -5293,6 +5317,14 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             "nombre": "Deshacer un aporte recién confirmado: revierte monto_actual y borra la transacción",
             "ejecutar": lambda: p16_caso_6(datos),
             "esperado": "Propuesta deshacer ok: True | Confirmacion deshacer ok: True | Meta revertida: True | Tx borrada: True | Saldo restaurado: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P10.13",
+            "punto": "Punto 10",
+            "nombre": "alta de gimnasio por WhatsApp con categoría sugerida",
+            "ejecutar": lambda: p10_caso_13(datos),
+            "esperado": "Cat: Salud / Deportes y gimnasio | Conf: True",
             "match": "exacto",
         },
     ]

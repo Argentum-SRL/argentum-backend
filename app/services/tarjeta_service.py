@@ -395,7 +395,8 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
             monto=cuota.monto_real if cuota.monto_real is not None else cuota.monto_proyectado,
             moneda=cuota_moneda,
             fecha_vencimiento=cuota.fecha_vencimiento,
-            pagada=cuota.pagada
+            pagada=cuota.pagada,
+            suscripcion_id=cuota.transaccion.suscripcion_id if cuota.transaccion else None,
         )
 
         f_cuota = cuota.fecha_vencimiento
