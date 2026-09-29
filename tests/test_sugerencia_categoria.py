@@ -16,6 +16,7 @@ from app.models.subcategoria import Subcategoria
 from app.core.catalogo_suscripciones import (
     sugerir_categoria_suscripcion,
     resolver_categoria_sugerida,
+    identificar_servicio_en_texto,
 )
 
 CASOS_PRUEBA = [
@@ -108,3 +109,27 @@ def test_resolver_categoria_sugerida_no_coincidente(db_session):
     assert sub_id is None
     cat = db_session.get(Categoria, cat_id)
     assert cat.nombre == "Otros"
+
+
+@pytest.mark.parametrize("texto", [
+    "compré un cable usb 3000",
+    "cargué 5000 al celular",
+    "pagué el colegio 80000",
+    "pagué el seguro del auto",
+    "clases de guitarra 10000",
+    "fui al club",
+    "pagué el gimnasio",
+])
+def test_identificar_servicio_en_texto_no_genericos(texto):
+    assert identificar_servicio_en_texto(texto) is None
+
+
+def test_identificar_servicio_en_texto_servicios_reales():
+    spotify = identificar_servicio_en_texto("pagué el Spotify")
+    assert spotify is not None
+    assert spotify["nombre"] == "Spotify"
+
+    netflix = identificar_servicio_en_texto("me suscribí a Netflix")
+    assert netflix is not None
+    assert netflix["nombre"] == "Netflix"
+

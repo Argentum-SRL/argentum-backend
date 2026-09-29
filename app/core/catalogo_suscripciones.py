@@ -63,6 +63,8 @@ def buscar_servicio_por_texto(texto: str) -> Optional[dict[str, Any]]:
         return None
     texto_norm = normalizar_texto(texto)
     for serv in CATALOGO_SERVICIOS:
+        if serv.get("generico"):
+            continue
         if normalizar_texto(serv["nombre"]) == texto_norm or normalizar_texto(serv["id"]) == texto_norm:
             return serv
         for v in serv.get("variantes", []):
@@ -87,6 +89,8 @@ def identificar_servicio_en_texto(texto: str) -> Optional[dict[str, Any]]:
     texto_norm = normalizar_texto(texto)
     candidatos = []
     for serv in CATALOGO_SERVICIOS:
+        if serv.get("generico"):
+            continue
         variantes = [serv["nombre"], serv["id"]] + serv.get("variantes", [])
         for v in variantes:
             v_norm = normalizar_texto(v)

@@ -2307,7 +2307,7 @@ def p10_caso_13(datos):
         _limpiar_subs(conn, u.id)
         return (
             f"Cat: {cat.nombre if cat else ''} / {subcat.nombre if subcat else ''} | "
-            f"Conf: {'Categoría: Salud / Deportes y gimnasio' in resp_conf}"
+            f"Conf: {'La anoté en Salud / Deportes y gimnasio' in resp_conf}"
         )
     return run_isolated(test)
 

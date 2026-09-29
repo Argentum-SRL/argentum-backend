@@ -68,7 +68,7 @@ from app.routers.whatsapp.parsers import (
 from app.services import suscripcion_service, whatsapp_service
 from app.services.tarjeta_service import calcular_primer_vencimiento
 from app.services.evento_service import emitir_evento_actualizacion
-from app.core.catalogo_suscripciones import buscar_servicio_por_texto, sugerir_categoria_suscripcion
+from app.core.catalogo_suscripciones import buscar_servicio_por_texto
 from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
 from app.utils.formato import formatear_monto
 from app.utils.texto import normalizar_texto
@@ -1557,8 +1557,6 @@ def manejar_alta_suscripcion(
                 medio_pago_txt = f"desde {billetera_obj.nombre}" if billetera_obj else ""
                 propuesta_msg = f"Voy a programar la suscripción a {srv_nom}: {monto_fmt} {frecuencia} {medio_pago_txt}, primer cobro el {fecha_fmt}. ¿Confirmás?"
 
-                cat_sugerida, subcat_sugerida = sugerir_categoria_suscripcion(srv_nom)
-
                 nueva_conv = ConversacionWpp(
                     usuario_id=usuario.id,
                     wamid=wamid,
@@ -1575,8 +1573,6 @@ def manejar_alta_suscripcion(
                         "billetera_id": str(billetera_obj.id) if billetera_obj else None,
                         "medio_pago_txt": medio_pago_txt,
                         "proximo_cobro": proximo_cobro.isoformat(),
-                        "categoria": cat_sugerida,
-                        "subcategoria": subcat_sugerida,
                     },
                     accion_ejecutada=None,
                     confianza=Decimal("1.000"),
