@@ -23,6 +23,7 @@ from app.services.ingreso_habitual_service import (
     calcular_ingreso_esperado_ciclo,
     obtener_ingreso_habitual,
 )
+from app.services.compromisos_service import calcular_compromisos_memoria, obtener_precio_vigente_memoria
 from app.utils.fecha import hoy_argentina
 from app.utils.finanzas import (
     ClasificacionGasto, StreamRecurrente, ZERO, ONE, clasificar_gastos,
@@ -33,9 +34,6 @@ from app.utils.finanzas import (
     UMBRAL_COBERTURA_MINIMA_80, UMBRAL_ANCHO_MAXIMO_RELATIVO_80, NIVEL_EVALUADO_PUERTA,
     _indice_por_mes
 )
-
-
-
 
 
 def _ciclos_anteriores(usuario: Usuario, hoy: date, cantidad: int = 12) -> list[tuple[date, date]]:
@@ -66,6 +64,7 @@ def _carga(db: Session, usuario: Usuario, fecha_referencia: date | None = None) 
     cuotas = db.execute(
         select(Cuota, GrupoCuotas)
         .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
+        .options(joinedload(GrupoCuotas.transaccion_padre))
         .where(GrupoCuotas.usuario_id == usuario.id)
     ).all()
     suscripciones = db.execute(
@@ -252,16 +251,13 @@ def calcular_perfil_nuevo(db: Session, usuario: Usuario, data: dict[str, Any] | 
         ahorro_max = None
         posicion_ahorro = None
 
-    # Gasto comprometido (Pilar Endeudarse/Gastar)
-    cuotas = data["cuotas"]
-    comprometido = sum((c.monto_real or c.monto_proyectado or ZERO for c, grupo in cuotas if grupo.moneda == Moneda.ARS and not c.pagada and c.fecha_vencimiento >= hoy), ZERO)
-    comprometido += sum((h.monto for h in data["historial_subs"] if h.moneda == Moneda.ARS and any(s.id == h.suscripcion_id for s in data["suscripciones"])), ZERO)
-    if datos_suficientes:
-        comprometido += sum(
-            (monto_mensual_deflactado_stream(s) for s in clasificacion.streams if s.clase == "COMPROMISO" and s.senal != "DECLARADO" and s.moneda == Moneda.ARS),
-            ZERO,
-        )
-    comprometido_ratio = (comprometido / ingreso_tipico) if (datos_suficientes and ingreso_tipico and ingreso_tipico > ZERO) else None
+    # Gasto comprometido (Pilar Endeudarse/Gastar) - Fase 2c
+    res_comp = calcular_compromisos_memoria(
+        data["cuotas"], data["suscripciones"], data["historial_subs"],
+        clasificacion.streams, hoy, Moneda.ARS,
+    )
+    comprometido = res_comp.total
+    comprometido_ratio = (comprometido / ingreso_tipico) if (ingreso_tipico and ingreso_tipico > ZERO) else None
 
     # Gasto en hábitos (Pilar Gastar)
     if datos_suficientes:
@@ -318,7 +314,7 @@ def calcular_perfil_nuevo(db: Session, usuario: Usuario, data: dict[str, Any] | 
 
     if comprometido_ratio is not None:
         pct_comp = round(comprometido_ratio * Decimal("100"), 1)
-        interp_relativas["gasto_comprometido"] = f"Demanda el {pct_comp}% de tu ingreso típico mensual (${comprometido:,.0f} / mes en compromisos fijos)."
+        interp_relativas["gasto_comprometido"] = f"Demanda el {pct_comp}% de tu ingreso típico mensual (${comprometido:,.0f} / mes en cuotas, suscripciones y gastos fijos)."
 
     if habitos_ratio is not None:
         pct_hab = round(habitos_ratio * Decimal("100"), 1)
@@ -700,10 +696,11 @@ def calcular_proyeccion_nueva(
              if grupo.moneda == moneda and not c.pagada and hoy <= c.fecha_vencimiento <= fin),
             ZERO,
         )
-        # Suscripciones activas que se cobrarán en [hoy, fin]
+        # Suscripciones activas que se cobrarán en [hoy, fin] a su precio vigente (Fase 2c)
+        moneda_s_str = moneda.value if hasattr(moneda, "value") else str(moneda)
         subs_pendientes = sum(
-            (h.monto for h in data["historial_subs"]
-             if h.moneda == moneda and any(s.id == h.suscripcion_id and hoy <= s.proximo_cobro <= fin for s in data["suscripciones"])),
+            (Decimal(str(pv.monto)) for s in data["suscripciones"] if hoy <= s.proximo_cobro <= fin
+             and (pv := obtener_precio_vigente_memoria(s.id, data["historial_subs"], hoy, moneda_s_str)) is not None),
             ZERO,
         )
         # Compromisos maduros detectados con fecha esperada en [hoy, fin]

@@ -176,12 +176,36 @@ class EvaluadorPersonas:
         aciertos_grupos_comp = sum(1 for g in grupos_comp if g["clase_asignada_predominante"] == "COMPROMISO")
         aciertos_grupos_hab = sum(1 for g in grupos_hab if g["clase_asignada_predominante"] == "HABITO")
         aciertos_grupos_var = sum(1 for g in grupos_var if g["clase_asignada_predominante"] == "VARIABLE")
+        # Métrica informativa Fase 2c: gastos fijos de verdad vs parte c detectada
+        grupos_fijos = [g for g in persona.grupos_verdad.values() if g.tipo_verdadero == "gasto_fijo"]
+        fijos_verdad_monto = Decimal("0")
+        for g in grupos_fijos:
+            movs = [m for m in persona.movimientos if m.grupo_verdadero == g.nombre]
+            if movs:
+                movs.sort(key=lambda x: x.fecha)
+                fijos_verdad_monto += Decimal(str(movs[-1].monto))
+
+        from app.services.compromisos_service import convertir_frecuencia_stream_a_mensual
+        streams_parte_c = [
+            s for s in resultado.streams
+            if s.clase == "COMPROMISO" and s.estado == "MADURO" and s.senal != "DECLARADO"
+        ]
+        parte_c_monto = Decimal("0")
+        for s in streams_parte_c:
+            parte_c_monto += convertir_frecuencia_stream_a_mensual(s.frecuencia, Decimal(str(s.ultimo_monto)))
+
+        cobertura_fijos_pct = float(round((parte_c_monto / fijos_verdad_monto * 100), 1)) if fijos_verdad_monto > Decimal("0") else 0.0
 
         return {
             "persona_id": persona.id,
             "nombre": persona.nombre,
             "tipo_ingreso": persona.tipo_ingreso,
             "cobertura_real": persona.cobertura_real,
+            "compromisos_fase2c": {
+                "fijos_verdad": float(fijos_verdad_monto),
+                "parte_c_detectada": float(parte_c_monto),
+                "porcentaje_cubierto": cobertura_fijos_pct,
+            },
             "total_transacciones": len(txs),
             "total_egresos": len(txs_egreso),
             "total_streams_detectados": len(resultado.streams),
@@ -397,6 +421,15 @@ def formatear_reporte_legible(evaluacion: dict[str, Any], etiqueta: str) -> str:
         c_noeval = fila.get("NO_EVALUADO", 0)
         lineas.append(f"{t_verd:<24} | {c_comp:>12} | {c_hab:>12} | {c_var:>12} | {c_noeval:>12}")
 
+    lineas.append("")
+    lineas.append("-" * 90)
+    lineas.append("METRICA INFORMATIVA FASE 2C: GASTOS FIJOS REALES VS PARTE C DETECTADA")
+    lineas.append("-" * 90)
+    lineas.append(f"{'Persona':<8} | {'Fijos Reales':>14} | {'Parte C Detectada':>18} | {'Cobertura':>10}")
+    lineas.append("-" * 60)
+    for p in evaluacion["personas"]:
+        cf = p.get("compromisos_fase2c", {})
+        lineas.append(f"{p['persona_id']:<8} | {cf.get('fijos_verdad', 0.0):>14,.2f} | {cf.get('parte_c_detectada', 0.0):>18,.2f} | {cf.get('porcentaje_cubierto', 0.0):>9.1f}%")
     lineas.append("")
     lineas.append("=" * 90)
     lineas.append("DETALLE INDIVIDUAL POR PERSONA SINTETICA")

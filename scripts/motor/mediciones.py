@@ -1048,3 +1048,24 @@ def medir_bloque_p(db: Session) -> dict[str, str]:
             res[f"{prefix}.compra"] = "0.00"
             res[f"{prefix}.venta"] = "0.00"
     return res
+
+
+def medir_bloque_q(db: Session, usuario: Usuario) -> dict[str, str]:
+    """Medición canónica de compromisos mensuales y gasto variable típico (Fase 2c)."""
+    from app.services.compromisos_service import (
+        calcular_compromisos_mensuales,
+        calcular_gasto_variable_tipico,
+    )
+    res: dict[str, str] = {}
+    for m in ["ars", "usd"]:
+        mon = Moneda[m.upper()]
+        comp = calcular_compromisos_mensuales(db, usuario, moneda=mon)
+        g_var = calcular_gasto_variable_tipico(db, usuario, moneda=mon)
+        res[f"compromisos.{m}.cuotas"] = _fmt_monto(comp.cuotas)
+        res[f"compromisos.{m}.suscripciones"] = _fmt_monto(comp.suscripciones)
+        res[f"compromisos.{m}.fijos"] = _fmt_monto(comp.fijos)
+        res[f"compromisos.{m}.total"] = _fmt_monto(comp.total)
+        res[f"compromisos.{m}.deudas_y_suscripciones"] = _fmt_monto(comp.deudas_y_suscripciones)
+        res[f"gasto_variable_tipico.{m}"] = _fmt_monto(g_var)
+    return res
+

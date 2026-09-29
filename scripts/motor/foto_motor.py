@@ -51,6 +51,7 @@ from scripts.motor.mediciones import (
     medir_bloque_n,
     medir_bloque_o,
     medir_bloque_p,
+    medir_bloque_q,
 )
 
 TESTINGADMIN_EMAIL = "testingadmin@argentum.com"
@@ -218,6 +219,7 @@ def ejecutar_foto_motor(
             ("N_cuotas", lambda: medir_bloque_n(db, usuario, hoy, ini_act, fin_act, ini_sig, fin_sig)),
             ("O_presupuestos_metas", lambda: medir_bloque_o(db, usuario)),
             ("P_ipc_dolar", lambda: medir_bloque_p(db)),
+            ("Q_compromisos", lambda: medir_bloque_q(db, usuario)),
         ]
 
         for tag_bloque, func_bloque in bloques:

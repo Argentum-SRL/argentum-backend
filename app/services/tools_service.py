@@ -453,26 +453,33 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
     ingreso_promedio_mensual = float(res_hab_ars.monto) if res_hab_ars.monto is not None else None
     ingreso_es_estimacion_parcial = (ciclos_con_historia == 0)
 
-    # 4. Gasto promedio mensual variable
-    cond_gas = condicion_gasto(user_id, start_range, end_range, hoy=hoy)
-    gastos_total = db.query(func.sum(Transaccion.monto)).filter(
-        cond_gas,
-        Transaccion.moneda == Moneda.ARS
-    ).scalar() or Decimal("0")
-
-    gasto_promedio_variable = float(gastos_total / Decimal(str(divisor)))
+    # 4. Gasto variable típico y compromisos mensuales unificados (Fase 2c)
+    from app.services.compromisos_service import (
+        calcular_compromisos_mensuales,
+        calcular_gasto_variable_tipico,
+    )
+    comp_res = calcular_compromisos_mensuales(db, usuario, hoy=hoy, moneda=Moneda.ARS)
+    gasto_promedio_variable = float(calcular_gasto_variable_tipico(db, usuario, hoy=hoy, moneda=Moneda.ARS))
 
     saldo_disp_ars = round(float(disponible_res["ars"]["saldo_disponible"]), 2)
-    carga_comprometida_ars = round(carga_mensual_comprometida_ars, 2)
+    carga_comprometida_ars = round(float(comp_res.deudas_y_suscripciones), 2)
+    total_compromisos_ars = float(comp_res.total)
 
-    # Margen libre mensual
+    # Margen libre mensual: ingreso - compromisos mensuales - gasto variable típico
     margen_libre_mensual = None
     if ingreso_promedio_mensual is not None:
-        margen_libre_mensual = ingreso_promedio_mensual - carga_mensual_comprometida_ars - gasto_promedio_variable
+        margen_libre_mensual = ingreso_promedio_mensual - total_compromisos_ars - gasto_promedio_variable
 
     return {
         "saldo_disponible": saldo_disp_ars,
         "carga_mensual_comprometida": carga_comprometida_ars,
+        "compromisos_mensuales": {
+            "cuotas": round(float(comp_res.cuotas), 2),
+            "suscripciones": round(float(comp_res.suscripciones), 2),
+            "fijos": round(float(comp_res.fijos), 2),
+            "total": round(total_compromisos_ars, 2),
+            "deudas_y_suscripciones": round(float(comp_res.deudas_y_suscripciones), 2),
+        },
         "ars": {
             "total_billeteras": round(float(disponible_res["ars"]["total_billeteras"]), 2),
             "cuotas_comprometidas": round(float(disponible_res["ars"]["cuotas_comprometidas"]), 2),
@@ -509,7 +516,9 @@ def calcular_puede_permitirse(
     
     ingreso = ingreso_manual if ctx.get('ingreso_promedio_mensual') is None else ctx['ingreso_promedio_mensual']
     saldo = ctx.get('ars', {}).get('saldo_disponible', 0.0)
-    carga_actual = ctx.get('ars', {}).get('cuotas_comprometidas', 0.0) + ctx.get('ars', {}).get('suscripciones_mensuales', 0.0)
+    comp_dict = ctx.get('compromisos_mensuales', {})
+    carga_actual = comp_dict.get('deudas_y_suscripciones', ctx.get('ars', {}).get('cuotas_comprometidas', 0.0) + ctx.get('ars', {}).get('suscripciones_mensuales', 0.0))
+    compromisos_totales = comp_dict.get('total', carga_actual)
     gasto_variable = ctx.get('gasto_promedio_variable', 0.0)
     es_manual = bool(ctx.get('ingreso_promedio_mensual') is None and ingreso_manual is not None)
 
@@ -568,7 +577,7 @@ def calcular_puede_permitirse(
 
         nueva_carga_total = carga_actual + monto_cuota
         porcentaje_carga_sobre_ingreso = (nueva_carga_total / ingreso * 100) if ingreso else None
-        nuevo_margen_libre = (ingreso - nueva_carga_total - gasto_variable) if ingreso else None
+        nuevo_margen_libre = (ingreso - compromisos_totales - gasto_variable - monto_cuota) if ingreso else None
         
         # Semáforo basado en % de carga comprometida sobre ingreso y margen libre resultante
         if porcentaje_carga_sobre_ingreso is None:
