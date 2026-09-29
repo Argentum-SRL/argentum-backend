@@ -284,16 +284,6 @@ def _extraer_nombre_servicio(mensaje: str) -> str | None:
         if cand:
             return cand
 
-    m5 = re.search(
-        r"(?:pago|pagu[eé]|abono|abon[eé])\s+(?:el\s+|la\s+|de\s+el\s+|de\s+la\s+|del\s+|de\s+)?(.+?)\s+(?:\$?\s*[\d\.,]+(?:k|\s*mil)?\s*(?:d[oó]lares|usd|pesos)?\s+)?(?:por\s+mes|al\s+mes|mensual|anual|cada\s+mes)\b",
-        mensaje,
-        flags=re.IGNORECASE,
-    )
-    if m5:
-        cand = m5.group(1).strip(" .,-")
-        if cand:
-            return cand
-
     return None
 
 

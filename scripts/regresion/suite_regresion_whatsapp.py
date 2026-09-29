@@ -2297,7 +2297,7 @@ def p10_caso_13(datos):
         conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "Pago el gimnasio 45000 por mes"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "empecé a pagar 45000 del gimnasio por mes"), time.perf_counter())
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp_conf = respuestas[-1][1] if respuestas else ""

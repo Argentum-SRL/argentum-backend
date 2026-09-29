@@ -1,3 +1,4 @@
+from app.routers.whatsapp.parsers import _extraer_nombre_servicio
 import pytest
 from uuid import uuid4
 from sqlalchemy import create_engine
@@ -132,4 +133,17 @@ def test_identificar_servicio_en_texto_servicios_reales():
     netflix = identificar_servicio_en_texto("me suscribí a Netflix")
     assert netflix is not None
     assert netflix["nombre"] == "Netflix"
+
+@pytest.mark.parametrize("texto", [
+    "pago el alquiler 300000 por mes",
+    "pago 300 mil por mes de expensas",
+    "Pago el gimnasio 45000 por mes",
+])
+def test_extraer_nombre_servicio_no_suscribe_gastos_comunes(texto):
+    assert _extraer_nombre_servicio(texto) is None
+
+
+def test_extraer_nombre_servicio_empece_a_pagar():
+    assert _extraer_nombre_servicio("empecé a pagar 15000 del Gimnasio del barrio por mes") == "Gimnasio del barrio"
+    assert _extraer_nombre_servicio("empecé a pagar 45000 del gimnasio por mes") == "gimnasio"
 
