@@ -376,7 +376,6 @@ def generar_metas_e_inversiones(
                             subcategoria_id=cat.sub_resto.id,
                             metodo_pago=MetodoPago.DEBITO,
                             billetera_id=cat.b_galicia.id,
-                            es_recurrente=False,
                             origen=OrigenTransaccion.MANUAL,
                             estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
                         ),

@@ -766,8 +766,8 @@ def manejar_deshacer(
             msg_undo_resp = "Ese movimiento corresponde al pago de un resumen y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
         elif motivo_err == "ES_META":
             msg_undo_resp = "Ese movimiento corresponde a una meta de ahorro y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
-        elif motivo_err == "ES_RECURRENTE":
-            msg_undo_resp = "Ese movimiento fue generado automáticamente y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
+        elif motivo_err == "ES_SUSCRIPCION":
+            msg_undo_resp = "Ese movimiento es el cobro automático de una suscripción. Para cambiarlo, entrá a Suscripciones en la web."
         else:
             msg_undo_resp = "No tenés ningún movimiento reciente registrado por WhatsApp para deshacer. Podés gestionarlo desde la web de Argentum."
 

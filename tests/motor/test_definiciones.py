@@ -165,7 +165,6 @@ def _crear_tx(db: Session, usuario, billetera, **kwargs) -> Transaccion:
         "descripcion": "Transacción Test",
         "origen": OrigenTransaccion.MANUAL,
         "estado_verificacion": EstadoVerificacionTransaccion.CONFIRMADA,
-        "es_recurrente": False,
         "es_cuota_hija": False,
         "es_padre_cuotas": False,
     }

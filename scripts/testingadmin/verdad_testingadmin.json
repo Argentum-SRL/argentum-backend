@@ -126,7 +126,7 @@
         "billetera": "Galicia"
       }
     ],
-    "es_recurrente_en_ingresos": false
+    "suscripcion_id_en_ingresos": false
   },
   "gastos_fijos": {
     "alquiler": {

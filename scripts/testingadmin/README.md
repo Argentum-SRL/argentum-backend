@@ -16,7 +16,7 @@ Este módulo regenera de forma integral y determinística el historial financier
    - Cálculo determinístico de los 14 ciclos financieros (desde agosto 2025 hasta septiembre 2026) usando las funciones oficiales del backend (`calcular_inicio_ciclo_para_mes_ancla` y `get_ciclo_fechas`).
 3. **`generador_ingresos.py`**:
    - Depósito de sueldo inicial neto ($2.600.000) con aumentos paritarios escalonados (3% a 5% cada 2 a 4 meses).
-   - Sin marca de `es_recurrente`.
+   - Sin marca de `suscripcion_id`.
    - Medio aguinaldo (SAC) en junio y diciembre por la mitad del mejor sueldo del semestre.
    - Trabajos freelance extraordinarios (incluyendo uno en dólares en la billetera Efectivo USD).
 4. **`generador_fijos.py`**:

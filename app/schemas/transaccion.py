@@ -48,7 +48,6 @@ class TransaccionBase(BaseModel):
     billetera_id: UUID
     tarjeta_id: UUID | None = None
     primer_vencimiento_manual: date | None = None
-    es_recurrente: bool = False
     es_cuota_hija: bool = False
     es_padre_cuotas: bool = False
     grupo_cuotas_id: UUID | None = None
@@ -86,7 +85,6 @@ class TransaccionUpdate(BaseModel):
     billetera_id: UUID | None = None
     tarjeta_id: UUID | None = None
     primer_vencimiento_manual: date | None = None
-    es_recurrente: bool | None = None
     estado_verificacion: EstadoVerificacionTransaccion | None = None
     pago_resumen_vencimiento: date | None = None
     pago_origen_id: UUID | None = None

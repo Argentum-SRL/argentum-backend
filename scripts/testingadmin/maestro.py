@@ -82,7 +82,6 @@ def generar_huella_testingadmin(db: Session, usuario_id: Any) -> Dict[str, Any]:
             "descripcion": tx.descripcion,
             "es_cuota_hija": bool(tx.es_cuota_hija),
             "es_padre_cuotas": bool(tx.es_padre_cuotas),
-            "es_recurrente": bool(tx.es_recurrente),
             "estado_verificacion": tx.estado_verificacion.value if hasattr(tx.estado_verificacion, "value") else str(tx.estado_verificacion),
             "fecha": tx.fecha.isoformat(),
             "metodo_pago": tx.metodo_pago.value if tx.metodo_pago else None,

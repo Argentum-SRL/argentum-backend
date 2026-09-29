@@ -7,7 +7,7 @@ Cumple con:
 - Subas en escalones de paritaria entre 3% y 5% cada 2 a 4 meses, con meses sin aumento.
 - Aguinaldo (SAC) como movimiento independiente cerca del 18/12 y 30/06 por la mitad
   del mejor sueldo del semestre correspondiente.
-- NINGÚN ingreso lleva es_recurrente = True.
+- NINGÚN ingreso lleva suscripcion_id.
 - 4 trabajos freelance irregulares con montos distintos, uno de ellos en USD (billetera Efectivo USD).
 """
 from __future__ import annotations
@@ -96,7 +96,6 @@ def generar_ingresos(
             subcategoria_id=cat.sub_sueldo.id,
             metodo_pago=MetodoPago.TRANSFERENCIA,
             billetera_id=cat.b_galicia.id,
-            es_recurrente=False,  # REGLA OBLIGATORIA: NINGÚN ingreso lleva es_recurrente
             origen=OrigenTransaccion.MANUAL,
             estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
         )
@@ -129,7 +128,6 @@ def generar_ingresos(
                 subcategoria_id=cat.sub_aguinaldo.id,
                 metodo_pago=MetodoPago.TRANSFERENCIA,
                 billetera_id=cat.b_galicia.id,
-                es_recurrente=False,
                 origen=OrigenTransaccion.MANUAL,
                 estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
             ),
@@ -156,7 +154,6 @@ def generar_ingresos(
                 subcategoria_id=cat.sub_aguinaldo.id,
                 metodo_pago=MetodoPago.TRANSFERENCIA,
                 billetera_id=cat.b_galicia.id,
-                es_recurrente=False,
                 origen=OrigenTransaccion.MANUAL,
                 estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
             ),
@@ -217,7 +214,6 @@ def generar_ingresos(
                 subcategoria_id=item["subcat"].id,
                 metodo_pago=MetodoPago.EFECTIVO if item["billetera"].es_efectivo else MetodoPago.TRANSFERENCIA,
                 billetera_id=item["billetera"].id,
-                es_recurrente=False,
                 origen=OrigenTransaccion.MANUAL,
                 estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
             ),
@@ -253,6 +249,6 @@ def generar_ingresos(
                 },
             ],
             "freelance_extra": freelance_registrados,
-            "es_recurrente_en_ingresos": False,
+            "suscripcion_id_en_ingresos": False,
         },
     }

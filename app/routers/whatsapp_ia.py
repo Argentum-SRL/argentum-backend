@@ -745,7 +745,6 @@ def _registrar_item_batch(
         subcategoria_id=subcat_id,
         origen=OrigenTransaccion.IA_WPP,
         estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        es_recurrente=False,
         es_cuota_hija=False,
         es_padre_cuotas=False,
     )
@@ -1185,7 +1184,6 @@ def _confirmar_propuesta_transaccion(
         subcategoria_id=subcategoria_id,
         origen=OrigenTransaccion.IA_WPP,
         estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        es_recurrente=False,
         es_cuota_hija=False,
         es_padre_cuotas=False,
     )
@@ -2769,7 +2767,6 @@ def _registrar_movimiento_directo(
         subcategoria_id=subcat_id,
         origen=OrigenTransaccion.IA_WPP,
         estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        es_recurrente=False,
         es_cuota_hija=False,
         es_padre_cuotas=False,
     )
@@ -4505,7 +4502,6 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                                         Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
                                         Transaccion.es_cuota_hija == False,
                                         Transaccion.es_padre_cuotas == False,
-                                        Transaccion.es_recurrente == False,
                                         Transaccion.suscripcion_id.is_(None),
                                         Transaccion.pago_origen_id.is_(None),
                                         Transaccion.pago_resumen_vencimiento.is_(None),

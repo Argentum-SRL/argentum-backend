@@ -456,8 +456,8 @@ def _inferir_frecuencia_y_estado(
     return frecuencia, estado, promedio_dias, proxima
 
 
-def _es_recurrente_declarado(tx: Any) -> bool:
-    return bool(getattr(tx, "es_recurrente", False))
+def _es_cobro_de_suscripcion(tx: Any) -> bool:
+    return getattr(tx, "suscripcion_id", None) is not None
 
 
 def _determinar_clase_stream(
@@ -573,7 +573,7 @@ def clasificar_gastos(
     streams: list[StreamRecurrente] = []
 
     # 1. SENAL DECLARADO
-    txs_declaradas = [tx for tx in txs if _es_recurrente_declarado(tx)]
+    txs_declaradas = [tx for tx in txs if _es_cobro_de_suscripcion(tx)]
     por_decl = defaultdict(list)
     for tx in txs_declaradas:
         k = tx.descripcion or "recurrente"
@@ -793,7 +793,7 @@ def clasificar_gastos(
     }
 
     # Transacciones declaradas siempre pertenecen a compromisos
-    declaradas_tx_ids = {tx.id for tx in txs if _es_recurrente_declarado(tx)}
+    declaradas_tx_ids = {tx.id for tx in txs if _es_cobro_de_suscripcion(tx)}
     compromiso_tx_ids.update(declaradas_tx_ids)
 
     # Evitar solapamientos

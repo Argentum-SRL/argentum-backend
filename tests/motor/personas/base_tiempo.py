@@ -5,6 +5,7 @@ import calendar
 import random
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
+from uuid import UUID
 
 from app.models.transaccion import EstadoVerificacionTransaccion, TipoTransaccion
 from app.models.usuario import Moneda
@@ -123,7 +124,7 @@ class ContextoGeneracionPersona:
         grupo_verdadero: str,
         tipo_verdadero: TipoVerdadMovimiento,
         moneda: Moneda = Moneda.ARS,
-        es_recurrente: bool = False,
+        suscripcion_id: UUID | None = None,
     ):
         if fecha > FECHA_FIN_HISTORIA:
             return
@@ -146,7 +147,7 @@ class ContextoGeneracionPersona:
             billetera_id=f"bil-{self.persona_id}",
             billetera=ItemCatalogo(f"bil-{self.persona_id}", f"Billetera {self.persona_id}"),
             estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-            es_recurrente=es_recurrente,
+            suscripcion_id=suscripcion_id,
             tipo_verdadero=tipo_verdadero,
             grupo_verdadero=grupo_verdadero,
         )

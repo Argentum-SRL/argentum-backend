@@ -499,7 +499,7 @@ def evaluar_calibracion_usuario(
         compr_ids_k = {tx_id for s in clasif_k.streams if s.clase == "COMPROMISO" for tx_id in s.transacciones_ids}
         compr_ids_k.update(
             tx.id for tx in txs_previas
-            if getattr(tx, "es_recurrente", False)
+            if getattr(tx, "suscripcion_id", None) is not None
         )
 
         # Compromisos ciertos pendientes al inicio del ciclo k
@@ -669,7 +669,7 @@ def calcular_proyeccion_nueva(
     # Incluir recurrentes declaradas
     compromiso_tx_ids.update(
         tx.id for tx in data["txs"]
-        if getattr(tx, "es_recurrente", False)
+        if getattr(tx, "suscripcion_id", None) is not None
     )
 
     for moneda in (Moneda.ARS, Moneda.USD):

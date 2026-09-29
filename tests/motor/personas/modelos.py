@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 from typing import Any, Literal
+from uuid import UUID
 
 from app.models.transaccion import EstadoVerificacionTransaccion, TipoTransaccion
 from app.models.usuario import Moneda
@@ -59,7 +60,7 @@ class MovimientoSintetico:
     billetera_id: str = "billetera_principal"
     billetera: ItemCatalogo = field(default_factory=lambda: ItemCatalogo("billetera_principal", "Cuenta Principal"))
     estado_verificacion: EstadoVerificacionTransaccion = EstadoVerificacionTransaccion.CONFIRMADA
-    es_recurrente: bool = False
+    suscripcion_id: UUID | None = None
     es_cuota_hija: bool = False
     es_padre_cuotas: bool = False
     movimiento_meta_id: Any = None

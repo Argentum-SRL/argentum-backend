@@ -109,7 +109,6 @@ class Transaccion(Base):
         PGUUID(as_uuid=True), ForeignKey("tarjetas_credito.id"), nullable=True
     )
     primer_vencimiento_manual: Mapped[date | None] = mapped_column(Date, nullable=True)
-    es_recurrente: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     es_cuota_hija: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # En cuotas > 1 se excluyen de gastos; en 1 pago computan como gasto de consumo.
     es_padre_cuotas: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

@@ -91,7 +91,6 @@ def procesar_vencimientos_tarjetas(db: Session) -> None:
             metodo_pago=MetodoPago.DEBITO,
             origen=OrigenTransaccion.RECURRENTE,
             estado_verificacion=EstadoVerificacionTransaccion.PENDIENTE,
-            es_recurrente=False,
             es_cuota_hija=False,
             es_padre_cuotas=False,
             pago_resumen_vencimiento=hoy

@@ -166,7 +166,7 @@ class ResultadoPagoTarjeta(BaseModel):
     metodo_pago: str | None = None
     billetera_id: UUID | None = None
     tarjeta_id: UUID | None = None
-    es_recurrente: bool = False
+    suscripcion_id: UUID | None = None
     estado_verificacion: str | None = None
     fecha_creacion: datetime | None = None
     cuotas_pagadas_count: int = 0

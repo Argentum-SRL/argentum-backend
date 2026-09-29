@@ -826,7 +826,6 @@ def p5_caso_4(datos):
             origen=OrigenTransaccion.IA_WPP,
             estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
             fecha_creacion=datetime.now(timezone.utc) - timedelta(hours=2, minutes=5),
-            es_recurrente=False,
             es_cuota_hija=False,
             es_padre_cuotas=False,
         )
@@ -978,7 +977,6 @@ def p5_caso_cuotas(datos):
             origen=OrigenTransaccion.MANUAL,
             estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
             fecha_creacion=datetime.now(timezone.utc) - timedelta(minutes=5),
-            es_recurrente=False,
             es_cuota_hija=True,
             es_padre_cuotas=False,
         )
@@ -1289,7 +1287,6 @@ def p8_caso_9(datos):
             origen=OrigenTransaccion.IA_WPP,
             estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
             fecha_creacion=datetime.now(timezone.utc) - timedelta(minutes=2),
-            es_recurrente=False,
             es_cuota_hija=True,
             es_padre_cuotas=False,
         )
@@ -1340,7 +1337,6 @@ def p8_caso_10(datos):
             origen=OrigenTransaccion.IA_WPP,
             estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
             fecha_creacion=hace_35_min,
-            es_recurrente=False,
             es_cuota_hija=False,
             es_padre_cuotas=False,
         )
@@ -1392,7 +1388,6 @@ def p8_caso_11(datos):
             origen=OrigenTransaccion.IA_WPP,
             estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
             fecha_creacion=datetime.now(timezone.utc) - timedelta(minutes=5),
-            es_recurrente=False,
             es_cuota_hija=False,
             es_padre_cuotas=False,
         )

@@ -7,7 +7,7 @@ Verificador determinístico en modo solo lectura. Inspecciona:
 2. Ausencia de filas con fecha futura en tablas operativas.
 3. Comparación entre saldo_actual guardado y calcular_saldo_teorico para cada billetera de testingadmin.
 4. Cuotas vencidas impagas (debe ser 0).
-5. Ingresos/sueldos con es_recurrente (debe ser 0).
+5. Ingresos/sueldos con suscripcion_id (debe ser 0).
 6. Conciliación de billeteras de todos los demás usuarios con calcular_saldo_teorico (anonimizada, solo diferencias).
 """
 from __future__ import annotations
@@ -187,21 +187,21 @@ def verificar_testingadmin(db: Session, fecha_corte=None) -> Tuple[bool, List[st
     lineas.append("")
 
     # --------------------------------------------------------------------------
-    # 5. INGRESOS CON ES_RECURRENTE = TRUE
+    # 5. INGRESOS CON SUSCRIPCION_ID
     # --------------------------------------------------------------------------
-    lineas.append("--- 5. INGRESOS CON ES_RECURRENTE ---")
-    ingresos_recurrentes = db.query(Transaccion).filter(
+    lineas.append("--- 5. INGRESOS CON SUSCRIPCION_ID ---")
+    ingresos_con_suscripcion = db.query(Transaccion).filter(
         Transaccion.usuario_id == user.id,
         Transaccion.tipo == TipoTransaccion.INGRESO,
-        Transaccion.es_recurrente == True,
+        Transaccion.suscripcion_id.isnot(None),
     ).all()
 
-    if len(ingresos_recurrentes) == 0:
-        lineas.append("  [OK] 0 ingresos con es_recurrente = True.")
+    if len(ingresos_con_suscripcion) == 0:
+        lineas.append("  [OK] 0 ingresos con suscripcion_id.")
     else:
         todo_correcto = False
-        lineas.append(f"  [FALLO] Se encontraron {len(ingresos_recurrentes)} ingresos con es_recurrente = True:")
-        for ir in ingresos_recurrentes:
+        lineas.append(f"  [FALLO] Se encontraron {len(ingresos_con_suscripcion)} ingresos con suscripcion_id:")
+        for ir in ingresos_con_suscripcion:
             lineas.append(f"    - {ir.fecha} | {ir.descripcion} | {ir.monto}")
     lineas.append("")
 
