@@ -47,7 +47,7 @@ from app.models.transaccion import (
 from app.models.transferencia_interna import TransferenciaInterna
 from app.models.usuario import EstadoUsuario, Moneda, Usuario
 from app.routers.whatsapp.confirmaciones import _ejecutar_intent
-from app.routers.whatsapp.constantes import MESES_ES_GEN
+from app.routers.whatsapp.constantes import MESES_ES_GEN, logger
 from app.routers.whatsapp.db_lookups import (
     MAX_INTENTOS_VINCULACION_POR_VENTANA,
     MAX_MEDIOS_POR_MINUTO_REGISTRADO,
@@ -210,37 +210,40 @@ from app.utils.formato import formatear_monto
 from app.utils.telefono import normalizar_telefono_ar
 from app.utils.texto import normalizar_texto
 
-import structlog
-logger = structlog.get_logger("whatsapp")
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp-ia"])
 
-MAX_MOVIMIENTOS_POR_LOTE = 5
+MAX_MOVIMIENTOS_POR_LOTE = 10
 MSG_TOPE_MOVIMIENTOS_SUPERADO = (
-    "Por seguridad sólo puedo registrar hasta 5 movimientos juntos por mensaje. "
-    "Por favor enviame los gastos en tandas de hasta 5 ítems."
+    "El límite es de 10 movimientos por mensaje. "
+    "Por favor mandalos en tandas más chicas o usá la importación desde la web de Argentum."
 )
 MSG_NO_MEZCLAR_TRANSFERENCIAS = (
-    "Por favor no mezcles transferencias, retiros o movimientos en dólares con otros gastos o ingresos en el mismo mensaje. "
-    "Enviámelos por separado para que pueda procesarlos correctamente."
-)
-TERMINOS_BLOQUEO_MEZCLA = [
-    "transferencia", "transferi", "transferí", "transferir", "pase", "pasé",
-    "extracción", "extraccion", "retire", "retiré", "cajero", "saque", "saqué",
-    "dólares", "dolares", "usd", "dolar", "dólar", "mep", "blue", "cambio", "cambie", "cambié"
-]
-PATRON_BLOQUEO_MEZCLA = re.compile(
-    r"(" + "|".join(TERMINOS_BLOQUEO_MEZCLA) + r")",
-    re.IGNORECASE
+    "Las transferencias, extracciones de cajero y compra de dólares deben registrarse "
+    "en mensajes separados de los gastos o ingresos. Por favor mandalas por separado."
 )
 
-PALABRAS_FUERZAN_CREDITO = (
-    "credito", "crédito", "cuota", "cuotas", "visa", "master", "mastercard",
-    "amex", "american express", "cabal", "naranja", "tarjeta", "resumen"
+TERMINOS_BLOQUEO_MEZCLA = (
+    "transferi", "transferir", "transferencia", "pase a", "pasé a",
+    "extraje", "extraccion", "extracción", "cajero",
+    "compre dolares", "compré dólares", "vendi dolares", "vendí dólares",
+    "comprar dolares", "comprar dólares", "vender dolares", "vender dólares",
 )
-PALABRAS_FUERZAN_DEBITO = (
-    "debito", "débito", "efectivo", "cash", "cuenta", "billetera"
+PATRON_BLOQUEO_MEZCLA = re.compile(
+    rf"\b(?:{'|'.join(re.escape(p) for p in TERMINOS_BLOQUEO_MEZCLA)})\b"
 )
+
+PALABRAS_FUERZAN_CREDITO = [
+    "credito", "crédito", "cuota", "cuotas", "en cuotas",
+    "visa", "master", "mastercard", "amex", "american express", "american",
+    "naranja", "cabal", "tarje", "la tarje", "la de credito", "la de crédito",
+    "la credi", "tarjeta de credito", "tarjeta de crédito"
+]
+
+PALABRAS_FUERZAN_DEBITO = [
+    "debito", "débito", "tarjeta de debito", "tarjeta de débito",
+    "debito automatico", "débito automático"
+]
 
 
 async def verify_webhook(request: Request) -> PlainTextResponse:

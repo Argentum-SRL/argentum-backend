@@ -19,6 +19,7 @@ from app.models.usuario import Moneda, Usuario
 from app.routers.whatsapp.constantes import (
     FACTOR_MAX_COTIZACION_DOLAR,
     FACTOR_MIN_COTIZACION_DOLAR,
+    logger,
 )
 from app.routers.whatsapp.db_lookups import (
     PLAZO_EXPIRACION_ESTADO_MINUTOS,
@@ -44,7 +45,6 @@ from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 from app.utils.texto import normalizar_texto
 
-logger = structlog.get_logger("whatsapp")
 
 
 def _confirmar_propuesta_transferencia(

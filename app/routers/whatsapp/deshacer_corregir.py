@@ -20,7 +20,7 @@ from app.models.tarjeta_credito import TarjetaCredito
 from app.models.transaccion import MetodoPago, TipoTransaccion, Transaccion
 from app.models.transferencia_interna import TransferenciaInterna
 from app.models.usuario import Moneda, Usuario
-from app.routers.whatsapp.constantes import PREFIJOS_CORRECCION
+from app.routers.whatsapp.constantes import PREFIJOS_CORRECCION, logger
 from app.routers.whatsapp.db_lookups import (
     PLAZO_DESHACER_CORREGIR_MINUTOS,
     _obtener_billeteras_activas,
@@ -58,7 +58,6 @@ from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 from app.utils.texto import normalizar_texto
 
-logger = structlog.get_logger("whatsapp")
 
 
 def _evaluar_correccion_billetera(

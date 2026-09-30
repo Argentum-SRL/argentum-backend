@@ -7,6 +7,7 @@ from decimal import Decimal
 from uuid import UUID
 
 import structlog
+from app.routers.whatsapp.constantes import logger
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -36,7 +37,6 @@ from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 from app.utils.texto import normalizar_texto
 
-logger = structlog.get_logger("whatsapp")
 
 
 def _confirmar_propuesta_aporte_meta(

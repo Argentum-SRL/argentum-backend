@@ -34,7 +34,7 @@ from app.models.transaccion import (
     Transaccion,
 )
 from app.models.usuario import Moneda, Usuario
-from app.routers.whatsapp.constantes import MESES_ES_GEN
+from app.routers.whatsapp.constantes import MESES_ES_GEN, logger
 from app.routers.whatsapp.db_lookups import (
     PLAZO_EXPIRACION_ESTADO_MINUTOS,
     _buscar_suscripcion_cobrada_periodo_actual,
@@ -83,7 +83,6 @@ from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 from app.utils.texto import normalizar_texto
 
-logger = structlog.get_logger("whatsapp")
 
 
 def _registrar_item_batch(

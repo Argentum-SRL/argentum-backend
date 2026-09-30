@@ -19,7 +19,7 @@ from app.models.transaccion import (
     Transaccion,
 )
 from app.models.usuario import Moneda, Usuario
-from app.routers.whatsapp.constantes import MESES_ES_GEN
+from app.routers.whatsapp.constantes import MESES_ES_GEN, logger
 from app.routers.whatsapp.db_lookups import (
     PLAZO_EXPIRACION_ESTADO_MINUTOS,
     _buscar_propuesta_confirmable_mas_reciente,
@@ -37,7 +37,6 @@ from app.services.evento_service import emitir_evento_actualizacion
 from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 
-logger = structlog.get_logger("whatsapp")
 
 
 def _confirmar_propuesta_suscripcion(

@@ -2,6 +2,9 @@
 app/routers/whatsapp/constantes.py — Constantes compartidas para el flujo de WhatsApp en Argentum.
 """
 from decimal import Decimal
+import structlog
+
+logger = structlog.get_logger("whatsapp")
 
 PREFIJOS_CORRECCION = [
     r"^no,?\s+fue\s+en\s+",
