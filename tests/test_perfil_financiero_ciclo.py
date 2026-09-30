@@ -17,12 +17,9 @@ from app.core.database import Base
 from app.models.usuario import Usuario, RolUsuario, EstadoUsuario, AuthProvider, CicloTipo, CicloAjusteDireccion, Moneda
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria, TipoCategoria
-from app.models.cuota import Cuota
-from app.models.grupo_cuotas import GrupoCuotas
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion, OrigenTransaccion
 from app.models.feriado import FeriadoAR
 from app.services.perfil_financiero_service import (
-    _calcular_ratio_cuotas_sync_moneda,
     _calcular_y_persistir_perfil_sync,
 )
 from app.services.transaccion_service import evaluar_gasto_inusual
@@ -83,223 +80,6 @@ def db_session_fixture():
 
 
 # ==============================================================================
-# 1. Tests para _calcular_ratio_cuotas_sync_moneda con REGLA y DIA_FIJO
-# ==============================================================================
-
-def test_ratio_cuotas_con_ciclo_regla(db_session):
-    """
-    Usuario con ciclo_tipo=REGLA (ultimo_viernes).
-    Las cuotas a computar deben delimitarse por get_ciclo_fechas y no por mes calendario 1..31.
-    """
-    usuario = Usuario(
-        id=uuid4(),
-        email="test_cuotas_regla@argentum.com",
-        auth_provider=AuthProvider.EMAIL,
-        rol=RolUsuario.USUARIO,
-        estado=EstadoUsuario.ACTIVO,
-        ciclo_tipo=CicloTipo.REGLA,
-        ciclo_valor="ultimo_viernes",
-        ciclo_ajuste_direccion=CicloAjusteDireccion.ANTERIOR,
-    )
-    db_session.add(usuario)
-
-    billetera = Billetera(
-        id=uuid4(),
-        usuario_id=usuario.id,
-        nombre="Efectivo",
-        moneda=Moneda.ARS,
-        saldo_actual=Decimal("500000"),
-        estado=EstadoBilletera.ACTIVA,
-    )
-    db_session.add(billetera)
-
-    tx_padre = Transaccion(
-        id=uuid4(),
-        usuario_id=usuario.id,
-        billetera_id=billetera.id,
-        tipo=TipoTransaccion.EGRESO,
-        origen=OrigenTransaccion.MANUAL,
-        descripcion="Compra financiada",
-        monto=Decimal("30000"),
-        moneda=Moneda.ARS,
-        fecha=date.today(),
-        es_padre_cuotas=True,
-    )
-    db_session.add(tx_padre)
-
-    grupo = GrupoCuotas(
-        id=uuid4(),
-        usuario_id=usuario.id,
-        transaccion_padre_id=tx_padre.id,
-        descripcion="Compra financiada",
-        monto_total=Decimal("30000"),
-        total_financiado=Decimal("30000"),
-        cantidad_cuotas=3,
-        moneda=Moneda.ARS,
-    )
-    db_session.add(grupo)
-
-    inicio_ciclo, fin_ciclo = get_ciclo_fechas(usuario, date.today())
-
-    tx_hija = Transaccion(
-        id=uuid4(),
-        usuario_id=usuario.id,
-        billetera_id=billetera.id,
-        tipo=TipoTransaccion.EGRESO,
-        origen=OrigenTransaccion.MANUAL,
-        descripcion="Cuota 1",
-        monto=Decimal("10000"),
-        moneda=Moneda.ARS,
-        fecha=inicio_ciclo + timedelta(days=2),
-        es_cuota_hija=True,
-    )
-    db_session.add(tx_hija)
-
-    # Cuota dentro del ciclo
-    cuota_en_ciclo = Cuota(
-        id=uuid4(),
-        grupo_id=grupo.id,
-        transaccion_id=tx_hija.id,
-        numero_cuota=1,
-        monto_proyectado=Decimal("10000"),
-        fecha_vencimiento=inicio_ciclo + timedelta(days=2),
-        pagada=False,
-    )
-    db_session.add(cuota_en_ciclo)
-
-    # Sueldo del mismo monto en cada uno de sus últimos ciclos completos
-    sueldo_monto = Decimal("200000")
-    puntero = inicio_ciclo - timedelta(days=1)
-    for _ in range(6):
-        c_ini, c_fin = get_ciclo_fechas(usuario, puntero)
-        tx_ingreso = Transaccion(
-            id=uuid4(),
-            usuario_id=usuario.id,
-            billetera_id=billetera.id,
-            tipo=TipoTransaccion.INGRESO,
-            origen=OrigenTransaccion.MANUAL,
-            descripcion="Sueldo",
-            monto=sueldo_monto,
-            moneda=Moneda.ARS,
-            fecha=c_ini + timedelta(days=2),
-            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        )
-        db_session.add(tx_ingreso)
-        puntero = c_ini - timedelta(days=1)
-
-    db_session.commit()
-
-    # Ejecutar cálculo
-    ratio = _calcular_ratio_cuotas_sync_moneda(db_session, usuario.id, date.today() - timedelta(days=60), Moneda.ARS)
-    assert ratio is not None
-    assert ratio > Decimal("0")
-    assert ratio == cuota_en_ciclo.monto_proyectado / sueldo_monto
-
-
-def test_ratio_cuotas_con_ciclo_regla_unico_ingreso_da_none(db_session):
-    """
-    Usuario con ciclo_tipo=REGLA (ultimo_viernes) y un único ingreso histórico.
-    Al no contar con al menos 3 ciclos completos con ingreso, no hay ingreso habitual
-    y el ratio de cuotas debe ser None.
-    """
-    usuario = Usuario(
-        id=uuid4(),
-        email="test_cuotas_regla_unico_ingreso@argentum.com",
-        auth_provider=AuthProvider.EMAIL,
-        rol=RolUsuario.USUARIO,
-        estado=EstadoUsuario.ACTIVO,
-        ciclo_tipo=CicloTipo.REGLA,
-        ciclo_valor="ultimo_viernes",
-        ciclo_ajuste_direccion=CicloAjusteDireccion.ANTERIOR,
-    )
-    db_session.add(usuario)
-
-    billetera = Billetera(
-        id=uuid4(),
-        usuario_id=usuario.id,
-        nombre="Efectivo",
-        moneda=Moneda.ARS,
-        saldo_actual=Decimal("500000"),
-        estado=EstadoBilletera.ACTIVA,
-    )
-    db_session.add(billetera)
-
-    tx_padre = Transaccion(
-        id=uuid4(),
-        usuario_id=usuario.id,
-        billetera_id=billetera.id,
-        tipo=TipoTransaccion.EGRESO,
-        origen=OrigenTransaccion.MANUAL,
-        descripcion="Compra financiada",
-        monto=Decimal("30000"),
-        moneda=Moneda.ARS,
-        fecha=date.today(),
-        es_padre_cuotas=True,
-    )
-    db_session.add(tx_padre)
-
-    grupo = GrupoCuotas(
-        id=uuid4(),
-        usuario_id=usuario.id,
-        transaccion_padre_id=tx_padre.id,
-        descripcion="Compra financiada",
-        monto_total=Decimal("30000"),
-        total_financiado=Decimal("30000"),
-        cantidad_cuotas=3,
-        moneda=Moneda.ARS,
-    )
-    db_session.add(grupo)
-
-    inicio_ciclo, fin_ciclo = get_ciclo_fechas(usuario, date.today())
-
-    tx_hija = Transaccion(
-        id=uuid4(),
-        usuario_id=usuario.id,
-        billetera_id=billetera.id,
-        tipo=TipoTransaccion.EGRESO,
-        origen=OrigenTransaccion.MANUAL,
-        descripcion="Cuota 1",
-        monto=Decimal("10000"),
-        moneda=Moneda.ARS,
-        fecha=inicio_ciclo + timedelta(days=2),
-        es_cuota_hija=True,
-    )
-    db_session.add(tx_hija)
-
-    # Cuota dentro del ciclo
-    cuota_en_ciclo = Cuota(
-        id=uuid4(),
-        grupo_id=grupo.id,
-        transaccion_id=tx_hija.id,
-        numero_cuota=1,
-        monto_proyectado=Decimal("10000"),
-        fecha_vencimiento=inicio_ciclo + timedelta(days=2),
-        pagada=False,
-    )
-    db_session.add(cuota_en_ciclo)
-
-    # Transacción de un único ingreso histórico (hace 20 días)
-    tx_ingreso = Transaccion(
-        id=uuid4(),
-        usuario_id=usuario.id,
-        billetera_id=billetera.id,
-        tipo=TipoTransaccion.INGRESO,
-        origen=OrigenTransaccion.MANUAL,
-        descripcion="Ingreso Test",
-        monto=Decimal("200000"),
-        moneda=Moneda.ARS,
-        fecha=date.today() - timedelta(days=20),
-        estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-    )
-    db_session.add(tx_ingreso)
-    db_session.commit()
-
-    # Ejecutar cálculo: sin ingreso habitual suficiente, debe dar None
-    ratio = _calcular_ratio_cuotas_sync_moneda(db_session, usuario.id, date.today() - timedelta(days=60), Moneda.ARS)
-    assert ratio is None
-
-
-# ==============================================================================
 # 2. Tests para _calcular_y_persistir_perfil_sync con REGLA
 # ==============================================================================
 
@@ -330,7 +110,7 @@ def test_frecuencia_financiera_con_ciclo_regla_no_rompe(db_session):
     )
     db_session.add(billetera)
 
-    # Crear transacciones con más de 90 días de historial para pasar _validar_historial_minimo
+    # Crear transacciones con más de 90 días de historial
     tx_antigua = Transaccion(
         id=uuid4(),
         usuario_id=usuario.id,

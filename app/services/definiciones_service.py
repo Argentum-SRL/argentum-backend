@@ -21,9 +21,9 @@ RESPALDO METODOLÓGICO (Filosofía YNAB / Contabilidad de Devengamiento):
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
-from typing import Any, Optional, Set, Dict, Tuple
+from typing import Any, Optional, Set, Dict
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select
@@ -383,32 +383,3 @@ def es_ingreso(tx: Any, ctx: ContextoDefiniciones) -> bool:
 
 # ==============================================================================
 # 4.3 PERÍODOS DE CICLO
-# ==============================================================================
-
-def rango_ciclo(
-    usuario: Usuario,
-    hoy: Optional[date] = None,
-) -> Tuple[date, date]:
-    """
-    Retorna la tupla (fecha_inicio, fecha_fin) del ciclo al que pertenece hoy
-    según la parametrización de ciclo del usuario en get_ciclo_fechas.
-    """
-    from app.services.dashboard_service import get_ciclo_fechas
-
-    ref_hoy = hoy or hoy_argentina()
-    return get_ciclo_fechas(usuario, ref_hoy)
-
-
-def rango_ciclo_anterior(
-    usuario: Usuario,
-    hoy: Optional[date] = None,
-) -> Tuple[date, date]:
-    """
-    Retorna la tupla (fecha_inicio, fecha_fin) del ciclo inmediato anterior
-    al ciclo al que pertenece hoy.
-    """
-    from app.services.dashboard_service import get_ciclo_fechas
-
-    ref_hoy = hoy or hoy_argentina()
-    inicio_act, _ = get_ciclo_fechas(usuario, ref_hoy)
-    return get_ciclo_fechas(usuario, inicio_act - timedelta(days=1))

@@ -51,8 +51,6 @@ from app.services import (
     tools_service,
 )
 from app.services.analisis_financiero_service import (
-    _carga,
-    _ciclos_anteriores,
     calcular_perfil_nuevo,
 )
 from app.services.definiciones_service import cargar_contexto, es_gasto
@@ -61,7 +59,6 @@ from app.services.ingreso_habitual_service import (
     obtener_ingreso_habitual,
 )
 from app.utils.fecha import hoy_argentina
-from app.utils.finanzas import clasificar_gastos
 from app.utils.formato import formatear_monto
 
 

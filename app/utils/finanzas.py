@@ -815,10 +815,6 @@ def clasificar_gastos(
     )
 
 
-def center_or_zero(value: Decimal | None) -> Decimal:
-    return value if value is not None else ZERO
-
-
 def pinball_loss(y: Decimal, q: Decimal, tau: Decimal) -> Decimal:
     """Calcula la pérdida pinball (quantile loss) para el cuantil tau y observación y.
 

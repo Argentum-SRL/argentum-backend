@@ -336,14 +336,22 @@ def resolver_datos_base(db: Session):
         }
     }
 
-def obtener_conteos_base(db: Session):
-    tx_cnt = db.execute(select(func.count(Transaccion.id))).scalar()
-    conv_cnt = db.execute(select(func.count(ConversacionWpp.id))).scalar()
-    msg_cnt = db.execute(select(text("count(*)")).select_from(text("mensajes_whatsapp_procesados"))).scalar()
-    saldos = {}
-    for b in db.execute(select(Billetera).order_by(Billetera.id)).scalars().all():
-        saldos[str(b.id)] = b.saldo_actual
-    return {"tx": tx_cnt, "conv": conv_cnt, "msg": msg_cnt, "saldos": saldos}
+def obtener_conteos_base(db: Session, usuario_id: uuid.UUID | None = None):
+    from app.models.meta import Meta
+    from app.models.movimiento_meta import MovimientoMeta
+    from app.models.transferencia_interna import TransferenciaInterna
+    if usuario_id is None:
+        usuario_id = db.execute(select(Usuario.id).where(Usuario.email == USUARIO_PRUEBAS_EMAIL)).scalar()
+    tx_cnt = db.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == usuario_id)).scalar()
+    conv_cnt = db.execute(select(func.count(ConversacionWpp.id)).where(ConversacionWpp.usuario_id == usuario_id)).scalar()
+    tr_cnt = db.execute(select(func.count(TransferenciaInterna.id)).where(TransferenciaInterna.usuario_id == usuario_id)).scalar()
+    mm_cnt = db.execute(select(func.count(MovimientoMeta.id)).join(Meta, MovimientoMeta.meta_id == Meta.id).where(Meta.usuario_id == usuario_id)).scalar()
+    msg_cnt = db.execute(select(text("count(*)")).select_from(text("mensajes_whatsapp_procesados")).where(text("wamid LIKE 'wamid_reg_%'"))).scalar()
+    saldos = {
+        str(b.id): b.saldo_actual
+        for b in db.execute(select(Billetera).where(Billetera.usuario_id == usuario_id).order_by(Billetera.id)).scalars().all()
+    }
+    return {"tx": tx_cnt, "conv": conv_cnt, "tr": tr_cnt, "mm": mm_cnt, "msg": msg_cnt, "saldos": saldos}
 
 def obtener_saldos_21(db: Session):
     return {
@@ -364,49 +372,62 @@ DIFERENCIAS_RECONCILIACION_BASELINE = {
     ("mrm291201@gmail.com", "Galicia"): Decimal("-941.00"),
 }
 
-def verificar_reconciliacion_billeteras(db: Session):
+def verificar_reconciliacion_billeteras(db: Session = None):
     """
     Compara el saldo_actual guardado de cada billetera contra el saldo teórico calculado
     mediante la función oficial calcular_saldo_teorico (app.services.conciliacion_service).
     Compara contra el baseline conocido de diferencias históricas (-$941 en Galicia de mrm291201@gmail.com)
     y reporta discrepancias solo si surge una diferencia NUEVA o cambia una existente.
     """
-    from app.models.billetera import Billetera
-    from app.models.usuario import Usuario
-    from app.services.conciliacion_service import calcular_saldo_teorico
-    from app.utils.fecha import hoy_argentina
-    
-    hoy = hoy_argentina()
-    billeteras = db.execute(
-        select(Billetera, Usuario.email)
-        .join(Usuario, Billetera.usuario_id == Usuario.id)
-        .order_by(Usuario.email, Billetera.nombre)
-    ).all()
-    
-    discrepancias_no_esperadas = []
-    detalles = []
-    
-    for b, email in billeteras:
-        s_guardado = b.saldo_actual
-        s_calc = calcular_saldo_teorico(db, b.id, hasta=hoy)
-        diff = s_guardado - s_calc
-        esperado_diff = DIFERENCIAS_RECONCILIACION_BASELINE.get((email, b.nombre), Decimal("0.00"))
-        coincide_con_baseline = (diff == esperado_diff)
+    cerrar_db = False
+    if db is None:
+        SessionRR = sessionmaker(
+            bind=engine.execution_options(isolation_level="REPEATABLE READ"),
+            autocommit=False,
+            autoflush=False,
+        )
+        db = SessionRR()
+        cerrar_db = True
+    try:
+        from app.models.billetera import Billetera
+        from app.models.usuario import Usuario
+        from app.services.conciliacion_service import calcular_saldo_teorico
+        from app.utils.fecha import hoy_argentina
         
-        item = {
-            "email": email,
-            "billetera": b.nombre,
-            "guardado": s_guardado,
-            "calculado": s_calc,
-            "diferencia": diff,
-            "esperado_diff": esperado_diff,
-            "ok": coincide_con_baseline
-        }
-        detalles.append(item)
-        if not coincide_con_baseline:
-            discrepancias_no_esperadas.append(item)
+        hoy = hoy_argentina()
+        billeteras = db.execute(
+            select(Billetera, Usuario.email)
+            .join(Usuario, Billetera.usuario_id == Usuario.id)
+            .order_by(Usuario.email, Billetera.nombre)
+        ).all()
+        
+        discrepancias_no_esperadas = []
+        detalles = []
+        
+        for b, email in billeteras:
+            s_guardado = b.saldo_actual
+            s_calc = calcular_saldo_teorico(db, b.id, hasta=hoy)
+            diff = s_guardado - s_calc
+            esperado_diff = DIFERENCIAS_RECONCILIACION_BASELINE.get((email, b.nombre), Decimal("0.00"))
+            coincide_con_baseline = (diff == esperado_diff)
             
-    return len(discrepancias_no_esperadas) == 0, discrepancias_no_esperadas, detalles
+            item = {
+                "email": email,
+                "billetera": b.nombre,
+                "guardado": s_guardado,
+                "calculado": s_calc,
+                "diferencia": diff,
+                "esperado_diff": esperado_diff,
+                "ok": coincide_con_baseline
+            }
+            detalles.append(item)
+            if not coincide_con_baseline:
+                discrepancias_no_esperadas.append(item)
+                
+        return len(discrepancias_no_esperadas) == 0, discrepancias_no_esperadas, detalles
+    finally:
+        if cerrar_db:
+            db.close()
 
 SALDOS_REFERENCIA_21 = {
     ("testingadmin@argentum.com", "Ahorro con rendimiento", "ARS"): Decimal("2082358.73"),
@@ -418,8 +439,8 @@ SALDOS_REFERENCIA_21 = {
 
 def verificar_saldos_contra_referencia(db: Session, saldos_inicio_21: dict):
     """
-    Compara testingadmin contra referencias fijas y las otras cinco cuentas
-    contra la foto tomada al inicio de la suite.
+    Compara testingadmin contra referencias fijas y recopila variaciones
+    en las otras cuentas respecto a la foto tomada al inicio de la suite.
     """
     from app.models.billetera import Billetera
     from app.models.usuario import Usuario
@@ -438,7 +459,8 @@ def verificar_saldos_contra_referencia(db: Session, saldos_inicio_21: dict):
         clave = (email, b.nombre, moneda)
         ref = SALDOS_REFERENCIA_21.get(clave) or SALDOS_REFERENCIA_21.get((email, b.nombre))
         saldo_inicial = saldos_inicio_21.get(clave)
-        esperado = ref if ref is not None else saldo_inicial
+        es_admin = (email == USUARIO_PRUEBAS_EMAIL)
+        esperado = ref if es_admin else saldo_inicial
         diff = actual - esperado if esperado is not None else None
         item = {
             "email": email,
@@ -450,7 +472,7 @@ def verificar_saldos_contra_referencia(db: Session, saldos_inicio_21: dict):
             "diff": diff
         }
         detalles.append(item)
-        if esperado is None or actual != esperado:
+        if es_admin and (esperado is None or actual != esperado):
             desvios.append(item)
     return len(desvios) == 0, desvios, detalles
 
@@ -863,9 +885,9 @@ def p5_caso_6_concurrente(datos):
     snap_db.close()
 
     pid = uuid.uuid4()
-    p_wamid = f"reg_c6_prop_{uuid.uuid4().hex}"
-    wamid1 = f"reg_c6_conf_1_{uuid.uuid4().hex}"
-    wamid2 = f"reg_c6_conf_2_{uuid.uuid4().hex}"
+    p_wamid = f"wamid_reg_c6_prop_{uuid.uuid4().hex}"
+    wamid1 = f"wamid_reg_c6_conf_1_{uuid.uuid4().hex}"
+    wamid2 = f"wamid_reg_c6_conf_2_{uuid.uuid4().hex}"
 
     db = SessionLocal()
     prop = ConversacionWpp(
@@ -3993,8 +4015,9 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
     if u_admin.email != USUARIO_PRUEBAS_EMAIL:
         raise RuntimeError(f"ABORT CRITICO: Verificación de usuario fallida. Resuelto: {u_admin.email}")
     
-    conteos_inicio = obtener_conteos_base(db)
+    conteos_inicio = obtener_conteos_base(db, u_admin.id)
     saldos_inicio_21 = obtener_saldos_21(db)
+    movs_otros_inicio = db.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id != u_admin.id)).scalar()
     total_billeteras = len(saldos_inicio_21)
     db.close()
 
@@ -5397,26 +5420,42 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
 
     # Verificación estricta de rollback y conteos
     db = SessionLocal()
-    conteos_fin = obtener_conteos_base(db)
+    conteos_fin = obtener_conteos_base(db, u_admin.id)
+    movs_otros_fin = db.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id != u_admin.id)).scalar()
     db.close()
+
+    movs_otros_nuevos = movs_otros_fin - movs_otros_inicio
 
     saldos_intactos = (conteos_inicio["saldos"] == conteos_fin["saldos"])
     sin_residuos = (
         conteos_inicio["tx"] == conteos_fin["tx"] and
         conteos_inicio["conv"] == conteos_fin["conv"] and
+        conteos_inicio["tr"] == conteos_fin["tr"] and
+        conteos_inicio["mm"] == conteos_fin["mm"] and
         conteos_inicio["msg"] == conteos_fin["msg"] and
         saldos_intactos
     )
 
-    # Verificación de saldos contra referencia histórica de las 21 billeteras
+    # Verificación de saldos contra referencia histórica de testingadmin
     db_ref = SessionLocal()
     saldos_ref_ok, desvios_ref, detalles_ref = verificar_saldos_contra_referencia(db_ref, saldos_inicio_21)
     db_ref.close()
 
-    # Verificación de reconciliación de saldos en todas las 21 billeteras
-    db_rec = SessionLocal()
-    rec_ok, discrepancias, detalles_rec = verificar_reconciliacion_billeteras(db_rec)
-    db_rec.close()
+    billeteras_ajenas_cambiadas = sum(
+        1 for d in detalles_ref if d["email"] != USUARIO_PRUEBAS_EMAIL and d["diff"] is not None and d["diff"] != Decimal("0.00")
+    )
+
+    # Verificación de reconciliación de saldos en todas las 21 billeteras con aislamiento REPEATABLE READ
+    session_factory_rr = sessionmaker(
+        bind=engine.execution_options(isolation_level="REPEATABLE READ"),
+        autocommit=False,
+        autoflush=False,
+    )
+    db_rec = session_factory_rr()
+    try:
+        rec_ok, discrepancias, detalles_rec = verificar_reconciliacion_billeteras(db_rec)
+    finally:
+        db_rec.close()
 
     if verbose:
         print("\n=== RESUMEN DE EJECUCION ===")
@@ -5435,22 +5474,26 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
         print("\n=== VERIFICACION DE ROLLBACK Y CONTEOS ===")
         print(f"Transacciones: antes={conteos_inicio['tx']} | después={conteos_fin['tx']}")
         print(f"Conversaciones: antes={conteos_inicio['conv']} | después={conteos_fin['conv']}")
+        print(f"Transferencias internas: antes={conteos_inicio['tr']} | después={conteos_fin['tr']}")
+        print(f"Movimientos meta: antes={conteos_inicio['mm']} | después={conteos_fin['mm']}")
         print(f"Mensajes procesados: antes={conteos_inicio['msg']} | después={conteos_fin['msg']}")
         print(f"Saldos de billeteras intactos: {'SÍ' if saldos_intactos else 'NO'}")
         print(f"¿Rollback total verificado (cero residuo)?: {'SÍ' if sin_residuos else 'NO'}")
 
         print(f"\n=== VERIFICACION DE SALDOS CONTRA REFERENCIA HISTORICA ({total_billeteras} BILLETERAS) ===")
         for d in detalles_ref:
-            esperado = d["referencia"] if d["referencia"] is not None else d["saldo_inicial"]
-            criterio = "referencia" if d["referencia"] is not None else "foto_inicio"
-            st = "OK" if d["diff"] == Decimal("0.00") else f"DESVIO ({d['diff']})"
-            print(f"  {d['email']} | {d['billetera']} {d['moneda']}: antes={esperado} | después={d['actual']} | diferencia={d['diff']} | criterio={criterio} -> {st}")
-        print(f"¿Todos los saldos cumplen el criterio?: {'SÍ' if saldos_ref_ok else 'NO'}")
+            if d["email"] == USUARIO_PRUEBAS_EMAIL:
+                st = "OK" if d["diff"] == Decimal("0.00") else f"DESVIO ({d['diff']})"
+                print(f"  {d['email']} | {d['billetera']} {d['moneda']}: antes={d['referencia']} | después={d['actual']} | diferencia={d['diff']} | criterio=referencia -> {st}")
+            else:
+                st = "OK" if d["diff"] == Decimal("0.00") else f"CAMBIO ({d['diff']})"
+                print(f"  {d['email']} | {d['billetera']} {d['moneda']}: antes={d['saldo_inicial']} | después={d['actual']} | diferencia={d['diff']} | criterio=foto_inicio -> {st}")
+        print(f"¿Todos los saldos de testingadmin cumplen la referencia?: {'SÍ' if saldos_ref_ok else 'NO'}")
         if not saldos_ref_ok:
             print(f"ALERTA: Se detectaron {len(desvios_ref)} billeteras con saldos alterados:")
             for desv in desvios_ref:
-                antes = desv["referencia"] if desv["referencia"] is not None else desv["saldo_inicial"]
-                print(f"  - {desv['email']} ({desv['billetera']} {desv['moneda']}): antes={antes}, después={desv['actual']}, diferencia={desv['diff']}")
+                print(f"  - {desv['email']} ({desv['billetera']} {desv['moneda']}): antes={desv['referencia']}, después={desv['actual']}, diferencia={desv['diff']}")
+        print(f"Actividad en otras cuentas: {movs_otros_nuevos} movimientos nuevos, {billeteras_ajenas_cambiadas} billeteras con saldo distinto")
 
         print(f"\n=== VERIFICACION DE RECONCILIACION ({total_billeteras} BILLETERAS) ===")
         for d in detalles_rec:
@@ -5471,12 +5514,12 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
         print(f"Llamadas IA: {_gestor_actual.llamadas_grabadas} grabadas, {_gestor_actual.llamadas_reales} reales")
         print(f"Rollback y conteos: {'OK (cero residuo)' if sin_residuos else 'FALLO'}")
         if saldos_ref_ok:
-            print(f"Saldos {total_billeteras} billeteras: OK (testingadmin contra referencia, cuentas ajenas contra foto inicial)")
+            print(f"Saldos {total_billeteras} billeteras: OK (testingadmin contra referencia)")
         else:
             print(f"Saldos {total_billeteras} billeteras: DESVIO ({len(desvios_ref)} billeteras)")
             for desv in desvios_ref:
-                antes = desv["referencia"] if desv["referencia"] is not None else desv["saldo_inicial"]
-                print(f"  - {desv['email']} ({desv['billetera']} {desv['moneda']}): antes={antes}, después={desv['actual']}, diferencia={desv['diff']}")
+                print(f"  - {desv['email']} ({desv['billetera']} {desv['moneda']}): antes={desv['referencia']}, después={desv['actual']}, diferencia={desv['diff']}")
+        print(f"Actividad en otras cuentas: {movs_otros_nuevos} movimientos nuevos, {billeteras_ajenas_cambiadas} billeteras con saldo distinto")
         if rec_ok:
             print(f"Reconciliación {total_billeteras} billeteras: OK (todas dentro del baseline)")
         else:

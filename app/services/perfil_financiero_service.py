@@ -6,164 +6,16 @@ Administra el cálculo, persistencia y consulta del perfil financiero del usuari
 from __future__ import annotations
 
 import logging
-import calendar as cal
-from datetime import date, datetime, timezone, timedelta
-from decimal import Decimal
+from datetime import date, datetime, timezone
 from uuid import UUID
-from sqlalchemy import select, func, or_
-from sqlalchemy.orm import joinedload, Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.models.perfil_financiero import PerfilFinanciero
 from app.models.historial_perfil_financiero import HistorialPerfilFinanciero
-from app.models.usuario import Usuario, Moneda
-from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion
-
-from app.models.cuota import Cuota
-from app.models.grupo_cuotas import GrupoCuotas
-from app.services.dashboard_service import get_ciclo_fechas
-from app.services.definiciones_service import condicion_gasto, condicion_ingreso
-from app.utils.fecha import hoy_argentina
+from app.models.usuario import Usuario
 
 logger = logging.getLogger(__name__)
-
-
-# --- HELPERS PARA HISTORIAL MÍNIMO ---
-
-def _obtener_primera_fecha_sync(db: Session, usuario_id: UUID, moneda: Moneda | None = None) -> date | None:
-    query = select(func.min(Transaccion.fecha)).where(
-        Transaccion.usuario_id == usuario_id,
-        or_(
-            Transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE,
-            Transaccion.estado_verificacion.is_(None)
-        ),
-        Transaccion.es_padre_cuotas == False
-    )
-    if moneda:
-        query = query.where(Transaccion.moneda == moneda)
-    res = db.execute(query).scalar()
-    if res is None:
-        return None
-    return res.date() if isinstance(res, datetime) else res
-
-
-def _validar_historial_minimo(db: Session, usuario_id: UUID, moneda: Moneda | None = None) -> bool:
-    primera_fecha = _obtener_primera_fecha_sync(db, usuario_id, moneda)
-    if primera_fecha is None:
-        return False
-    hoy = hoy_argentina()
-    return (hoy - primera_fecha).days >= 90
-
-
-# --- IMPLEMENTACIONES SÍNCRONAS INTERNAS ---
-
-def _calcular_tasa_ahorro_sync_moneda(db: Session, usuario_id: UUID, fecha_inicio: date, moneda: Moneda) -> Decimal | None:
-    hoy = hoy_argentina()
-
-    cond_gas = condicion_gasto(usuario_id, desde=fecha_inicio, hasta=hoy, moneda=moneda, hoy=hoy)
-    cond_ing = condicion_ingreso(usuario_id, desde=fecha_inicio, hasta=hoy, moneda=moneda, hoy=hoy)
-
-    total_gastos = db.scalar(
-        select(func.coalesce(func.sum(Transaccion.monto), Decimal("0"))).where(cond_gas)
-    ) or Decimal("0")
-
-    ing_res = db.execute(
-        select(
-            func.coalesce(func.sum(Transaccion.monto), Decimal("0")),
-            func.count(Transaccion.id)
-        ).where(cond_ing)
-    ).one()
-    total_ingresos = ing_res[0] or Decimal("0")
-    tiene_ingreso = ing_res[1] > 0
-
-    # Restricción: tasa_ahorro requiere al menos 1 ingreso en el período
-    if not tiene_ingreso or total_ingresos <= 0:
-        return None
-
-    return (total_ingresos - total_gastos) / total_ingresos
-
-
-
-def _calcular_ratio_cuotas_sync_moneda(db: Session, usuario_id: UUID, fecha_inicio: date, moneda: Moneda) -> Decimal | None:
-    hoy = hoy_argentina()
-    usuario = db.get(Usuario, usuario_id)
-    if not usuario:
-        return None
-
-    inicio_ciclo, fin_ciclo = get_ciclo_fechas(usuario, hoy)
-
-    # Cuotas no pagadas que vencen en el ciclo actual y corresponden al grupo de la moneda dada
-    cuotas = db.execute(
-        select(Cuota)
-        .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
-        .options(joinedload(Cuota.grupo))
-        .filter(
-            GrupoCuotas.usuario_id == usuario_id,
-            GrupoCuotas.moneda == moneda,
-            Cuota.pagada == False,
-            Cuota.fecha_vencimiento >= inicio_ciclo,
-            Cuota.fecha_vencimiento <= fin_ciclo
-        )
-    ).scalars().all()
-
-    suma_cuotas = Decimal("0")
-    for c in cuotas:
-        monto = c.monto_real if c.monto_real is not None else c.monto_proyectado or Decimal("0")
-        suma_cuotas += monto
-
-    # Ratio sobre ingreso habitual: si es None, el ratio es None (se deja de usar el gasto como divisor)
-    from app.services.ingreso_habitual_service import obtener_ingreso_habitual
-    res_hab = obtener_ingreso_habitual(db, usuario, hoy=hoy, moneda=moneda)
-    if res_hab.monto is None or res_hab.monto <= Decimal("0"):
-        return None
-
-    return suma_cuotas / res_hab.monto
-
-
-
-def _calcular_consistencia_registro_sync(
-    db: Session, usuario_id: UUID, fecha_inicio: date, primera_fecha: date | datetime | None = None
-) -> Decimal | None:
-    hoy = hoy_argentina()
-
-    if primera_fecha is None:
-        primera_fecha = _obtener_primera_fecha_sync(db, usuario_id, None)
-
-    if primera_fecha is None:
-        return None
-
-    primera_fecha_date = primera_fecha.date() if isinstance(primera_fecha, datetime) else primera_fecha
-
-    dias = (hoy - fecha_inicio).days
-    dias = max(1, dias)
-
-    inicio_periodo = fecha_inicio
-
-    dias_reales = (hoy - primera_fecha_date).days + 1
-    dias_evaluados = min(dias, dias_reales)
-    dias_evaluados = max(1, dias_evaluados)
-
-    fechas_unicas = db.execute(
-        select(func.distinct(Transaccion.fecha))
-        .where(
-            Transaccion.usuario_id == usuario_id,
-            or_(
-                Transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE,
-                Transaccion.estado_verificacion.is_(None)
-            ),
-            Transaccion.es_padre_cuotas == False,
-            Transaccion.fecha >= inicio_periodo,
-            Transaccion.fecha <= hoy
-        )
-    ).scalars().all()
-
-    dias_con_transacciones = len(fechas_unicas)
-    if dias_con_transacciones == 0:
-        return None
-
-    consistencia = Decimal(str(dias_con_transacciones)) / Decimal(str(dias_evaluados))
-    return min(Decimal("1.0"), consistencia)
-
-
 
 
 def _calcular_y_persistir_perfil_sync(db: Session, usuario_id: UUID) -> PerfilFinanciero | None:
@@ -201,38 +53,6 @@ def _obtener_perfil_sync(db: Session, usuario_id: UUID) -> PerfilFinanciero | No
 
     perfil = _calcular_y_persistir_perfil_sync(db, usuario_id)
     return perfil
-
-
-# --- INTERFACES ASÍNCRONAS DE COMPATIBILIDAD ---
-
-async def calcular_tasa_ahorro(db: Session, usuario_id: UUID, fecha_inicio: date | None = None) -> dict[str, Decimal | None]:
-    if fecha_inicio is None:
-        fecha_inicio = hoy_argentina() - timedelta(days=90)
-    res = {"ars": None, "usd": None}
-    if _validar_historial_minimo(db, usuario_id, Moneda.ARS):
-        res["ars"] = _calcular_tasa_ahorro_sync_moneda(db, usuario_id, fecha_inicio, Moneda.ARS)
-    if _validar_historial_minimo(db, usuario_id, Moneda.USD):
-        res["usd"] = _calcular_tasa_ahorro_sync_moneda(db, usuario_id, fecha_inicio, Moneda.USD)
-    return res
-
-
-async def calcular_ratio_cuotas(db: Session, usuario_id: UUID, fecha_inicio: date | None = None) -> dict[str, Decimal | None]:
-    if fecha_inicio is None:
-        fecha_inicio = hoy_argentina() - timedelta(days=90)
-    res = {"ars": None, "usd": None}
-    if _validar_historial_minimo(db, usuario_id, Moneda.ARS):
-        res["ars"] = _calcular_ratio_cuotas_sync_moneda(db, usuario_id, fecha_inicio, Moneda.ARS)
-    if _validar_historial_minimo(db, usuario_id, Moneda.USD):
-        res["usd"] = _calcular_ratio_cuotas_sync_moneda(db, usuario_id, fecha_inicio, Moneda.USD)
-    return res
-
-
-async def calcular_consistencia_registro(db: Session, usuario_id: UUID, fecha_inicio: date | None = None) -> Decimal | None:
-    if not _validar_historial_minimo(db, usuario_id, None):
-        return None
-    if fecha_inicio is None:
-        fecha_inicio = hoy_argentina() - timedelta(days=30)
-    return _calcular_consistencia_registro_sync(db, usuario_id, fecha_inicio)
 
 
 def calcular_y_persistir_perfil(db: Session, usuario_id: UUID) -> PerfilFinanciero | None:

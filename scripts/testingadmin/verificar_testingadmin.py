@@ -23,8 +23,14 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 os.environ["LOG_LEVEL"] = "CRITICAL"
 
 from sqlalchemy import func, select, text
-from sqlalchemy.orm import Session
-from app.core.database import SessionLocal
+from sqlalchemy.orm import Session, sessionmaker
+from app.core.database import SessionLocal, engine
+
+SessionRR = sessionmaker(
+    bind=engine.execution_options(isolation_level="REPEATABLE READ"),
+    autocommit=False,
+    autoflush=False,
+)
 from app.models.billetera import Billetera
 from app.models.cuota import Cuota
 from app.models.grupo_cuotas import GrupoCuotas
@@ -44,11 +50,23 @@ EMAIL_TESTINGADMIN = "testingadmin@argentum.com"
 DIFERENCIA_CONOCIDA_OTROS = Decimal("-941.00")
 
 
-def verificar_testingadmin(db: Session, fecha_corte=None) -> Tuple[bool, List[str]]:
+def verificar_testingadmin(db: Session = None, fecha_corte=None) -> Tuple[bool, List[str]]:
     """
     Ejecuta todas las verificaciones en modo solo lectura.
     Retorna (exito, lineas_reporte).
     """
+    cerrar_db = False
+    if db is None:
+        db = SessionRR()
+        cerrar_db = True
+    try:
+        return _ejecutar_verificacion(db, fecha_corte)
+    finally:
+        if cerrar_db:
+            db.close()
+
+
+def _ejecutar_verificacion(db: Session, fecha_corte=None) -> Tuple[bool, List[str]]:
     if fecha_corte is None:
         fecha_corte = hoy_argentina()
 
@@ -283,7 +301,7 @@ def main():
     with open(script_path, "r", encoding="utf-8") as f:
         codigo_propio = f.read()
 
-    db = SessionLocal()
+    db = SessionRR()
     try:
         exito, lineas_reporte = verificar_testingadmin(db)
     finally:

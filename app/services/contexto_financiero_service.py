@@ -139,14 +139,6 @@ def _calcular_saldo_disponible_sync(
         }
     }
 
-async def calcular_saldo_disponible(
-    db: Session,
-    usuario_id: UUID,
-    billetera_ids: Optional[List[UUID]] = None
-) -> dict:
-    return _calcular_saldo_disponible_sync(db, usuario_id, billetera_ids)
-
-
 def _resumen_metas_activas_sync(db: Session, usuario_id: UUID) -> list[dict]:
     from sqlalchemy import select
     from app.models.meta import Meta, EstadoMeta

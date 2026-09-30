@@ -96,10 +96,7 @@ def calcular_calibracion_usuario(
         *(cuota for cuota, _ in data["cuotas"] if not cuota.pagada and cuota.fecha_vencimiento >= hoy),
         *data["suscripciones"],
     ]
-    ctx = data.get("ctx")
-    if ctx is None:
-        from app.services.definiciones_service import cargar_contexto
-        ctx = cargar_contexto(db, usuario.id, hoy)
+    ctx = data["ctx"]
 
     clasificacion = clasificar_gastos(data["txs"], anteriores, data["ipc"], hoy, comprometidos_externos, ctx=ctx)
     compromiso_tx_ids = {

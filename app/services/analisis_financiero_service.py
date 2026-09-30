@@ -15,7 +15,7 @@ from app.models.grupo_cuotas import GrupoCuotas
 from app.models.historial_suscripcion import HistorialSuscripcion
 from app.models.suscripcion import EstadoSuscripcion, Suscripcion
 from app.models.tools import IPCCache
-from app.models.transaccion import EstadoVerificacionTransaccion, TipoTransaccion, Transaccion
+from app.models.transaccion import TipoTransaccion, Transaccion
 from app.models.usuario import Moneda, Usuario
 from app.services.dashboard_service import get_ciclo_fechas
 from app.services.definiciones_service import ContextoDefiniciones, cargar_contexto, es_gasto, es_ingreso
@@ -28,7 +28,7 @@ from app.utils.fecha import hoy_argentina
 from app.utils.finanzas import (
     ClasificacionGasto, StreamRecurrente, ZERO, ONE, clasificar_gastos,
     deflactar_monto, gasto_ciclo, mad, mediana, percentil,
-    posicion_relativa, monto_mensual_deflactado_stream, pinball_loss,
+    posicion_relativa, monto_mensual_deflactado_stream,
     estimar_gasto_diario_basico_robusto, student_t_critical, weighted_quantile,
     evaluar_puerta_calibracion, MINIMO_CICLOS_EVALUABLES_CALIBRACION,
     UMBRAL_COBERTURA_MINIMA_80, UMBRAL_ANCHO_MAXIMO_RELATIVO_80, NIVEL_EVALUADO_PUERTA,
@@ -75,10 +75,6 @@ def _carga(db: Session, usuario: Usuario, fecha_referencia: date | None = None) 
     ).scalars().all()
     ctx = cargar_contexto(db, usuario.id, hoy)
     return {"hoy": hoy, "txs": txs, "ipc": ipc, "cuotas": cuotas, "suscripciones": suscripciones, "historial_subs": historial_subs, "ctx": ctx}
-
-
-def _tx_valido(tx: Any) -> bool:
-    return tx.estado_verificacion in (None, EstadoVerificacionTransaccion.CONFIRMADA) and not tx.es_padre_cuotas
 
 
 def _suma_deflactada(txs: list[Any], ipc: Any, destino: date, moneda: Moneda, tipo: TipoTransaccion | None = None, *, ctx: ContextoDefiniciones) -> Decimal:
@@ -375,10 +371,6 @@ def _historial_categorias(txs: list[Any], ciclos: list[tuple[date, date]], ipc: 
         for cat, valor in por_cat.items():
             resultado.setdefault(cat, []).append(valor)
     return resultado
-
-
-def _cantidad_hasta(cuotas: list[tuple[Any, Any]], hoy: date, fin: date, moneda: Moneda) -> Decimal:
-    return sum((c.monto_real or c.monto_proyectado or ZERO for c, grupo in cuotas if grupo.moneda == moneda and not c.pagada and hoy <= c.fecha_vencimiento <= fin), ZERO)
 
 
 def evaluar_escalera_historia(cant_ciclos: int) -> tuple[bool, str, str | None]:
@@ -1350,108 +1342,3 @@ def calcular_proyeccion_nueva(
         or (resultado.get("usd") or {}).get("mostrar_card")
     )
     return resultado
-
-
-def backtest_probabilistico_ciclo(
-    db: Session,
-    usuario: Usuario,
-    fecha_ciclo: date,
-) -> dict[str, Any]:
-    """Evalúa la proyección probabilística en un ciclo pasado usando estrictamente datos anteriores.
-
-    Calcula:
-    - Valor real deflactado.
-    - Cuantil central (q50).
-    - Intervalos calibrados al 50%, 80% y 95%.
-    - Cobertura empírica binaria para cada nivel.
-    - Pinball loss promediada sobre grilla de 19 cuantiles (tau in [0.05, 0.95]).
-    - Error absoluto medio del valor central.
-    """
-    inicio, fin = get_ciclo_fechas(usuario, fecha_ciclo)
-    ipc = _indice_por_mes(db.execute(select(IPCCache).order_by(IPCCache.fecha_dato)).scalars().all())
-
-    # Transacciones completas para obtener el gasto real del ciclo evaluado
-    txs_eval = db.execute(
-        select(Transaccion)
-        .options(
-            joinedload(Transaccion.categoria),
-            joinedload(Transaccion.subcategoria),
-            joinedload(Transaccion.billetera),
-        )
-        .where(
-            Transaccion.usuario_id == usuario.id,
-            Transaccion.fecha >= inicio,
-            Transaccion.fecha <= fin,
-        )
-    ).scalars().all()
-    ctx_eval = cargar_contexto(db, usuario.id, fin)
-    gc_real = gasto_ciclo(txs_eval, inicio, fin, fin, ipc, Moneda.ARS, ctx=ctx_eval)
-    y_real = gc_real.deflactado
-
-    # Correr la proyección probabilística evaluada para el ciclo completo con historial previo
-    proy = calcular_proyeccion_nueva(db, usuario, ciclo_evaluado=fecha_ciclo)
-    p_ars = proy.get("ars", {})
-
-    q50 = Decimal(str(p_ars.get("gasto_proyectado_total", 0)))
-    dist = p_ars.get("distribucion") or {}
-    interv = p_ars.get("intervalos") or {}
-
-    q025 = Decimal(str(dist.get("q025", q50)))
-    q10 = Decimal(str(dist.get("q10", q50)))
-    q25 = Decimal(str(dist.get("q25", q50)))
-    q75 = Decimal(str(dist.get("q75", q50)))
-    q90 = Decimal(str(dist.get("q90", q50)))
-    q975 = Decimal(str(dist.get("q975", q50)))
-
-    cubierto_50 = (q25 <= y_real <= q75)
-    cubierto_80 = (q10 <= y_real <= q90)
-    cubierto_95 = (q025 <= y_real <= q975)
-
-    err_abs = abs(q50 - y_real)
-
-    # Pinball loss en grilla de 19 cuantiles tau in [0.05, 0.95]
-    grid_taus = [Decimal(str(round(x * 0.05, 2))) for x in range(1, 20)]
-    pb_losses = []
-    # Reconstruir cuantiles aproximados por interpolación
-    cuantiles_clave = [
-        (Decimal("0.025"), q025),
-        (Decimal("0.10"), q10),
-        (Decimal("0.25"), q25),
-        (Decimal("0.50"), q50),
-        (Decimal("0.75"), q75),
-        (Decimal("0.90"), q90),
-        (Decimal("0.975"), q975),
-    ]
-    for tau in grid_taus:
-        # Interpolación lineal entre cuantiles clave
-        if tau <= Decimal("0.025"):
-            q_tau = q025
-        elif tau >= Decimal("0.975"):
-            q_tau = q975
-        else:
-            # Encontrar segmento
-            for i in range(len(cuantiles_clave) - 1):
-                t1, v1 = cuantiles_clave[i]
-                t2, v2 = cuantiles_clave[i + 1]
-                if t1 <= tau <= t2:
-                    frac = (tau - t1) / (t2 - t1)
-                    q_tau = v1 + (v2 - v1) * frac
-                    break
-        pb_losses.append(pinball_loss(y_real, q_tau, tau))
-
-    avg_pinball_loss = sum(pb_losses, ZERO) / Decimal(len(pb_losses))
-
-    return {
-        "ciclo": fin.strftime("%Y-%m"),
-        "real": y_real,
-        "q50": q50,
-        "intervalo_50": {"piso": q25, "techo": q75, "cubierto": cubierto_50},
-        "intervalo_80": {"piso": q10, "techo": q90, "cubierto": cubierto_80},
-        "intervalo_95": {"piso": q025, "techo": q975, "cubierto": cubierto_95},
-        "ancho_80": q90 - q10,
-        "ancho_95": q975 - q025,
-        "error_absoluto": err_abs,
-        "pinball_loss": avg_pinball_loss,
-        "datos_suficientes": p_ars.get("datos_suficientes", False),
-    }
-
