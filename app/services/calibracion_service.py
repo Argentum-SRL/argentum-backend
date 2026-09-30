@@ -37,18 +37,16 @@ def _obtener_lock_usuario(usuario_id_str: str) -> threading.Lock:
         return _locks_calibracion[usuario_id_str]
 
 
-def calcular_y_guardar_calibracion_usuario(
+def calcular_calibracion_usuario(
     db: Session,
-    usuario_id: UUID | str,
+    usuario_id: UUID | str | Usuario,
     moneda: Moneda | str = Moneda.ARS,
-) -> CalibracionUsuario | None:
-    """Calcula la calibración para un usuario y moneda usando evaluar_calibracion_usuario sin cambios y la guarda.
-
-    Reemplaza la fila anterior (upsert por usuario_id y moneda).
-    Si el usuario no tiene ciclos cerrados suficientes (< 6), guarda o responde pocos_ciclos directamente.
-    """
+) -> dict[str, Any] | None:
+    """Calcula la calibración para un usuario y moneda sin realizar escrituras en la base de datos."""
     t0 = time.perf_counter()
-    if isinstance(usuario_id, str):
+    if isinstance(usuario_id, Usuario):
+        usuario = usuario_id
+    elif isinstance(usuario_id, str):
         usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
     else:
         usuario = db.get(Usuario, usuario_id)
@@ -91,13 +89,19 @@ def calcular_y_guardar_calibracion_usuario(
             "detalles": [],
             "duracion_ms": duracion_ms,
             "sin_fila": True,
+            "clasificacion": None,
         }
 
     comprometidos_externos = [
         *(cuota for cuota, _ in data["cuotas"] if not cuota.pagada and cuota.fecha_vencimiento >= hoy),
         *data["suscripciones"],
     ]
-    clasificacion = clasificar_gastos(data["txs"], anteriores, data["ipc"], hoy, comprometidos_externos)
+    ctx = data.get("ctx")
+    if ctx is None:
+        from app.services.definiciones_service import cargar_contexto
+        ctx = cargar_contexto(db, usuario.id, hoy)
+
+    clasificacion = clasificar_gastos(data["txs"], anteriores, data["ipc"], hoy, comprometidos_externos, ctx=ctx)
     compromiso_tx_ids = {
         tx_id for s in clasificacion.streams if s.clase == "COMPROMISO" for tx_id in s.transacciones_ids
     }
@@ -111,15 +115,6 @@ def calcular_y_guardar_calibracion_usuario(
     duracion_ms = (time.perf_counter() - t0) * 1000.0
     moneda_str = moneda.value if hasattr(moneda, "value") else str(moneda)
 
-    fila = (
-        db.query(CalibracionUsuario)
-        .filter(
-            CalibracionUsuario.usuario_id == usuario.id,
-            CalibracionUsuario.moneda == moneda_str,
-        )
-        .first()
-    )
-
     cob_50 = Decimal(str(round(calib["cobertura_50"], 4))) if calib.get("cobertura_50") is not None else None
     cob_80 = Decimal(str(round(calib["cobertura_80"], 4))) if calib.get("cobertura_80") is not None else None
     cob_95 = Decimal(str(round(calib["cobertura_95"], 4))) if calib.get("cobertura_95") is not None else None
@@ -129,37 +124,80 @@ def calcular_y_guardar_calibracion_usuario(
     import json
     detalles_json = json.loads(json.dumps(calib.get("detalles"), default=float)) if calib.get("detalles") is not None else None
 
+    return {
+        "usuario_id": usuario.id,
+        "moneda": moneda_str,
+        "inicio_ciclo": inicio_actual,
+        "pasa_puerta": calib["pasa_puerta"],
+        "motivo": calib.get("motivo"),
+        "mensaje": calib.get("mensaje"),
+        "ciclos_evaluados": calib.get("ciclos_evaluados", 0),
+        "cobertura_50": cob_50,
+        "cobertura_80": cob_80,
+        "cobertura_95": cob_95,
+        "ancho_medio_80_rel": ancho_rel,
+        "detalles": detalles_json,
+        "duracion_ms": dur_dec,
+        "clasificacion": clasificacion,
+    }
+
+
+def calcular_y_guardar_calibracion_usuario(
+    db: Session,
+    usuario_id: UUID | str,
+    moneda: Moneda | str = Moneda.ARS,
+) -> CalibracionUsuario | dict[str, Any] | None:
+    """Calcula la calibración y guarda el resultado en la tabla calibraciones_usuario.
+
+    Delega el cálculo puro en calcular_calibracion_usuario y preserva la misma firma y comportamiento.
+    """
+    res = calcular_calibracion_usuario(db, usuario_id, moneda)
+    if not res:
+        return None
+    if res.get("sin_fila"):
+        return res
+
+    moneda_str = res["moneda"]
+    fila = (
+        db.query(CalibracionUsuario)
+        .filter(
+            CalibracionUsuario.usuario_id == res["usuario_id"],
+            CalibracionUsuario.moneda == moneda_str,
+        )
+        .first()
+    )
+
     if not fila:
         fila = CalibracionUsuario(
-            usuario_id=usuario.id,
+            usuario_id=res["usuario_id"],
             moneda=moneda_str,
-            inicio_ciclo=inicio_actual,
-            pasa_puerta=calib["pasa_puerta"],
-            motivo=calib.get("motivo"),
-            mensaje=calib.get("mensaje"),
-            ciclos_evaluados=calib.get("ciclos_evaluados", 0),
-            cobertura_50=cob_50,
-            cobertura_80=cob_80,
-            cobertura_95=cob_95,
-            ancho_medio_80_rel=ancho_rel,
-            detalles=detalles_json,
+            inicio_ciclo=res["inicio_ciclo"],
+            pasa_puerta=res["pasa_puerta"],
+            motivo=res["motivo"],
+            mensaje=res["mensaje"],
+            ciclos_evaluados=res["ciclos_evaluados"],
+            cobertura_50=res["cobertura_50"],
+            cobertura_80=res["cobertura_80"],
+            cobertura_95=res["cobertura_95"],
+            ancho_medio_80_rel=res["ancho_medio_80_rel"],
+            detalles=res["detalles"],
             fecha_calculo=datetime.now(timezone.utc),
-            duracion_ms=dur_dec,
+            duracion_ms=res["duracion_ms"],
         )
         db.add(fila)
     else:
-        fila.inicio_ciclo = inicio_actual
-        fila.pasa_puerta = calib["pasa_puerta"]
-        fila.motivo = calib.get("motivo")
-        fila.mensaje = calib.get("mensaje")
-        fila.ciclos_evaluados = calib.get("ciclos_evaluados", 0)
-        fila.cobertura_50 = cob_50
-        fila.cobertura_80 = cob_80
-        fila.cobertura_95 = cob_95
-        fila.ancho_medio_80_rel = ancho_rel
-        fila.detalles = detalles_json
+        fila.inicio_ciclo = res["inicio_ciclo"]
+        fila.pasa_puerta = res["pasa_puerta"]
+        fila.motivo = res["motivo"]
+        fila.mensaje = res["mensaje"]
+        fila.ciclos_evaluados = res["ciclos_evaluados"]
+        fila.cobertura_50 = res["cobertura_50"]
+        fila.cobertura_80 = res["cobertura_80"]
+        fila.cobertura_95 = res["cobertura_95"]
+        fila.ancho_medio_80_rel = res["ancho_medio_80_rel"]
+        fila.detalles = res["detalles"]
         fila.fecha_calculo = datetime.now(timezone.utc)
-        fila.duracion_ms = dur_dec
+        fila.duracion_ms = res["duracion_ms"]
 
     db.commit()
     db.refresh(fila)

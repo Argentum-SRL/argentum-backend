@@ -41,6 +41,7 @@ from app.routers.whatsapp.gastos import (
 from app.schemas.tools import InstallmentConvenienceRequest
 from app.services import (
     ai_service,
+    calibracion_service,
     contexto_financiero_service,
     dashboard_service,
     gastos_consulta_service,
@@ -589,20 +590,11 @@ def medir_bloque_g(db: Session, usuario: Usuario) -> dict[str, str]:
 def medir_bloque_h(db: Session, usuario: Usuario) -> dict[str, str]:
     """Bloque H: Clasificación de gastos (streams recurrentes y clases)."""
     res = {}
-    data = _carga(db, usuario)
-    hoy = data["hoy"]
-    anteriores = _ciclos_anteriores(usuario, hoy, 12)
-    comprometidos_externos = [
-        *(
-            cuota
-            for cuota, _ in data["cuotas"]
-            if not cuota.pagada and cuota.fecha_vencimiento >= hoy
-        ),
-        *data["suscripciones"],
-    ]
-    clasificacion = clasificar_gastos(
-        data["txs"], anteriores, data["ipc"], hoy, comprometidos_externos, ctx=data["ctx"]
-    )
+    calc_res = calibracion_service.calcular_calibracion_usuario(db, usuario, Moneda.ARS)
+    clasificacion = calc_res.get("clasificacion") if calc_res else None
+
+    if not clasificacion:
+        return res
 
     conteo_clases = {}
     for s in clasificacion.streams:
