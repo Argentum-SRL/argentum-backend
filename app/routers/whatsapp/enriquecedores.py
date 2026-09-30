@@ -35,7 +35,7 @@ def enriquecer_respuesta_por_intent(
     de deshacer y corregir vía IA.
     Muta resultado_ia in-place y devuelve intent_detectado (que puede ser reasignado).
     """
-    from app.routers.whatsapp_ia import (
+    from app.routers.whatsapp.deshacer_corregir import (
         _construir_propuesta_corregir,
         _construir_propuesta_deshacer,
         _detectar_correccion_ultimo_movimiento,

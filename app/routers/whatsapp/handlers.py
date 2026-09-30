@@ -527,15 +527,17 @@ def manejar_confirmacion(
     if not _es_confirmacion(mensaje_texto):
         return False
 
-    from app.routers.whatsapp_ia import (
+    from app.routers.whatsapp.confirmaciones import (
         _confirmar_propuesta_baja_suscripcion,
         _confirmar_propuesta_cambio_precio,
+        _confirmar_propuesta_suscripcion,
+    )
+    from app.routers.whatsapp.deshacer_corregir import (
         _confirmar_propuesta_corregir,
         _confirmar_propuesta_deshacer,
-        _confirmar_propuesta_suscripcion,
-        _confirmar_propuesta_transaccion,
-        _confirmar_propuesta_transferencia,
     )
+    from app.routers.whatsapp.registro import _confirmar_propuesta_transaccion
+    from app.routers.whatsapp.transferencias import _confirmar_propuesta_transferencia
 
     propuesta_ganadora = _buscar_propuesta_confirmable_mas_reciente(usuario.id, db)
     intent_ganador = propuesta_ganadora.intent_detectado if propuesta_ganadora else None
@@ -752,7 +754,7 @@ def manejar_deshacer(
     if not _es_pedido_deshacer(mensaje_texto):
         return False
 
-    from app.routers.whatsapp_ia import _construir_propuesta_deshacer
+    from app.routers.whatsapp.deshacer_corregir import _construir_propuesta_deshacer
 
     tx_last, motivo_err = _buscar_ultimo_movimiento_whatsapp(usuario.id, db)
     if not tx_last:
@@ -828,7 +830,7 @@ def manejar_corregir(
     """
     Detección determinística de corregir último movimiento.
     """
-    from app.routers.whatsapp_ia import (
+    from app.routers.whatsapp.deshacer_corregir import (
         _construir_propuesta_corregir,
         _detectar_correccion_ultimo_movimiento,
     )
@@ -921,7 +923,7 @@ def manejar_transferencias(
     """
     Detección determinística de transferencias / cajero / dólares.
     """
-    from app.routers.whatsapp_ia import _interpretar_transferencia
+    from app.routers.whatsapp.transferencias import _interpretar_transferencia
 
     es_tr, estado_tr, ents_tr, resp_tr = _interpretar_transferencia(
         mensaje_texto, usuario, db, estado_previo=estado_previo
@@ -1001,7 +1003,7 @@ def manejar_menu_tarjeta(mensaje_texto: str, usuario: Usuario, db: Session, from
 Si no aplica, retorna False. Si aplica, persiste ConversacionWpp, envía la respuesta y retorna True."""
     if not (conv_activa and conv_activa.slot_filling_estado and any(('tarjeta' in d for d in conv_activa.slot_filling_estado.get('datos_faltantes', [])))):
         return False
-    from app.routers.whatsapp_ia import _construir_propuesta_credito
+    from app.routers.whatsapp.propuestas import _construir_propuesta_credito
     estado_prev_tarj = dict(conv_activa.slot_filling_estado)
     tarjetas_activas = _obtener_tarjetas_activas(usuario.id, db)
     cands_ids = estado_prev_tarj.get('candidatas_tarjetas_ids', [])
@@ -1064,7 +1066,7 @@ def manejar_aclaracion_cuotas(mensaje_texto: str, usuario: Usuario, db: Session,
 Si no aplica, retorna False. Si aplica, persiste ConversacionWpp, envía la respuesta y retorna True."""
     if not (conv_activa and conv_activa.slot_filling_estado and any(('aclarar_cuotas' in d for d in conv_activa.slot_filling_estado.get('datos_faltantes', [])))):
         return False
-    from app.routers.whatsapp_ia import _construir_propuesta_credito
+    from app.routers.whatsapp.propuestas import _construir_propuesta_credito
     estado_prev_cuotas = dict(conv_activa.slot_filling_estado)
     m_txt_norm = normalizar_texto(mensaje_texto)
     es_total = any((w in m_txt_norm for w in ['total', 'el total', 'en total', 'es el total', 'los dos', 'todo']))
@@ -1117,7 +1119,7 @@ Si no aplica o el mensaje no corresponde a una billetera, retorna False.
 Si aplica y procesa la selección o error de rango/moneda, persiste y retorna True."""
     if not (_es_pregunta_billetera(conv_activa) and conv_activa.intent_detectado != 'transferir_fondos' and (not (estado_previo and (estado_previo.get('intent_origen') == 'transferir_fondos' or estado_previo.get('tipo_operacion') in ('transferencia', 'extraccion', 'compra_usd', 'venta_usd'))))):
         return False
-    from app.routers.whatsapp_ia import _construir_propuesta_transaccion
+    from app.routers.whatsapp.propuestas import _construir_propuesta_transaccion
     estado_previo_bill = dict(conv_activa.slot_filling_estado) if conv_activa.slot_filling_estado else {}
     tipo_mov = estado_previo_bill.get('tipo', 'egreso')
     moneda_str = estado_previo_bill.get('moneda', 'ARS')
@@ -1212,7 +1214,7 @@ Si aplica y procesa la selección o error de rango/moneda, persiste y retorna Tr
             nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=propuesta_msg, intent_detectado=intent_val, entidades=entidades_lote, accion_ejecutada=None, confianza=Decimal('1.000'), slot_filling_activo=slot_activo_val, slot_filling_estado=slot_estado_val)
             db.add(nueva_conv)
             db.flush()
-            from app.routers.whatsapp_ia import _registrar_directo_si_corresponde
+            from app.routers.whatsapp.registro import _registrar_directo_si_corresponde
             es_img = bool(entidades_lote.get("origen_imagen") or entidades_lote.get("es_imagen") or estado_previo_bill.get("origen_imagen") or estado_previo_bill.get("es_imagen"))
             reg_dir, resp_dir = _registrar_directo_si_corresponde(
                 usuario, db, nueva_conv, es_credito=False, es_imagen=es_img, es_duplicado=(intent_val != "registrar_transaccion"), se_asumio_principal=False
@@ -1257,7 +1259,7 @@ Si aplica y procesa la selección o error de rango/moneda, persiste y retorna Tr
         nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=propuesta_msg, intent_detectado=intent_val, entidades=estado_previo_bill, accion_ejecutada=None, confianza=Decimal('1.000'), slot_filling_activo=slot_activo_val, slot_filling_estado=slot_estado_val)
         db.add(nueva_conv)
         db.flush()
-        from app.routers.whatsapp_ia import _registrar_directo_si_corresponde
+        from app.routers.whatsapp.registro import _registrar_directo_si_corresponde
         es_img = bool(estado_previo_bill.get("origen_imagen") or estado_previo_bill.get("es_imagen"))
         reg_dir, resp_dir = _registrar_directo_si_corresponde(
             usuario, db, nueva_conv, es_credito=False, es_imagen=es_img, es_duplicado=(intent_val != "registrar_transaccion"), se_asumio_principal=False
@@ -1281,7 +1283,8 @@ def manejar_verificaciones_slot_filling(
     Si procesa o cancela el flujo, persiste y retorna True.
     Si no aplica o el usuario ignora la pregunta con otro mensaje, retorna False.
     """
-    from app.routers.whatsapp_ia import _registrar_movimiento_directo, MESES_ES_GEN
+    from app.routers.whatsapp.registro import _registrar_movimiento_directo
+    from app.routers.whatsapp.constantes import MESES_ES_GEN
 
     conv_activa_dup = _buscar_slot_filling_activo(usuario.id, db)
     if conv_activa_dup and conv_activa_dup.slot_filling_estado:
@@ -1462,7 +1465,7 @@ def manejar_alta_suscripcion(
     """
     Detección determinística de alta de suscripción.
     """
-    from app.routers.whatsapp_ia import MESES_ES_GEN
+    from app.routers.whatsapp.constantes import MESES_ES_GEN
 
     if _es_intento_alta_suscripcion(mensaje_texto):
         srv_nom = _extraer_nombre_servicio(mensaje_texto)

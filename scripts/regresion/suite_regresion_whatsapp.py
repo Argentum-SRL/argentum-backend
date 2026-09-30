@@ -52,12 +52,10 @@ from app.models.transaccion import (
     EstadoVerificacionTransaccion,
     MetodoPago,
 )
-from app.routers.whatsapp_ia import (
-    _procesar_webhook_whatsapp_sync,
-    _construir_propuesta_transaccion,
-    _confirmar_propuesta_transaccion,
-    _resolver_categoria_y_subcategoria,
-)
+from app.routers.whatsapp_ia import _procesar_webhook_whatsapp_sync
+from app.routers.whatsapp.propuestas import _construir_propuesta_transaccion
+from app.routers.whatsapp.registro import _confirmar_propuesta_transaccion
+from app.routers.whatsapp.db_lookups import _resolver_categoria_y_subcategoria
 from app.services import ai_service
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion, FrecuenciaSuscripcion
 from app.models.historial_suscripcion import HistorialSuscripcion
@@ -3375,7 +3373,7 @@ def p14_caso_10(datos):
         tx_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
 
         respuestas.clear()
-        with patch("app.routers.whatsapp_ia._confirmar_propuesta_transaccion", side_effect=RuntimeError("boom")):
+        with patch("app.routers.whatsapp.registro._confirmar_propuesta_transaccion", side_effect=RuntimeError("boom")):
             _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
         resp1 = respuestas[-1][1] if respuestas else ""
 
