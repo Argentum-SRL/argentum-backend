@@ -37,7 +37,7 @@ def _job_notificaciones_cuotas(db_session_factory):
         from app.models.cuota import Cuota
         from app.models.grupo_cuotas import GrupoCuotas
         from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
-        from app.services.tarjeta_service import calcular_resumen_actual
+        from app.services.resumen_tarjeta_service import calcular_resumen_actual
 
         configs = db.query(
             ConfiguracionNotificacion.usuario_id,

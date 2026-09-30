@@ -1,7 +1,7 @@
 from uuid import uuid4
 from app.models.usuario import Usuario, AuthProvider, EstadoUsuario, RolUsuario, CicloTipo
 from app.core.database import SessionLocal
-from app.services.analisis_financiero_service import calcular_perfil_nuevo
+from app.services.perfil_financiero_service import calcular_perfil_nuevo
 from app.services.proyeccion_service import calcular_proyeccion
 
 def test_modal_bienvenida_flag_en_usuario_sin_historia():

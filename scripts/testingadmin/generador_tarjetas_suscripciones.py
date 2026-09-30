@@ -8,7 +8,7 @@ Cumple con:
      - Smart TV 55" en 12 cuotas con interés (Visa Santander, arrancó en agosto 2026).
      - Heladera en 12 cuotas sin interés (Visa Galicia, arrancó en octubre 2025).
      - Zapatillas en 3 cuotas (Visa Galicia, arrancó en mayo 2026).
-  c. Resumen de cada tarjeta pagado todos los meses con el servicio real `tarjeta_service.pagar_resumen_tarjeta`.
+  c. Resumen de cada tarjeta pagado todos los meses con el servicio real `pago_resumen_service.pagar_resumen_tarjeta`.
   d. Un mes con pago parcial (abril 2026), generando saldo arrastrado que se cancela al mes siguiente.
   e. Ninguna cuota ya vencida queda impaga.
 4.8 Suscripciones:
@@ -45,7 +45,7 @@ from app.models.transaccion import (
 from app.models.usuario import Moneda
 from app.schemas.suscripcion import SuscripcionCreate
 from app.schemas.transaccion import InfoCuotas, TransaccionCreate, TransaccionUpdate
-from app.services import cuotas_service, suscripcion_service, tarjeta_service, transaccion_service
+from app.services import cuotas_service, pago_resumen_service, suscripcion_service, tarjeta_service, transaccion_service
 from app.utils.fecha import hoy_argentina
 from scripts.testingadmin.datos_base import CatalogoEntidades
 
@@ -438,7 +438,7 @@ def generar_tarjetas_y_suscripciones(
                 if total_vto > Decimal("0"):
                     pago_parcial = (total_vto * Decimal("0.70")).quantize(Decimal("0.01"))
                     try:
-                        tx_pago = tarjeta_service.pagar_resumen_tarjeta(
+                        tx_pago = pago_resumen_service.pagar_resumen_tarjeta(
                             db=db,
                             usuario_id=cat.user.id,
                             tarjeta_id=cat.t_visa_galicia.id,
@@ -461,7 +461,7 @@ def generar_tarjetas_y_suscripciones(
             else:
                 # Pago total habitual
                 try:
-                    tx_pago = tarjeta_service.pagar_resumen_tarjeta(
+                    tx_pago = pago_resumen_service.pagar_resumen_tarjeta(
                         db=db,
                         usuario_id=cat.user.id,
                         tarjeta_id=cat.t_visa_galicia.id,
@@ -484,7 +484,7 @@ def generar_tarjetas_y_suscripciones(
             # Vencimiento Amex Galicia en dólares: día 13 (ajustado a hábil posterior)
             # Pagamos consumos en dólares desde Efectivo USD
             try:
-                tx_amex = tarjeta_service.pagar_resumen_tarjeta(
+                tx_amex = pago_resumen_service.pagar_resumen_tarjeta(
                     db=db,
                     usuario_id=cat.user.id,
                     tarjeta_id=cat.t_amex_galicia.id,
@@ -513,7 +513,7 @@ def generar_tarjetas_y_suscripciones(
         )
         if vto_santander <= fecha_corte:
             try:
-                tx_san = tarjeta_service.pagar_resumen_tarjeta(
+                tx_san = pago_resumen_service.pagar_resumen_tarjeta(
                     db=db,
                     usuario_id=cat.user.id,
                     tarjeta_id=cat.t_visa_santander.id,

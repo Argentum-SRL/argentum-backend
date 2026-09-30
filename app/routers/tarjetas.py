@@ -18,7 +18,7 @@ from app.schemas.tarjeta_credito import (
     SimularPesificacionResponse
 )
 from app.schemas.transaccion import TransaccionRead
-from app.services import tarjeta_service
+from app.services import pago_resumen_service, resumen_tarjeta_service, tarjeta_service
 
 router = APIRouter()
 
@@ -108,7 +108,7 @@ def get_resumen_tarjeta(
     if not tarjeta:
         raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
 
-    return tarjeta_service.calcular_resumen_actual(db, tarjeta)
+    return resumen_tarjeta_service.calcular_resumen_actual(db, tarjeta)
 
 
 @router.post("/{tarjeta_id}/pagar", response_model=ResultadoPagoTarjeta)
@@ -128,7 +128,7 @@ def pagar_tarjeta(
     monto_pesos_personalizado = body.monto_pesos_personalizado if body else None
     monto_percepcion_personalizado = body.monto_percepcion_personalizado if body else None
 
-    return tarjeta_service.pagar_resumen_tarjeta(
+    return pago_resumen_service.pagar_resumen_tarjeta(
         db,
         current_user.id,
         tarjeta_id,
@@ -152,7 +152,7 @@ def simular_pesificacion(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
-    return tarjeta_service.simular_pesificacion(
+    return pago_resumen_service.simular_pesificacion(
         db,
         current_user.id,
         tarjeta_id,

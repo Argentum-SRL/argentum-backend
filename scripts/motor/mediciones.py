@@ -50,7 +50,7 @@ from app.services import (
     suscripcion_service,
     tools_service,
 )
-from app.services.analisis_financiero_service import (
+from app.services.perfil_financiero_service import (
     calcular_perfil_nuevo,
 )
 from app.services.definiciones_service import cargar_contexto, es_gasto

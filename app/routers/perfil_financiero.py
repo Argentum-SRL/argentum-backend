@@ -75,7 +75,7 @@ def get_perfil_financiero(
 ):
     perfil = perfil_financiero_service.obtener_perfil(db, current_user.id)
     interpretaciones = construir_interpretaciones(perfil)
-    from app.services.analisis_financiero_service import calcular_perfil_nuevo
+    from app.services.perfil_financiero_service import calcular_perfil_nuevo
     perfil_nuevo = calcular_perfil_nuevo(db, current_user)
     
     # Mapear a esquema de respuesta
@@ -98,7 +98,7 @@ def recalcular_perfil_financiero(
 ):
     perfil = perfil_financiero_service.calcular_y_persistir_perfil(db, current_user.id)
     interpretaciones = construir_interpretaciones(perfil)
-    from app.services.analisis_financiero_service import calcular_perfil_nuevo
+    from app.services.perfil_financiero_service import calcular_perfil_nuevo
     perfil_nuevo = calcular_perfil_nuevo(db, current_user)
     
     # Mapear a esquema de respuesta

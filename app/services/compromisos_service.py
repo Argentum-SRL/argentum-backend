@@ -373,11 +373,11 @@ def calcular_compromisos_mensuales(
     if clasificacion is not None:
         streams = getattr(clasificacion, "streams", [])
     else:
-        from app.services.analisis_financiero_service import _carga, _ciclos_anteriores
+        from app.services.datos_motor_service import cargar_datos_motor, ciclos_anteriores
         from app.utils.finanzas import clasificar_gastos
 
-        data = _carga(db, usuario, ref_hoy)
-        ciclos_12 = _ciclos_anteriores(usuario, ref_hoy, 12)
+        data = cargar_datos_motor(db, usuario, ref_hoy)
+        ciclos_12 = ciclos_anteriores(usuario, ref_hoy, 12)
         comprometidos_ext = [
             *(c for c, _ in data["cuotas"] if not c.pagada and c.fecha_vencimiento >= ref_hoy),
             *data["suscripciones"],
@@ -479,11 +479,11 @@ def calcular_gasto_variable_tipico(
 
     # 2. Transacciones asociadas a streams de la parte c
     if streams_c is None:
-        from app.services.analisis_financiero_service import _carga, _ciclos_anteriores
+        from app.services.datos_motor_service import cargar_datos_motor, ciclos_anteriores
         from app.utils.finanzas import clasificar_gastos
 
-        data = _carga(db, usuario, ref_hoy)
-        ciclos_12 = _ciclos_anteriores(usuario, ref_hoy, 12)
+        data = cargar_datos_motor(db, usuario, ref_hoy)
+        ciclos_12 = ciclos_anteriores(usuario, ref_hoy, 12)
         comprometidos_ext = [
             *(c for c, _ in data["cuotas"] if not c.pagada and c.fecha_vencimiento >= ref_hoy),
             *data["suscripciones"],

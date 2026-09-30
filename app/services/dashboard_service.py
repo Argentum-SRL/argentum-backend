@@ -24,7 +24,7 @@ from app.models.cuota import Cuota
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.historial_suscripcion import HistorialSuscripcion
 from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
-from app.services.tarjeta_service import calcular_resumen_actual
+from app.services.resumen_tarjeta_service import calcular_resumen_actual
 from app.services.definiciones_service import condicion_gasto, condicion_ingreso
 
 def get_date_by_rule(rule: str, month: int, year: int) -> date:

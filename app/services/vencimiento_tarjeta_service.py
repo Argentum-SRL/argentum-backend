@@ -11,7 +11,8 @@ from app.models.transaccion import (
 )
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.cuota import Cuota
-from app.services.tarjeta_service import calcular_resumen_actual, calcular_fecha_vencimiento_proximo
+from app.services.resumen_tarjeta_service import calcular_resumen_actual
+from app.services.tarjeta_service import calcular_fecha_vencimiento_proximo
 from app.utils.fecha import hoy_argentina
 
 def procesar_vencimientos_tarjetas(db: Session) -> None:

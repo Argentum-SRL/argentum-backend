@@ -35,7 +35,7 @@ Este módulo regenera de forma integral y determinística el historial financier
    - Suscripciones mensuales (Netflix, Spotify) y anual (Google One), con historial de precios y un cobro corregido en Spotify.
    - Compras en cuotas: Smart TV (12 cuotas con interés), Heladera (12 cuotas sin interés) y Zapatillas (3 cuotas).
    - Compras en 1 pago y consumos en USD con Amex.
-   - Pago mensual de resúmenes de tarjeta utilizando el servicio oficial `tarjeta_service.pagar_resumen_tarjeta`.
+   - Pago mensual de resúmenes de tarjeta utilizando el servicio oficial `pago_resumen_service.pagar_resumen_tarjeta`.
    - Pago parcial en abril 2026 que genera saldo arrastrado cancelado al mes siguiente.
 7. **`generador_metas_inversiones.py`**:
    - Aportes mensuales a las metas "Fondo de Emergencia" ($100.000) y "Viaje a Bariloche" ($50.000).

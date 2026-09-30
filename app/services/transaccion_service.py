@@ -15,10 +15,10 @@ from app.models.cuota import Cuota
 from app.models.tarjeta_credito import TarjetaCredito
 from app.models.saldo_arrastrado import SaldoArrastradoTarjeta, PagoSaldoArrastrado, EstadoSaldoArrastrado
 from app.schemas.transaccion import TransaccionCreate, TransaccionUpdate
+from app.services.resumen_tarjeta_service import _tabla_saldo_arrastrado_existe
 from app.services.tarjeta_service import (
     calcular_primer_vencimiento,
     calcular_fecha_vencimiento_proximo,
-    _tabla_saldo_arrastrado_existe,
 )
 from app.services import cuotas_service, presupuesto_service
 from app.utils.fecha import hoy_argentina
