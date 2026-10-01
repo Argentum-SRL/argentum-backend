@@ -1,6 +1,6 @@
 {
   "escenario_id": "P9B.9",
-  "fecha_grabacion": "2026-09-15T14:48:42.357667+00:00",
+  "fecha_grabacion": "2026-10-01T12:54:48.470978+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -27,12 +27,13 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
         "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $5.000 en Transferencia a mi hermano desde Santander. ¿Va?"
+        "respuesta_usuario": "Listo. Transferencia de $5.000 a tu hermano registrada."
       }
     }
   ]

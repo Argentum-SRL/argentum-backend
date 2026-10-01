@@ -1,6 +1,6 @@
 {
   "escenario_id": "P17.9",
-  "fecha_grabacion": "2026-09-30T22:39:19.932500+00:00",
+  "fecha_grabacion": "2026-10-01T12:44:36.403105+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -16,7 +16,7 @@
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
-          "billetera_destino": "Galicia",
+          "billetera_destino": "Efectivo ARS",
           "cantidad_cuotas": null,
           "fecha": "2026-09-22",
           "destinatario": null,
@@ -32,8 +32,8 @@
         "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. Ingreso de $100.000 en Otros a Galicia (el 22 de septiembre) — registrado.\nSi fue con otra, decime cuál.",
-        "_asumio_principal": true
+        "respuesta_usuario": "Listo. Ingreso de $100.000 en Otros a Efectivo ARS (el 22 de septiembre) — registrado.",
+        "_asumio_principal": false
       }
     },
     {
@@ -50,10 +50,10 @@
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
-          "billetera_origen": "Galicia",
-          "billetera_destino": "Galicia",
+          "billetera_origen": "Efectivo ARS",
+          "billetera_destino": "Efectivo ARS",
           "cantidad_cuotas": null,
-          "fecha": "2026-09-29",
+          "fecha": "2026-09-30",
           "destinatario": null,
           "persona": null,
           "tasa_cambio": null,
@@ -67,7 +67,7 @@
         "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. Ingreso de $100.000 en Otros a Galicia (ayer) — registrado."
+        "respuesta_usuario": "Listo. Ingreso de $100.000 en Otros a Efectivo ARS (ayer) — registrado."
       }
     }
   ]

@@ -4400,6 +4400,41 @@ def p17_caso_14(datos):
     return run_isolated(test)
 
 
+def p17_caso_15(datos):
+    """P17.15 'El 25/09 gasté 1.000 pesos en el kiosco y 2.000 pesos en la verdulería. El 27/09 gasté 3.000 pesos en Uber.' -> 3 movimientos con fechas 25/09, 25/09 y 27/09"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        db = Session()
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(
+            make_payload(TELEFONO_TEST, "El 25/09 gasté 1.000 pesos en el kiosco y 2.000 pesos en la verdulería. El 27/09 gasté 3.000 pesos en Uber."),
+            time.perf_counter()
+        )
+        if respuestas and "¿" in respuestas[-1][1] and "corregir" not in respuestas[-1][1].lower():
+            _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+
+        txs = db.execute(
+            select(Transaccion).where(Transaccion.usuario_id == u.id).order_by(Transaccion.fecha_creacion.desc()).limit(3)
+        ).scalars().all()
+
+        cant_ok = len(txs) == 3
+        tx_uber = next((t for t in txs if t.monto == Decimal("3000")), None)
+        tx_verduleria = next((t for t in txs if t.monto == Decimal("2000")), None)
+        tx_kiosco = next((t for t in txs if t.monto == Decimal("1000")), None)
+
+        fechas_ok = (
+            tx_kiosco is not None and tx_kiosco.fecha.day == 25 and tx_kiosco.fecha.month == 9 and
+            tx_verduleria is not None and tx_verduleria.fecha.day == 25 and tx_verduleria.fecha.month == 9 and
+            tx_uber is not None and tx_uber.fecha.day == 27 and tx_uber.fecha.month == 9
+        )
+
+        return f"Lote 3 txs: {cant_ok} | Fechas 25/09 25/09 27/09: {fechas_ok}"
+    return run_isolated(test)
+
+
 def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False, solo_escenario: str | None = None):
     global _gestor_actual
     _gestor_actual = GestorGrabacionesIA(
@@ -5867,6 +5902,14 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             "nombre": "pago a tercero y transferencia entre cuentas propias se bloquea",
             "ejecutar": lambda: p17_caso_14(datos),
             "esperado": "Bloqueo transferencias propias: True | Creadas: 0",
+            "match": "exacto",
+        },
+        {
+            "id": "P17.15",
+            "punto": "Punto 17",
+            "nombre": "lote con fechas intermedias propaga fecha previa a movimientos sin fecha",
+            "ejecutar": lambda: p17_caso_15(datos),
+            "esperado": "Lote 3 txs: True | Fechas 25/09 25/09 27/09: True",
             "match": "exacto",
         },
     ]

@@ -1,14 +1,14 @@
 {
-  "escenario_id": "P11.8",
-  "fecha_grabacion": "2026-10-01T12:59:58.859805+00:00",
+  "escenario_id": "P17.15",
+  "fecha_grabacion": "2026-10-01T12:50:24.361742+00:00",
   "llamadas": [
     {
       "call_idx": 0,
-      "mensaje": "gasté 5000 en el kiosco y 50 dólares en un libro",
+      "mensaje": "El 25/09 gasté 1.000 pesos en el kiosco y 2.000 pesos en la verdulería. El 27/09 gasté 3.000 pesos en Uber.",
       "respuesta": {
         "intent": "registrar_transaccion",
         "entidades": {
-          "monto": 5000,
+          "monto": 1000,
           "moneda": "ARS",
           "tipo": "egreso",
           "categoria": "Kiosco",
@@ -19,7 +19,7 @@
           "billetera_origen": null,
           "billetera_destino": null,
           "cantidad_cuotas": null,
-          "fecha": null,
+          "fecha": "2026-09-25",
           "destinatario": null,
           "persona": null,
           "tasa_cambio": null,
@@ -30,21 +30,31 @@
           "meta": null,
           "transacciones_adicionales": [
             {
-              "monto": 50,
-              "moneda": "USD",
+              "monto": 2000,
+              "moneda": "ARS",
               "tipo": "egreso",
-              "categoria": "Otros",
-              "descripcion": "Libro",
+              "categoria": "Verdulería",
+              "descripcion": "Verdulería",
               "billetera": null,
               "tarjeta": null,
-              "fecha": null
+              "fecha": "2026-09-25"
+            },
+            {
+              "monto": 3000,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Transporte público",
+              "descripcion": "Uber",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": "2026-09-27"
             }
           ]
         },
-        "confianza": 0.85,
+        "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. $5.000 en Kiosco y 50 dólares en un libro — registrado."
+        "respuesta_usuario": "Listo. Gastos registrados: $1.000 en Kiosco, $2.000 en Verdulería y $3.000 en Uber."
       }
     }
   ]

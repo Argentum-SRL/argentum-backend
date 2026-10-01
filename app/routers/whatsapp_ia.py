@@ -159,6 +159,7 @@ from app.routers.whatsapp.parsers import (
     _resolver_y_validar_fecha,
     montos_de_dinero_en_texto,
     parsear_monto_marca,
+    propagar_fechas_lote,
 )
 from app.routers.whatsapp.propuestas import (
     _construir_propuesta_credito,
@@ -902,8 +903,9 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                             "Mandámelo en un mensaje aparte así lo cargo bien."
                         )
 
-            # Ajuste determinístico de categorías según marcas comerciales (Decisión D)
+            # Ajuste determinístico de categorías según marcas comerciales (Decisión D) y propagación de fechas
             if isinstance(resultado_ia.get("entidades"), dict):
+                propagar_fechas_lote(resultado_ia["entidades"])
                 ajustar_categoria_marcas(resultado_ia["entidades"])
                 for ad in resultado_ia["entidades"].get("transacciones_adicionales", []):
                     ajustar_categoria_marcas(ad)

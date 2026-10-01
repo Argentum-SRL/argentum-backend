@@ -1,6 +1,6 @@
 {
   "escenario_id": "P11.12",
-  "fecha_grabacion": "2026-09-23T17:19:09.261471+00:00",
+  "fecha_grabacion": "2026-10-01T13:03:41.570465+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,8 +11,8 @@
           "monto": 50000,
           "moneda": "ARS",
           "tipo": "ingreso",
-          "categoria": "Sueldo",
-          "descripcion": "Sueldo",
+          "categoria": "Trabajo independiente",
+          "descripcion": "Arreglo de compu",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
@@ -64,7 +64,7 @@
               "moneda": "ARS",
               "tipo": "egreso",
               "categoria": "Kiosco",
-              "descripcion": "Kiosco",
+              "descripcion": "Chocolate",
               "billetera": null,
               "tarjeta": null,
               "fecha": null

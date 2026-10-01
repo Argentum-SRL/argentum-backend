@@ -1,6 +1,6 @@
 {
   "escenario_id": "P17.13",
-  "fecha_grabacion": "2026-09-30T22:11:11.966794+00:00",
+  "fecha_grabacion": "2026-10-01T12:48:56.482351+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,7 +11,7 @@
           "monto": 3000,
           "moneda": "ARS",
           "tipo": "ingreso",
-          "categoria": "Otros",
+          "categoria": null,
           "descripcion": "Transferencia de juan",
           "servicio": null,
           "frecuencia": null,

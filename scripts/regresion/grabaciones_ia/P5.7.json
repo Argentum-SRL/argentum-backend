@@ -1,6 +1,6 @@
 {
   "escenario_id": "P5.7",
-  "fecha_grabacion": "2026-09-15T14:40:32.145618+00:00",
+  "fecha_grabacion": "2026-10-01T12:51:24.569559+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -27,6 +27,7 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": [
             {
               "monto": 5000,
@@ -40,10 +41,10 @@
             }
           ]
         },
-        "confianza": 0.85,
+        "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $5.000 en Kiosco desde la billetera que elijas. ¿Va?"
+        "respuesta_usuario": "Listo. $10.000 en Kiosco — registrado."
       }
     }
   ]

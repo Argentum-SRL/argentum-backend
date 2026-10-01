@@ -1,6 +1,6 @@
 {
   "escenario_id": "P11.10",
-  "fecha_grabacion": "2026-09-15T14:54:02.305214+00:00",
+  "fecha_grabacion": "2026-10-01T13:01:38.316761+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -27,6 +27,7 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": [
             {
               "monto": 8000,
@@ -40,10 +41,10 @@
             }
           ]
         },
-        "confianza": 0.85,
+        "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $5.000 en Kiosco y $8.000 en Verdulería. ¿Confirmás?"
+        "respuesta_usuario": "Listo. $5.000 en Kiosco y $8.000 en Verdulería — registrado."
       }
     }
   ]

@@ -1,6 +1,6 @@
 {
   "escenario_id": "P17.4",
-  "fecha_grabacion": "2026-09-30T22:20:52.455572+00:00",
+  "fecha_grabacion": "2026-10-01T12:40:14.891464+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -17,7 +17,7 @@
           "frecuencia": null,
           "billetera": null,
           "billetera_origen": null,
-          "billetera_destino": null,
+          "billetera_destino": "Efectivo ARS",
           "cantidad_cuotas": null,
           "fecha": null,
           "destinatario": null,
@@ -33,7 +33,7 @@
         "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Registro de ingreso por transferencia de mamá por $300.000."
+        "respuesta_usuario": "Listo. $300.000 de ingreso registrado como transferencia de mamá."
       }
     }
   ]

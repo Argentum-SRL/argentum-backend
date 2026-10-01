@@ -1,18 +1,18 @@
 {
   "escenario_id": "P11.13",
-  "fecha_grabacion": "2026-09-23T17:20:02.172711+00:00",
+  "fecha_grabacion": "2026-10-01T13:04:59.213183+00:00",
   "llamadas": [
     {
       "call_idx": 0,
       "mensaje": "le transferí 5000 a mi hermano y también gasté 3000 en el kiosco",
       "respuesta": {
-        "intent": "desconocido",
+        "intent": "registrar_transaccion",
         "entidades": {
-          "monto": null,
-          "moneda": null,
-          "tipo": null,
-          "categoria": null,
-          "descripcion": null,
+          "monto": 3000,
+          "moneda": "ARS",
+          "tipo": "egreso",
+          "categoria": "Kiosco",
+          "descripcion": "Kiosco",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
@@ -28,12 +28,23 @@
           "confirmado": null,
           "tarjeta": null,
           "meta": null,
-          "transacciones_adicionales": []
+          "transacciones_adicionales": [
+            {
+              "monto": 5000,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Otros",
+              "descripcion": "Transferencia a mi hermano",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            }
+          ]
         },
-        "confianza": 1.0,
+        "confianza": 0.85,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Las transferencias y los gastos deben enviarse en mensajes separados. Por favor, envía cada operación por separado."
+        "respuesta_usuario": "Listo. $3.000 en Kiosco — registrado. $5.000 a tu hermano — registrado como un gasto."
       }
     }
   ]

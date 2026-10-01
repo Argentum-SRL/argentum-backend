@@ -408,3 +408,28 @@ def parsear_monto_marca(m_txt: str) -> Decimal | None:
     """Extrae el valor numérico Decimal de una expresión de monto con marca."""
     t = re.sub(r"(?:[\$€£]|us\$|usd|u\$s|pesos|d[oó]lares|dolares)", "", m_txt, flags=re.IGNORECASE).strip()
     return _parsear_monto_texto_cuota(t) or _parsear_monto_argentino(t)
+
+
+def propagar_fechas_lote(entidades: dict) -> None:
+    """
+    En un mensaje con varios movimientos, un ítem que viene sin fecha toma
+    la última fecha que apareció antes que él en el mensaje, recorriendo en orden
+    el movimiento principal y después cada transacciones_adicionales.
+    Si ningún ítem anterior tiene fecha, queda como hoy (o None).
+    Un ítem que trae su propia fecha nunca se toca.
+    Modifica el diccionario in-place.
+    """
+    if not isinstance(entidades, dict):
+        return
+
+    ultima_fecha = entidades.get("fecha") or None
+    adicionales = entidades.get("transacciones_adicionales")
+    if isinstance(adicionales, list):
+        for adic in adicionales:
+            if isinstance(adic, dict):
+                fecha_adic = adic.get("fecha") or None
+                if fecha_adic:
+                    ultima_fecha = fecha_adic
+                elif ultima_fecha:
+                    adic["fecha"] = ultima_fecha
+

@@ -1,6 +1,6 @@
 {
   "escenario_id": "P17.8",
-  "fecha_grabacion": "2026-09-30T22:38:26.022659+00:00",
+  "fecha_grabacion": "2026-10-01T12:43:40.250443+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -51,7 +51,7 @@
             }
           ]
         },
-        "confianza": 0.95,
+        "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
         "respuesta_usuario": "Listo. Gastos registrados: $1.400 en Didi, $27.630 en Rappi y $5.000 en Didi Food."
