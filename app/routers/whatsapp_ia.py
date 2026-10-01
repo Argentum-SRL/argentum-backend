@@ -109,7 +109,9 @@ from app.routers.whatsapp.detectors import (
     _es_senial_gasto_suelto,
     _es_senial_suscripcion,
     _parece_intento_correccion,
+    _debe_bloquear_mezcla_lote,
 )
+from app.routers.whatsapp.marcas import ajustar_categoria_marcas
 from app.routers.whatsapp.enriquecedores import enriquecer_respuesta_por_intent
 from app.routers.whatsapp.gastos import manejar_consulta_gastos
 from app.routers.whatsapp.handlers import (
@@ -845,6 +847,12 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
             t_ia_end = time.perf_counter()
             logger.info("[LATENCIA][IA] Procesamiento: %.2fs", t_ia_end - t_ia_start)
 
+            # Ajuste determinístico de categorías según marcas comerciales (Decisión D)
+            if isinstance(resultado_ia.get("entidades"), dict):
+                ajustar_categoria_marcas(resultado_ia["entidades"])
+                for ad in resultado_ia["entidades"].get("transacciones_adicionales", []):
+                    ajustar_categoria_marcas(ad)
+
             # Si el intent es desconocido o la confianza es baja (< 0.60), dar respuesta clara con ejemplo
             intent_ia_raw = resultado_ia.get("intent")
             confianza_ia_raw = float(resultado_ia.get("confianza", 1.0))
@@ -943,7 +951,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                         resultado_ia["slot_filling"] = False
                         resultado_ia["respuesta_usuario"] = MSG_TOPE_MOVIMIENTOS_SUPERADO
                         resultado_ia["entidades"] = {}
-                    elif PATRON_BLOQUEO_MEZCLA.search(m_norm):
+                    elif _debe_bloquear_mezcla_lote(mensaje_texto, usuario.id, db):
                         resultado_ia["intent"] = "mezcla_transferencia_invalida"
                         resultado_ia["slot_filling"] = False
                         resultado_ia["respuesta_usuario"] = MSG_NO_MEZCLAR_TRANSFERENCIAS
@@ -1090,8 +1098,11 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                                     )
                                     mon_chk = Moneda.USD if op.get("moneda") == "USD" else Moneda.ARS
                                     m_chk = Decimal(str(op["monto"]))
+                                    f_op = _resolver_fecha_transaccion(op.get("fecha"))
+                                    tipo_op_enum = TipoTransaccion.INGRESO if op.get("tipo") == "ingreso" else TipoTransaccion.EGRESO
                                     for th in txs_hist:
-                                        if th.monto == m_chk and th.moneda == mon_chk and th.categoria_id == cat_id_chk:
+                                        if (th.monto == m_chk and th.moneda == mon_chk and th.categoria_id == cat_id_chk
+                                                and th.fecha == f_op and th.tipo == tipo_op_enum):
                                             tx_dup_found = th
                                             op_dup_found = op
                                             break
@@ -1406,6 +1417,8 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                                             moneda=moneda_sol,
                                             categoria_id=cat_id_chk,
                                             db=db,
+                                            fecha=_resolver_fecha_transaccion(entidades_actuales.get("fecha")),
+                                            tipo=tipo_act,
                                         )
                                         if tx_dup:
                                             hora_dup = tx_dup.fecha_creacion.astimezone(TZ_ARGENTINA).strftime("%H:%M")

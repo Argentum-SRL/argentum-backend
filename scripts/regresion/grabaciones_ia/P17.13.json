@@ -1,0 +1,40 @@
+{
+  "escenario_id": "P17.13",
+  "fecha_grabacion": "2026-09-30T22:11:11.966794+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "Juan me transfirió 3000",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 3000,
+          "moneda": "ARS",
+          "tipo": "ingreso",
+          "categoria": "Otros",
+          "descripcion": "Transferencia de juan",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": null,
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "meta": null,
+          "transacciones_adicionales": []
+        },
+        "confianza": 0.9,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Listo. $3.000 de ingreso registrado como transferencia de Juan."
+      }
+    }
+  ]
+}

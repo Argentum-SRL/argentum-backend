@@ -1,0 +1,40 @@
+{
+  "escenario_id": "P17.4",
+  "fecha_grabacion": "2026-09-30T22:20:52.455572+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "mi mamá me transfirió 300.000 pesos",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 300000,
+          "moneda": "ARS",
+          "tipo": "ingreso",
+          "categoria": null,
+          "descripcion": "Transferencia de mamá",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": null,
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "meta": null,
+          "transacciones_adicionales": []
+        },
+        "confianza": 0.9,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Registro de ingreso por transferencia de mamá por $300.000."
+      }
+    }
+  ]
+}

@@ -57,10 +57,12 @@ from app.routers.whatsapp.detectors import (
     _es_confirmacion_nuevo_movimiento,
     _es_descarte_duplicado,
     _es_intento_alta_suscripcion,
+    _bloquear_mezcla_en_handlers,
 )
 from app.routers.whatsapp.parsers import (
     _nombre_corto_categoria,
     _resolver_y_validar_fecha,
+    _resolver_fecha_transaccion,
     _extraer_frecuencia_mencionada,
     _extraer_monto_y_moneda_suscripcion,
     _extraer_nombre_servicio,
@@ -925,6 +927,9 @@ def manejar_transferencias(
     """
     from app.routers.whatsapp.transferencias import _interpretar_transferencia
 
+    if not estado_previo and _bloquear_mezcla_en_handlers(mensaje_texto, usuario, db, from_number, wamid):
+        return True
+
     es_tr, estado_tr, ents_tr, resp_tr = _interpretar_transferencia(
         mensaje_texto, usuario, db, estado_previo=estado_previo
     )
@@ -1242,7 +1247,15 @@ Si aplica y procesa la selección o error de rango/moneda, persiste y retorna Tr
             slot_estado_val = {**estado_previo_bill, 'tipo_flujo': 'verificacion_duplicado_suscripcion', 'suscripcion_id': str(sub_cobrada.id), 'servicio_nombre': sub_cobrada.nombre, 'billetera_resuelta_nombre': billetera_elegida.nombre, 'datos_faltantes': ['confirmar_gasto_aparte']}
         else:
             cat_id_chk, _ = _resolver_categoria_y_subcategoria(estado_previo_bill.get('categoria'), usuario.id, db, tipo=tipo_mov)
-            tx_dup = _buscar_transaccion_duplicada_reciente(usuario.id, Decimal(str(estado_previo_bill['monto'])), moneda_sel, cat_id_chk, db)
+            tx_dup = _buscar_transaccion_duplicada_reciente(
+                usuario.id,
+                Decimal(str(estado_previo_bill['monto'])),
+                moneda_sel,
+                cat_id_chk,
+                db,
+                fecha=_resolver_fecha_transaccion(estado_previo_bill.get('fecha')),
+                tipo=tipo_mov,
+            )
             if tx_dup:
                 hora_dup = tx_dup.fecha_creacion.astimezone(TZ_ARGENTINA).strftime('%H:%M')
                 cat_disp = _nombre_corto_categoria(estado_previo_bill.get('categoria'))

@@ -234,6 +234,105 @@ def _registrar_item_batch(
     return tx, None
 
 
+def _formatear_confirmacion_lote_unificada(
+    txs_todas: list[Transaccion],
+    usuario_id: UUID,
+    db: Session,
+    items_info: list[dict] | None = None,
+) -> str:
+    """
+    Decisión F: Formato unificado de confirmación de lote (igual al registro directo):
+    signo -/+, categoría o subcategoría y fecha natural.
+    """
+    total_registrados = len(txs_todas)
+    mov_palabra = "movimientos" if total_registrados != 1 else "movimiento"
+    reg_palabra = "Registrados." if total_registrados != 1 else "Registrado."
+
+    billeteras_todas = _obtener_billeteras_activas(usuario_id, db)
+    tarjetas_todas = _obtener_tarjetas_activas(usuario_id, db)
+    b_map = {b.id: b for b in billeteras_todas}
+    t_map = {t.id: t for t in tarjetas_todas}
+
+    b_ids = [t.billetera_id for t in txs_todas if t.metodo_pago != MetodoPago.CREDITO]
+    todas_misma_billetera = len(set(b_ids)) <= 1 and not any(t.metodo_pago == MetodoPago.CREDITO for t in txs_todas)
+    mismo_tipo = len(set(t.tipo for t in txs_todas)) == 1
+    tipos_mezclados = any(t.tipo == TipoTransaccion.INGRESO for t in txs_todas) and any(t.tipo == TipoTransaccion.EGRESO for t in txs_todas)
+
+    def _cat_disp_item(item_d: dict | None, tx_item: Transaccion) -> str:
+        if item_d and item_d.get("categoria"):
+            return _nombre_corto_categoria(item_d["categoria"])
+        if tx_item.subcategoria_id:
+            s_obj = db.get(Subcategoria, tx_item.subcategoria_id)
+            if s_obj:
+                return s_obj.nombre
+        if tx_item.categoria_id:
+            c_obj = db.get(Categoria, tx_item.categoria_id)
+            if c_obj:
+                return c_obj.nombre
+        return _nombre_corto_categoria(tx_item.descripcion) or "Otros"
+
+    items_dict = items_info if items_info and len(items_info) == len(txs_todas) else [None] * len(txs_todas)
+
+    if todas_misma_billetera and b_ids:
+        b_comun = b_map.get(b_ids[0])
+        nom_b = b_comun.nombre if b_comun else "tu billetera"
+        if mismo_tipo:
+            tipo_comun = txs_todas[0].tipo
+            origen_str = f" a {nom_b}" if tipo_comun == TipoTransaccion.INGRESO else f" desde {nom_b}"
+            items_str = []
+            for t, it_d in zip(txs_todas, items_dict):
+                m_fmt = formatear_monto(float(t.monto), t.moneda)
+                cat_d = _cat_disp_item(it_d, t)
+                f_nat = _formatear_fecha_natural(t.fecha)
+                f_disp = f" ({f_nat})" if f_nat else ""
+                items_str.append(f"{m_fmt} en {cat_d}{f_disp}")
+            encabezado = f"Listo, {total_registrados} {mov_palabra}{origen_str}:"
+            return _unir_items_multilinea(items_str, encabezado, reg_palabra)
+        else:
+            items_str = []
+            for t, it_d in zip(txs_todas, items_dict):
+                m_fmt = formatear_monto(float(t.monto), t.moneda)
+                cat_d = _cat_disp_item(it_d, t)
+                f_nat = _formatear_fecha_natural(t.fecha)
+                f_disp = f" ({f_nat})" if f_nat else ""
+                signo = "+" if t.tipo == TipoTransaccion.INGRESO else "-"
+                items_str.append(f"*{signo}{m_fmt}* en {cat_d}{f_disp}")
+            encabezado = f"Listo, {total_registrados} {mov_palabra} en *{nom_b}*:"
+            return _unir_items_multilinea(items_str, encabezado, reg_palabra)
+    else:
+        items_str = []
+        for t, it_d in zip(txs_todas, items_dict):
+            m_fmt = formatear_monto(float(t.monto), t.moneda)
+            cat_d = _cat_disp_item(it_d, t)
+            f_nat = _formatear_fecha_natural(t.fecha)
+            f_disp = f" ({f_nat})" if f_nat else ""
+
+            if t.metodo_pago == MetodoPago.CREDITO:
+                t_obj = t_map.get(t.tarjeta_id)
+                t_nom = t_obj.nombre if t_obj else "crédito"
+                items_str.append(f"1 cuota de {m_fmt} en {cat_d} con tarjeta {t_nom}{f_disp}")
+            elif tipos_mezclados:
+                b_obj = b_map.get(t.billetera_id)
+                b_nom = b_obj.nombre if b_obj else ""
+                if t.tipo == TipoTransaccion.INGRESO:
+                    dest_s = f" a {b_nom}" if b_nom else ""
+                    items_str.append(f"+{m_fmt} en {cat_d}{dest_s}{f_disp}")
+                else:
+                    orig_s = f" desde {b_nom}" if b_nom else ""
+                    items_str.append(f"-{m_fmt} en {cat_d}{orig_s}{f_disp}")
+            else:
+                b_obj = b_map.get(t.billetera_id)
+                b_nom = b_obj.nombre if b_obj else ""
+                if t.tipo == TipoTransaccion.INGRESO:
+                    dest_s = f" a {b_nom}" if b_nom else ""
+                    items_str.append(f"{m_fmt} en {cat_d}{dest_s}{f_disp}")
+                else:
+                    orig_s = f" desde {b_nom}" if b_nom else ""
+                    items_str.append(f"{m_fmt} en {cat_d}{orig_s}{f_disp}")
+        encabezado = f"Listo, {total_registrados} {mov_palabra}:"
+        return _unir_items_multilinea(items_str, encabezado, reg_palabra)
+
+
 def _confirmar_propuesta_transaccion(
     usuario: Usuario,
     db: Session,
@@ -433,93 +532,14 @@ def _confirmar_propuesta_transaccion(
         db.flush()
 
         total_registrados = len(txs_registradas)
-        mov_palabra = "movimientos" if total_registrados != 1 else "movimiento"
-        reg_palabra = "Registrados." if total_registrados != 1 else "Registrado."
-
-        b_map = {b.id: b for b in billeteras_todas}
-        t_map = {t.id: t for t in tarjetas_todas}
-
-        b_ids = [t.billetera_id for t in txs_registradas if t.metodo_pago != MetodoPago.CREDITO]
-        todas_misma_billetera = len(set(b_ids)) <= 1 and not any(t.metodo_pago == MetodoPago.CREDITO for t in txs_registradas)
-        mismo_tipo = len(set(t.tipo for t in txs_registradas)) == 1
-        tipos_mezclados = any(t.tipo == TipoTransaccion.INGRESO for t in txs_registradas) and any(t.tipo == TipoTransaccion.EGRESO for t in txs_registradas)
-
-        def _cat_disp_item(item_d: dict, tx_item: Transaccion) -> str:
-            cat_nom = item_d.get("categoria")
-            if cat_nom:
-                return _nombre_corto_categoria(cat_nom)
-            if tx_item.subcategoria_id:
-                s_obj = db.get(Subcategoria, tx_item.subcategoria_id)
-                if s_obj:
-                    return s_obj.nombre
-            if tx_item.categoria_id:
-                c_obj = db.get(Categoria, tx_item.categoria_id)
-                if c_obj:
-                    return c_obj.nombre
-            return _nombre_corto_categoria(tx_item.descripcion) or "Otros"
-
-        if todas_misma_billetera and b_ids:
-            b_comun = b_map.get(b_ids[0])
-            nom_b = b_comun.nombre if b_comun else "tu billetera"
-            if mismo_tipo:
-                tipo_comun = txs_registradas[0].tipo
-                origen_str = f" a {nom_b}" if tipo_comun == TipoTransaccion.INGRESO else f" desde {nom_b}"
-                items_str = []
-                for t, it_d in zip(txs_registradas, items_registrados):
-                    m_fmt = formatear_monto(float(t.monto), t.moneda)
-                    cat_d = _cat_disp_item(it_d, t)
-                    f_nat = _formatear_fecha_natural(t.fecha)
-                    f_disp = f" ({f_nat})" if f_nat else ""
-                    items_str.append(f"{m_fmt} en {cat_d}{f_disp}")
-                encabezado = f"Listo, {total_registrados} {mov_palabra}{origen_str}:"
-                msg_resp = _unir_items_multilinea(items_str, encabezado, reg_palabra)
-            else:
-                items_str = []
-                for t, it_d in zip(txs_registradas, items_registrados):
-                    m_fmt = formatear_monto(float(t.monto), t.moneda)
-                    cat_d = _cat_disp_item(it_d, t)
-                    f_nat = _formatear_fecha_natural(t.fecha)
-                    f_disp = f" ({f_nat})" if f_nat else ""
-                    signo = "+" if t.tipo == TipoTransaccion.INGRESO else "-"
-                    items_str.append(f"*{signo}{m_fmt}* en {cat_d}{f_disp}")
-                encabezado = f"Listo, {total_registrados} {mov_palabra} en *{nom_b}*:"
-                msg_resp = _unir_items_multilinea(items_str, encabezado, reg_palabra)
-        else:
-            items_str = []
-            for t, it_d in zip(txs_registradas, items_registrados):
-                m_fmt = formatear_monto(float(t.monto), t.moneda)
-                cat_d = _cat_disp_item(it_d, t)
-                f_nat = _formatear_fecha_natural(t.fecha)
-                f_disp = f" ({f_nat})" if f_nat else ""
-
-                if t.metodo_pago == MetodoPago.CREDITO:
-                    t_obj = t_map.get(t.tarjeta_id)
-                    t_nom = t_obj.nombre if t_obj else "crédito"
-                    items_str.append(f"1 cuota de {m_fmt} en {cat_d} con tarjeta {t_nom}{f_disp}")
-                elif tipos_mezclados:
-                    b_obj = b_map.get(t.billetera_id)
-                    b_nom = b_obj.nombre if b_obj else ""
-                    if t.tipo == TipoTransaccion.INGRESO:
-                        dest_s = f" a {b_nom}" if b_nom else ""
-                        items_str.append(f"+{m_fmt} en {cat_d}{dest_s}{f_disp}")
-                    else:
-                        orig_s = f" desde {b_nom}" if b_nom else ""
-                        items_str.append(f"-{m_fmt} en {cat_d}{orig_s}{f_disp}")
-                else:
-                    b_obj = b_map.get(t.billetera_id)
-                    b_nom = b_obj.nombre if b_obj else ""
-                    if t.tipo == TipoTransaccion.INGRESO:
-                        dest_s = f" a {b_nom}" if b_nom else ""
-                        items_str.append(f"{m_fmt} en {cat_d}{dest_s}{f_disp}")
-                    else:
-                        orig_s = f" desde {b_nom}" if b_nom else ""
-                        items_str.append(f"{m_fmt} en {cat_d}{orig_s}{f_disp}")
-            encabezado = f"Listo, {total_registrados} {mov_palabra}:"
-            msg_resp = _unir_items_multilinea(items_str, encabezado, reg_palabra)
+        msg_resp = _formatear_confirmacion_lote_unificada(
+            txs_registradas, usuario.id, db, items_registrados
+        )
 
         if descartadas:
             msg_resp += "\n" + "\n".join(descartadas)
 
+        b_map = {b.id: b for b in billeteras_todas}
         billeteras_tocadas = {t.billetera_id for t in txs_registradas if t.billetera_id and t.metodo_pago != MetodoPago.CREDITO}
         for bid in billeteras_tocadas:
             b_chk = b_map.get(bid)
@@ -701,22 +721,9 @@ def _confirmar_propuesta_transaccion(
     bill_nombre = billetera.nombre
 
     if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
-        total_registrados = 1 + len(adicionales_registradas)
-        cat_display = _nombre_corto_categoria(entidades.get("categoria"))
-        fecha_p_nat = _formatear_fecha_natural(transaccion.fecha)
-        fecha_p_disp = f" ({fecha_p_nat})" if fecha_p_nat else ""
-        items_str = [f"{monto_str} en {cat_display}{fecha_p_disp}"]
-        for tx_ad in adicionales_registradas:
-            fecha_ad_nat = _formatear_fecha_natural(tx_ad.fecha)
-            fecha_ad_disp = f" ({fecha_ad_nat})" if fecha_ad_nat else ""
-            items_str.append(
-                f"{formatear_monto(float(tx_ad.monto), tx_ad.moneda)} en {_nombre_corto_categoria(tx_ad.descripcion)}{fecha_ad_disp}"
-            )
-        origen_str = f" desde {bill_nombre}" if bill_nombre else (f" a {bill_nombre}" if transaccion.tipo == TipoTransaccion.INGRESO else "")
-        mov_palabra = "movimientos" if total_registrados != 1 else "movimiento"
-        reg_palabra = "Registrados." if total_registrados != 1 else "Registrado."
-        encabezado = f"Listo, {total_registrados} {mov_palabra}{origen_str}:"
-        msg_resp = _unir_items_multilinea(items_str, encabezado, reg_palabra)
+        txs_lote = [transaccion] + adicionales_registradas
+        items_lote = [entidades] + [a for a in adicionales if isinstance(a, dict)]
+        msg_resp = _formatear_confirmacion_lote_unificada(txs_lote, usuario.id, db, items_lote)
     else:
         cat_nombre = None
         if transaccion.categoria_id:
@@ -1097,22 +1104,9 @@ def _registrar_movimiento_directo(
     bill_nombre = billetera.nombre
 
     if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
-        total_registrados = 1 + len(adicionales_registradas)
-        cat_display = _nombre_corto_categoria(entidades.get("categoria"))
-        fecha_p_nat = _formatear_fecha_natural(tx.fecha)
-        fecha_p_disp = f" ({fecha_p_nat})" if fecha_p_nat else ""
-        items_str = [f"{monto_str} en {cat_display}{fecha_p_disp}"]
-        for tx_ad in adicionales_registradas:
-            fecha_ad_nat = _formatear_fecha_natural(tx_ad.fecha)
-            fecha_ad_disp = f" ({fecha_ad_nat})" if fecha_ad_nat else ""
-            items_str.append(
-                f"{formatear_monto(float(tx_ad.monto), tx_ad.moneda)} en {_nombre_corto_categoria(tx_ad.descripcion)}{fecha_ad_disp}"
-            )
-        origen_str = f" desde {bill_nombre}" if bill_nombre else (f" a {bill_nombre}" if tx.tipo == TipoTransaccion.INGRESO else "")
-        mov_palabra = "movimientos" if total_registrados != 1 else "movimiento"
-        reg_palabra = "Registrados." if total_registrados != 1 else "Registrado."
-        encabezado = f"Listo, {total_registrados} {mov_palabra}{origen_str}:"
-        msg_resp = _unir_items_multilinea(items_str, encabezado, reg_palabra)
+        txs_lote = [tx] + adicionales_registradas
+        items_lote = [entidades] + [a for a in adicionales if isinstance(a, dict)]
+        msg_resp = _formatear_confirmacion_lote_unificada(txs_lote, usuario.id, db, items_lote)
     else:
         cat_nombre = None
         if tx.categoria_id:

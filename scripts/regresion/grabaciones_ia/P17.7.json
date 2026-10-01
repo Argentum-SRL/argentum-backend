@@ -1,0 +1,40 @@
+{
+  "escenario_id": "P17.7",
+  "fecha_grabacion": "2026-09-30T22:34:14.452831+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "gasté 3.200 en Didi",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 3200,
+          "moneda": "ARS",
+          "tipo": "egreso",
+          "categoria": "Taxi / Apps",
+          "descripcion": "Didi",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": null,
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "meta": null,
+          "transacciones_adicionales": []
+        },
+        "confianza": 0.9,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Listo. $3.200 en Didi — registrado."
+      }
+    }
+  ]
+}

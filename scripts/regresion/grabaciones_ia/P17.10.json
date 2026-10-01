@@ -1,0 +1,61 @@
+{
+  "escenario_id": "P17.10",
+  "fecha_grabacion": "2026-09-30T22:40:20.116522+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "gasté 4131 en Uber, un amigo me pasó 9000 y una amiga me pasó 9000",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 4131,
+          "moneda": "ARS",
+          "tipo": "egreso",
+          "categoria": "Taxi / Apps",
+          "descripcion": "Uber",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": null,
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "meta": null,
+          "transacciones_adicionales": [
+            {
+              "monto": 9000,
+              "moneda": "ARS",
+              "tipo": "ingreso",
+              "categoria": "Otros",
+              "descripcion": "Ingreso de amigo",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            },
+            {
+              "monto": 9000,
+              "moneda": "ARS",
+              "tipo": "ingreso",
+              "categoria": "Otros",
+              "descripcion": "Ingreso de amiga",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
+            }
+          ]
+        },
+        "confianza": 0.85,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Listo. Registré el gasto de $4.131 en Uber y los ingresos de $9.000 de tu amigo y $9.000 de tu amiga."
+      }
+    }
+  ]
+}

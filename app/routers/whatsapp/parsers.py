@@ -128,7 +128,62 @@ def _interpretar_cuotas(
     return 1, None, None, False, None
 
 
-def _resolver_y_validar_fecha(fecha_val: str | None) -> tuple[date, str | None]:
+def _parsear_fecha_texto(texto: str | None) -> date | None:
+    """
+    Parsea determinísticamente fechas en formatos habituales argentinos:
+    - ISO: '2026-09-18'
+    - Numérico: '27/09', '18/09/2026', 'del 27/09'
+    - Textual: 'el 18 de septiembre', '23 de septiembre'
+    - Relativo: 'hoy', 'ayer', 'anteayer'
+    """
+    if not texto:
+        return None
+    hoy = hoy_argentina()
+    t = str(texto).strip().lower()
+
+    if t in ("hoy", "de hoy"):
+        return hoy
+    if t in ("ayer", "de ayer"):
+        return hoy - timedelta(days=1)
+    if t in ("anteayer", "antes de ayer"):
+        return hoy - timedelta(days=2)
+
+    # 1. ISO format
+    try:
+        return date.fromisoformat(t)
+    except Exception:
+        pass
+
+    # 2. Formato textual: 'el 18 de septiembre', 'del 27 de septiembre'
+    m_textual = re.search(r"(?:el\s+|del\s+)?\b(\d{1,2})\s+de\s+([a-záéíóú]+)(?:\s+de\s+(\d{4}))?\b", t)
+    if m_textual:
+        dia = int(m_textual.group(1))
+        mes_raw = normalizar_texto(m_textual.group(2))
+        anio = int(m_textual.group(3)) if m_textual.group(3) else hoy.year
+        if mes_raw in _MESES_RIOPLATENSE:
+            mes = _MESES_RIOPLATENSE.index(mes_raw) + 1
+            try:
+                return date(anio, mes, dia)
+            except ValueError:
+                pass
+
+    # 3. Formato numérico: 'del 27/09', '27/09', '27/09/2026'
+    m_num = re.search(r"(?:el\s+|del\s+)?\b(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{2,4}))?\b", t)
+    if m_num:
+        dia = int(m_num.group(1))
+        mes = int(m_num.group(2))
+        anio = int(m_num.group(3)) if m_num.group(3) else hoy.year
+        if anio < 100:
+            anio += 2000
+        try:
+            return date(anio, mes, dia)
+        except ValueError:
+            pass
+
+    return None
+
+
+def _resolver_y_validar_fecha(fecha_val: str | date | None) -> tuple[date, str | None]:
     """
     Resuelve la fecha de la transacción y valida reglas de negocio:
     - Fechas futuras: se avisa y se usa hoy.
@@ -141,10 +196,12 @@ def _resolver_y_validar_fecha(fecha_val: str | None) -> tuple[date, str | None]:
     if not fecha_val:
         return hoy, None
 
-    try:
-        fecha_candidata = date.fromisoformat(str(fecha_val))
-    except Exception:
-        return hoy, None
+    if isinstance(fecha_val, date):
+        fecha_candidata = fecha_val
+    else:
+        fecha_candidata = _parsear_fecha_texto(str(fecha_val))
+        if fecha_candidata is None:
+            return hoy, None
 
     limite_antiguedad = hoy - timedelta(days=60)
     if fecha_candidata > hoy:

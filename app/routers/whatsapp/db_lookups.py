@@ -4,7 +4,7 @@ Incluye verificaciones de rate limiting, resolución de usuarios, billeteras, ta
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
@@ -25,6 +25,7 @@ from app.models.tarjeta_credito import EstadoTarjeta, TarjetaCredito
 from app.models.transaccion import (
     EstadoVerificacionTransaccion,
     OrigenTransaccion,
+    TipoTransaccion,
     Transaccion,
 )
 from app.models.transferencia_interna import TransferenciaInterna
@@ -442,10 +443,12 @@ def _buscar_transaccion_duplicada_reciente(
     moneda: Moneda,
     categoria_id: UUID | None,
     db: Session,
+    fecha: date | None = None,
+    tipo: TipoTransaccion | str | None = None,
 ) -> Transaccion | None:
     """
-    Busca una transacción confirmada del mismo usuario con el mismo monto, moneda y categoría,
-    creada en la última hora (Tarea 3.1).
+    Busca una transacción confirmada del mismo usuario con el mismo monto, tipo, moneda,
+    categoría y fecha, creada en la última hora (Decisión E).
     Excluye movimientos generados de forma automática o diferida:
     - Cuotas hijas y padres de cuotas (planes de tarjeta de crédito)
     - Pagos automáticos de resúmenes de tarjeta
@@ -467,6 +470,14 @@ def _buscar_transaccion_duplicada_reciente(
             Transaccion.pago_resumen_vencimiento.is_(None),
         )
     )
+    if fecha is not None:
+        query = query.where(Transaccion.fecha == fecha)
+    if tipo is not None:
+        tipo_enum = tipo if isinstance(tipo, TipoTransaccion) else (
+            TipoTransaccion.INGRESO if str(tipo).lower() == "ingreso" else TipoTransaccion.EGRESO
+        )
+        query = query.where(Transaccion.tipo == tipo_enum)
+
     if categoria_id is not None:
         query = query.where(Transaccion.categoria_id == categoria_id)
     else:

@@ -230,16 +230,99 @@ def _parece_intento_correccion(mensaje: str) -> bool:
     norm = normalizar_texto(mensaje)
     if not norm:
         return False
+
+    # Regla A: Verbo de operación en CUALQUIER parte implica movimiento nuevo
+    verbos_op_nueva = (
+        r"\b(?:gaste|pague|compre|cargue|cobre|ingresaron|ingrese|me\s+paso|me\s+pasaron|"
+        r"me\s+transfirio|me\s+mando|le\s+pase|le\s+transferi|transferi|le\s+envie|le\s+pague|"
+        r"meti|puse|pase|saque|extraje|retire|vendi|dolarice|mande|movi)\b"
+    )
+    if re.search(verbos_op_nueva, norm):
+        return False
+
+    # Señales explícitas requeridas según Decisión A
     if re.search(r"(?:eran?|fue)?\s*\$?[\d\.,]+k?\s+no\s+\$?[\d\.,]+k?", norm):
         return True
     if re.search(r"^no,?\s+(?:eran?\s+)?\$?[\d\.,]+k?$", norm):
+        return True
+    if re.search(r"^no(?:\b|[,\s]|$)", norm):
+        return True
+    if re.search(r"\b(?:me\s+equivoque|corregi|corregilo|cambialo|cambia|en\s+realidad|eso\s+era)\b", norm):
         return True
     if re.search(r"^(?:eso\s+era|era|en\s+realidad\s+era)\s+", norm):
         return True
     if re.search(r"^(?:fue\s+con|era\s+con|fue\s+en|era\s+en)\s+", norm):
         return True
-    if re.search(r"^(?:fue\s+ayer|era\s+ayer|fue\s+anteayer|era\s+anteayer|fue\s+hoy)\b", norm):
+    if re.search(r"\b(?:fue|era)\s+(?:ayer|anteayer|hoy)\b", norm):
         return True
+    if re.search(r"\b(?:ese|el)\s+(?:gasto|ingreso|movimiento|ultimo|último)\s+(?:es|era|fue)\s+(?:de|del|el)\b", norm):
+        return True
+    if re.search(r"^(?:es|era|fue)\s+(?:de|del|el)\s+", norm):
+        return True
+
+    return False
+
+
+def _debe_bloquear_mezcla_lote(mensaje_texto: str, usuario_id, db) -> bool:
+    """
+    Decisión C: En un mensaje con varios movimientos, el bloqueo de mezcla queda solo para:
+    - extracción de cajero;
+    - compra o venta de dólares;
+    - una transferencia cuyo origen o destino nombra una billetera activa del usuario.
+    """
+    norm = normalizar_texto(mensaje_texto)
+    if not norm:
+        return False
+
+    # 1. Extracción de cajero
+    if re.search(r"\b(extraje|extraccion|extracción|cajero)\b", norm):
+        return True
+
+    # 2. Compra o venta de dólares
+    if re.search(r"\b(compre dolares|compré dólares|vendi dolares|vendí dólares|comprar dolares|comprar dólares|vender dolares|vender dólares)\b", norm):
+        return True
+
+    # 3. Pagos a terceros / ingresos de terceros no bloquean
+    if re.search(r"\b(?:le\s+(?:transferi|transferí|mande|mandé|pase|pasé|envie|envié|pague|pagué)|me\s+(?:transfirio|transfirió|mando|mandó|paso|pasó))\b", norm):
+        return False
+
+    # 4. Transferencia interna entre cuentas propias
+    m_tr = re.search(r"\b(?:transferi|transferir|transferencia|pase|pasé|mande|mandé|envie|envié)\b", norm)
+    if m_tr:
+        from app.routers.whatsapp.db_lookups import _obtener_billeteras_activas
+        from app.routers.whatsapp.resolvers_cascada import resolver_billetera_cascada
+
+        billeteras_activas = _obtener_billeteras_activas(usuario_id, db)
+        if not billeteras_activas:
+            return False
+
+        pos = m_tr.start()
+        frag = norm[pos:]
+
+        m_de_a = re.search(r"\bde\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+?)\s+a\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)", frag)
+        if m_de_a:
+            b_orig, _ = resolver_billetera_cascada(m_de_a.group(1).strip(), billeteras_activas)
+            b_dest, _ = resolver_billetera_cascada(m_de_a.group(2).strip(), billeteras_activas)
+            if b_orig or b_dest:
+                return True
+
+        m_a = re.search(r"\ba\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)", frag)
+        if m_a:
+            cands_dest = m_a.group(1).strip()
+            # Tomar las primeras palabras hasta algún conector
+            cand_nom = re.split(r"\b(?:y|con|desde|de|del|por)\b", cands_dest)[0].strip()
+            b_dest, _ = resolver_billetera_cascada(cand_nom, billeteras_activas)
+            if b_dest:
+                return True
+
+        m_de = re.search(r"\bde\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)", frag)
+        if m_de:
+            cands_orig = m_de.group(1).strip()
+            cand_nom = re.split(r"\b(?:y|con|hacia|a|al|por)\b", cands_orig)[0].strip()
+            b_orig, _ = resolver_billetera_cascada(cand_nom, billeteras_activas)
+            if b_orig:
+                return True
+
     return False
 
 def _es_senial_suscripcion(mensaje: str) -> bool:
@@ -350,7 +433,39 @@ def _es_intento_alta_suscripcion(mensaje: str) -> bool:
     frec = _extraer_frecuencia_mencionada(mensaje)
     if frec:
         srv = _extraer_nombre_servicio(mensaje)
-        if srv:
-            return True
+    return False
+
+
+def _bloquear_mezcla_en_handlers(mensaje_texto: str, usuario, db, from_number: str, wamid: str | None) -> bool:
+    """
+    Decisión C: Si el mensaje mezcla gastos con transferencia entre cuentas propias,
+    cajero o dólares, bloquea con MSG_NO_MEZCLAR_TRANSFERENCIAS antes de interpretar.
+    """
+    if not _debe_bloquear_mezcla_lote(mensaje_texto, usuario.id, db):
+        return False
+    m_chk = normalizar_texto(mensaje_texto)
+    if re.search(r"\b(?:gaste|gasté|pague|pagué|compre|compré)\b", m_chk) or len(re.findall(r"\$?\s*[0-9]+", m_chk)) >= 2:
+        from decimal import Decimal
+        from app.routers.whatsapp_ia import MSG_NO_MEZCLAR_TRANSFERENCIAS
+        from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
+        from app.services import whatsapp_service
+        nueva_conv = ConversacionWpp(
+            usuario_id=usuario.id,
+            wamid=wamid,
+            mensaje_usuario=mensaje_texto,
+            tipo_mensaje=TipoMensajeWpp.TEXTO,
+            transcripcion=None,
+            mensaje_bot=MSG_NO_MEZCLAR_TRANSFERENCIAS,
+            intent_detectado="no_mezclar_transferencias",
+            entidades={},
+            accion_ejecutada="bloqueado_mezcla",
+            confianza=Decimal("1.000"),
+            slot_filling_activo=False,
+            slot_filling_estado=None,
+        )
+        db.add(nueva_conv)
+        db.commit()
+        whatsapp_service.enviar_whatsapp(from_number, MSG_NO_MEZCLAR_TRANSFERENCIAS)
+        return True
     return False
 

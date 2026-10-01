@@ -1,0 +1,95 @@
+{
+  "escenario_id": "P17.2",
+  "fecha_grabacion": "2026-09-30T22:09:12.048827+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "gasté 1000 en el kiosco",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 1000.0,
+          "moneda": "ARS",
+          "tipo": "egreso",
+          "categoria": "Kiosco",
+          "descripcion": "Kiosco",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": "Galicia",
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "meta": null,
+          "transacciones_adicionales": []
+        },
+        "confianza": 0.9,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Listo. $1.000 en Kiosco desde Galicia — registrado.\nSi fue con otra, decime cuál.",
+        "_asumio_principal": true
+      }
+    },
+    {
+      "call_idx": 1,
+      "mensaje": "El 27 de septiembre gasté 2.900 pesos en Uber y gasté 16.900 pesos de los chinos. Después mi mamá me transfirió 300.000 pesos.",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 2900.0,
+          "moneda": "ARS",
+          "tipo": "egreso",
+          "categoria": "Taxi / Apps",
+          "descripcion": "Uber",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": "Galicia",
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": "2026-09-27",
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "meta": null,
+          "transacciones_adicionales": [
+            {
+              "monto": 16900.0,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Supermercado",
+              "descripcion": "Chinos",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": "2026-09-27"
+            },
+            {
+              "monto": 300000.0,
+              "moneda": "ARS",
+              "tipo": "ingreso",
+              "categoria": "Otros",
+              "descripcion": "Transferencia mamá",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": "2026-09-27"
+            }
+          ]
+        },
+        "confianza": 0.9,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Listo. 3 movimientos registrados."
+      }
+    }
+  ]
+}

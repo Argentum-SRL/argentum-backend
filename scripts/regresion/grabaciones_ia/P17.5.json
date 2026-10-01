@@ -1,0 +1,51 @@
+{
+  "escenario_id": "P17.5",
+  "fecha_grabacion": "2026-09-30T22:22:43.201578+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "Del 13 de septiembre gasté 2.200 pesos en Uber y le transferí a una amiga 14.400 pesos.",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 2200,
+          "moneda": "ARS",
+          "tipo": "egreso",
+          "categoria": "Taxi / Apps",
+          "descripcion": "Uber",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": "Santander",
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": "2026-09-13",
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "meta": null,
+          "transacciones_adicionales": [
+            {
+              "monto": 14400,
+              "moneda": "ARS",
+              "tipo": "egreso",
+              "categoria": "Otros",
+              "descripcion": "Transferencia a amiga",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": "2026-09-13"
+            }
+          ]
+        },
+        "confianza": 0.85,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Listo. $2.200 en Uber y $14.400 transferidos a tu amiga — registrados."
+      }
+    }
+  ]
+}

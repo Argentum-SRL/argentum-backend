@@ -344,6 +344,17 @@ def _confirmar_propuesta_corregir(
     return tx, "Listo, movimiento corregido.", False
 
 
+from app.routers.whatsapp.parsers import (
+    _extraer_frecuencia_mencionada,
+    _extraer_nombre_servicio,
+    _formatear_fecha_natural,
+    _nombre_corto_categoria,
+    _parsear_fecha_texto,
+    _parsear_monto_argentino,
+    _resolver_y_validar_fecha,
+)
+
+
 def _detectar_correccion_ultimo_movimiento(
     mensaje: str,
     usuario_id: UUID,
@@ -357,8 +368,58 @@ def _detectar_correccion_ultimo_movimiento(
     if _es_saludo(mensaje) or _es_confirmacion(mensaje) or _es_cancelacion(mensaje) or _es_pedido_deshacer(mensaje):
         return False, {}, None
 
-    verbos_op_nueva = r"^(?:gaste|pague|compre|cargue|cobre|ingrese|transferi|meti|puse|pase|saque|extraje|retire|vendi|dolarice|mande|movi)\b"
+    # Regla A: Verbo de operación en CUALQUIER parte del mensaje implica movimiento nuevo
+    verbos_op_nueva = (
+        r"\b(?:gaste|pague|compre|cargue|cobre|ingresaron|ingrese|me\s+paso|me\s+pasaron|"
+        r"me\s+transfirio|me\s+mando|le\s+pase|le\s+transferi|transferi|le\s+envie|le\s+pague|"
+        r"meti|puse|pase|saque|extraje|retire|vendi|dolarice|mande|movi)\b"
+    )
     if re.search(verbos_op_nueva, norm):
+        return False, {}, None
+
+    # Regla A: Señales explícitas de corrección requeridas
+    # 1. Empieza con "no" (seguido de coma, espacio o fin de mensaje)
+    # 2. Contiene "me equivoqué", "corregí", "corregilo", "cambialo", "cambiá", "en realidad" o "eso era"
+    # 3. "era/eran <monto o categoría>", "fue con/en <billetera>", "fue ayer/anteayer/hoy"
+    # 4. "(ese|el) (gasto|ingreso|movimiento|último) (es|era|fue) (de|del|el) <fecha>"
+    tiene_no_inicial = bool(re.search(r"^no(?:[,\s]|$)", norm))
+    tiene_frase_explicita = bool(
+        re.search(
+            r"\b(?:me\s+equivoque|corregi|corregilo|cambialo|cambia|en\s+realidad|eso\s+era)\b",
+            norm,
+        )
+    )
+    tiene_senial_era = bool(re.search(r"\b(?:eran?)\s+", norm))
+    tiene_senial_billetera = bool(re.search(r"\b(?:fue\s+con|era\s+con|fue\s+en|era\s+en)\s+", norm))
+    tiene_senial_fecha_rel = bool(re.search(r"\b(?:fue|era)\s+(?:ayer|anteayer|hoy)\b", norm))
+    tiene_senial_fecha_op = bool(
+        re.search(
+            r"\b(?:ese|el)\s+(?:gasto|ingreso|movimiento|ultimo|último)\s+(?:es|era|fue)\s+(?:de|del|el)\b",
+            norm,
+        )
+        or re.search(r"^(?:es|era|fue)\s+(?:de|del|el)\s+", norm)
+    )
+
+    es_senial_explicita = (
+        tiene_no_inicial
+        or tiene_frase_explicita
+        or tiene_senial_era
+        or tiene_senial_billetera
+        or tiene_senial_fecha_rel
+        or tiene_senial_fecha_op
+    )
+
+    if not es_senial_explicita:
+        # Una fecha sola o mensaje sin señal explícita nunca es corrección
+        return False, {}, None
+
+    # Descartar si tiene dos o más montos salvo que sea la estructura "X no Y"
+    es_correccion_dos_montos = bool(re.search(r"(?:eran?|fue)?\s*\$?[\d\.,]+k?\s+no\s+\$?[\d\.,]+k?", norm))
+    norm_sin_fechas = re.sub(r"\b\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?\b", "", norm)
+    montos_detectados = re.findall(r"\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?\b", norm_sin_fechas)
+    # Filtrar solo montos numéricos significativos
+    montos_reales = [m for m in montos_detectados if _parsear_monto_argentino(m) is not None]
+    if len(montos_reales) >= 2 and not es_correccion_dos_montos:
         return False, {}, None
 
     cambios: dict = {}
@@ -421,22 +482,29 @@ def _detectar_correccion_ultimo_movimiento(
             cambios["billetera_id"] = str(b_encontrada.id)
             cambios["billetera_nombre"] = b_encontrada.nombre
 
-    # 3. Detectar fecha: "fue ayer", "era ayer", "ayer", "fue anteayer", etc.
-    m_fecha = re.search(r"\b(ayer|anteayer|hoy|el\s+\d+\s+de\s+[a-z]+(?:\s+de\s+\d+)?)\b", norm)
-    if m_fecha:
-        f_str = m_fecha.group(1)
-        hoy = hoy_argentina()
-        if f_str == "ayer":
-            f_res = hoy - timedelta(days=1)
-        elif f_str == "anteayer":
-            f_res = hoy - timedelta(days=2)
-        elif f_str == "hoy":
-            f_res = hoy
-        else:
-            f_res, _ = _resolver_y_validar_fecha(f_str)
-        if f_res != tx_actual.fecha:
-            cambios["fecha"] = f_res.isoformat()
-            texto_restante = re.sub(r"\b(ayer|anteayer|hoy|el\s+\d+\s+de\s+[a-z]+(?:\s+de\s+\d+)?)\b", "", texto_restante, flags=re.IGNORECASE).strip()
+    # 3. Detectar fecha con resolvedor completo: "ese ingreso es del 27/09", "el 18 de septiembre", "fue ayer", etc.
+    candidato_fecha_str = None
+    m_op_fecha = re.search(
+        r"(?:(?:ese|el)\s+(?:gasto|ingreso|movimiento|ultimo|último)\s+)?(?:es|era|fue)\s+(?:de|del|el)\s+([^\.,;]+)",
+        norm,
+    )
+    if m_op_fecha:
+        candidato_fecha_str = m_op_fecha.group(1).strip()
+    elif tiene_senial_fecha_rel:
+        m_rel = re.search(r"\b(?:fue|era)\s+(ayer|anteayer|hoy)\b", norm)
+        if m_rel:
+            candidato_fecha_str = m_rel.group(1).strip()
+    else:
+        m_fecha_gen = re.search(r"\b(ayer|anteayer|hoy|(?:el\s+|del\s+)?\d+\s+de\s+[a-z]+(?:\s+de\s+\d+)?|(?:el\s+|del\s+)?\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?)\b", norm)
+        if m_fecha_gen and (tiene_no_inicial or tiene_frase_explicita):
+            candidato_fecha_str = m_fecha_gen.group(1).strip()
+
+    if candidato_fecha_str:
+        f_obj = _parsear_fecha_texto(candidato_fecha_str)
+        if f_obj:
+            f_val, _ = _resolver_y_validar_fecha(f_obj)
+            if f_val != tx_actual.fecha:
+                cambios["fecha"] = f_val.isoformat()
 
     # 4. Detectar categoría: "eso era supermercado", "era supermercado", "era en supermercado"
     m_cat = re.search(r"(?:eso\s+era|era|en\s+realidad\s+era)\s+(?:en\s+)?([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)", texto_restante, flags=re.IGNORECASE)
@@ -554,8 +622,12 @@ def _construir_propuesta_corregir(
         b_nueva_nom = b_vieja_nom
 
     if "fecha" in cambios and cambios["fecha"]:
-        f_nueva_nat = _formatear_fecha_natural(date.fromisoformat(str(cambios["fecha"])))
-        f_nueva_disp = f" ({f_nueva_nat})" if f_nueva_nat else ""
+        f_nueva_obj = date.fromisoformat(str(cambios["fecha"]))
+        if f_nueva_obj == hoy_argentina():
+            f_nueva_disp = " (hoy)"
+        else:
+            f_nueva_nat = _formatear_fecha_natural(f_nueva_obj)
+            f_nueva_disp = f" ({f_nueva_nat})" if f_nueva_nat else ""
     else:
         f_nueva_disp = f_vieja_disp
 

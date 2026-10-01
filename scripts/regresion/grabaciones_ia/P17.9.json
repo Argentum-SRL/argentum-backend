@@ -1,0 +1,74 @@
+{
+  "escenario_id": "P17.9",
+  "fecha_grabacion": "2026-09-30T22:39:19.932500+00:00",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "mi mamá me pasó 100000 el 22/09",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 100000.0,
+          "moneda": "ARS",
+          "tipo": "ingreso",
+          "categoria": "Otros",
+          "descripcion": "Ingreso de mamá",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_destino": "Galicia",
+          "cantidad_cuotas": null,
+          "fecha": "2026-09-22",
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "meta": null,
+          "transacciones_adicionales": []
+        },
+        "confianza": 0.9,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Listo. Ingreso de $100.000 en Otros a Galicia (el 22 de septiembre) — registrado.\nSi fue con otra, decime cuál.",
+        "_asumio_principal": true
+      }
+    },
+    {
+      "call_idx": 1,
+      "mensaje": "ayer mi mamá me pasó cien mil pesos",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 100000.0,
+          "moneda": "ARS",
+          "tipo": "ingreso",
+          "categoria": "Otros",
+          "descripcion": "Ingreso de mamá",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": null,
+          "billetera_origen": "Galicia",
+          "billetera_destino": "Galicia",
+          "cantidad_cuotas": null,
+          "fecha": "2026-09-29",
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "meta": null,
+          "transacciones_adicionales": []
+        },
+        "confianza": 0.9,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Listo. Ingreso de $100.000 en Otros a Galicia (ayer) — registrado."
+      }
+    }
+  ]
+}
