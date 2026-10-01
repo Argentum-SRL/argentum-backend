@@ -126,7 +126,7 @@ def test_reintento_exitoso_completa_todos_los_montos(db_session, mock_contexto_d
 
     mensajes_enviados = []
     with patch("app.services.ai_service.procesar_mensaje", side_effect=mock_procesar) as p_mock, \
-         patch("app.routers.whatsapp_ia.enviar_whatsapp", side_effect=lambda to, text: mensajes_enviados.append(text)):
+         patch("app.services.whatsapp_service.enviar_whatsapp", side_effect=lambda to, text: mensajes_enviados.append(text)):
 
         datos_msg = {
             "from_number": u.telefono_normalizado,
@@ -173,7 +173,7 @@ def test_reintento_falla_y_termina_en_aviso_faltantes(db_session, mock_contexto_
 
     mensajes_enviados = []
     with patch("app.services.ai_service.procesar_mensaje", side_effect=mock_procesar) as p_mock, \
-         patch("app.routers.whatsapp_ia.enviar_whatsapp", side_effect=lambda to, text: mensajes_enviados.append(text)):
+         patch("app.services.whatsapp_service.enviar_whatsapp", side_effect=lambda to, text: mensajes_enviados.append(text)):
 
         datos_msg = {
             "from_number": u.telefono_normalizado,

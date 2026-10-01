@@ -18,24 +18,32 @@ from app.routers.whatsapp.db_lookups import (
 from app.routers.whatsapp.deshacer_corregir import _evaluar_correccion_billetera
 from app.routers.whatsapp.detectors import _es_pregunta_billetera
 from app.routers.whatsapp.gastos import manejar_consulta_gastos
-from app.routers.whatsapp.handlers import (
+from app.routers.whatsapp.handlers_confirmaciones import (
+    manejar_cancelacion,
+    manejar_confirmacion,
+    manejar_saludo,
+)
+from app.routers.whatsapp.handlers_deshacer import (
+    manejar_corregir,
+    manejar_deshacer,
+)
+from app.routers.whatsapp.handlers_menus import (
     manejar_aclaracion_cuotas,
+    manejar_menu_billetera,
+    manejar_menu_tarjeta,
+    manejar_numero_aislado,
+    manejar_verificaciones_slot_filling,
+)
+from app.routers.whatsapp.handlers_suscripciones import (
     manejar_alta_suscripcion,
     manejar_ambiguedad_suscripcion,
     manejar_baja_suscripcion,
     manejar_cambio_precio_suscripcion,
-    manejar_cancelacion,
-    manejar_confirmacion,
     manejar_consulta_suscripciones,
-    manejar_corregir,
-    manejar_deshacer,
-    manejar_menu_billetera,
-    manejar_menu_tarjeta,
-    manejar_numero_aislado,
+)
+from app.routers.whatsapp.handlers_transferencias import (
     manejar_pago_resumen,
-    manejar_saludo,
     manejar_transferencias,
-    manejar_verificaciones_slot_filling,
 )
 from app.routers.whatsapp.metas import (
     manejar_aporte_meta,

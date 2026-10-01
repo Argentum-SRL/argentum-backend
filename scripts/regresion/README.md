@@ -24,6 +24,31 @@ La suite consolidada (`scripts/regresion/suite_regresion_whatsapp.py`) valida de
 
 ---
 
+## 1.1 Estructura Modular de la Suite (`scripts/regresion/suite/`)
+
+A partir de la Fase 3d-3, la suite se encuentra modularizada bajo el paquete `scripts/regresion/suite/`, manteniendo `scripts/regresion/suite_regresion_whatsapp.py` como CLI y orquestador principal:
+
+- **`suite_regresion_whatsapp.py`**: Punto de entrada CLI consolidado. Mantiene exactamente los mismos flags (`--forzar-grabadas`, `--volcar-salidas <ruta>`, `--escenario <id>`, `-v`), orden de ejecución y flujo de control.
+- **`suite/comun.py`**: Aislamiento transaccional con rollback automático (`run_isolated`), simulaciones seguras de usuario y mensajes, grabaciones determinísticas de IA (replay), guarda contra llamadas salientes a `graph.facebook.com` y colector de salidas para comparación fotográfica.
+- **`suite/controles.py`**: Verificaciones posteriores a la suite: conteos por tabla, validación de saldos de billeteras contra referencias históricas y chequeo de reconciliación contable.
+- **`suite/catalogo.py`**: Catálogo centralizado y ordenado de los 174 escenarios ejecutables, mapeando cada ID a su bloque y aserción esperada.
+- **Módulos de Escenarios Temáticos**:
+  - `escenarios_p03.py`: Resolución de billeteras (Punto 3).
+  - `escenarios_p04.py`: Intenciones, cancelaciones y expiración (Punto 4).
+  - `escenarios_p05.py`: Integridad transaccional y prevención de duplicados (Punto 5).
+  - `escenarios_p06_p07.py`: Manejo temporal, USD y jerga argentina (Puntos 6 y 7).
+  - `escenarios_p08.py`: Modificaciones y reversiones interactivas (Punto 8).
+  - `escenarios_p09.py`: Transferencias simples e internas (Punto 9A).
+  - `escenarios_p10.py`: Suscripciones y servicios periódicos (Punto 10).
+  - `escenarios_p11.py`: Multimoneda y conversiones (Punto 11).
+  - `escenarios_p12.py`: Consultas analíticas y proyecciones (Punto 12).
+  - `escenarios_p13.py`: Tarjetas de crédito y cuotas simples (Punto 13).
+  - `escenarios_p14.py`: Menús de tarjeta, aclaración de cuotas y desambiguación (Punto 14 y 15).
+  - `escenarios_p16.py`: Metas de ahorro y aportes interactivos (Punto 16).
+  - `escenarios_p17.py`: Lotes complejos, fechas previas y ajustes de marcas (Punto 17).
+
+---
+
 ## 2. Ejecución contra Base de Datos Local (Recomendado)
 
 El entorno local funciona sobre una instancia portable de **PostgreSQL 18** en el puerto `5433` con base de datos `argentum_local`, idéntica en estructura, datos, extensiones (`pgcrypto`, `plpgsql`, `uuid-ossp`) y ordenamiento (ICU `en-US` UTF8) a la base de producción.

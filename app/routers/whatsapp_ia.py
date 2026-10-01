@@ -123,24 +123,32 @@ from app.routers.whatsapp.detectors import (
 from app.routers.whatsapp.marcas import ajustar_categoria_marcas
 from app.routers.whatsapp.enriquecedores import enriquecer_respuesta_por_intent
 from app.routers.whatsapp.gastos import manejar_consulta_gastos
-from app.routers.whatsapp.handlers import (
+from app.routers.whatsapp.handlers_confirmaciones import (
+    manejar_cancelacion,
+    manejar_confirmacion,
+    manejar_saludo,
+)
+from app.routers.whatsapp.handlers_deshacer import (
+    manejar_corregir,
+    manejar_deshacer,
+)
+from app.routers.whatsapp.handlers_menus import (
     manejar_aclaracion_cuotas,
+    manejar_menu_billetera,
+    manejar_menu_tarjeta,
+    manejar_numero_aislado,
+    manejar_verificaciones_slot_filling,
+)
+from app.routers.whatsapp.handlers_suscripciones import (
     manejar_alta_suscripcion,
     manejar_ambiguedad_suscripcion,
     manejar_baja_suscripcion,
     manejar_cambio_precio_suscripcion,
-    manejar_cancelacion,
-    manejar_confirmacion,
     manejar_consulta_suscripciones,
-    manejar_corregir,
-    manejar_deshacer,
-    manejar_menu_billetera,
-    manejar_menu_tarjeta,
-    manejar_numero_aislado,
+)
+from app.routers.whatsapp.handlers_transferencias import (
     manejar_pago_resumen,
-    manejar_saludo,
     manejar_transferencias,
-    manejar_verificaciones_slot_filling,
 )
 from app.routers.whatsapp.media import (
     _descargar_medio_meta,
@@ -202,6 +210,7 @@ from app.services import (
     tarjeta_service,
     transaccion_service,
     transferencia_service,
+    whatsapp_service,
 )
 from app.services.evento_service import emitir_evento_actualizacion
 from app.services.openai_client import get_openai_client
@@ -215,7 +224,6 @@ from app.services.transaccion_service import (
 from app.services.whatsapp_service import (
     buscar_codigo_vinculacion,
     consumir_codigo_vinculacion,
-    enviar_whatsapp,
     get_meta_http_client,
     marcar_leido_y_escribiendo,
 )
@@ -441,7 +449,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                     telefono=from_number,
                     motivo=motivo_rate_limit,
                 )
-                enviar_whatsapp(
+                whatsapp_service.enviar_whatsapp(
                     from_number,
                     f"Enviaste muchos mensajes en poco tiempo. Esperá un minuto antes de mandar otro ({motivo_rate_limit}).",
                 )
@@ -480,7 +488,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
             # Envío saliente vía Meta Graph API
             if ctx.resultado_ia and "respuesta_usuario" in ctx.resultado_ia:
                 t_envio_start = time.perf_counter()
-                enviar_whatsapp(from_number, ctx.resultado_ia["respuesta_usuario"])
+                whatsapp_service.enviar_whatsapp(from_number, ctx.resultado_ia["respuesta_usuario"])
                 t_envio_end = time.perf_counter()
                 logger.info("[LATENCIA][ENVIO_META] Envío de mensaje: %.2fs", t_envio_end - t_envio_start)
 
@@ -497,7 +505,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
             logger.error("whatsapp_webhook_error", error=str(e), exc_info=True)
             try:
                 if from_number:
-                    enviar_whatsapp(
+                    whatsapp_service.enviar_whatsapp(
                         from_number, "Hubo un problema al procesar tu mensaje. Intentá de nuevo."
                     )
             except Exception:
