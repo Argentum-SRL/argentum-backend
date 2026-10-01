@@ -157,6 +157,8 @@ from app.routers.whatsapp.parsers import (
     _parsear_monto_texto_cuota,
     _resolver_fecha_transaccion,
     _resolver_y_validar_fecha,
+    montos_de_dinero_en_texto,
+    parsear_monto_marca,
 )
 from app.routers.whatsapp.propuestas import (
     _construir_propuesta_credito,
@@ -846,6 +848,59 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
             )
             t_ia_end = time.perf_counter()
             logger.info("[LATENCIA][IA] Procesamiento: %.2fs", t_ia_end - t_ia_start)
+
+            # Decision C: Verificación de montos perdidos en silencio
+            aviso_montos_faltantes = None
+            if resultado_ia.get("intent") == "registrar_transaccion":
+                entidades_ia = resultado_ia.get("entidades") or {}
+                adic_ia = entidades_ia.get("transacciones_adicionales") or []
+                cant_items = (1 if entidades_ia.get("monto") is not None else 0) + (len(adic_ia) if isinstance(adic_ia, list) else 0)
+                montos_detectados = montos_de_dinero_en_texto(mensaje_texto)
+                if len(montos_detectados) > cant_items:
+                    n_montos = len(montos_detectados)
+                    lista_str = ", ".join(montos_detectados)
+                    msg_reintento = f"{mensaje_texto} (Atención: el mensaje tiene {n_montos} montos: {lista_str}. Devolvé un ítem por cada monto.)"
+                    res_reintento = ai_service.procesar_mensaje(
+                        mensaje=msg_reintento,
+                        usuario=usuario,
+                        db=db,
+                        historial=_obtener_historial_reciente(usuario.id, db),
+                        estado_previo=estado_previo,
+                    )
+                    if res_reintento.get("intent") == "registrar_transaccion" and res_reintento.get("entidades"):
+                        resultado_ia = res_reintento
+                        entidades_ia = resultado_ia.get("entidades") or {}
+                        adic_ia = entidades_ia.get("transacciones_adicionales") or []
+                        cant_items = (1 if entidades_ia.get("monto") is not None else 0) + (len(adic_ia) if isinstance(adic_ia, list) else 0)
+
+                    if len(montos_detectados) > cant_items:
+                        montos_reg = []
+                        if entidades_ia.get("monto") is not None:
+                            montos_reg.append(Decimal(str(entidades_ia["monto"])))
+                        if isinstance(adic_ia, list):
+                            for ad in adic_ia:
+                                if isinstance(ad, dict) and ad.get("monto") is not None:
+                                    montos_reg.append(Decimal(str(ad["monto"])))
+                        faltantes = []
+                        reg_disp = list(montos_reg)
+                        for m_txt in montos_detectados:
+                            val_m = parsear_monto_marca(m_txt)
+                            match_idx = None
+                            if val_m is not None:
+                                for i, r in enumerate(reg_disp):
+                                    if abs(r - val_m) < Decimal("0.01"):
+                                        match_idx = i
+                                        break
+                            if match_idx is not None:
+                                reg_disp.pop(match_idx)
+                            else:
+                                faltantes.append(m_txt)
+                        if not faltantes:
+                            faltantes = montos_detectados[cant_items:]
+                        aviso_montos_faltantes = (
+                            f"Ojo: en tu mensaje también vi {', '.join(faltantes)} y no lo registré. "
+                            "Mandámelo en un mensaje aparte así lo cargo bien."
+                        )
 
             # Ajuste determinístico de categorías según marcas comerciales (Decisión D)
             if isinstance(resultado_ia.get("entidades"), dict):
@@ -1578,6 +1633,12 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
             if registrado_dir or nueva_conv.accion_ejecutada == "error":
                 resultado_ia["respuesta_usuario"] = msg_dir
             else:
+                db.commit()
+
+            if aviso_montos_faltantes and aviso_montos_faltantes not in resultado_ia["respuesta_usuario"]:
+                resultado_ia["respuesta_usuario"] = f"{resultado_ia['respuesta_usuario']}\n{aviso_montos_faltantes}"
+                nueva_conv.mensaje_bot = resultado_ia["respuesta_usuario"]
+                db.flush()
                 db.commit()
 
             # Envío saliente vía Meta Graph API

@@ -1,6 +1,6 @@
 {
   "escenario_id": "P17.2",
-  "fecha_grabacion": "2026-10-01T03:25:47.028216+00:00",
+  "fecha_grabacion": "2026-10-01T11:58:56.031660+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -29,7 +29,7 @@
           "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.95,
+        "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
         "respuesta_usuario": "Listo. $1.000 en Kiosco desde Galicia — registrado.\nSi fue con otra, decime cuál.",
@@ -72,13 +72,23 @@
               "billetera": null,
               "tarjeta": null,
               "fecha": "2026-09-27"
+            },
+            {
+              "monto": 300000.0,
+              "moneda": "ARS",
+              "tipo": "ingreso",
+              "categoria": "Otros",
+              "descripcion": "Transferencia de mamá",
+              "billetera": null,
+              "tarjeta": null,
+              "fecha": null
             }
           ]
         },
-        "confianza": 0.95,
+        "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. $2.900 en Uber y $16.900 en Supermercado desde Galicia — registrado."
+        "respuesta_usuario": "Listo. $2.900 en Uber y $16.900 en Chinos desde Galicia — registrados. También se registró la transferencia de $300.000 de tu mamá."
       }
     }
   ]

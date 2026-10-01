@@ -357,3 +357,54 @@ def _extraer_monto_y_moneda_suscripcion(mensaje: str) -> tuple[Decimal | None, s
 def _resolver_fecha_transaccion(fecha_val: str | None) -> date:
     fecha_obj, _ = _resolver_y_validar_fecha(fecha_val)
     return fecha_obj
+
+
+def montos_de_dinero_en_texto(texto: str) -> list[str]:
+    """
+    Devuelve los montos con marca de dinero presentes en el texto:
+    - '$' adelante, o seguidos de pesos, mil, lucas, luca, k, palos, dólares, dolares, usd o us$;
+    - excluye fechas (27/09, 27 de septiembre) y lo que sigue a 'cuotas de' o 'cuota de'.
+    """
+    if not texto:
+        return []
+
+    # 1. Enmascarar fechas
+    patron_fechas = [
+        r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b",
+        r"\b\d{1,2}\s+de\s+(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)(?:\s+de\s+\d{2,4})?\b",
+    ]
+    t_enmascarado = texto
+    for pf in patron_fechas:
+        t_enmascarado = re.sub(pf, lambda m: " " * len(m.group(0)), t_enmascarado, flags=re.IGNORECASE)
+
+    # 2. Enmascarar lo que sigue a 'cuotas de' o 'cuota de'
+    patron_cuotas_de = r"\bcuotas?\s+de\s+(?:cada\s+una\s+de\s+)?(?:[\$€£]|us\$|usd)?\s*[\d\.,]+(?:\s*(?:pesos|mil|lucas?|k|palos?|d[oó]lares|dolares|usd|us\$))?"
+    t_enmascarado = re.sub(patron_cuotas_de, lambda m: " " * len(m.group(0)), t_enmascarado, flags=re.IGNORECASE)
+
+    # 3. Buscar montos con marca de dinero
+    sufijos = r"(?:pesos|mil|lucas?|k|palos?|d[oó]lares|dolares|usd|us\$)"
+    patron_monto = re.compile(
+        rf"""
+        (?:
+            (?:(?:\$|us\$|u\$s)\s*\d+(?:[\.,]\d+)*(?:\s*{sufijos})?)
+            |
+            (?:\b\d+(?:[\.,]\d+)*\s*{sufijos}\b)
+        )
+        """,
+        re.IGNORECASE | re.VERBOSE,
+    )
+
+    encontrados = []
+    for match in patron_monto.finditer(t_enmascarado):
+        start, end = match.span()
+        trozo_orig = texto[start:end].strip()
+        if trozo_orig:
+            encontrados.append(trozo_orig)
+
+    return encontrados
+
+
+def parsear_monto_marca(m_txt: str) -> Decimal | None:
+    """Extrae el valor numérico Decimal de una expresión de monto con marca."""
+    t = re.sub(r"(?:[\$€£]|us\$|usd|u\$s|pesos|d[oó]lares|dolares)", "", m_txt, flags=re.IGNORECASE).strip()
+    return _parsear_monto_texto_cuota(t) or _parsear_monto_argentino(t)

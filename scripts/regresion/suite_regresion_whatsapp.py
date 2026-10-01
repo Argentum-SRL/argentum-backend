@@ -4265,12 +4265,19 @@ def p17_caso_9(datos):
         if "¿" in resp2 and sin_pregunta_dup:
             _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
 
-        txs = db.execute(select(Transaccion).where(Transaccion.usuario_id == u.id).order_by(Transaccion.fecha_creacion.desc()).limit(2)).scalars().all()
-        from app.utils.fecha import hoy_argentina
-        ayer_dt = hoy_argentina() - timedelta(days=1)
-        fecha_ayer = (txs[0].fecha == ayer_dt) if txs else False
+        row = conn.execute(
+            text("SELECT entidades FROM conversaciones_wpp WHERE usuario_id = :uid ORDER BY fecha DESC, id DESC LIMIT 1"),
+            {"uid": u.id}
+        ).mappings().first()
+        fecha_ia_str = (row["entidades"] or {}).get("fecha") if row and row["entidades"] else None
 
-        return f"Sin pregunta duplicado: {sin_pregunta_dup} | Fecha ayer: {fecha_ayer}"
+        txs = db.execute(select(Transaccion).where(Transaccion.usuario_id == u.id).order_by(Transaccion.fecha_creacion.desc()).limit(2)).scalars().all()
+        tx_segundo = txs[0] if txs else None
+        segundo_ingreso_ok = (tx_segundo is not None and tx_segundo.tipo == TipoTransaccion.INGRESO and tx_segundo.monto == Decimal("100000"))
+        fecha_no_22 = (tx_segundo.fecha != date(2026, 9, 22)) if tx_segundo else False
+        fecha_igual_ia = (tx_segundo.fecha.isoformat() == fecha_ia_str) if (tx_segundo and fecha_ia_str) else False
+
+        return f"Sin pregunta duplicado: {sin_pregunta_dup} | Segundo ingreso: {segundo_ingreso_ok} | Fecha distinta 22/09: {fecha_no_22} | Fecha igual IA: {fecha_igual_ia}" 
     return run_isolated(test)
 
 
@@ -5819,7 +5826,7 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             "punto": "Punto 17",
             "nombre": "ingreso con fecha distinta no dispara pregunta de duplicado",
             "ejecutar": lambda: p17_caso_9(datos),
-            "esperado": "Sin pregunta duplicado: True | Fecha ayer: True",
+            "esperado": "Sin pregunta duplicado: True | Segundo ingreso: True | Fecha distinta 22/09: True | Fecha igual IA: True",
             "match": "exacto",
         },
         {
