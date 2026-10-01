@@ -4369,6 +4369,30 @@ def p17_caso_13(datos):
     return run_isolated(test)
 
 
+def p17_caso_14(datos):
+    """P17.14 'le pasé 5000 a Juan y transferí 20000 de Galicia a Santander' -> bloqueado con MSG_NO_MEZCLAR_TRANSFERENCIAS"""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    def test(conn, Session, respuestas):
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+
+        tx_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(
+            make_payload(TELEFONO_TEST, "le pasé 5000 a Juan y transferí 20000 de Galicia a Santander"),
+            time.perf_counter()
+        )
+        resp = respuestas[-1][1] if respuestas else ""
+
+        tx_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        bloqueado = "mandalas por separado" in resp.lower() or "no puedo mezclar transferencias" in resp.lower()
+        creadas = tx_despues - tx_antes
+
+        return f"Bloqueo transferencias propias: {bloqueado} | Creadas: {creadas}"
+    return run_isolated(test)
+
+
 def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False, solo_escenario: str | None = None):
     global _gestor_actual
     _gestor_actual = GestorGrabacionesIA(
@@ -5828,6 +5852,14 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             "nombre": "persona me transfirió es ingreso",
             "ejecutar": lambda: p17_caso_13(datos),
             "esperado": "Tipo ingreso: True",
+            "match": "exacto",
+        },
+        {
+            "id": "P17.14",
+            "punto": "Punto 17",
+            "nombre": "pago a tercero y transferencia entre cuentas propias se bloquea",
+            "ejecutar": lambda: p17_caso_14(datos),
+            "esperado": "Bloqueo transferencias propias: True | Creadas: 0",
             "match": "exacto",
         },
     ]

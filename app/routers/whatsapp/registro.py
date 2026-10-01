@@ -1104,9 +1104,22 @@ def _registrar_movimiento_directo(
     bill_nombre = billetera.nombre
 
     if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
-        txs_lote = [tx] + adicionales_registradas
-        items_lote = [entidades] + [a for a in adicionales if isinstance(a, dict)]
-        msg_resp = _formatear_confirmacion_lote_unificada(txs_lote, usuario.id, db, items_lote)
+        total_registrados = 1 + len(adicionales_registradas)
+        cat_display = _nombre_corto_categoria(entidades.get("categoria"))
+        fecha_p_nat = _formatear_fecha_natural(tx.fecha)
+        fecha_p_disp = f" ({fecha_p_nat})" if fecha_p_nat else ""
+        items_str = [f"{monto_str} en {cat_display}{fecha_p_disp}"]
+        for tx_ad in adicionales_registradas:
+            fecha_ad_nat = _formatear_fecha_natural(tx_ad.fecha)
+            fecha_ad_disp = f" ({fecha_ad_nat})" if fecha_ad_nat else ""
+            items_str.append(
+                f"{formatear_monto(float(tx_ad.monto), tx_ad.moneda)} en {_nombre_corto_categoria(tx_ad.descripcion)}{fecha_ad_disp}"
+            )
+        origen_str = f" desde {bill_nombre}" if bill_nombre else (f" a {bill_nombre}" if tx.tipo == TipoTransaccion.INGRESO else "")
+        mov_palabra = "movimientos" if total_registrados != 1 else "movimiento"
+        reg_palabra = "Registrados." if total_registrados != 1 else "Registrado."
+        encabezado = f"Listo, {total_registrados} {mov_palabra}{origen_str}:"
+        msg_resp = _unir_items_multilinea(items_str, encabezado, reg_palabra)
     else:
         cat_nombre = None
         if tx.categoria_id:

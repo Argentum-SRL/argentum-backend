@@ -33,7 +33,11 @@ from app.routers.whatsapp.detectors import (
     _es_saludo,
 )
 from app.routers.whatsapp.parsers import (
+    _extraer_frecuencia_mencionada,
+    _extraer_nombre_servicio,
     _formatear_fecha_natural,
+    _nombre_corto_categoria,
+    _parsear_fecha_texto,
     _parsear_monto_argentino,
     _resolver_y_validar_fecha,
 )
@@ -343,16 +347,6 @@ def _confirmar_propuesta_corregir(
 
     return tx, "Listo, movimiento corregido.", False
 
-
-from app.routers.whatsapp.parsers import (
-    _extraer_frecuencia_mencionada,
-    _extraer_nombre_servicio,
-    _formatear_fecha_natural,
-    _nombre_corto_categoria,
-    _parsear_fecha_texto,
-    _parsear_monto_argentino,
-    _resolver_y_validar_fecha,
-)
 
 
 def _detectar_correccion_ultimo_movimiento(

@@ -269,6 +269,7 @@ def _debe_bloquear_mezcla_lote(mensaje_texto: str, usuario_id, db) -> bool:
     - extracción de cajero;
     - compra o venta de dólares;
     - una transferencia cuyo origen o destino nombra una billetera activa del usuario.
+    Un pago o cobro a terceros en el mensaje no impide bloquear si además hay transferencia propia.
     """
     norm = normalizar_texto(mensaje_texto)
     if not norm:
@@ -282,46 +283,38 @@ def _debe_bloquear_mezcla_lote(mensaje_texto: str, usuario_id, db) -> bool:
     if re.search(r"\b(compre dolares|compré dólares|vendi dolares|vendí dólares|comprar dolares|comprar dólares|vender dolares|vender dólares)\b", norm):
         return True
 
-    # 3. Pagos a terceros / ingresos de terceros no bloquean
-    if re.search(r"\b(?:le\s+(?:transferi|transferí|mande|mandé|pase|pasé|envie|envié|pague|pagué)|me\s+(?:transfirio|transfirió|mando|mandó|paso|pasó))\b", norm):
-        return False
+    # 3. Transferencia cuyo origen o destino nombra una billetera activa propia
+    from app.routers.whatsapp.db_lookups import _obtener_billeteras_activas
+    from app.routers.whatsapp.resolvers_cascada import resolver_billetera_cascada
 
-    # 4. Transferencia interna entre cuentas propias
-    m_tr = re.search(r"\b(?:transferi|transferir|transferencia|pase|pasé|mande|mandé|envie|envié)\b", norm)
-    if m_tr:
-        from app.routers.whatsapp.db_lookups import _obtener_billeteras_activas
-        from app.routers.whatsapp.resolvers_cascada import resolver_billetera_cascada
+    billeteras_activas = _obtener_billeteras_activas(usuario_id, db)
+    if billeteras_activas:
+        for m_tr in re.finditer(r"\b(?:transferi|transferí|transferir|transferencia|pase|pasé|mande|mandé|envie|envié)\b", norm):
+            pos = m_tr.start()
+            frag = norm[pos:]
 
-        billeteras_activas = _obtener_billeteras_activas(usuario_id, db)
-        if not billeteras_activas:
-            return False
+            m_de_a = re.search(r"\bde\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+?)\s+a\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)", frag)
+            if m_de_a:
+                b_orig, _ = resolver_billetera_cascada(m_de_a.group(1).strip(), billeteras_activas)
+                b_dest, _ = resolver_billetera_cascada(m_de_a.group(2).strip(), billeteras_activas)
+                if b_orig or b_dest:
+                    return True
 
-        pos = m_tr.start()
-        frag = norm[pos:]
+            m_a = re.search(r"\ba\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)", frag)
+            if m_a:
+                cands_dest = m_a.group(1).strip()
+                cand_nom = re.split(r"\b(?:y|con|desde|de|del|por|,|\.)\b", cands_dest)[0].strip()
+                b_dest, _ = resolver_billetera_cascada(cand_nom, billeteras_activas)
+                if b_dest:
+                    return True
 
-        m_de_a = re.search(r"\bde\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+?)\s+a\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)", frag)
-        if m_de_a:
-            b_orig, _ = resolver_billetera_cascada(m_de_a.group(1).strip(), billeteras_activas)
-            b_dest, _ = resolver_billetera_cascada(m_de_a.group(2).strip(), billeteras_activas)
-            if b_orig or b_dest:
-                return True
-
-        m_a = re.search(r"\ba\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)", frag)
-        if m_a:
-            cands_dest = m_a.group(1).strip()
-            # Tomar las primeras palabras hasta algún conector
-            cand_nom = re.split(r"\b(?:y|con|desde|de|del|por)\b", cands_dest)[0].strip()
-            b_dest, _ = resolver_billetera_cascada(cand_nom, billeteras_activas)
-            if b_dest:
-                return True
-
-        m_de = re.search(r"\bde\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)", frag)
-        if m_de:
-            cands_orig = m_de.group(1).strip()
-            cand_nom = re.split(r"\b(?:y|con|hacia|a|al|por)\b", cands_orig)[0].strip()
-            b_orig, _ = resolver_billetera_cascada(cand_nom, billeteras_activas)
-            if b_orig:
-                return True
+            m_de = re.search(r"\bde\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)", frag)
+            if m_de:
+                cands_orig = m_de.group(1).strip()
+                cand_nom = re.split(r"\b(?:y|con|hacia|a|al|por|,|\.)\b", cands_orig)[0].strip()
+                b_orig, _ = resolver_billetera_cascada(cand_nom, billeteras_activas)
+                if b_orig:
+                    return True
 
     return False
 
@@ -433,6 +426,8 @@ def _es_intento_alta_suscripcion(mensaje: str) -> bool:
     frec = _extraer_frecuencia_mencionada(mensaje)
     if frec:
         srv = _extraer_nombre_servicio(mensaje)
+        if srv:
+            return True
     return False
 
 
