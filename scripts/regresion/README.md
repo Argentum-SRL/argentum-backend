@@ -8,17 +8,19 @@ Esta carpeta y el submódulo `scripts/local/` contienen el entorno automatizado 
 
 La suite consolidada (`scripts/regresion/suite_regresion_whatsapp.py`) valida de forma exhaustiva el comportamiento del asistente ante todos los casos de uso documentados:
 
-- **Punto 3: Resolución determinística de billeteras** (16 escenarios). Billetera principal implícita, menús numéricos y por nombre, opciones fuera de rango, respuestas a números aislados, menús expirados, corrección de billetera en propuesta interactiva y usuarios con billetera única.
-- **Punto 4: Detección de intenciones y gestión de contexto** (15 escenarios). Cancelaciones explícitas, reseteo de slots ante saludos o cambios de tema, reanudación de operaciones a medias, preguntas fuera de alcance, 6 variantes idiomáticas de negación ("no", "nada", "de ninguna manera", etc.) y expiración de propuestas por inactividad.
-- **Punto 5: Integridad transaccional y prevención de duplicados** (14 escenarios). Prevención de duplicados idénticos en ventana corta, idempotencia ante reenvíos de webhook, concurrencia en confirmación rápida y exclusión estricta de cuotas hijas o planes de tarjeta en cálculos directos.
-- **Punto 6: Manejo temporal y parámetros cuantitativos** (15 escenarios). Fechas relativas ("ayer", "el viernes pasado") y absolutas, rechazo de fechas >60 días en el pasado o futuras, transacciones en dólares estadounidenses (USD) con tasa implícita, límites cuantitativos, descarte anticipado de transacciones inválidas en lotes y estricta privacidad de saldos.
+- **Punto 3: Resolución determinística de billeteras** (10 escenarios). Billetera principal implícita, menús numéricos y por nombre, opciones fuera de rango, respuestas a números aislados, menús expirados, corrección de billetera en propuesta interactiva y usuarios con billetera única.
+- **Punto 4: Detección de intenciones y gestión de contexto** (14 escenarios). Cancelaciones explícitas, reseteo de slots ante saludos o cambios de tema, reanudación de operaciones a medias, preguntas fuera de alcance, 6 variantes idiomáticas de negación ("no", "nada", "de ninguna manera", etc.) y expiración de propuestas por inactividad.
+- **Punto 5: Integridad transaccional y prevención de duplicados** (8 escenarios). Prevención de duplicados idénticos en ventana corta, idempotencia ante reenvíos de webhook, concurrencia en confirmación rápida y exclusión estricta de cuotas hijas o planes de tarjeta en cálculos directos.
+- **Punto 6: Manejo temporal y parámetros cuantitativos** (10 escenarios). Fechas relativas ("ayer", "el viernes pasado") y absolutas, rechazo de fechas >60 días en el pasado o futuras, transacciones en dólares estadounidenses (USD) con tasa implícita, límites cuantitativos, descarte anticipado de transacciones inválidas en lotes y estricta privacidad de saldos.
 - **Punto 7: Jerga argentina, modismos y categorización por IA** (7 escenarios con validación de LLM real). Modismos cotidianos ("golosinas" -> Kiosco, "bondi" -> Transporte público, "nafta" -> Combustible, "prepaga" -> Obra social / Prepaga, "corte de pelo" -> Cuidado personal, etc.), prohibición de inventar categorías y preservación de descripciones originales.
-- **Punto 8: Modificaciones y reversiones interactivas** (8 escenarios). Registro y posterior anulación inmediata ("borrá eso"), confirmación de cancelación, eliminación de transacciones y reversión exacta de saldos.
-- **Punto 9 y 9B: Transferencias entre billeteras y medios de pago combinados** (18 escenarios). Transferencias origen-destino con o sin comisión, validación de saldos en ambas cuentas y consistencia contable.
-- **Punto 10: Suscripciones y servicios periódicos** (12 escenarios). Detección de servicios recurrentes (Netflix, Spotify, gimnasio), solicitud de frecuencia de facturación, alta de la suscripción sin impacto prematuro en saldos de transacciones.
-- **Punto 11: Multimoneda y conversiones** (15 escenarios). Billeteras en ARS y USD, registro de compras en moneda extranjera y cálculo consistente de tenencias.
-- **Punto 12: Consultas analíticas y proyecciones financieras** (14 escenarios). Detección de intención analítica, resumen de presupuestos mensuales y proyecciones de flujo de fondos (`consultar_proyeccion`).
-- **Puntos 16 y 17: Metas de ahorro y procesamiento por lotes** (40 escenarios). Aportes a metas, metas completadas con felicitación, reversión de aportes deshechos, y procesamiento de lotes con frases introductorias compuestas y fechas previas.
+- **Punto 8: Modificaciones y reversiones interactivas** (11 escenarios). Registro y posterior anulación inmediata ("borrá eso"), confirmación de cancelación, eliminación de transacciones y reversión exacta de saldos.
+- **Puntos 9A y 9B: Transferencias y cajero/dólares** (32 escenarios: 12 en 9A y 20 en 9B). Transferencias origen-destino con o sin comisión, validación de saldos en ambas cuentas y consistencia contable.
+- **Punto 10: Suscripciones y servicios periódicos** (13 escenarios). Detección de servicios recurrentes (Netflix, Spotify, gimnasio), solicitud de frecuencia de facturación, alta de la suscripción sin impacto prematuro en saldos de transacciones.
+- **Punto 11: Multimoneda y conversiones** (13 escenarios). Billeteras en ARS y USD, registro de compras en moneda extranjera y cálculo consistente de tenencias.
+- **Punto 12: Consultas analíticas y proyecciones financieras** (13 escenarios). Detección de intención analítica, resumen de presupuestos mensuales y proyecciones de flujo de fondos (`consultar_proyeccion`).
+- **Punto 13: Tarjetas de crédito** (5 escenarios). Selección de tarjeta, cuotas, cálculo de primer vencimiento y validaciones.
+- **Punto 14: Cuotas y pagos en tarjeta** (17 escenarios). Manejo de cuotas fijas, aclaraciones de cuotas ambiguas, opciones y menús de tarjeta.
+- **Puntos 16 y 17: Metas de ahorro y procesamiento por lotes** (21 escenarios: 6 en Punto 16 y 15 en Punto 17). Aportes a metas, metas completadas con felicitación, reversión de aportes deshechos, y procesamiento de lotes con frases introductorias compuestas y fechas previas.
 
 ---
 
@@ -33,7 +35,7 @@ Para ejecutar cualquier script o herramienta apuntando a la base local de forma 
 python scripts/local/con_base_local.py python scripts/regresion/suite_regresion_whatsapp.py -v
 
 # Ejecutar la foto del motor contra la base local
-python scripts/local/con_base_local.py python scripts/regresion/foto_motor.py --etiqueta mi_foto_local
+python scripts/local/con_base_local.py python scripts/motor/foto_motor.py --etiqueta mi_foto_local
 
 # Ejecutar el verificador de testingadmin contra la base local
 python scripts/local/con_base_local.py python scripts/testingadmin/verificar_testingadmin.py

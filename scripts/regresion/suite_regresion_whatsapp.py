@@ -21,6 +21,7 @@ import argparse
 import threading
 from decimal import Decimal
 from datetime import datetime, date, timezone, timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 # Asegurar path al backend
@@ -261,6 +262,97 @@ def _hook_procesar_mensaje(mensaje, usuario, db, historial=None, estado_previo=N
 # Instalar hook para interceptar llamadas en whatsapp_ia y en cualquier servicio
 ai_service.procesar_mensaje = _hook_procesar_mensaje
 
+# ==============================================================================
+# GUARDA DE SEGURIDAD (DECISIÓN B) Y COLECTOR DE SALIDAS (DECISIÓN A)
+# ==============================================================================
+_disparos_guarda: int = 0
+
+def _instalar_guarda_seguridad():
+    global _disparos_guarda
+    _disparos_guarda = 0
+
+    try:
+        import httpx
+        _orig_client_send = httpx.Client.send
+        def _guarda_client_send(self, request, *args, **kwargs):
+            global _disparos_guarda
+            url_str = str(getattr(request, "url", ""))
+            if "graph.facebook.com" in url_str:
+                _disparos_guarda += 1
+                raise RuntimeError(f"GUARDA DE SEGURIDAD DISPARADA: Pedido HTTP a {url_str} interceptado en la suite")
+            return _orig_client_send(self, request, *args, **kwargs)
+        httpx.Client.send = _guarda_client_send
+    except Exception:
+        pass
+
+    try:
+        import requests
+        _orig_session_send = requests.Session.send
+        def _guarda_session_send(self, request, *args, **kwargs):
+            global _disparos_guarda
+            url_str = str(getattr(request, "url", ""))
+            if "graph.facebook.com" in url_str:
+                _disparos_guarda += 1
+                raise RuntimeError(f"GUARDA DE SEGURIDAD DISPARADA: Pedido HTTP a {url_str} interceptado en la suite")
+            return _orig_session_send(self, request, *args, **kwargs)
+        requests.Session.send = _guarda_session_send
+    except Exception:
+        pass
+
+_instalar_guarda_seguridad()
+
+
+class ColectorSalidas:
+    """
+    Colector de fotos de salida por escenario:
+    - mensajes enviados por el bot (orden y textual)
+    - movimientos creados antes del rollback
+    - conversaciones_wpp creadas (intent y accion_ejecutada)
+    Sin IDs ni horas de creación.
+    """
+    def __init__(self, ruta_json: str):
+        self.ruta_json = ruta_json
+        self.salidas: dict[str, dict] = {}
+        self.escenario_actual: str | None = None
+        self._mensajes_escenario: list[str] = []
+        self._lock = threading.Lock()
+
+    def iniciar_escenario(self, escenario_id: str):
+        with self._lock:
+            self.escenario_actual = escenario_id
+            self._mensajes_escenario = []
+
+    def registrar_mensaje(self, mensaje: str):
+        with self._lock:
+            if self.escenario_actual:
+                self._mensajes_escenario.append(mensaje)
+
+    def registrar_salida_escenario(self, escenario_id: str, movimientos: list[dict], conversaciones: list[dict]):
+        with self._lock:
+            mensajes = list(self._mensajes_escenario)
+            if escenario_id == "P5.6":
+                mensajes = sorted(mensajes)
+            self.salidas[escenario_id] = {
+                "mensajes": mensajes,
+                "movimientos": movimientos,
+                "conversaciones": conversaciones,
+            }
+
+    def guardar(self):
+        if not self.ruta_json:
+            return
+        p = Path(self.ruta_json)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(self.salidas, f, ensure_ascii=False, indent=2)
+
+_colector_salidas: ColectorSalidas | None = None
+
+def _normalizar_accion_ejecutada(accion: str | None) -> str | None:
+    if accion is None:
+        return None
+    return re.sub(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', '<ID>', str(accion))
+
 
 USUARIO_PRUEBAS_EMAIL = "testingadmin@argentum.com"
 TELEFONO_TEST = "+5491100000000"
@@ -309,15 +401,72 @@ def run_isolated(fn):
     trans = conn.begin()
     respuestas = []
     BoundSession = sessionmaker(bind=conn, join_transaction_mode="create_savepoint")
+
+    tx_ids_antes = set(conn.execute(select(Transaccion.id)).scalars().all())
+    conv_ids_antes = set(conn.execute(select(ConversacionWpp.id)).scalars().all())
+
+    def _mock_envio(t, m):
+        respuestas.append((t, m))
+        if _colector_salidas is not None:
+            _colector_salidas.registrar_mensaje(m)
+
     try:
         # Modularización WhatsApp: Se patchea en whatsapp_ia (para imports sueltos legacy)
         # y en whatsapp_service (para módulos de handlers nuevos que usan acceso calificado).
         with patch("app.routers.whatsapp_ia.SessionLocal", BoundSession), \
              patch("app.routers.whatsapp_ia._buscar_usuario_por_telefono", side_effect=_mock_buscar_usuario_testingadmin), \
-             patch("app.routers.whatsapp_ia.enviar_whatsapp", side_effect=lambda t, m: respuestas.append((t, m))), \
-             patch("app.services.whatsapp_service.enviar_whatsapp", side_effect=lambda t, m: respuestas.append((t, m))), \
+             patch("app.routers.whatsapp_ia.enviar_whatsapp", side_effect=_mock_envio), \
+             patch("app.services.whatsapp_service.enviar_whatsapp", side_effect=_mock_envio), \
              patch("app.routers.whatsapp_ia._verificar_rate_limit_registrado", return_value=(True, None)):
             res = fn(conn, BoundSession, respuestas)
+
+            if _colector_salidas is not None and _colector_salidas.escenario_actual:
+                sess_col = BoundSession()
+                try:
+                    if tx_ids_antes:
+                        tx_nuevas = sess_col.execute(
+                            select(Transaccion).where(Transaccion.id.not_in(tx_ids_antes))
+                        ).scalars().all()
+                    else:
+                        tx_nuevas = sess_col.execute(select(Transaccion)).scalars().all()
+
+                    cat_map = dict(sess_col.execute(select(Categoria.id, Categoria.nombre)).all())
+                    subcat_map = dict(sess_col.execute(select(Subcategoria.id, Subcategoria.nombre)).all())
+                    bill_map = dict(sess_col.execute(select(Billetera.id, Billetera.nombre)).all())
+
+                    movs = []
+                    for tx in tx_nuevas:
+                        movs.append({
+                            "tipo": tx.tipo.value if hasattr(tx.tipo, "value") else str(tx.tipo),
+                            "monto": float(tx.monto),
+                            "moneda": tx.moneda.value if hasattr(tx.moneda, "value") else str(tx.moneda),
+                            "fecha": tx.fecha.isoformat() if hasattr(tx.fecha, "isoformat") else str(tx.fecha),
+                            "categoria": cat_map.get(tx.categoria_id),
+                            "subcategoria": subcat_map.get(tx.subcategoria_id),
+                            "billetera": bill_map.get(tx.billetera_id),
+                            "descripcion": tx.descripcion,
+                        })
+                    movs.sort(key=lambda m: (m["fecha"], m["tipo"], m["monto"], m["descripcion"], m["billetera"] or "", m["categoria"] or "", m["subcategoria"] or ""))
+
+                    if conv_ids_antes:
+                        conv_nuevas = sess_col.execute(
+                            select(ConversacionWpp).where(ConversacionWpp.id.not_in(conv_ids_antes))
+                        ).scalars().all()
+                    else:
+                        conv_nuevas = sess_col.execute(select(ConversacionWpp)).scalars().all()
+
+                    convs = []
+                    for c in conv_nuevas:
+                        convs.append({
+                            "intent": c.intent_detectado,
+                            "accion_ejecutada": _normalizar_accion_ejecutada(c.accion_ejecutada),
+                        })
+                    convs.sort(key=lambda c: (c["intent"] or "", c["accion_ejecutada"] or ""))
+
+                    _colector_salidas.registrar_salida_escenario(_colector_salidas.escenario_actual, movs, convs)
+                finally:
+                    sess_col.close()
+
             return res
     finally:
         trans.rollback()
@@ -915,6 +1064,8 @@ def p5_caso_6_concurrente(datos):
     def mock_envio(to, msg):
         with lock:
             resp_c6.append(msg)
+            if _colector_salidas is not None:
+                _colector_salidas.registrar_mensaje(msg)
 
     def _mock_buscar_concurrente(tel, db_sess):
         usr = db_sess.query(Usuario).filter(Usuario.email == USUARIO_PRUEBAS_EMAIL).first()
@@ -941,6 +1092,47 @@ def p5_caso_6_concurrente(datos):
             th1.join()
             th2.join()
     finally:
+        # Captura de foto de salidas antes de borrar
+        if _colector_salidas is not None and _colector_salidas.escenario_actual == "P5.6":
+            snap_c6 = SessionLocal()
+            try:
+                tx_ids_despues_c6 = set(snap_c6.execute(select(Transaccion.id).where(Transaccion.usuario_id == u.id)).scalars().all())
+                creadas_c6 = tx_ids_despues_c6 - tx_ids_antes
+                tx_nuevas = snap_c6.execute(select(Transaccion).where(Transaccion.id.in_(creadas_c6))).scalars().all() if creadas_c6 else []
+                cat_map = dict(snap_c6.execute(select(Categoria.id, Categoria.nombre)).all())
+                subcat_map = dict(snap_c6.execute(select(Subcategoria.id, Subcategoria.nombre)).all())
+                bill_map = dict(snap_c6.execute(select(Billetera.id, Billetera.nombre)).all())
+                movs = []
+                for tx in tx_nuevas:
+                    movs.append({
+                        "tipo": tx.tipo.value if hasattr(tx.tipo, "value") else str(tx.tipo),
+                        "monto": float(tx.monto),
+                        "moneda": tx.moneda.value if hasattr(tx.moneda, "value") else str(tx.moneda),
+                        "fecha": tx.fecha.isoformat() if hasattr(tx.fecha, "isoformat") else str(tx.fecha),
+                        "categoria": cat_map.get(tx.categoria_id),
+                        "subcategoria": subcat_map.get(tx.subcategoria_id),
+                        "billetera": bill_map.get(tx.billetera_id),
+                        "descripcion": tx.descripcion,
+                    })
+                movs.sort(key=lambda m: (m["fecha"], m["tipo"], m["monto"], m["descripcion"], m["billetera"] or "", m["categoria"] or "", m["subcategoria"] or ""))
+
+                conv_nuevas = snap_c6.execute(
+                    select(ConversacionWpp).where(
+                        ConversacionWpp.usuario_id == u.id,
+                        (ConversacionWpp.wamid.in_([wamid1, wamid2, p_wamid])) | (ConversacionWpp.id == pid)
+                    )
+                ).scalars().all()
+                convs = []
+                for c in conv_nuevas:
+                    convs.append({
+                        "intent": c.intent_detectado,
+                        "accion_ejecutada": _normalizar_accion_ejecutada(c.accion_ejecutada),
+                    })
+                convs.sort(key=lambda c: (c["intent"] or "", c["accion_ejecutada"] or ""))
+                _colector_salidas.registrar_salida_escenario("P5.6", movs, convs)
+            finally:
+                snap_c6.close()
+
         # Limpieza infalible: identificar exactamente las transacciones creadas por diferencia de conjuntos
         clean_db = SessionLocal()
         tx_ids_despues = set(clean_db.execute(select(Transaccion.id).where(Transaccion.usuario_id == u.id)).scalars().all())
@@ -4451,7 +4643,12 @@ def p17_caso_15(datos):
     return run_isolated(test)
 
 
-def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False, solo_escenario: str | None = None):
+def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False, solo_escenario: str | None = None, volcar_salidas: str | None = None):
+    global _colector_salidas
+    if volcar_salidas:
+        _colector_salidas = ColectorSalidas(volcar_salidas)
+    else:
+        _colector_salidas = None
     global _gestor_actual
     _gestor_actual = GestorGrabacionesIA(
         dir_grabaciones=DIR_GRABACIONES,
@@ -5960,6 +6157,8 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
         match_tipo = esc["match"]
 
         _gestor_actual.iniciar_escenario(eid)
+        if _colector_salidas is not None:
+            _colector_salidas.iniciar_escenario(eid)
         t0 = time.perf_counter()
         try:
             obtenido = esc["ejecutar"]()
@@ -5994,7 +6193,17 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
                 "obtenido": f"EXCEPCION: {type(e).__name__}: {e}",
             })
 
+        if _colector_salidas is not None and eid not in _colector_salidas.salidas:
+            _colector_salidas.salidas[eid] = {
+                "mensajes": list(_colector_salidas._mensajes_escenario),
+                "movimientos": [],
+                "conversaciones": [],
+            }
+
     dur_total = time.perf_counter() - t0_suite
+
+    if _colector_salidas is not None:
+        _colector_salidas.guardar()
 
     # Verificación estricta de rollback y conteos
     db = SessionLocal()
@@ -6072,6 +6281,7 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             for desv in desvios_ref:
                 print(f"  - {desv['email']} ({desv['billetera']} {desv['moneda']}): antes={desv['referencia']}, después={desv['actual']}, diferencia={desv['diff']}")
         print(f"Actividad en otras cuentas: {movs_otros_nuevos} movimientos nuevos, {billeteras_ajenas_cambiadas} billeteras con saldo distinto")
+        print(f"Guarda graph.facebook.com: {_disparos_guarda} disparos")
 
         print(f"\n=== VERIFICACION DE RECONCILIACION ({total_billeteras} BILLETERAS) ===")
         for d in detalles_rec:
@@ -6098,6 +6308,7 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             for desv in desvios_ref:
                 print(f"  - {desv['email']} ({desv['billetera']} {desv['moneda']}): antes={desv['referencia']}, después={desv['actual']}, diferencia={desv['diff']}")
         print(f"Actividad en otras cuentas: {movs_otros_nuevos} movimientos nuevos, {billeteras_ajenas_cambiadas} billeteras con saldo distinto")
+        print(f"Guarda graph.facebook.com: {'OK (0 disparos)' if _disparos_guarda == 0 else f'DISPARADA ({_disparos_guarda})'}")
         if rec_ok:
             print(f"Reconciliación {total_billeteras} billeteras: OK (todas dentro del baseline)")
         else:
@@ -6108,14 +6319,15 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
     return total, aprobados, omitidos, fallidos, detalles_fallidos
 
 
-def correr_suite_completa(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False, escenario: str | None = None):
+def correr_suite_completa(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False, escenario: str | None = None, volcar_salidas: str | None = None):
     print("=== INICIANDO SUITE CONSOLIDADA DE REGRESION DE WHATSAPP ===")
     modo_str = "IA Real" if ia_real else ("Regrabar" if regrabar else "Grabadas (replay)")
     salida_str = "Detallada" if verbose else "Compacta"
     filtro_str = f" | Escenario: {escenario}" if escenario else ""
-    print(f"Modo IA: {modo_str} | Salida: {salida_str}{filtro_str} | Usuario: {USUARIO_PRUEBAS_EMAIL}")
+    volcar_str = f" | Volcar salidas: {volcar_salidas}" if volcar_salidas else ""
+    print(f"Modo IA: {modo_str} | Salida: {salida_str}{filtro_str}{volcar_str} | Usuario: {USUARIO_PRUEBAS_EMAIL}")
 
-    return _ejecutar_suite(verbose=verbose, ia_real=ia_real, regrabar=regrabar, forzar_grabadas=forzar_grabadas, solo_escenario=escenario)
+    return _ejecutar_suite(verbose=verbose, ia_real=ia_real, regrabar=regrabar, forzar_grabadas=forzar_grabadas, solo_escenario=escenario, volcar_salidas=volcar_salidas)
 
 
 if __name__ == "__main__":
@@ -6125,6 +6337,7 @@ if __name__ == "__main__":
     parser.add_argument("--regrabar", "--record", action="store_true", help="Regrabar todas las llamadas contra OpenAI real y sobrescribir archivos")
     parser.add_argument("--forzar-grabadas", action="store_true", help="Forzar uso de grabaciones incluso en escenarios de modelo P7.1-P7.7 (modo offline)")
     parser.add_argument("--escenario", type=str, default=None, help="Ejecutar solo el escenario especificado por ID (ej: P6.5)")
+    parser.add_argument("--volcar-salidas", type=str, default=None, help="Ruta del archivo JSON donde volcar la foto de salidas de cada escenario")
     args = parser.parse_args()
 
     total, aprobados, omitidos, fallidos, _ = correr_suite_completa(
@@ -6133,6 +6346,7 @@ if __name__ == "__main__":
         regrabar=args.regrabar,
         forzar_grabadas=args.forzar_grabadas,
         escenario=args.escenario,
+        volcar_salidas=args.volcar_salidas,
     )
     if fallidos > 0:
         sys.exit(1)
