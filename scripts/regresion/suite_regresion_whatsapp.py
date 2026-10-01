@@ -2598,9 +2598,10 @@ def p11_caso_12(datos):
     return run_isolated(test)
 
 def p11_caso_13(datos):
-    """Verdadero positivo: lote mixto con transferencia real y gasto bloquea con MSG_NO_MEZCLAR_TRANSFERENCIAS"""
+    """Pago a un tercero dentro de un lote no bloquea: se registran los dos gastos"""
     u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
+        db = Session()
         conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
 
@@ -2611,7 +2612,8 @@ def p11_caso_13(datos):
             make_payload(TELEFONO_TEST, "le transferí 5000 a mi hermano y también gasté 3000 en el kiosco"),
             time.perf_counter()
         )
-        resp = respuestas[-1][1] if respuestas else ""
+        if respuestas and "¿" in respuestas[-1][1] and "corregir" not in respuestas[-1][1].lower():
+            _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
 
         tx_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         tx_creadas = tx_despues - tx_antes
@@ -2621,17 +2623,27 @@ def p11_caso_13(datos):
             {"uid": u.id}
         ).mappings().first()
 
-        bloqueado = (
-            conv is not None
-            and (
-                conv["intent_detectado"] in ("mezcla_transferencia_invalida", "no_mezclar_transferencias")
-                or "mandalas por separado" in conv["mensaje_bot"]
+        no_bloqueado = (
+            conv is None
+            or (
+                conv["intent_detectado"] not in ("mezcla_transferencia_invalida", "no_mezclar_transferencias")
+                and "mandalas por separado" not in (conv["mensaje_bot"] or "").lower()
             )
         )
 
+        txs = db.execute(
+            select(Transaccion).where(Transaccion.usuario_id == u.id).order_by(Transaccion.fecha_creacion.desc()).limit(2)
+        ).scalars().all()
+
+        cant_ok = len(txs) == 2
+        egresos_ok = all(t.tipo == TipoTransaccion.EGRESO for t in txs)
+        montos = sorted([t.monto for t in txs])
+        montos_ok = (montos == [Decimal("3000"), Decimal("5000")])
+
         return (
-            f"Bloqueado: {bloqueado} | "
-            f"Cero txs: {tx_creadas == 0}"
+            f"No bloqueado: {no_bloqueado} | "
+            f"Dos egresos: {cant_ok and egresos_ok} | "
+            f"Montos 3000 y 5000: {montos_ok}"
         )
     return run_isolated(test)
 
@@ -5445,9 +5457,9 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
         {
             "id": "P11.13",
             "punto": "Punto 11",
-            "nombre": "Verdadero positivo: lote mixto con transferencia real y gasto bloquea con MSG_NO_MEZCLAR_TRANSFERENCIAS",
+            "nombre": "Pago a un tercero dentro de un lote no bloquea: se registran los dos gastos",
             "ejecutar": lambda: p11_caso_13(datos),
-            "esperado": "Bloqueado: True | Cero txs: True",
+            "esperado": "No bloqueado: True | Dos egresos: True | Montos 3000 y 5000: True",
             "match": "exacto",
         },
         # --- PUNTO 12: Consultas y Dashboard (Balance y Cotización) ---
