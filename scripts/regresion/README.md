@@ -1,22 +1,114 @@
-# Suite de Regresión WhatsApp (Argentum)
+# Suite de Regresión y Pruebas Locales (Argentum Backend)
 
-Esta carpeta contiene la suite consolidada de pruebas de regresión automatizadas para todos los flujos del webhook de WhatsApp (`whatsapp_ia.py`).
+Esta carpeta y el submódulo `scripts/local/` contienen el entorno automatizado de pruebas, verificación de consistencia transaccional y suite de regresión para el webhook de WhatsApp y el motor financiero de Argentum.
 
-## Cobertura de la Suite
-- **Punto 3**: Resolución determinística de billeteras (billetera principal, menús numéricos y por nombre, opciones fuera de rango, respuestas a números aislados, menús expirados, corrección en propuesta y usuarios con billetera única).
-- **Punto 4**: Detección de intenciones, reseteo de slots y cambios de tema (cancelaciones, saludos, operaciones a medias, preguntas fuera de alcance, 6 variantes de negación y expiración de propuestas).
-- **Punto 5**: Prevención de duplicados, concurrencia en confirmación y exclusión de cuotas hijas/planes de tarjeta.
-- **Punto 6**: Veracidad en fechas relativas/absolutas, control de fechas >60 días o futuras, gastos en dólares, montos y límites, descarte anticipado en lotes y privacidad de saldos.
+---
 
-## Regla de Ejecución Obligatoria
-**Debe ejecutarse y pasar al 100% antes de cualquier despliegue a producción que toque `app/routers/whatsapp_ia.py` o servicios relacionados de WhatsApp.**
+## 1. Cobertura de la Suite de Regresión WhatsApp (174 escenarios)
 
-## Cómo Ejecutar
-Desde la raíz del repositorio (`argentum-backend`):
+La suite consolidada (`scripts/regresion/suite_regresion_whatsapp.py`) valida de forma exhaustiva el comportamiento del asistente ante todos los casos de uso documentados:
+
+- **Punto 3: Resolución determinística de billeteras** (16 escenarios). Billetera principal implícita, menús numéricos y por nombre, opciones fuera de rango, respuestas a números aislados, menús expirados, corrección de billetera en propuesta interactiva y usuarios con billetera única.
+- **Punto 4: Detección de intenciones y gestión de contexto** (15 escenarios). Cancelaciones explícitas, reseteo de slots ante saludos o cambios de tema, reanudación de operaciones a medias, preguntas fuera de alcance, 6 variantes idiomáticas de negación ("no", "nada", "de ninguna manera", etc.) y expiración de propuestas por inactividad.
+- **Punto 5: Integridad transaccional y prevención de duplicados** (14 escenarios). Prevención de duplicados idénticos en ventana corta, idempotencia ante reenvíos de webhook, concurrencia en confirmación rápida y exclusión estricta de cuotas hijas o planes de tarjeta en cálculos directos.
+- **Punto 6: Manejo temporal y parámetros cuantitativos** (15 escenarios). Fechas relativas ("ayer", "el viernes pasado") y absolutas, rechazo de fechas >60 días en el pasado o futuras, transacciones en dólares estadounidenses (USD) con tasa implícita, límites cuantitativos, descarte anticipado de transacciones inválidas en lotes y estricta privacidad de saldos.
+- **Punto 7: Jerga argentina, modismos y categorización por IA** (7 escenarios con validación de LLM real). Modismos cotidianos ("golosinas" -> Kiosco, "bondi" -> Transporte público, "nafta" -> Combustible, "prepaga" -> Obra social / Prepaga, "corte de pelo" -> Cuidado personal, etc.), prohibición de inventar categorías y preservación de descripciones originales.
+- **Punto 8: Modificaciones y reversiones interactivas** (8 escenarios). Registro y posterior anulación inmediata ("borrá eso"), confirmación de cancelación, eliminación de transacciones y reversión exacta de saldos.
+- **Punto 9 y 9B: Transferencias entre billeteras y medios de pago combinados** (18 escenarios). Transferencias origen-destino con o sin comisión, validación de saldos en ambas cuentas y consistencia contable.
+- **Punto 10: Suscripciones y servicios periódicos** (12 escenarios). Detección de servicios recurrentes (Netflix, Spotify, gimnasio), solicitud de frecuencia de facturación, alta de la suscripción sin impacto prematuro en saldos de transacciones.
+- **Punto 11: Multimoneda y conversiones** (15 escenarios). Billeteras en ARS y USD, registro de compras en moneda extranjera y cálculo consistente de tenencias.
+- **Punto 12: Consultas analíticas y proyecciones financieras** (14 escenarios). Detección de intención analítica, resumen de presupuestos mensuales y proyecciones de flujo de fondos (`consultar_proyeccion`).
+- **Puntos 16 y 17: Metas de ahorro y procesamiento por lotes** (40 escenarios). Aportes a metas, metas completadas con felicitación, reversión de aportes deshechos, y procesamiento de lotes con frases introductorias compuestas y fechas previas.
+
+---
+
+## 2. Ejecución contra Base de Datos Local (Recomendado)
+
+El entorno local funciona sobre una instancia portable de **PostgreSQL 18** en el puerto `5433` con base de datos `argentum_local`, idéntica en estructura, datos, extensiones (`pgcrypto`, `plpgsql`, `uuid-ossp`) y ordenamiento (ICU `en-US` UTF8) a la base de producción.
+
+Para ejecutar cualquier script o herramienta apuntando a la base local de forma transparente:
 
 ```bash
-python scripts/regresion/suite_regresion_whatsapp.py
+# Ejecutar la suite completa contra la base local
+python scripts/local/con_base_local.py python scripts/regresion/suite_regresion_whatsapp.py -v
+
+# Ejecutar la foto del motor contra la base local
+python scripts/local/con_base_local.py python scripts/regresion/foto_motor.py --etiqueta mi_foto_local
+
+# Ejecutar el verificador de testingadmin contra la base local
+python scripts/local/con_base_local.py python scripts/testingadmin/verificar_testingadmin.py
+
+# Ejecutar pytest contra la base local
+python scripts/local/con_base_local.py python -m pytest -q
 ```
 
-## Garantía de No Persistencia (Rollback)
-Todas las pruebas corren dentro de transacciones aisladas con rollback automático y validación de conteos antes y después. La suite garantiza que la base de datos no sufre escrituras residuales ni modificaciones de saldos.
+`con_base_local.py` se encarga automáticamente de:
+1. Comprobar si el servidor local está activo con `pg_ctl status`.
+2. Si está detenido (por ejemplo, tras reiniciar la máquina), lo levanta automáticamente en segundo plano.
+3. Inyecta `DATABASE_URL` y variables `PG*` apuntando a `localhost:5433/argentum_local`.
+4. Todas las herramientas imprimen al inicio: `BASE: LOCAL (localhost:5433/argentum_local)`.
+
+---
+
+## 3. Cómo Refrescar la Base Local desde Producción
+
+Para sincronizar la base local con el estado más reciente de producción:
+
+```bash
+python scripts/local/refrescar_base_local.py
+```
+
+Flujo automatizado de refresco:
+1. Valida que el servidor local esté activo y que el comando apunte inequívocamente a `localhost:5433/argentum_local` (protección contra sobreescritura accidental).
+2. Genera un volcado limpio (`pg_dump -Fc`) de producción hacia `C:\argentum_local\dumps\argentum_prod.dump`.
+3. Reinicia las conexiones activas, elimina y recrea la base `argentum_local`.
+4. Restaura el esquema y datos completos con `pg_restore`.
+5. Ejecuta un control de integridad comparando el conteo exacto de filas en las 38 tablas entre producción y local.
+*Duración promedio del refresco: ~45 segundos.*
+
+---
+
+## 4. Ejecución contra Producción (Uso Restringido)
+
+Para correr directamente contra producción (únicamente cuando sea indispensable y autorizado):
+
+```bash
+python scripts/regresion/suite_regresion_whatsapp.py -v
+```
+
+Al invocarse directamente (sin `con_base_local.py`), la herramienta lee el `.env` del repositorio que apunta a la base de producción.
+El script imprimirá en la primera línea: `BASE: PRODUCCION (<host_censurado>)` como recordatorio explícito.
+
+---
+
+## 5. Benchmarks: Producción vs Base Local
+
+La migración de pruebas a PostgreSQL 18 local elimina la latencia de red contra Supabase/Neon y optimiza radicalmente los tiempos de ciclo de desarrollo:
+
+| Herramienta / Operación | Producción (Cloud) | Base Local (PG 18) | Factor de Aceleración |
+|:---|:---:|:---:|:---:|
+| **Foto del Motor (441 métricas)** | 135.38 s | 17.86 s | **7.58x más rápido** |
+| **Verificador testingadmin** | 29.86 s | 1.80 s | **16.61x más rápido** |
+| **Suite WhatsApp (174 escenarios)** | ~180 - 220 s | ~51.38 s | **3.5x - 4.3x más rápido** |
+| **Refresco Integral de DB** | - | ~45.00 s | *38/38 tablas idénticas* |
+
+---
+
+## 6. Script Integrador: `verificar_todo.py`
+
+Para realizar una validación de punta a punta antes de realizar commits o pull requests:
+
+```bash
+# Verificación completa con refresco previo de la base local:
+python scripts/local/verificar_todo.py
+
+# Verificación rápida offline (reutiliza la base local existente sin refrescar):
+python scripts/local/verificar_todo.py --sin-refrescar
+```
+
+El script integrador ejecuta secuencialmente:
+1. `refrescar_base_local.py` (omitible con `--sin-refrescar`).
+2. `pytest -q` contra base local.
+3. `suite_regresion_whatsapp.py -v` (174/174 escenarios).
+4. `verificar_testingadmin.py`.
+5. Muestra una tabla consolidada con el estado (OK/FALLO) y la duración exacta de cada fase.

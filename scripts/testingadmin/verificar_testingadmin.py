@@ -20,6 +20,10 @@ from typing import Any, Dict, List, Tuple
 
 # Asegurar raíz del backend en sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+# Deteccion y visualizacion de base actual (local o produccion)
+from scripts.local.base_actual import imprimir_base_actual
+imprimir_base_actual()
+
 os.environ["LOG_LEVEL"] = "CRITICAL"
 
 from sqlalchemy import func, select, text

@@ -27,6 +27,10 @@ from unittest.mock import patch
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
+# Deteccion y visualizacion de base actual (local o produccion)
+from scripts.local.base_actual import imprimir_base_actual
+imprimir_base_actual()
+
 sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
 
 import structlog
