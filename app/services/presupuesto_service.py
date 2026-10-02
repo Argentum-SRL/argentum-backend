@@ -532,7 +532,12 @@ def obtener_historial(db: Session, usuario_id: UUID, presupuesto_id: UUID) -> Li
     )
     return db.execute(query).scalars().all()
 
-def registrar_impacto_presupuesto(db: Session, transaccion: Transaccion, revertir: bool = False, commit: bool = True):
+def registrar_impacto_presupuesto(
+    db: Session,
+    transaccion: Transaccion,
+    revertir: bool = False,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+):
     if transaccion.tipo != TipoTransaccion.EGRESO:
         return
     if transaccion.estado_verificacion not in [EstadoVerificacionTransaccion.CONFIRMADA, None]:
@@ -625,7 +630,12 @@ def registrar_impacto_presupuesto(db: Session, transaccion: Transaccion, reverti
         if not revertir:
             verificar_alertas_presupuesto(db, presu, periodo_activo, commit=commit)
 
-def verificar_alertas_presupuesto(db: Session, presupuesto: Presupuesto, periodo: PeriodoPresupuesto, commit: bool = True):
+def verificar_alertas_presupuesto(
+    db: Session,
+    presupuesto: Presupuesto,
+    periodo: PeriodoPresupuesto,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+):
     if periodo.monto_limite == 0:
         return
         
@@ -642,7 +652,7 @@ def verificar_alertas_presupuesto(db: Session, presupuesto: Presupuesto, periodo
         
     # 1. Obtener la configuración del usuario
     from app.services.notificacion_service import obtener_configuracion, crear_notificacion
-    config = obtener_configuracion(db, presupuesto.usuario_id)
+    config = obtener_configuracion(db, presupuesto.usuario_id, commit=commit)
 
     # 2. Verificar si el canal/tipo está activo en la configuración del usuario
     canal_web = True

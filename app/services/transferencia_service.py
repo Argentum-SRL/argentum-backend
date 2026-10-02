@@ -34,7 +34,12 @@ def obtener_transferencia(db: Session, usuario_id: UUID, transferencia_id: UUID)
     return tr
 
 
-def crear_transferencia(db: Session, usuario_id: UUID, data: TransferenciaInternaCreate, commit: bool = True) -> TransferenciaInterna:
+def crear_transferencia(
+    db: Session,
+    usuario_id: UUID,
+    data: TransferenciaInternaCreate,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+) -> TransferenciaInterna:
     # 1. Validar billeteras
     b_origen = db.execute(
         select(Billetera).where(Billetera.id == data.billetera_origen_id, Billetera.usuario_id == usuario_id)
@@ -216,7 +221,12 @@ def crear_transferencia(db: Session, usuario_id: UUID, data: TransferenciaIntern
     return nueva_tr
 
 
-def eliminar_transferencia(db: Session, usuario_id: UUID, transferencia_id: UUID, commit: bool = True):
+def eliminar_transferencia(
+    db: Session,
+    usuario_id: UUID,
+    transferencia_id: UUID,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+):
     tr = obtener_transferencia(db, usuario_id, transferencia_id)
 
     # Si tenía comisión vinculada, revertir y eliminar la transacción de gasto de comisión

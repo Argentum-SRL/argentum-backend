@@ -141,7 +141,13 @@ def eliminar_meta(db: Session, usuario_id: UUID, meta_id: UUID) -> None:
     db.delete(meta)
     db.commit()
 
-def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: MovimientoMetaCreate) -> MovimientoMeta:
+def registrar_movimiento(
+    db: Session,
+    usuario_id: UUID,
+    meta_id: UUID,
+    data: MovimientoMetaCreate,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+) -> MovimientoMeta:
     meta = obtener_meta(db, usuario_id, meta_id)
     
     if data.monto <= Decimal("0"):
@@ -299,7 +305,7 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
             try:
                 from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
                 from app.models.notificacion import TipoNotificacion, NivelNotificacion
-                config = obtener_configuracion(db, usuario_id)
+                config = obtener_configuracion(db, usuario_id, commit=False)
                 canales = resolver_canales_notificacion(config, TipoNotificacion.META_ALCANZADA)
                 if canales is not None:
                     canal_web, canal_whatsapp = canales
@@ -314,6 +320,7 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
                         deep_link="/app/metas",
                         canal_web=canal_web,
                         canal_whatsapp=canal_whatsapp,
+                        commit=False,
                         datos_template={"nombre": meta.nombre, "monto_fmt": formatear_monto(meta.monto_objetivo, meta.moneda)},
                     )
             except Exception:
@@ -321,11 +328,20 @@ def registrar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, data: Mov
     elif meta.estado == EstadoMeta.COMPLETADA and meta.monto_actual < meta.monto_objetivo:
         meta.estado = EstadoMeta.ACTIVA
 
-    db.commit()
-    db.refresh(nuevo_movimiento)
+    if commit:
+        db.commit()
+        db.refresh(nuevo_movimiento)
+    else:
+        db.flush()
     return nuevo_movimiento
 
-def eliminar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, movimiento_id: UUID) -> None:
+def eliminar_movimiento(
+    db: Session,
+    usuario_id: UUID,
+    meta_id: UUID,
+    movimiento_id: UUID,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+) -> None:
     meta = obtener_meta(db, usuario_id, meta_id)
     
     movimiento = db.get(MovimientoMeta, movimiento_id)
@@ -403,7 +419,10 @@ def eliminar_movimiento(db: Session, usuario_id: UUID, meta_id: UUID, movimiento
         db.delete(tx)
 
     db.delete(movimiento)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
 def obtener_analytics(db: Session, usuario_id: UUID, meta_id: UUID) -> Dict[str, Any]:
     meta = obtener_meta(db, usuario_id, meta_id)

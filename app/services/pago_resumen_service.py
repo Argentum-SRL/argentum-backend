@@ -54,7 +54,8 @@ def pagar_resumen_tarjeta(
     pesificar: bool = False,
     cotizacion_personalizada: Decimal | None = None,
     monto_pesos_personalizado: Decimal | None = None,
-    monto_percepcion_personalizado: Decimal | None = None
+    monto_percepcion_personalizado: Decimal | None = None,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
 ) -> Transaccion:
     # 1. Obtener la tarjeta
     tarjeta = db.query(TarjetaCredito).filter(
@@ -437,8 +438,11 @@ def pagar_resumen_tarjeta(
                 )
                 db.add(nuevo_saldo)
 
-        db.commit()
-        db.refresh(tx)
+        if commit:
+            db.commit()
+            db.refresh(tx)
+        else:
+            db.flush()
 
         pendientes = []
         for c in cuotas_otra_moneda:

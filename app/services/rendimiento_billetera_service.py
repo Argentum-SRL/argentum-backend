@@ -77,6 +77,7 @@ def confirmar_rendimiento(
     billetera_id: UUID | str,
     monto: Decimal,
     fecha: datetime | None = None,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
 ) -> Billetera:
     """
     Confirma un rendimiento manual:
@@ -115,6 +116,9 @@ def confirmar_rendimiento(
     billetera.saldo_actual += monto
     billetera.fecha_ultimo_rendimiento = ahora_dt
 
-    db.commit()
-    db.refresh(billetera)
+    if commit:
+        db.commit()
+        db.refresh(billetera)
+    else:
+        db.flush()
     return billetera

@@ -93,7 +93,13 @@ def _resolver_monto_y_conversion(
     )
 
 
-def _cobrar_suscripcion(db: Session, suscripcion: Suscripcion, hoy: date, primer_vencimiento: date | None = None) -> bool:
+def _cobrar_suscripcion(
+    db: Session,
+    suscripcion: Suscripcion,
+    hoy: date,
+    primer_vencimiento: date | None = None,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+) -> bool:
     """
     Crea la transacción (y cuota si es tarjeta) para un período de cobro.
     Avanza proximo_cobro al siguiente período exactamente desde la fecha que se está cobrando.
@@ -259,12 +265,21 @@ def _cobrar_suscripcion(db: Session, suscripcion: Suscripcion, hoy: date, primer
             entidad_tipo="suscripcion",
             entidad_id=suscripcion.id,
             grupo_agrupacion_override=f"SUSCRIPCION_ATRASADA_{suscripcion.id}_{hoy.strftime('%Y%m%d')}",
+            commit=False,
         )
+
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
     return True
 
 
-def procesar_cobros_suscripciones(db: Session) -> dict:
+def procesar_cobros_suscripciones(
+    db: Session,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+) -> dict:
     hoy = hoy_argentina()
 
     suscripciones = db.query(Suscripcion).filter(
@@ -301,7 +316,7 @@ def procesar_cobros_suscripciones(db: Session) -> dict:
             continue
 
         try:
-            exito = _cobrar_suscripcion(db, suscripcion, hoy)
+            exito = _cobrar_suscripcion(db, suscripcion, hoy, commit=False)
             if exito:
                 cobradas += 1
                 detalles.append({
@@ -328,7 +343,10 @@ def procesar_cobros_suscripciones(db: Session) -> dict:
                 "error": str(e),
             })
 
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return {
         "total_encontradas": len(suscripciones),
         "cobradas": cobradas,

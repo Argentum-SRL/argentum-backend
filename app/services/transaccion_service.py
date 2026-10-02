@@ -189,7 +189,13 @@ def _evaluar_gasto_inusual_safe(usuario_id: UUID, transaccion_id: UUID) -> None:
         db.close()
 
 
-def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, commit: bool = True, background_tasks: Optional[BackgroundTasks] = None) -> Transaccion:
+def crear_transaccion(
+    db: Session,
+    usuario_id: UUID,
+    data: TransaccionCreate,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+    background_tasks: Optional[BackgroundTasks] = None,
+) -> Transaccion:
     # 1. Validar billetera
     billetera = db.execute(
         select(Billetera).where(
@@ -365,7 +371,7 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, co
                 try:
                     from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
                     from app.models.notificacion import TipoNotificacion, NivelNotificacion
-                    config = obtener_configuracion(db, usuario_id)
+                    config = obtener_configuracion(db, usuario_id, commit=False)
                     canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
                     if canales is not None:
                         canal_web, canal_whatsapp = canales
@@ -380,6 +386,7 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, co
                             deep_link="/app/billeteras",
                             canal_web=canal_web,
                             canal_whatsapp=canal_whatsapp,
+                            commit=False,
                             datos_template={"billetera_nombre": billetera.nombre},
                         )
                 except Exception:
@@ -392,12 +399,12 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, co
                     background_tasks.add_task(_evaluar_gasto_inusual_safe, usuario_id, nueva_transaccion.id)
                 else:
                     try:
-                        evaluar_gasto_inusual(db, usuario_id, nueva_transaccion)
+                        evaluar_gasto_inusual(db, usuario_id, nueva_transaccion, commit=False)
                     except Exception:
                         pass
         
     # Impacto en presupuestos
-    presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False)
+    presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False, commit=False)
 
     db.add(nueva_transaccion)
     if commit:
@@ -409,7 +416,13 @@ def crear_transaccion(db: Session, usuario_id: UUID, data: TransaccionCreate, co
     return nueva_transaccion
 
 
-def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, data: TransaccionUpdate) -> Transaccion:
+def actualizar_transaccion(
+    db: Session,
+    usuario_id: UUID,
+    transaccion_id: UUID,
+    data: TransaccionUpdate,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+) -> Transaccion:
     transaccion = obtener_transaccion(db, usuario_id, transaccion_id)
     
     # Validar que la nueva moneda (o la actual) coincida con la nueva billetera (o la actual)
@@ -425,7 +438,7 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
         _validar_tarjeta(db, data.tarjeta_id, usuario_id)
 
     # Impacto en presupuestos (Revertir con datos viejos)
-    presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=True)
+    presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=True, commit=False)
 
     CAMPOS_FINANCIEROS_CUOTA = {
         'monto', 'moneda', 'tipo', 'billetera_id',
@@ -501,7 +514,7 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
                     try:
                         from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
                         from app.models.notificacion import TipoNotificacion, NivelNotificacion
-                        config = obtener_configuracion(db, usuario_id)
+                        config = obtener_configuracion(db, usuario_id, commit=False)
                         canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
                         if canales is not None:
                             canal_web, canal_whatsapp = canales
@@ -516,6 +529,7 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
                                 deep_link="/app/billeteras",
                                 canal_web=canal_web,
                                 canal_whatsapp=canal_whatsapp,
+                                commit=False,
                                 datos_template={"billetera_nombre": billetera_nueva.nombre},
                             )
                     except Exception:
@@ -528,15 +542,23 @@ def actualizar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, 
             setattr(transaccion, key, value)
             
     # Impacto en presupuestos (Aplicar con datos nuevos)
-    presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=False)
+    presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=False, commit=False)
 
-    db.commit()
-    db.refresh(transaccion)
+    if commit:
+        db.commit()
+        db.refresh(transaccion)
+    else:
+        db.flush()
 
     return transaccion
 
 
-def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, commit: bool = True):
+def eliminar_transaccion(
+    db: Session,
+    usuario_id: UUID,
+    transaccion_id: UUID,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+):
     transaccion = obtener_transaccion(db, usuario_id, transaccion_id)
     
     # Manejo de cascada para cuotas
@@ -705,7 +727,7 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, co
             b_p = db.get(Billetera, p.billetera_id)
             if b_p:
                 b_p.saldo_actual += p.monto
-        presupuesto_service.registrar_impacto_presupuesto(db, p, revertir=True)
+        presupuesto_service.registrar_impacto_presupuesto(db, p, revertir=True, commit=False)
         db.delete(p)
 
     # Transaccion normal
@@ -722,7 +744,7 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, co
                 logger.critical(f"Error crítico de inconsistencia de moneda al eliminar transacción {transaccion.id}: {e}")
             
     # Impacto en presupuestos
-    presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=True)
+    presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=True, commit=False)
 
     db.delete(transaccion)
     if commit:
@@ -733,7 +755,12 @@ def eliminar_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID, co
     return {"detail": "Transacción eliminada exitosamente"}
 
 
-def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID) -> Transaccion:
+def confirmar_transaccion_ia(
+    db: Session,
+    usuario_id: UUID,
+    transaccion_id: UUID,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+) -> Transaccion:
     transaccion = obtener_transaccion(db, usuario_id, transaccion_id)
     
     if transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE:
@@ -759,7 +786,7 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
                 try:
                     from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
                     from app.models.notificacion import TipoNotificacion, NivelNotificacion
-                    config = obtener_configuracion(db, usuario_id)
+                    config = obtener_configuracion(db, usuario_id, commit=False)
                     canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
                     if canales is not None:
                         canal_web, canal_whatsapp = canales
@@ -774,6 +801,7 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
                             deep_link="/app/billeteras",
                             canal_web=canal_web,
                             canal_whatsapp=canal_whatsapp,
+                            commit=False,
                             datos_template={"billetera_nombre": billetera.nombre},
                         )
                 except Exception:
@@ -782,7 +810,7 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
             # Solo si tiene categoría asignada y hay suficiente historial
             if transaccion.categoria_id is not None:
                 try:
-                    evaluar_gasto_inusual(db, usuario_id, transaccion)
+                    evaluar_gasto_inusual(db, usuario_id, transaccion, commit=False)
                 except Exception:
                     pass
 
@@ -826,17 +854,20 @@ def confirmar_transaccion_ia(db: Session, usuario_id: UUID, transaccion_id: UUID
                     ))
             
     # Impacto en presupuestos
-    presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=False)
-
-    db.commit()
-    db.refresh(transaccion)
+    presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=False, commit=False)
 
     # Trigger: recalcular perfil financiero en background
     try:
         from app.services.perfil_financiero_service import recalcular_perfil_tras_confirmacion
-        recalcular_perfil_tras_confirmacion(db, usuario_id)
+        recalcular_perfil_tras_confirmacion(db, usuario_id, commit=False)
     except Exception:
         pass  # No interrumpir el flujo principal si falla
+
+    if commit:
+        db.commit()
+        db.refresh(transaccion)
+    else:
+        db.flush()
 
     return transaccion
 
@@ -860,7 +891,12 @@ def obtener_pendientes_ia(db: Session, usuario_id: UUID, skip: int = 0, limit: i
     ).scalars().all()
 
 
-def evaluar_gasto_inusual(db: Session, usuario_id: UUID, transaccion: Transaccion) -> None:
+def evaluar_gasto_inusual(
+    db: Session,
+    usuario_id: UUID,
+    transaccion: Transaccion,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+) -> None:
     """
     Evalúa si una transacción de egreso es inusual y genera una notificación.
     Utiliza tres niveles de sensibilidad según el volumen de historial de la categoría.
@@ -947,7 +983,7 @@ def evaluar_gasto_inusual(db: Session, usuario_id: UUID, transaccion: Transaccio
             mediana_fmt = formatear_monto(mediana, transaccion.moneda)
             mensaje = f"Registramos un gasto inusual: gastaste {monto_fmt} en {categoria_nombre}, pero tu gasto habitual en esa categoría es de {mediana_fmt}."
             from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion
-            config = obtener_configuracion(db, usuario_id)
+            config = obtener_configuracion(db, usuario_id, commit=commit)
             canales = resolver_canales_notificacion(config, TipoNotificacion.GASTO_INUSUAL)
             if canales is not None:
                 canal_web, canal_whatsapp = canales
@@ -962,6 +998,7 @@ def evaluar_gasto_inusual(db: Session, usuario_id: UUID, transaccion: Transaccio
                     deep_link="/app/transacciones",
                     canal_web=canal_web,
                     canal_whatsapp=canal_whatsapp,
+                    commit=commit,
                     datos_template={"monto_fmt": monto_fmt, "categoria": categoria_nombre, "habitual_fmt": mediana_fmt},
                 )
     else:
@@ -1030,7 +1067,7 @@ def evaluar_gasto_inusual(db: Session, usuario_id: UUID, transaccion: Transaccio
         if monto_actual > promedio_ajustado * multiplicador:
             mensaje = f"Registramos un gasto inusual: gastaste {simbolo}{monto_actual:,.0f} en {categoria_nombre}, pero tu gasto habitual en esa categoría es de {simbolo}{promedio_ajustado:,.0f}."
             from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion
-            config = obtener_configuracion(db, usuario_id)
+            config = obtener_configuracion(db, usuario_id, commit=commit)
             canales = resolver_canales_notificacion(config, TipoNotificacion.GASTO_INUSUAL)
             if canales is not None:
                 canal_web, canal_whatsapp = canales
@@ -1045,6 +1082,7 @@ def evaluar_gasto_inusual(db: Session, usuario_id: UUID, transaccion: Transaccio
                     deep_link="/app/transacciones",
                     canal_web=canal_web,
                     canal_whatsapp=canal_whatsapp,
+                    commit=commit,
                     datos_template={"monto_fmt": f"{simbolo}{monto_actual:,.0f}", "categoria": categoria_nombre, "habitual_fmt": f"{simbolo}{promedio_ajustado:,.0f}"},
                 )
 

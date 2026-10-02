@@ -23,7 +23,7 @@ def crear_notificacion(
     canal_whatsapp: bool = False,
     canal_email: bool = False,
     grupo_agrupacion_override: Optional[str] = None,
-    commit: bool = True,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
     datos_template: Optional[dict] = None,
 ) -> Optional[Notificacion]:
     """
@@ -172,7 +172,11 @@ def marcar_todas_leidas(db: Session, usuario_id: UUID) -> None:
     db.commit()
 
 
-def obtener_configuracion(db: Session, usuario_id: UUID) -> ConfiguracionNotificacion:
+def obtener_configuracion(
+    db: Session,
+    usuario_id: UUID,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+) -> ConfiguracionNotificacion:
     """Obtiene la configuración del usuario. Si no existe, la crea con defaults."""
     config = db.query(ConfiguracionNotificacion).filter(
         ConfiguracionNotificacion.usuario_id == usuario_id
@@ -180,8 +184,11 @@ def obtener_configuracion(db: Session, usuario_id: UUID) -> ConfiguracionNotific
     if not config:
         config = ConfiguracionNotificacion(usuario_id=usuario_id)
         db.add(config)
-        db.commit()
-        db.refresh(config)
+        if commit:
+            db.commit()
+            db.refresh(config)
+        else:
+            db.flush()
     return config
 
 

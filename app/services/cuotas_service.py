@@ -140,7 +140,12 @@ def crear_cuotas(
     return cuotas
 
 
-def cancelar_grupo(db: Session, grupo_id: any, usuario_id: any) -> GrupoCuotas:
+def cancelar_grupo(
+    db: Session,
+    grupo_id: any,
+    usuario_id: any,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+) -> GrupoCuotas:
     from fastapi import HTTPException
     from sqlalchemy import select
     from app.models.grupo_cuotas import EstadoGrupoCuotas
@@ -170,7 +175,7 @@ def cancelar_grupo(db: Session, grupo_id: any, usuario_id: any) -> GrupoCuotas:
         if tx_hija:
             # Revertir impacto de presupuesto si existe la tx hija antes de borrarla
             try:
-                presupuesto_service.registrar_impacto_presupuesto(db, tx_hija, revertir=True)
+                presupuesto_service.registrar_impacto_presupuesto(db, tx_hija, revertir=True, commit=False)
             except Exception:
                 pass
             # Marcar la transacción hija con monto cero y descripción cancelada
@@ -183,8 +188,11 @@ def cancelar_grupo(db: Session, grupo_id: any, usuario_id: any) -> GrupoCuotas:
 
     # 5. Marcar grupo.estado = EstadoGrupoCuotas.CANCELADO
     grupo.estado = EstadoGrupoCuotas.CANCELADO
-    # 6. db.commit()
-    db.commit()
+    # 6. db.commit() o flush
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     # 7. Retornar el grupo actualizado
     return grupo
 
@@ -194,7 +202,8 @@ def prepagar_grupo(
     grupo_id: any,
     usuario_id: any,
     billetera_id: any,
-    categoria_id: any = None
+    categoria_id: any = None,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
 ) -> GrupoCuotas:
     from fastapi import HTTPException
     from sqlalchemy import select
@@ -270,7 +279,7 @@ def prepagar_grupo(
         try:
             from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
             from app.models.notificacion import TipoNotificacion, NivelNotificacion
-            config = obtener_configuracion(db, usuario_id)
+            config = obtener_configuracion(db, usuario_id, commit=False)
             canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
             if canales is not None:
                 canal_web, canal_whatsapp = canales
@@ -286,13 +295,14 @@ def prepagar_grupo(
                     canal_web=canal_web,
                     canal_whatsapp=canal_whatsapp,
                     datos_template={"billetera_nombre": billetera.nombre},
+                    commit=False,
                 )
         except Exception:
             pass
 
     # Registrar impacto del prepago en el presupuesto
     try:
-        presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False)
+        presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False, commit=False)
     except Exception:
         pass
 
@@ -306,7 +316,7 @@ def prepagar_grupo(
         tx_hija = cuota.transaccion
         if tx_hija:
             try:
-                presupuesto_service.registrar_impacto_presupuesto(db, tx_hija, revertir=True)
+                presupuesto_service.registrar_impacto_presupuesto(db, tx_hija, revertir=True, commit=False)
             except Exception:
                 pass
             tx_hija.monto = Decimal("0.00")
@@ -318,14 +328,21 @@ def prepagar_grupo(
     # 10. db.add(nueva_transaccion)
     db.add(nueva_transaccion)
 
-    # 11. db.commit()
-    db.commit()
+    # 11. db.commit() o flush
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
     # 12. Retornar el grupo actualizado
     return grupo
 
 
-def _eliminar_cuota_pendiente(db: Session, cuota: Cuota) -> None:
+def _eliminar_cuota_pendiente(
+    db: Session,
+    cuota: Cuota,
+    commit: bool = False,  # commit=False: la operación de afuera hace el único commit
+) -> None:
     """
     Elimina una cuota pendiente puntual y su transacción hija asociada,
     revirtiendo el impacto presupuestario si correspondiera.
@@ -337,7 +354,7 @@ def _eliminar_cuota_pendiente(db: Session, cuota: Cuota) -> None:
     tx_hija = cuota.transaccion or (db.get(Transaccion, cuota.transaccion_id) if cuota.transaccion_id else None)
     if tx_hija:
         try:
-            presupuesto_service.registrar_impacto_presupuesto(db, tx_hija, revertir=True)
+            presupuesto_service.registrar_impacto_presupuesto(db, tx_hija, revertir=True, commit=False)
         except Exception:
             pass
 
@@ -349,7 +366,12 @@ def _eliminar_cuota_pendiente(db: Session, cuota: Cuota) -> None:
         db.flush()
 
 
-def eliminar_cuota_individual(db: Session, usuario_id: any, transaccion_id: any) -> None:
+def eliminar_cuota_individual(
+    db: Session,
+    usuario_id: any,
+    transaccion_id: any,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+) -> None:
     """
     Elimina exclusivamente una cuota pendiente puntual y su transacción hija asociada,
     sin tocar el resto del grupo ni recalcular fechas o montos.
@@ -405,7 +427,7 @@ def eliminar_cuota_individual(db: Session, usuario_id: any, transaccion_id: any)
         raise HTTPException(status_code=404, detail="No encontramos el grupo de cuotas.")
 
     # 3. Borrar la cuota pendiente puntual y su transacción hija reusando la función existente
-    _eliminar_cuota_pendiente(db, cuota)
+    _eliminar_cuota_pendiente(db, cuota, commit=False)
     db.flush()
 
     # 4. Verificar cuotas restantes del grupo
@@ -417,13 +439,17 @@ def eliminar_cuota_individual(db: Session, usuario_id: any, transaccion_id: any)
     if not cuotas_pendientes:
         grupo.estado = EstadoGrupoCuotas.COMPLETADO
 
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
 
 def actualizar_grupo(
     db: Session,
     grupo: GrupoCuotas,
     data: GrupoCuotasUpdate,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
 ) -> GrupoCuotas:
     from fastapi import HTTPException
     from sqlalchemy import select
@@ -513,7 +539,7 @@ def actualizar_grupo(
         # Borrar cuotas pendientes y sus transacciones hijas usando la función local
         cuotas_pendientes = [c for c in list(grupo.cuotas) if not c.pagada]
         for c in cuotas_pendientes:
-            _eliminar_cuota_pendiente(db, c)
+            _eliminar_cuota_pendiente(db, c, commit=False)
         db.flush()
         db.expire(grupo, ["cuotas"])
 
@@ -634,8 +660,11 @@ def actualizar_grupo(
         if grupo.transaccion_padre:
             grupo.transaccion_padre.monto = data.monto_total_nuevo
 
-    db.commit()
-    db.expire_all()
-    db.refresh(grupo)
+    if commit:
+        db.commit()
+        db.expire_all()
+        db.refresh(grupo)
+    else:
+        db.flush()
     return grupo
 
