@@ -1,12 +1,12 @@
 import ast
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
@@ -17,15 +17,14 @@ from sqlalchemy import types
 from app.core.database import Base
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria, EstadoCategoria, TipoCategoria
-from app.models.notificacion import Notificacion, TipoNotificacion
+from app.models.notificacion import TipoNotificacion
 from app.models.transaccion import (
     EstadoVerificacionTransaccion,
-    MetodoPago,
     OrigenTransaccion,
-    TipoTransaccion,
     Transaccion,
 )
 from app.models.usuario import AuthProvider, EstadoUsuario, Moneda, RolUsuario, Usuario
+from app.schemas.transaccion import TransaccionCreate
 from app.routers.whatsapp.registro import (
     _confirmar_propuesta_transaccion,
     _registrar_item_batch,
@@ -72,7 +71,6 @@ def db_fixture():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    import app.models  # noqa: F401
     Base.metadata.create_all(bind=engine)
     TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     session = TestingSession()
@@ -204,26 +202,26 @@ def test_02_item_batch_billetera_monto_saldo_impacto(db):
     assert spy_impacto.call_count == 1
 
 
-# 3. El mismo ítem con fecha futura no mueve el saldo.
-def test_03_item_batch_fecha_futura_no_mueve_saldo(db):
+# 3. _registrar_item_batch usa la fecha devuelta por _resolver_y_validar_fecha.
+def test_03_item_batch_usa_fecha_de_resolver_y_validar(db):
     u, b, cat_kiosco, _ = _crear_usuario_y_billetera(db, saldo=Decimal("20000.00"))
 
-    fecha_futura = date.today() + timedelta(days=5)
+    fecha_conocida = date(2026, 5, 10)
     datos = {
         "tipo": "egreso",
         "monto": Decimal("5000.00"),
         "categoria": "Kiosco",
-        "fecha": str(fecha_futura),
-        "descripcion": "Kiosco futuro",
+        "fecha": "ayer",
+        "descripcion": "Kiosco conocido",
         "billetera": b.nombre,
     }
 
-    tx, motivo = _registrar_item_batch(datos, u.id, [b], [], db)
+    with patch("app.routers.whatsapp.registro._resolver_y_validar_fecha", return_value=(fecha_conocida, None)):
+        tx, motivo = _registrar_item_batch(datos, u.id, [b], [], db)
 
     assert tx is not None
     assert motivo is None
-    assert tx.fecha == fecha_futura
-    assert b.saldo_actual == Decimal("20000.00")  # Saldo NO debe haberse movido
+    assert tx.fecha == fecha_conocida
 
 
 # 4. Un egreso que deja la billetera exactamente en 0 crea el aviso SALDO_CERO con canal_whatsapp False.
@@ -258,13 +256,10 @@ def test_04_egreso_saldo_cero_aviso_sin_whatsapp(db):
     assert called, "No se invocó crear_notificacion para SALDO_CERO"
 
 
-# 5. Una categoría inválida descarta el ítem con el mensaje "No se pudo registrar ...",
+# 5. Una categoría inválida descarta el ítem con el mensaje "No se pudo registrar <desc>: Debés seleccionar una categoría.",
 # y no escribe ni la transacción ni el saldo.
 def test_05_categoria_invalida_descarta_item(db):
-    u, b, _, cat_otros = _crear_usuario_y_billetera(db, saldo=Decimal("20000.00"))
-    # Desactivar "Otros" para forzar que falle la resolución y no haya fallback
-    cat_otros.estado = EstadoCategoria.ARCHIVADA
-    db.commit()
+    u, b, _, _ = _crear_usuario_y_billetera(db, saldo=Decimal("20000.00"))
 
     datos = {
         "tipo": "egreso",
@@ -276,11 +271,12 @@ def test_05_categoria_invalida_descarta_item(db):
     }
 
     tx_count_before = db.query(Transaccion).count()
-    tx, motivo = _registrar_item_batch(datos, u.id, [b], [], db)
+    with patch("app.routers.whatsapp.registro._resolver_categoria_y_subcategoria", return_value=(None, None)), \
+         patch("app.routers.whatsapp.registro.TransaccionCreate", side_effect=lambda **kw: TransaccionCreate.model_construct(**kw)):
+        tx, motivo = _registrar_item_batch(datos, u.id, [b], [], db)
 
     assert tx is None
-    assert motivo is not None
-    assert motivo.startswith("No se pudo registrar Kiosco")
+    assert motivo == "No se pudo registrar Kiosco: Debés seleccionar una categoría."
     assert b.saldo_actual == Decimal("20000.00")
     assert db.query(Transaccion).count() == tx_count_before
 

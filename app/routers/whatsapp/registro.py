@@ -2,7 +2,7 @@
 app/routers/whatsapp/registro.py — Registro directo y confirmación de propuestas de transacciones y cuotas para WhatsApp.
 """
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
@@ -18,7 +18,7 @@ from app.core.catalogo_suscripciones import (
 )
 from app.core.constants import MAX_MONTO_INTEGRIDAD
 from app.models.billetera import Billetera, EstadoBilletera
-from app.models.categoria import Categoria, EstadoCategoria, TipoCategoria
+from app.models.categoria import Categoria
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.historial_suscripcion import HistorialSuscripcion
@@ -54,7 +54,6 @@ from app.routers.whatsapp.parsers import (
     _fmt,
     _formatear_fecha_natural,
     _nombre_corto_categoria,
-    _parsear_fecha_texto,
     _parsear_monto_argentino,
     _resolver_fecha_transaccion,
     _resolver_y_validar_fecha,
@@ -80,7 +79,6 @@ from app.services.transaccion_service import (
     deducir_metodo_pago,
     eliminar_transaccion,
 )
-from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 from app.utils.texto import normalizar_texto
 
@@ -204,26 +202,7 @@ def _registrar_item_batch(
     cat_id, subcat_id = _resolver_categoria_y_subcategoria(
         datos.get("categoria"), usuario_id, db, tipo=tipo_item
     )
-    if not cat_id:
-        tipo_enum = TipoCategoria.INGRESO if tipo_item == "ingreso" else TipoCategoria.EGRESO
-        cat_otros = db.execute(
-            select(Categoria).where(
-                Categoria.nombre == "Otros",
-                Categoria.tipo == tipo_enum,
-                Categoria.estado == EstadoCategoria.ACTIVA,
-            )
-        ).scalars().first()
-        if cat_otros:
-            cat_id = cat_otros.id
-            subcat_id = None
-
-    fecha_raw = datos.get("fecha")
-    if isinstance(fecha_raw, date):
-        fecha_obj = fecha_raw
-    elif fecha_raw:
-        fecha_obj = _parsear_fecha_texto(str(fecha_raw)) or hoy_argentina()
-    else:
-        fecha_obj = hoy_argentina()
+    fecha_obj, _ = _resolver_y_validar_fecha(datos.get("fecha"))
     desc_final = ai_service.sanitizar_descripcion(
         datos.get("descripcion"),
         mensaje_original=mensaje_original,
@@ -231,8 +210,6 @@ def _registrar_item_batch(
     )
 
     try:
-        if not cat_id:
-            raise HTTPException(status_code=400, detail="Debés seleccionar una categoría.")
         data_tx = TransaccionCreate(
             tipo=TipoTransaccion.INGRESO if tipo_item == "ingreso" else TipoTransaccion.EGRESO,
             monto=monto_decimal,
@@ -256,7 +233,7 @@ def _registrar_item_batch(
         )
         return tx, None
     except HTTPException as e:
-        return None, f"No se pudo registrar {desc}: {e.detail}."
+        return None, f"No se pudo registrar {desc}: {str(e.detail).rstrip('.')}."
 
 
 def _formatear_confirmacion_lote_unificada(
@@ -624,19 +601,6 @@ def _confirmar_propuesta_transaccion(
     categoria_id, subcategoria_id = _resolver_categoria_y_subcategoria(
         entidades.get("categoria"), usuario.id, db, tipo=tipo_val
     )
-    if not categoria_id:
-        tipo_enum = TipoCategoria.INGRESO if tipo_val == "ingreso" else TipoCategoria.EGRESO
-        cat_otros = db.execute(
-            select(Categoria).where(
-                Categoria.nombre == "Otros",
-                Categoria.tipo == tipo_enum,
-                Categoria.estado == EstadoCategoria.ACTIVA,
-            )
-        ).scalars().first()
-        if cat_otros:
-            categoria_id = cat_otros.id
-            subcategoria_id = None
-
     fecha_obj, _ = _resolver_y_validar_fecha(entidades.get("fecha"))
 
     desc_candidata = entidades.get("descripcion")
@@ -647,8 +611,6 @@ def _confirmar_propuesta_transaccion(
     )
 
     try:
-        if not categoria_id:
-            raise HTTPException(status_code=400, detail="Debés seleccionar una categoría.")
         data_tx = TransaccionCreate(
             tipo=TipoTransaccion.INGRESO if tipo_val == "ingreso" else TipoTransaccion.EGRESO,
             monto=monto_decimal,
@@ -1026,19 +988,6 @@ def _registrar_movimiento_directo(
         return None, "Billetera no encontrada."
 
     cat_id, subcat_id = _resolver_categoria_y_subcategoria(entidades.get("categoria"), usuario.id, db, tipo=tipo_val)
-    if not cat_id:
-        tipo_enum = TipoCategoria.INGRESO if tipo_val == "ingreso" else TipoCategoria.EGRESO
-        cat_otros = db.execute(
-            select(Categoria).where(
-                Categoria.nombre == "Otros",
-                Categoria.tipo == tipo_enum,
-                Categoria.estado == EstadoCategoria.ACTIVA,
-            )
-        ).scalars().first()
-        if cat_otros:
-            cat_id = cat_otros.id
-            subcat_id = None
-
     fecha_obj = _resolver_fecha_transaccion(entidades.get("fecha"))
 
     desc_candidata = entidades.get("descripcion")
@@ -1048,8 +997,6 @@ def _registrar_movimiento_directo(
     )
 
     try:
-        if not cat_id:
-            raise HTTPException(status_code=400, detail="Debés seleccionar una categoría.")
         data_tx = TransaccionCreate(
             tipo=TipoTransaccion.INGRESO if tipo_val == "ingreso" else TipoTransaccion.EGRESO,
             monto=monto_decimal,

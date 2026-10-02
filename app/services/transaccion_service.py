@@ -360,7 +360,7 @@ def crear_transaccion(
                     canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
                     if canales is not None:
                         canal_web, canal_whatsapp = canales
-                        if nueva_transaccion.origen in (OrigenTransaccion.IA_WPP, "ia_wpp", "IA_WPP"):
+                        if nueva_transaccion.origen == OrigenTransaccion.IA_WPP:
                             canal_whatsapp = False
                         crear_notificacion(
                             db=db,
