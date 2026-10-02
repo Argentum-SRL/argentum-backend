@@ -3,7 +3,7 @@ from uuid import UUID
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Optional
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import HTTPException
 from sqlalchemy import select, desc, or_, delete, not_, and_
 from sqlalchemy.orm import Session, joinedload
 from dateutil.relativedelta import relativedelta
@@ -175,26 +175,11 @@ def _validar_tarjeta(db: Session, tarjeta_id: UUID, usuario_id: UUID) -> Tarjeta
     return tarjeta
 
 
-def _evaluar_gasto_inusual_safe(usuario_id: UUID, transaccion_id: UUID) -> None:
-    """Wrapper seguro para evaluar_gasto_inusual en background tasks. Abre su propia sesión de DB."""
-    from app.core.database import SessionLocal
-    db = SessionLocal()
-    try:
-        transaccion = db.get(Transaccion, transaccion_id)
-        if transaccion:
-            evaluar_gasto_inusual(db, usuario_id, transaccion)
-    except Exception as e:
-        logger.warning(f"Error en background evaluar_gasto_inusual para tx {transaccion_id}: {e}")
-    finally:
-        db.close()
-
-
 def crear_transaccion(
     db: Session,
     usuario_id: UUID,
     data: TransaccionCreate,
     commit: bool = True,  # commit=False: la operación de afuera hace el único commit
-    background_tasks: Optional[BackgroundTasks] = None,
 ) -> Transaccion:
     # 1. Validar billetera
     billetera = db.execute(
@@ -392,17 +377,7 @@ def crear_transaccion(
                 except Exception:
                     pass
 
-            # Solo si tiene categoría asignada y hay suficiente historial
-            if nueva_transaccion.categoria_id is not None:
-                if background_tasks is not None:
-                    # Ejecutar en background para no bloquear el request (evita llamadas HTTP externas lentas)
-                    background_tasks.add_task(_evaluar_gasto_inusual_safe, usuario_id, nueva_transaccion.id)
-                else:
-                    try:
-                        evaluar_gasto_inusual(db, usuario_id, nueva_transaccion, commit=False)
-                    except Exception:
-                        pass
-        
+
     # Impacto en presupuestos
     presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False, commit=False)
 
@@ -807,12 +782,6 @@ def confirmar_transaccion_ia(
                 except Exception:
                     pass
 
-            # Solo si tiene categoría asignada y hay suficiente historial
-            if transaccion.categoria_id is not None:
-                try:
-                    evaluar_gasto_inusual(db, usuario_id, transaccion, commit=False)
-                except Exception:
-                    pass
 
     # Si esta transacción es un pago de resumen de tarjeta (creada por job o manual):
     # 1. Marcar como pagadas las cuotas de dicho resumen (incluye atrasadas que arrastre el resumen) y vincularlas
@@ -892,198 +861,5 @@ def obtener_pendientes_ia(db: Session, usuario_id: UUID, skip: int = 0, limit: i
     ).scalars().all()
 
 
-def evaluar_gasto_inusual(
-    db: Session,
-    usuario_id: UUID,
-    transaccion: Transaccion,
-    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
-) -> None:
-    """
-    Evalúa si una transacción de egreso es inusual y genera una notificación.
-    Utiliza tres niveles de sensibilidad según el volumen de historial de la categoría.
-    """
-    from app.models.usuario import Moneda
-    from app.services.definiciones_service import cargar_contexto, es_gasto, condicion_gasto
-    from app.utils.fecha import hoy_argentina
 
-    hoy = hoy_argentina()
-    ctx = cargar_contexto(db, usuario_id, hoy)
-    if not es_gasto(transaccion, ctx) or transaccion.categoria_id is None:
-        return
-
-    # 1. Obtener historial de transacciones de egreso en la misma categoría y moneda
-    stmt = (
-        select(Transaccion)
-        .where(
-            condicion_gasto(usuario_id, moneda=transaccion.moneda, hoy=hoy),
-            Transaccion.categoria_id == transaccion.categoria_id,
-            Transaccion.id != transaccion.id
-        )
-    )
-    historial = db.execute(stmt).scalars().all()
-    count = len(historial)
-
-    if count < 12:
-        return
-
-    # 2. Ajustar montos por inflación si la moneda es ARS (USD nunca se ajusta)
-    montos_historicos = []
-    if transaccion.moneda == Moneda.ARS:
-        from app.services.tools_service import ajustar_por_ipc
-        from app.models.tools import IPCCache
-        ipc_records = db.execute(select(IPCCache).order_by(IPCCache.fecha_dato.asc())).scalars().all()
-        for tx in historial:
-            adjusted = ajustar_por_ipc(
-                monto=float(tx.monto),
-                fecha_origen=tx.fecha.strftime("%Y-%m-%d"),
-                db=db,
-                ipc_records=ipc_records
-            )
-            montos_historicos.append(float(adjusted))
-    else:
-        montos_historicos = [float(tx.monto) for tx in historial]
-
-    monto_actual = float(transaccion.monto)
-
-    from app.services.notificacion_service import crear_notificacion
-    from app.models.notificacion import TipoNotificacion, NivelNotificacion
-    from app.models.categoria import Categoria
-
-    categoria = db.get(Categoria, transaccion.categoria_id)
-    categoria_nombre = categoria.nombre if categoria else "esta categoría"
-    simbolo = "US$ " if transaccion.moneda == Moneda.USD else "$"
-
-    if count < 30:
-        # NIVEL 1: Conservador (12 a 29 transacciones)
-        # Basado en Mediana y MAD
-        def calcular_mediana(valores: list[float]) -> float:
-            n = len(valores)
-            if n == 0:
-                return 0.0
-            sorted_val = sorted(valores)
-            mid = n // 2
-            if n % 2 == 1:
-                return sorted_val[mid]
-            else:
-                return (sorted_val[mid - 1] + sorted_val[mid]) / 2.0
-
-        mediana = calcular_mediana(montos_historicos)
-        desviaciones = [abs(val - mediana) for val in montos_historicos]
-        mad = calcular_mediana(desviaciones)
-
-        dispara = False
-        if mad == 0:
-            threshold = mediana * 1.5
-            dispara = monto_actual > threshold
-        else:
-            z_modificado = 0.6745 * (monto_actual - mediana) / mad
-            dispara = z_modificado > 3.5
-
-        if dispara:
-            monto_fmt = formatear_monto(monto_actual, transaccion.moneda)
-            mediana_fmt = formatear_monto(mediana, transaccion.moneda)
-            mensaje = f"Registramos un gasto inusual: gastaste {monto_fmt} en {categoria_nombre}, pero tu gasto habitual en esa categoría es de {mediana_fmt}."
-            from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion
-            config = obtener_configuracion(db, usuario_id, commit=commit)
-            canales = resolver_canales_notificacion(config, TipoNotificacion.GASTO_INUSUAL)
-            if canales is not None:
-                canal_web, canal_whatsapp = canales
-                crear_notificacion(
-                    db=db,
-                    usuario_id=usuario_id,
-                    tipo=TipoNotificacion.GASTO_INUSUAL,
-                    nivel=NivelNotificacion.FINANCIERA_INFORMATIVA,
-                    mensaje=mensaje,
-                    entidad_tipo="transaccion",
-                    entidad_id=transaccion.id,
-                    deep_link="/app/transacciones",
-                    canal_web=canal_web,
-                    canal_whatsapp=canal_whatsapp,
-                    commit=commit,
-                    datos_template={"monto_fmt": monto_fmt, "categoria": categoria_nombre, "habitual_fmt": mediana_fmt},
-                )
-    else:
-        # NIVEL 2 y 3: count >= 30
-        # Basado en promedio ajustado y perfil financiero (tasa de ahorro + saldo disponible)
-        promedio_ajustado = sum(montos_historicos) / len(montos_historicos)
-
-        from app.models.perfil_financiero import PerfilFinanciero
-        perfil = db.execute(
-            select(PerfilFinanciero).where(PerfilFinanciero.usuario_id == usuario_id)
-        ).scalar_one_or_none()
-
-        from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
-        from app.models.usuario import Usuario
-
-        # Si el perfil financiero no tiene datos suficientes, usar 2.0 y nivel informativa por defecto
-        multiplicador = 2.0
-        nivel = NivelNotificacion.FINANCIERA_INFORMATIVA
-
-        # 1. Tasa de ahorro
-        tasa_ahorro = None
-        if perfil:
-            if transaccion.moneda == Moneda.ARS:
-                tasa_ahorro = perfil.tasa_ahorro_ars
-            elif transaccion.moneda == Moneda.USD:
-                tasa_ahorro = perfil.tasa_ahorro_usd
-
-        # 2. Saldo disponible post-gasto
-        disponible_res = _calcular_saldo_disponible_sync(db, usuario_id)
-        moneda_str = "ars" if transaccion.moneda == Moneda.ARS else "usd"
-        saldo_info = disponible_res.get(moneda_str)
-        saldo_disponible = saldo_info.get("saldo_disponible") if saldo_info else None
-
-        # 3. Ingreso habitual mensual (módulo unificado)
-        from app.services.ingreso_habitual_service import obtener_ingreso_habitual
-        usuario = db.get(Usuario, usuario_id)
-        hoy_dt = hoy_argentina()
-        ingreso_habitual = None
-        if usuario:
-            res_hab = obtener_ingreso_habitual(db, usuario, hoy=hoy_dt, moneda=transaccion.moneda)
-            ingreso_habitual = res_hab.monto
-
-        # Modulación del multiplicador y nivel (excluyente, prioridad a saldo bajo/negativo)
-        cond_saldo_bajo = (
-            saldo_disponible is None
-            or saldo_disponible < Decimal("0")
-            or (ingreso_habitual is not None and saldo_disponible < Decimal("0.10") * ingreso_habitual)
-        )
-        if cond_saldo_bajo:
-            multiplicador = 2.0 - 0.75
-            nivel = NivelNotificacion.FINANCIERA_IMPORTANTE
-        elif (
-            tasa_ahorro is not None
-            and tasa_ahorro > Decimal("0.30")
-            and saldo_disponible is not None
-            and saldo_disponible > Decimal("0")
-        ):
-            multiplicador = 2.0 + 0.75
-            nivel = NivelNotificacion.FINANCIERA_INFORMATIVA
-        else:
-            multiplicador = 2.0
-            nivel = NivelNotificacion.FINANCIERA_INFORMATIVA
-
-        multiplicador = max(multiplicador, 1.2)
-
-        if monto_actual > promedio_ajustado * multiplicador:
-            mensaje = f"Registramos un gasto inusual: gastaste {simbolo}{monto_actual:,.0f} en {categoria_nombre}, pero tu gasto habitual en esa categoría es de {simbolo}{promedio_ajustado:,.0f}."
-            from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion
-            config = obtener_configuracion(db, usuario_id, commit=commit)
-            canales = resolver_canales_notificacion(config, TipoNotificacion.GASTO_INUSUAL)
-            if canales is not None:
-                canal_web, canal_whatsapp = canales
-                crear_notificacion(
-                    db=db,
-                    usuario_id=usuario_id,
-                    tipo=TipoNotificacion.GASTO_INUSUAL,
-                    nivel=nivel,
-                    mensaje=mensaje,
-                    entidad_tipo="transaccion",
-                    entidad_id=transaccion.id,
-                    deep_link="/app/transacciones",
-                    canal_web=canal_web,
-                    canal_whatsapp=canal_whatsapp,
-                    commit=commit,
-                    datos_template={"monto_fmt": f"{simbolo}{monto_actual:,.0f}", "categoria": categoria_nombre, "habitual_fmt": f"{simbolo}{promedio_ajustado:,.0f}"},
-                )
 

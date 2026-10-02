@@ -288,7 +288,7 @@ def pagar_resumen_tarjeta(
 
     ultimos_4 = tarjeta.nombre[-4:] if len(tarjeta.nombre) >= 4 else tarjeta.nombre
     if es_pesificacion:
-        descripcion_pago = f"Pago resumen {ultimos_4} (USD {monto_pago:,.2f})"
+        descripcion_pago = f"Pago resumen {ultimos_4} ({formatear_monto(monto_pago, Moneda.USD)})"
     elif moneda_a_pagar == Moneda.USD:
         descripcion_pago = f"Pago resumen {ultimos_4} (USD)"
     else:

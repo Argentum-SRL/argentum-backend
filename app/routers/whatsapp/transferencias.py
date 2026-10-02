@@ -276,13 +276,13 @@ def _interpretar_transferencia(
                 else:
                     # Fuera de rango plausible
                     candidato_elegido = c1_cotiz if d1 <= d2 else c2_cotiz
-                    c_str = str(int(candidato_elegido)) if candidato_elegido == int(candidato_elegido) else str(candidato_elegido)
-                    ref_str = str(int(cot_ref)) if cot_ref == int(cot_ref) else str(cot_ref)
+                    c_str = formatear_monto(float(candidato_elegido), Moneda.ARS)
+                    ref_str = formatear_monto(float(cot_ref), Moneda.ARS)
                     return (
                         True,
                         "absurda",
                         {},
-                        f"La cotización de ${c_str} por dólar no parece razonable (la cotización de referencia es de ${ref_str}). Por favor verificá el valor e intentá de nuevo.",
+                        f"La cotización de {c_str} por dólar no parece razonable (la cotización de referencia es de {ref_str}). Por favor verificá el valor e intentá de nuevo.",
                     )
 
                 usd_wallets = [w for w in billeteras_usuario if w.moneda == Moneda.USD and w.estado == EstadoBilletera.ACTIVA]
@@ -456,13 +456,13 @@ def _interpretar_transferencia(
                 rango_min = (cot_ref * FACTOR_MIN_COTIZACION_DOLAR).quantize(Decimal("0.01"))
                 rango_max = (cot_ref * FACTOR_MAX_COTIZACION_DOLAR).quantize(Decimal("0.01"))
                 if cotiz < rango_min or cotiz > rango_max:
-                    c_str = str(int(cotiz)) if cotiz == int(cotiz) else str(cotiz)
-                    ref_str = str(int(cot_ref)) if cot_ref == int(cot_ref) else str(cot_ref)
+                    c_str = formatear_monto(float(cotiz), Moneda.ARS)
+                    ref_str = formatear_monto(float(cot_ref), Moneda.ARS)
                     return (
                         True,
                         "absurda",
                         {},
-                        f"La cotización de ${c_str} por dólar no parece razonable (la cotización de referencia es de ${ref_str}). Por favor verificá el valor e intentá de nuevo.",
+                        f"La cotización de {c_str} por dólar no parece razonable (la cotización de referencia es de {ref_str}). Por favor verificá el valor e intentá de nuevo.",
                     )
             pesos = (dolares * cotiz).quantize(Decimal("0.01"))
 
@@ -636,13 +636,13 @@ def _interpretar_transferencia(
                     rango_min = (cot_ref * FACTOR_MIN_COTIZACION_DOLAR).quantize(Decimal("0.01"))
                     rango_max = (cot_ref * FACTOR_MAX_COTIZACION_DOLAR).quantize(Decimal("0.01"))
                     if cotiz < rango_min or cotiz > rango_max:
-                        c_str = str(int(cotiz)) if cotiz == int(cotiz) else str(cotiz)
-                        ref_str = str(int(cot_ref)) if cot_ref == int(cot_ref) else str(cot_ref)
+                        c_str = formatear_monto(float(cotiz), Moneda.ARS)
+                        ref_str = formatear_monto(float(cot_ref), Moneda.ARS)
                         return (
                             True,
                             "absurda",
                             {},
-                            f"La cotización de ${c_str} por dólar no parece razonable (la cotización de referencia es de ${ref_str}). Por favor verificá el valor e intentá de nuevo.",
+                            f"La cotización de {c_str} por dólar no parece razonable (la cotización de referencia es de {ref_str}). Por favor verificá el valor e intentá de nuevo.",
                         )
 
                 cotiz_fmt = formatear_monto(float(cotiz), Moneda.ARS)

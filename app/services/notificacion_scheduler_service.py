@@ -972,9 +972,11 @@ def _job_proyeccion_negativa(db_session_factory):
                         balance = proj.get("balance_proyectado")
                         if pasa_puerta and balance is not None and balance < 0:
                             if moneda_key == "ars":
-                                mensaje = f"¡Atención! Estimamos que tu saldo en pesos va a terminar este ciclo en negativo por {simbolo}{abs(balance):,.0f}. Te sugerimos revisar tus gastos."
+                                monto_fmt = formatear_monto(abs(balance), Moneda.ARS, con_decimales=False)
+                                mensaje = f"¡Atención! Estimamos que tu saldo en pesos va a terminar este ciclo en negativo por {monto_fmt}. Te sugerimos revisar tus gastos."
                             else:
-                                mensaje = f"¡Atención! Estimamos que tu saldo en dólares va a terminar este ciclo en negativo por {simbolo}{abs(balance):,.2f}. Te sugerimos revisar tus gastos."
+                                monto_fmt = formatear_monto(abs(balance), Moneda.USD)
+                                mensaje = f"¡Atención! Estimamos que tu saldo en dólares va a terminar este ciclo en negativo por {monto_fmt}. Te sugerimos revisar tus gastos."
 
                             # Clave de deduplicación que incluye ID de usuario, moneda y fecha inicio del ciclo
                             grupo_override = f"proyeccion_negativa/{usuario.id}/{moneda_key}/{fecha_inicio_ciclo.strftime('%Y%m%d')}"
@@ -994,7 +996,7 @@ def _job_proyeccion_negativa(db_session_factory):
                                     canal_whatsapp=canal_whatsapp,
                                     canal_email=False,
                                     grupo_agrupacion_override=grupo_override,
-                                    datos_template={"moneda_label": "pesos" if moneda_key == "ars" else "dólares", "monto_fmt": f"{simbolo}{abs(balance):,.0f}" if moneda_key == "ars" else f"{simbolo}{abs(balance):,.2f}"},
+                                    datos_template={"moneda_label": "pesos" if moneda_key == "ars" else "dólares", "monto_fmt": monto_fmt},
                                 )
                                 if notif:
                                     cant_notificaciones_creadas += 1

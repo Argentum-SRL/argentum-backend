@@ -213,7 +213,7 @@ def registrar_movimiento(
             if data.cotizacion_usada < min_permitido or data.cotizacion_usada > max_permitido:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"La cotización ingresada (${data.cotizacion_usada:,.2f}) difiere más del 30% de la cotización actual (${cotizacion_referencia:,.2f}). Ingresá un valor entre ${min_permitido:,.2f} y ${max_permitido:,.2f}."
+                    detail=f"La cotización ingresada ({formatear_monto(data.cotizacion_usada, Moneda.ARS)}) difiere más del 30% de la cotización actual ({formatear_monto(cotizacion_referencia, Moneda.ARS)}). Ingresá un valor entre {formatear_monto(min_permitido, Moneda.ARS)} y {formatear_monto(max_permitido, Moneda.ARS)}."
                 )
 
         # Meta en USD, Movimiento en ARS. monto_impacto = monto_ars / cotizacion

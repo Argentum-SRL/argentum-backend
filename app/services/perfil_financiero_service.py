@@ -22,6 +22,7 @@ from app.services.dashboard_service import get_ciclo_fechas
 from app.services.datos_motor_service import cargar_datos_motor, ciclos_anteriores
 from app.services.definiciones_service import ContextoDefiniciones, es_gasto, es_ingreso
 from app.utils.fecha import hoy_argentina
+from app.utils.formato import formatear_monto
 from app.services.compromisos_service import calcular_compromisos_memoria
 from app.services.ingreso_habitual_service import obtener_ingreso_habitual
 from app.utils.finanzas import (
@@ -447,18 +448,18 @@ def calcular_perfil_nuevo(db: Session, usuario: Usuario, data: dict[str, Any] | 
 
     if comprometido_ratio is not None:
         pct_comp = round(comprometido_ratio * Decimal("100"), 1)
-        interp_relativas["gasto_comprometido"] = f"Demanda el {pct_comp}% de tu ingreso típico mensual (${comprometido:,.0f} / mes en cuotas, suscripciones y gastos fijos)."
+        interp_relativas["gasto_comprometido"] = f"Demanda el {pct_comp}% de tu ingreso típico mensual ({formatear_monto(comprometido, Moneda.ARS, con_decimales=False)} / mes en cuotas, suscripciones y gastos fijos)."
 
     if habitos_ratio is not None:
         pct_hab = round(habitos_ratio * Decimal("100"), 1)
-        interp_relativas["gasto_habitos"] = f"Representa el {pct_hab}% de tu ingreso típico mensual (${habitos:,.0f} / mes en consumos habituales elegibles)."
+        interp_relativas["gasto_habitos"] = f"Representa el {pct_hab}% de tu ingreso típico mensual ({formatear_monto(habitos, Moneda.ARS, con_decimales=False)} / mes en consumos habituales elegibles)."
 
     if runway is not None:
-        interp_relativas["runway"] = f"Tu liquidez actual (${saldo_runway_ars:,.0f}) cubre {runway:.1f} meses de tu gasto típico mensual deflactado (${gasto_tipico:,.0f}/mes)."
+        interp_relativas["runway"] = f"Tu liquidez actual ({formatear_monto(saldo_runway_ars, Moneda.ARS, con_decimales=False)}) cubre {runway:.1f} meses de tu gasto típico mensual deflactado ({formatear_monto(gasto_tipico, Moneda.ARS, con_decimales=False)}/mes)."
 
     if volatilidad is not None:
         pct_vol = round(volatilidad * Decimal("100"), 1)
-        interp_relativas["volatilidad"] = f"Tus gastos variables fluctúan típicamente un ±{pct_vol}% respecto de tu mediana mensual (${variable_tipico:,.0f})."
+        interp_relativas["volatilidad"] = f"Tus gastos variables fluctúan típicamente un ±{pct_vol}% respecto de tu mediana mensual ({formatear_monto(variable_tipico, Moneda.ARS, con_decimales=False)})."
 
     if ingreso_tipico is not None:
         interp_relativas["ingreso_tipico"] = "Ingreso habitual estimado en ARS."
