@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Tuple
 
@@ -44,7 +45,7 @@ from app.models.presupuesto import Presupuesto
 from app.models.rendimiento_billetera import RendimientoBilletera
 from app.models.suscripcion import Suscripcion
 from app.models.tarjeta_credito import TarjetaCredito
-from app.models.transaccion import TipoTransaccion, Transaccion
+from app.models.transaccion import EstadoVerificacionTransaccion, TipoTransaccion, Transaccion
 from app.models.transferencia_interna import TransferenciaInterna
 from app.models.usuario import Usuario
 from app.services.conciliacion_service import calcular_saldo_teorico
@@ -68,6 +69,101 @@ def verificar_testingadmin(db: Session = None, fecha_corte=None) -> Tuple[bool, 
     finally:
         if cerrar_db:
             db.close()
+
+
+def verificar_cuotas_vencidas(db: Session, user_id: Any = None, fecha_corte: Any = None) -> Tuple[bool, List[str]]:
+    """
+    Verifica las cuotas vencidas impagas para un usuario (por defecto testingadmin).
+
+    Reglas de evaluación:
+    - 'Vencida': fecha_vencimiento estrictamente anterior a fecha_corte (vencimiento < fecha_corte).
+    - Es FALLO si la cuota impaga vencida:
+      a) pertenece a un grupo con tarjeta y existe un pago de resumen CONFIRMADO de esa tarjeta
+         con pago_resumen_vencimiento >= fecha_vencimiento de la cuota (el resumen se pagó pero
+         la cuota no quedó marcada como pagada).
+      b) pertenece a un grupo sin tarjeta.
+    - Es INFORMATIVO (no hace fallar el verificador): si la cuota pertenece a una tarjeta cuyo resumen
+      todavía no tiene un pago confirmado. Se informa como 'resumen vencido sin pagar' con cantidad y monto.
+    """
+    # Manejo flexible si se invoca pasando fecha_corte como segundo argumento posicional
+    if isinstance(user_id, (date, datetime)):
+        fecha_corte = user_id
+        user_id = None
+
+    if fecha_corte is None:
+        fecha_corte = hoy_argentina()
+    elif isinstance(fecha_corte, datetime):
+        fecha_corte = fecha_corte.date()
+
+    if user_id is None:
+        user = db.query(Usuario).filter(Usuario.email == EMAIL_TESTINGADMIN).first()
+        if not user:
+            return False, [f"ERROR CRITICO: Usuario {EMAIL_TESTINGADMIN} no encontrado en la base."]
+        user_id = user.id
+
+    lineas: List[str] = []
+    lineas.append("--- 4. CUOTAS VENCIDAS IMPAGAS ---")
+
+    # Cuotas impagas con vencimiento estrictamente anterior a fecha_corte
+    cuotas_vencidas_impagas = (
+        db.query(Cuota, GrupoCuotas)
+        .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
+        .filter(
+            GrupoCuotas.usuario_id == user_id,
+            Cuota.pagada == False,
+            Cuota.fecha_vencimiento < fecha_corte,
+        )
+        .order_by(Cuota.fecha_vencimiento, Cuota.numero_cuota)
+        .all()
+    )
+
+    cuotas_fallo: List[Cuota] = []
+    cuotas_info: List[Tuple[Cuota, GrupoCuotas]] = []
+
+    for cuota, grupo in cuotas_vencidas_impagas:
+        if grupo.tarjeta_id is not None:
+            # Caso a: grupo con tarjeta de crédito
+            # Verificar si existe un pago de resumen CONFIRMADO que cubra el vencimiento de la cuota
+            pago_confirmado = (
+                db.query(Transaccion.id)
+                .filter(
+                    Transaccion.usuario_id == user_id,
+                    Transaccion.tarjeta_id == grupo.tarjeta_id,
+                    Transaccion.pago_resumen_vencimiento >= cuota.fecha_vencimiento,
+                    Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
+                )
+                .first()
+            )
+            if pago_confirmado is not None:
+                # El resumen correspondiente fue pagado pero la cuota quedó impaga
+                cuotas_fallo.append(cuota)
+            else:
+                # El resumen correspondiente aún no tiene pago confirmado registrado
+                cuotas_info.append((cuota, grupo))
+        else:
+            # Caso b: cuota sin tarjeta asociada. Vencida e impaga es inconsistencia
+            cuotas_fallo.append(cuota)
+
+    es_correcto = (len(cuotas_fallo) == 0)
+
+    if es_correcto:
+        lineas.append("  [OK] 0 cuotas vencidas impagas.")
+    else:
+        lineas.append(f"  [FALLO] Se encontraron {len(cuotas_fallo)} cuotas vencidas impagas:")
+        for cvi in cuotas_fallo:
+            lineas.append(f"    - Cuota #{cvi.numero_cuota} vto={cvi.fecha_vencimiento} monto={cvi.monto_proyectado}")
+
+    if len(cuotas_info) > 0:
+        # Agrupar montos informativos por moneda
+        montos_por_moneda: Dict[str, Decimal] = {}
+        for c, g in cuotas_info:
+            mon = g.moneda.value if hasattr(g, "moneda") and g.moneda else "ARS"
+            montos_por_moneda[mon] = montos_por_moneda.get(mon, Decimal("0.00")) + Decimal(str(c.monto_proyectado or 0))
+        monto_str = ", ".join(f"{monto:.2f} {mon}" for mon, monto in montos_por_moneda.items())
+        lineas.append(f"  [INFO] {len(cuotas_info)} cuotas con resumen vencido sin pagar (monto total: {monto_str}).")
+
+    lineas.append("")
+    return es_correcto, lineas
 
 
 def _ejecutar_verificacion(db: Session, fecha_corte=None) -> Tuple[bool, List[str]]:
@@ -192,21 +288,10 @@ def _ejecutar_verificacion(db: Session, fecha_corte=None) -> Tuple[bool, List[st
     # --------------------------------------------------------------------------
     # 4. CUOTAS VENCIDAS IMPAGAS
     # --------------------------------------------------------------------------
-    lineas.append("--- 4. CUOTAS VENCIDAS IMPAGAS ---")
-    cuotas_vencidas_impagas = db.query(Cuota).join(GrupoCuotas).filter(
-        GrupoCuotas.usuario_id == user.id,
-        Cuota.pagada == False,
-        Cuota.fecha_vencimiento <= fecha_corte,
-    ).all()
-
-    if len(cuotas_vencidas_impagas) == 0:
-        lineas.append("  [OK] 0 cuotas vencidas impagas.")
-    else:
+    ok_cuotas, lineas_cuotas = verificar_cuotas_vencidas(db, user.id, fecha_corte)
+    if not ok_cuotas:
         todo_correcto = False
-        lineas.append(f"  [FALLO] Se encontraron {len(cuotas_vencidas_impagas)} cuotas vencidas impagas:")
-        for cvi in cuotas_vencidas_impagas:
-            lineas.append(f"    - Cuota #{cvi.numero_cuota} vto={cvi.fecha_vencimiento} monto={cvi.monto_proyectado}")
-    lineas.append("")
+    lineas.extend(lineas_cuotas)
 
     # --------------------------------------------------------------------------
     # 5. INGRESOS CON SUSCRIPCION_ID
