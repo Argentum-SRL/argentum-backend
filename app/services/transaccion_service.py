@@ -856,18 +856,19 @@ def confirmar_transaccion_ia(
     # Impacto en presupuestos
     presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=False, commit=False)
 
-    # Trigger: recalcular perfil financiero en background
-    try:
-        from app.services.perfil_financiero_service import recalcular_perfil_tras_confirmacion
-        recalcular_perfil_tras_confirmacion(db, usuario_id, commit=False)
-    except Exception:
-        pass  # No interrumpir el flujo principal si falla
-
     if commit:
         db.commit()
         db.refresh(transaccion)
+
+        # Trigger: recalcular perfil financiero en background
+        try:
+            from app.services.perfil_financiero_service import recalcular_perfil_tras_confirmacion
+            recalcular_perfil_tras_confirmacion(db, usuario_id)
+        except Exception:
+            pass  # No interrumpir el flujo principal si falla
     else:
         db.flush()
+        # con commit=False, el perfil lo recalcula quien hace el commit
 
     return transaccion
 

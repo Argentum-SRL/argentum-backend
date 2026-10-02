@@ -338,11 +338,7 @@ def prepagar_grupo(
     return grupo
 
 
-def _eliminar_cuota_pendiente(
-    db: Session,
-    cuota: Cuota,
-    commit: bool = False,  # commit=False: la operación de afuera hace el único commit
-) -> None:
+def _eliminar_cuota_pendiente(db: Session, cuota: Cuota) -> None:
     """
     Elimina una cuota pendiente puntual y su transacción hija asociada,
     revirtiendo el impacto presupuestario si correspondiera.
@@ -427,7 +423,7 @@ def eliminar_cuota_individual(
         raise HTTPException(status_code=404, detail="No encontramos el grupo de cuotas.")
 
     # 3. Borrar la cuota pendiente puntual y su transacción hija reusando la función existente
-    _eliminar_cuota_pendiente(db, cuota, commit=False)
+    _eliminar_cuota_pendiente(db, cuota)
     db.flush()
 
     # 4. Verificar cuotas restantes del grupo
@@ -539,7 +535,7 @@ def actualizar_grupo(
         # Borrar cuotas pendientes y sus transacciones hijas usando la función local
         cuotas_pendientes = [c for c in list(grupo.cuotas) if not c.pagada]
         for c in cuotas_pendientes:
-            _eliminar_cuota_pendiente(db, c, commit=False)
+            _eliminar_cuota_pendiente(db, c)
         db.flush()
         db.expire(grupo, ["cuotas"])
 

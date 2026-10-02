@@ -9,24 +9,40 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-@compiles(JSONB, "sqlite")
-def compile_jsonb_sqlite(type_, compiler, **kw):
-    return "TEXT"
-
 import uuid
 from sqlalchemy import types
 
-_orig_uuid_processor = types.Uuid.bind_processor
-def _safe_uuid_processor(self, dialect):
-    proc = _orig_uuid_processor(self, dialect)
-    if proc is None:
-        return None
-    def process(value):
-        if isinstance(value, str):
-            value = uuid.UUID(value)
-        return proc(value)
-    return process
-types.Uuid.bind_processor = _safe_uuid_processor
+@pytest.fixture(autouse=True)
+def setup_sqlite_compat(monkeypatch):
+    # 1. JSONB on sqlite: preservar si ya estaba registrado
+    had_sqlite = (
+        hasattr(JSONB, "_compiler_dispatcher")
+        and "sqlite" in getattr(JSONB._compiler_dispatcher, "specs", {})
+    )
+    if not had_sqlite:
+        compiles(JSONB, "sqlite")(lambda type_, compiler, **kw: "TEXT")
+
+    # 2. Monkeypatch de types.Uuid.bind_processor para soportar UUID en string sin modificar SQLAlchemy globalmente
+    orig_uuid_processor = types.Uuid.bind_processor
+    def _safe_uuid_processor(self, dialect):
+        proc = orig_uuid_processor(self, dialect)
+        if proc is None:
+            return None
+        def process(value):
+            if isinstance(value, str):
+                try:
+                    value = uuid.UUID(value)
+                except Exception:
+                    pass
+            return proc(value)
+        return process
+    monkeypatch.setattr(types.Uuid, "bind_processor", _safe_uuid_processor)
+
+    yield
+
+    if not had_sqlite:
+        if hasattr(JSONB, "_compiler_dispatcher") and hasattr(JSONB._compiler_dispatcher, "specs"):
+            JSONB._compiler_dispatcher.specs.pop("sqlite", None)
 
 from app.core.database import Base
 from app.models.billetera import Billetera, EstadoBilletera
@@ -377,7 +393,7 @@ def test_confirmar_pendiente_commit_true(db_session):
 
     with patch.object(db_session, "commit", wraps=db_session.commit) as mock_commit:
         tx_conf = transaccion_service.confirmar_transaccion_ia(db_session, u.id, tx_pend.id, commit=True)
-        assert mock_commit.call_count == 1
+        assert mock_commit.call_count == 2  # 2 commits: la operacion y despues el perfil
         assert tx_conf.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA
         assert db_session.get(Billetera, b.id).saldo_actual == Decimal("8000.00")
 
@@ -409,6 +425,76 @@ def test_confirmar_pendiente_commit_false_rollback(db_session):
     tx_ref = db_session.get(Transaccion, tx_pend.id)
     assert tx_ref.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE
     assert db_session.get(Billetera, b.id).saldo_actual == Decimal("10000.00")
+
+
+def test_confirmar_pendiente_commit_antes_de_recalcular_perfil(db_session):
+    u, b, cat = _crear_base(db_session)
+    tx_pend = Transaccion(
+        id=uuid4(),
+        usuario_id=u.id,
+        tipo=TipoTransaccion.EGRESO,
+        monto=Decimal("2000.00"),
+        moneda=Moneda.ARS,
+        fecha=date.today(),
+        descripcion="Ticket pendiente orden",
+        categoria_id=cat.id,
+        metodo_pago=MetodoPago.DEBITO,
+        billetera_id=b.id,
+        origen=OrigenTransaccion.IA_WPP,
+        estado_verificacion=EstadoVerificacionTransaccion.PENDIENTE,
+    )
+    db_session.add(tx_pend)
+    db_session.commit()
+
+    orden_llamadas = []
+    orig_commit = db_session.commit
+
+    def tracked_commit():
+        orden_llamadas.append("commit")
+        return orig_commit()
+
+    def tracked_recalcular(db, usuario_id):
+        orden_llamadas.append("recalcular_perfil")
+
+    with (
+        patch.object(db_session, "commit", side_effect=tracked_commit),
+        patch("app.services.perfil_financiero_service.recalcular_perfil_tras_confirmacion", side_effect=tracked_recalcular),
+    ):
+        transaccion_service.confirmar_transaccion_ia(db_session, u.id, tx_pend.id, commit=True)
+        assert orden_llamadas == ["commit", "recalcular_perfil"]
+
+
+def test_confirmar_pendiente_error_recalculo_mantiene_confirmacion(db_session):
+    u, b, cat = _crear_base(db_session)
+    tx_pend = Transaccion(
+        id=uuid4(),
+        usuario_id=u.id,
+        tipo=TipoTransaccion.EGRESO,
+        monto=Decimal("2000.00"),
+        moneda=Moneda.ARS,
+        fecha=date.today(),
+        descripcion="Ticket pendiente error perfil",
+        categoria_id=cat.id,
+        metodo_pago=MetodoPago.DEBITO,
+        billetera_id=b.id,
+        origen=OrigenTransaccion.IA_WPP,
+        estado_verificacion=EstadoVerificacionTransaccion.PENDIENTE,
+    )
+    db_session.add(tx_pend)
+    db_session.commit()
+
+    with patch(
+        "app.services.perfil_financiero_service.recalcular_perfil_tras_confirmacion",
+        side_effect=RuntimeError("Fallo inesperado al recalcular perfil"),
+    ):
+        tx_conf = transaccion_service.confirmar_transaccion_ia(db_session, u.id, tx_pend.id, commit=True)
+        assert tx_conf.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA
+
+    # Verificar en la base que la transacción quedó efectivamente grabada como CONFIRMADA
+    db_session.expire_all()
+    tx_db = db_session.get(Transaccion, tx_pend.id)
+    assert tx_db is not None
+    assert tx_db.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA
 
 
 # 7. Transferencia con comisión y su borrado

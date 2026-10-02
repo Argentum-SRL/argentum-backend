@@ -40,11 +40,7 @@ from app.utils.finanzas import (
 logger = logging.getLogger(__name__)
 
 
-def _calcular_y_persistir_perfil_sync(
-    db: Session,
-    usuario_id: UUID,
-    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
-) -> PerfilFinanciero | None:
+def _calcular_y_persistir_perfil_sync(db: Session, usuario_id: UUID) -> PerfilFinanciero | None:
     
     usuario = db.get(Usuario, usuario_id)
     if not usuario:
@@ -63,11 +59,8 @@ def _calcular_y_persistir_perfil_sync(
     perfil.ratio_cuotas_usd = None
     perfil.consistencia_registro = nuevo["cobertura_registro"]
     perfil.ultima_actualizacion = datetime.now(timezone.utc)
-    if commit:
-        db.commit()
-        db.refresh(perfil)
-    else:
-        db.flush()
+    db.commit()
+    db.refresh(perfil)
     return perfil
 
 
@@ -206,18 +199,14 @@ def guardar_snapshot_historial(
     return snapshot
 
 
-def recalcular_perfil_tras_confirmacion(
-    db: Session,
-    usuario_id: UUID,
-    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
-) -> None:
+def recalcular_perfil_tras_confirmacion(db: Session, usuario_id: UUID) -> None:
     """
     Trigger síncrono para recalcular el perfil cuando se confirma una transacción.
     Se llama desde el endpoint de confirmación (síncrono).
     Falla silenciosamente para no interrumpir el flujo principal.
     """
     try:
-        _calcular_y_persistir_perfil_sync(db, usuario_id, commit=commit)
+        _calcular_y_persistir_perfil_sync(db, usuario_id)
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)

@@ -96,7 +96,7 @@ def main():
     resultados.append(("Pytest (-q)", ok_py, dur_py))
 
     # 3. Suite WhatsApp
-    cmd_suite = [str(PYTHON_EXE), str(con_base_local_py), str(PYTHON_EXE), str(suite_py), "-v"]
+    cmd_suite = [str(PYTHON_EXE), str(con_base_local_py), str(PYTHON_EXE), str(suite_py), "-v", "--forzar-grabadas"]
     ok_suite, dur_suite = run_step("3. Suite WhatsApp contra base local", cmd_suite)
     resultados.append(("Suite WhatsApp (-v)", ok_suite, dur_suite))
 

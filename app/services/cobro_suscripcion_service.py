@@ -93,13 +93,7 @@ def _resolver_monto_y_conversion(
     )
 
 
-def _cobrar_suscripcion(
-    db: Session,
-    suscripcion: Suscripcion,
-    hoy: date,
-    primer_vencimiento: date | None = None,
-    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
-) -> bool:
+def _cobrar_suscripcion(db: Session, suscripcion: Suscripcion, hoy: date, primer_vencimiento: date | None = None) -> bool:
     """
     Crea la transacción (y cuota si es tarjeta) para un período de cobro.
     Avanza proximo_cobro al siguiente período exactamente desde la fecha que se está cobrando.
@@ -268,11 +262,6 @@ def _cobrar_suscripcion(
             commit=False,
         )
 
-    if commit:
-        db.commit()
-    else:
-        db.flush()
-
     return True
 
 
@@ -316,21 +305,23 @@ def procesar_cobros_suscripciones(
             continue
 
         try:
-            exito = _cobrar_suscripcion(db, suscripcion, hoy, commit=False)
-            if exito:
-                cobradas += 1
-                detalles.append({
-                    "suscripcion_id": str(suscripcion.id),
-                    "nombre": suscripcion.nombre,
-                    "resultado": "cobrada",
-                })
-            else:
-                pendientes_cotizacion += 1
-                detalles.append({
-                    "suscripcion_id": str(suscripcion.id),
-                    "nombre": suscripcion.nombre,
-                    "resultado": "pendiente_sin_cotizacion",
-                })
+            with db.begin_nested():
+                exito = _cobrar_suscripcion(db, suscripcion, hoy)
+                if exito:
+                    db.flush()
+                    cobradas += 1
+                    detalles.append({
+                        "suscripcion_id": str(suscripcion.id),
+                        "nombre": suscripcion.nombre,
+                        "resultado": "cobrada",
+                    })
+                else:
+                    pendientes_cotizacion += 1
+                    detalles.append({
+                        "suscripcion_id": str(suscripcion.id),
+                        "nombre": suscripcion.nombre,
+                        "resultado": "pendiente_sin_cotizacion",
+                    })
         except Exception as e:
             errores += 1
             logger.error(
