@@ -16,6 +16,12 @@ from scripts.regresion.suite.escenarios_p13 import *
 from scripts.regresion.suite.escenarios_p14 import *
 from scripts.regresion.suite.escenarios_p16 import *
 from scripts.regresion.suite.escenarios_p17 import *
+from scripts.regresion.suite.escenarios_p18 import (
+    p18_caso_1,
+    p18_caso_2,
+    p18_caso_3,
+    p18_caso_4,
+)
 
 
 def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
@@ -1096,5 +1102,29 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "nombre": "lote con fechas intermedias propaga fecha previa a movimientos sin fecha",
             "ejecutar": lambda: p17_caso_15(datos),
             "esperado": "Lote 3 txs: True | Fechas 25/09 25/09 27/09: True",
+        },
+        {
+            "id": "P18.1", "punto": "Punto 18", "match": "exacto",
+            "nombre": "Consulta permitirse contado: tele de 300.000",
+            "ejecutar": lambda: p18_caso_1(datos),
+            "esperado": "Intent: puede_permitirse | Respuesta ok: True",
+        },
+        {
+            "id": "P18.2", "punto": "Punto 18", "match": "exacto",
+            "nombre": "Consulta permitirse cuotas: celular de 600 mil en 6 cuotas",
+            "ejecutar": lambda: p18_caso_2(datos),
+            "esperado": "Intent: puede_permitirse | Respuesta ok: True",
+        },
+        {
+            "id": "P18.3", "punto": "Punto 18", "match": "exacto",
+            "nombre": "Consulta permitirse cuotas de X: heladera en 12 cuotas de 50 lucas",
+            "ejecutar": lambda: p18_caso_3(datos),
+            "esperado": "Intent: puede_permitirse | Respuesta ok: True",
+        },
+        {
+            "id": "P18.4", "punto": "Punto 18", "match": "exacto",
+            "nombre": "Consulta permitirse sin precio: me lo puedo permitir",
+            "ejecutar": lambda: p18_caso_4(datos),
+            "esperado": "Intent: puede_permitirse | Respuesta ok: True",
         },
     ]

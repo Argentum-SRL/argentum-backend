@@ -27,6 +27,7 @@ from app.routers.whatsapp.handlers_deshacer import (
     manejar_corregir,
     manejar_deshacer,
 )
+from app.routers.whatsapp.handlers_permitirse import manejar_consulta_permitirse
 from app.routers.whatsapp.handlers_menus import (
     manejar_aclaracion_cuotas,
     manejar_menu_billetera,
@@ -232,6 +233,11 @@ def procesar_estados_y_handlers_deterministicos(ctx: ContextoMensaje) -> None:
     if manejar_numero_aislado(
         mensaje_texto, usuario, db, from_number, wamid=wamid, conv_activa=conv_activa, estado_previo=estado_previo
     ):
+        ctx.terminado = True
+        return
+
+    # 7.4 Detección determinística de '¿me lo puedo permitir?' (Fase 3 F2)
+    if manejar_consulta_permitirse(ctx):
         ctx.terminado = True
         return
 
