@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
+from fastapi import HTTPException
 import structlog
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -17,7 +18,7 @@ from app.core.catalogo_suscripciones import (
 )
 from app.core.constants import MAX_MONTO_INTEGRIDAD
 from app.models.billetera import Billetera, EstadoBilletera
-from app.models.categoria import Categoria, TipoCategoria
+from app.models.categoria import Categoria, EstadoCategoria, TipoCategoria
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.historial_suscripcion import HistorialSuscripcion
@@ -53,6 +54,7 @@ from app.routers.whatsapp.parsers import (
     _fmt,
     _formatear_fecha_natural,
     _nombre_corto_categoria,
+    _parsear_fecha_texto,
     _parsear_monto_argentino,
     _resolver_fecha_transaccion,
     _resolver_y_validar_fecha,
@@ -68,7 +70,6 @@ from app.routers.whatsapp.resolvers_cascada import (
 from app.schemas.transaccion import InfoCuotas, TransaccionCreate
 from app.services import (
     ai_service,
-    presupuesto_service,
     transaccion_service,
     whatsapp_service,
 )
@@ -199,39 +200,63 @@ def _registrar_item_batch(
         return None, f"Billetera {billetera_item.nombre} no encontrada."
 
     tipo_item = datos.get("tipo") or "egreso"
-    if tipo_item == "ingreso":
-        billetera_db.saldo_actual += monto_decimal
-    else:
-        billetera_db.saldo_actual -= monto_decimal
 
     cat_id, subcat_id = _resolver_categoria_y_subcategoria(
         datos.get("categoria"), usuario_id, db, tipo=tipo_item
     )
-    fecha_obj, _ = _resolver_y_validar_fecha(datos.get("fecha"))
+    if not cat_id:
+        tipo_enum = TipoCategoria.INGRESO if tipo_item == "ingreso" else TipoCategoria.EGRESO
+        cat_otros = db.execute(
+            select(Categoria).where(
+                Categoria.nombre == "Otros",
+                Categoria.tipo == tipo_enum,
+                Categoria.estado == EstadoCategoria.ACTIVA,
+            )
+        ).scalars().first()
+        if cat_otros:
+            cat_id = cat_otros.id
+            subcat_id = None
+
+    fecha_raw = datos.get("fecha")
+    if isinstance(fecha_raw, date):
+        fecha_obj = fecha_raw
+    elif fecha_raw:
+        fecha_obj = _parsear_fecha_texto(str(fecha_raw)) or hoy_argentina()
+    else:
+        fecha_obj = hoy_argentina()
     desc_final = ai_service.sanitizar_descripcion(
         datos.get("descripcion"),
         mensaje_original=mensaje_original,
         tipo=tipo_item,
     )
-    tx = Transaccion(
-        usuario_id=usuario_id,
-        tipo=TipoTransaccion.INGRESO if tipo_item == "ingreso" else TipoTransaccion.EGRESO,
-        monto=monto_decimal,
-        moneda=billetera_db.moneda,
-        fecha=fecha_obj,
-        descripcion=desc_final or _nombre_corto_categoria(datos.get("categoria")),
-        metodo_pago=deducir_metodo_pago(billetera_db, tarjeta_id=None),
-        billetera_id=billetera_db.id,
-        categoria_id=cat_id,
-        subcategoria_id=subcat_id,
-        origen=OrigenTransaccion.IA_WPP,
-        estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        es_cuota_hija=False,
-        es_padre_cuotas=False,
-    )
-    db.add(tx)
-    presupuesto_service.registrar_impacto_presupuesto(db, tx, revertir=False, commit=False)
-    return tx, None
+
+    try:
+        if not cat_id:
+            raise HTTPException(status_code=400, detail="Debés seleccionar una categoría.")
+        data_tx = TransaccionCreate(
+            tipo=TipoTransaccion.INGRESO if tipo_item == "ingreso" else TipoTransaccion.EGRESO,
+            monto=monto_decimal,
+            moneda=billetera_db.moneda,
+            fecha=fecha_obj,
+            descripcion=desc_final or _nombre_corto_categoria(datos.get("categoria")),
+            metodo_pago=deducir_metodo_pago(billetera_db, tarjeta_id=None),
+            billetera_id=billetera_db.id,
+            categoria_id=cat_id,
+            subcategoria_id=subcat_id,
+            origen=OrigenTransaccion.IA_WPP,
+            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+            es_cuota_hija=False,
+            es_padre_cuotas=False,
+        )
+        tx = transaccion_service.crear_transaccion(
+            db=db,
+            usuario_id=usuario_id,
+            data=data_tx,
+            commit=False,
+        )
+        return tx, None
+    except HTTPException as e:
+        return None, f"No se pudo registrar {desc}: {e.detail}."
 
 
 def _formatear_confirmacion_lote_unificada(
@@ -346,71 +371,7 @@ def _confirmar_propuesta_transaccion(
     """
     limite_tiempo = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
 
-    # 1. Primero verificar si hay una transacción pendiente de IA
-    tx_pend = db.execute(
-        select(Transaccion)
-        .where(
-            Transaccion.usuario_id == usuario.id,
-            Transaccion.origen == OrigenTransaccion.IA_WPP,
-            Transaccion.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE,
-            Transaccion.fecha_creacion >= limite_tiempo,
-        )
-        .order_by(Transaccion.fecha_creacion.desc(), Transaccion.id.desc())
-        .with_for_update()
-    ).scalars().first()
-
-    if tx_pend:
-        tx_pend.estado_verificacion = EstadoVerificacionTransaccion.CONFIRMADA
-        billetera = db.execute(
-            select(Billetera).where(Billetera.id == tx_pend.billetera_id).with_for_update()
-        ).scalars().first()
-        if billetera:
-            if tx_pend.tipo == TipoTransaccion.INGRESO:
-                billetera.saldo_actual += tx_pend.monto
-            else:
-                billetera.saldo_actual -= tx_pend.monto
-        emitir_evento_actualizacion(db, usuario.id, "transacciones")
-        emitir_evento_actualizacion(db, usuario.id, "billeteras")
-        db.flush()
-
-        monto_str = formatear_monto(float(tx_pend.monto), tx_pend.moneda)
-        bill_nombre = billetera.nombre if billetera else None
-        cat_nombre = None
-        if tx_pend.categoria_id:
-            cat = db.execute(select(Categoria).where(Categoria.id == tx_pend.categoria_id)).scalars().first()
-            cat_nombre = cat.nombre if cat else None
-        subcat_nombre = None
-        if tx_pend.subcategoria_id:
-            subcat = db.execute(select(Subcategoria).where(Subcategoria.id == tx_pend.subcategoria_id)).scalars().first()
-            subcat_nombre = subcat.nombre if subcat else None
-        nombre_cat_disp = subcat_nombre or cat_nombre or "Otros"
-
-        fecha_nat = _formatear_fecha_natural(tx_pend.fecha)
-        fecha_disp = f" ({fecha_nat})" if fecha_nat else ""
-
-        if tx_pend.tipo == TipoTransaccion.INGRESO:
-            partes = [f"Listo. Ingreso de {monto_str}"]
-            if nombre_cat_disp:
-                partes.append(f"en {nombre_cat_disp}")
-            if bill_nombre:
-                partes.append(f"a {bill_nombre}{fecha_disp}")
-            partes.append("— registrado.")
-        else:
-            partes = [f"Listo. {monto_str}"]
-            if nombre_cat_disp:
-                partes.append(f"en {nombre_cat_disp}")
-            if bill_nombre:
-                partes.append(f"desde {bill_nombre}{fecha_disp}")
-            partes.append("— registrado.")
-        msg_resp = " ".join(partes)
-
-        if billetera:
-            # REGLA DE PRIVACIDAD: Los saldos no se muestran tras registrar un movimiento,
-            # salvo que el usuario los pida explícitamente (privacidad de pantalla).
-            if billetera.saldo_actual < 0:
-                msg_resp += "\nLa billetera quedó en negativo."
-
-        return tx_pend, msg_resp, False
+    # La rama de transacción pendiente IA se eliminó por no tener emisores ni registros (Decisión 3).
 
     # 2. Determinar si las entidades del turno actual vienen completas
     usar_entidades_actuales = _entidades_completas(entidades_actuales)
@@ -663,6 +624,19 @@ def _confirmar_propuesta_transaccion(
     categoria_id, subcategoria_id = _resolver_categoria_y_subcategoria(
         entidades.get("categoria"), usuario.id, db, tipo=tipo_val
     )
+    if not categoria_id:
+        tipo_enum = TipoCategoria.INGRESO if tipo_val == "ingreso" else TipoCategoria.EGRESO
+        cat_otros = db.execute(
+            select(Categoria).where(
+                Categoria.nombre == "Otros",
+                Categoria.tipo == tipo_enum,
+                Categoria.estado == EstadoCategoria.ACTIVA,
+            )
+        ).scalars().first()
+        if cat_otros:
+            categoria_id = cat_otros.id
+            subcategoria_id = None
+
     fecha_obj, _ = _resolver_y_validar_fecha(entidades.get("fecha"))
 
     desc_candidata = entidades.get("descripcion")
@@ -672,31 +646,32 @@ def _confirmar_propuesta_transaccion(
         tipo=tipo_val,
     )
 
-    transaccion = Transaccion(
-        usuario_id=usuario.id,
-        tipo=TipoTransaccion.INGRESO if tipo_val == "ingreso" else TipoTransaccion.EGRESO,
-        monto=monto_decimal,
-        moneda=moneda_solicitada,
-        fecha=fecha_obj,
-        descripcion=desc_final or _nombre_corto_categoria(entidades.get("categoria")),
-        metodo_pago=deducir_metodo_pago(billetera, tarjeta_id=None),
-        billetera_id=billetera_id,
-        categoria_id=categoria_id,
-        subcategoria_id=subcategoria_id,
-        origen=OrigenTransaccion.IA_WPP,
-        estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        es_cuota_hija=False,
-        es_padre_cuotas=False,
-    )
-    db.add(transaccion)
-    db.flush()
-
-    if transaccion.tipo == TipoTransaccion.INGRESO:
-        billetera.saldo_actual += monto_decimal
-    else:
-        billetera.saldo_actual -= monto_decimal
-
-    presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=False, commit=False)
+    try:
+        if not categoria_id:
+            raise HTTPException(status_code=400, detail="Debés seleccionar una categoría.")
+        data_tx = TransaccionCreate(
+            tipo=TipoTransaccion.INGRESO if tipo_val == "ingreso" else TipoTransaccion.EGRESO,
+            monto=monto_decimal,
+            moneda=moneda_solicitada,
+            fecha=fecha_obj,
+            descripcion=desc_final or _nombre_corto_categoria(entidades.get("categoria")),
+            metodo_pago=deducir_metodo_pago(billetera, tarjeta_id=None),
+            billetera_id=billetera_id,
+            categoria_id=categoria_id,
+            subcategoria_id=subcategoria_id,
+            origen=OrigenTransaccion.IA_WPP,
+            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+            es_cuota_hija=False,
+            es_padre_cuotas=False,
+        )
+        transaccion = transaccion_service.crear_transaccion(
+            db=db,
+            usuario_id=usuario.id,
+            data=data_tx,
+            commit=False,
+        )
+    except HTTPException as e:
+        return None, e.detail, False
 
     adicionales = entidades.get("transacciones_adicionales")
     descartadas = []
@@ -1051,6 +1026,19 @@ def _registrar_movimiento_directo(
         return None, "Billetera no encontrada."
 
     cat_id, subcat_id = _resolver_categoria_y_subcategoria(entidades.get("categoria"), usuario.id, db, tipo=tipo_val)
+    if not cat_id:
+        tipo_enum = TipoCategoria.INGRESO if tipo_val == "ingreso" else TipoCategoria.EGRESO
+        cat_otros = db.execute(
+            select(Categoria).where(
+                Categoria.nombre == "Otros",
+                Categoria.tipo == tipo_enum,
+                Categoria.estado == EstadoCategoria.ACTIVA,
+            )
+        ).scalars().first()
+        if cat_otros:
+            cat_id = cat_otros.id
+            subcat_id = None
+
     fecha_obj = _resolver_fecha_transaccion(entidades.get("fecha"))
 
     desc_candidata = entidades.get("descripcion")
@@ -1059,30 +1047,32 @@ def _registrar_movimiento_directo(
         tipo=tipo_val,
     )
 
-    tx = Transaccion(
-        usuario_id=usuario.id,
-        tipo=TipoTransaccion.INGRESO if tipo_val == "ingreso" else TipoTransaccion.EGRESO,
-        monto=monto_decimal,
-        moneda=moneda_sol,
-        fecha=fecha_obj,
-        descripcion=desc_final or _nombre_corto_categoria(entidades.get("categoria")),
-        metodo_pago=deducir_metodo_pago(billetera, tarjeta_id=None),
-        billetera_id=billetera.id,
-        categoria_id=cat_id,
-        subcategoria_id=subcat_id,
-        origen=OrigenTransaccion.IA_WPP,
-        estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-        es_cuota_hija=False,
-        es_padre_cuotas=False,
-    )
-    db.add(tx)
-
-    if tx.tipo == TipoTransaccion.INGRESO:
-        billetera.saldo_actual += monto_decimal
-    else:
-        billetera.saldo_actual -= monto_decimal
-
-    presupuesto_service.registrar_impacto_presupuesto(db, tx, revertir=False, commit=False)
+    try:
+        if not cat_id:
+            raise HTTPException(status_code=400, detail="Debés seleccionar una categoría.")
+        data_tx = TransaccionCreate(
+            tipo=TipoTransaccion.INGRESO if tipo_val == "ingreso" else TipoTransaccion.EGRESO,
+            monto=monto_decimal,
+            moneda=moneda_sol,
+            fecha=fecha_obj,
+            descripcion=desc_final or _nombre_corto_categoria(entidades.get("categoria")),
+            metodo_pago=deducir_metodo_pago(billetera, tarjeta_id=None),
+            billetera_id=billetera.id,
+            categoria_id=cat_id,
+            subcategoria_id=subcat_id,
+            origen=OrigenTransaccion.IA_WPP,
+            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+            es_cuota_hija=False,
+            es_padre_cuotas=False,
+        )
+        tx = transaccion_service.crear_transaccion(
+            db=db,
+            usuario_id=usuario.id,
+            data=data_tx,
+            commit=False,
+        )
+    except HTTPException as e:
+        return None, e.detail
 
     adicionales = entidades.get("transacciones_adicionales") if registrar_adicionales else None
     descartadas = []

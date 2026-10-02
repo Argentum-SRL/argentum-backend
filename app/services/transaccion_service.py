@@ -186,7 +186,7 @@ def crear_transaccion(
         select(Billetera).where(
             Billetera.id == data.billetera_id,
             Billetera.usuario_id == usuario_id
-        )
+        ).with_for_update()
     ).scalar_one_or_none()
 
     if not billetera:
@@ -360,6 +360,8 @@ def crear_transaccion(
                     canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
                     if canales is not None:
                         canal_web, canal_whatsapp = canales
+                        if nueva_transaccion.origen in (OrigenTransaccion.IA_WPP, "ia_wpp", "IA_WPP"):
+                            canal_whatsapp = False
                         crear_notificacion(
                             db=db,
                             usuario_id=usuario_id,
