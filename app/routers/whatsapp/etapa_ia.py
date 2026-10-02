@@ -25,6 +25,7 @@ from app.routers.whatsapp.parsers import (
     propagar_fechas_lote,
 )
 from app.routers.whatsapp.resolvers_cascada import _merge_entidades
+from app.routers.whatsapp.verificacion_texto_ia import TextoIA
 from app.services import ai_service
 from app.utils.formato import formatear_monto
 
@@ -62,6 +63,8 @@ def procesar_llamada_ia_y_normalizacion(ctx: ContextoMensaje) -> None:
     )
     t_ia_end = time.perf_counter()
     logger.info("[LATENCIA][IA] Procesamiento: %.2fs", t_ia_end - t_ia_start)
+    # Marcar el texto escrito por la IA antes de cualquier procesamiento posterior (Decisión 2)
+    resultado_ia["respuesta_usuario"] = TextoIA(resultado_ia.get("respuesta_usuario") or "")
 
     # Verificación de montos perdidos en silencio
     aviso_montos_faltantes = None
@@ -83,6 +86,8 @@ def procesar_llamada_ia_y_normalizacion(ctx: ContextoMensaje) -> None:
             )
             if res_reintento.get("intent") == "registrar_transaccion" and res_reintento.get("entidades"):
                 resultado_ia = res_reintento
+                # Marcar también el texto si proviene del reintento de la IA
+                resultado_ia["respuesta_usuario"] = TextoIA(resultado_ia.get("respuesta_usuario") or "")
                 entidades_ia = resultado_ia.get("entidades") or {}
                 adic_ia = entidades_ia.get("transacciones_adicionales") or []
                 cant_items = (1 if entidades_ia.get("monto") is not None else 0) + (len(adic_ia) if isinstance(adic_ia, list) else 0)

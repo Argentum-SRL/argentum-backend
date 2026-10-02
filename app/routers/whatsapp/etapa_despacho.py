@@ -25,6 +25,7 @@ from app.routers.whatsapp.resolvers_cascada import (
     _generar_menu_billeteras,
     resolver_billetera_cascada,
 )
+from app.routers.whatsapp.verificacion_texto_ia import TextoIA, verificar_texto_ia
 from app.services import whatsapp_service
 from app.utils.formato import formatear_monto
 
@@ -116,13 +117,17 @@ def procesar_despacho_y_respuesta(ctx: ContextoMensaje) -> None:
     if intent_detectado == "cancelar":
         resultado_ia["respuesta_usuario"] = "Listo, cancelado."
 
-    # Si hubo descarte por cambio de tema, anteponer aviso en una línea
+    # Si hubo descarte por cambio de tema, anteponer aviso en una línea (Decisión 3)
     if aviso_cambio_tema and resultado_ia.get("respuesta_usuario"):
         resp_actual = resultado_ia["respuesta_usuario"]
         if resp_actual.startswith("¿"):
-            resultado_ia["respuesta_usuario"] = f"{aviso_cambio_tema}\n\n{resp_actual}"
+            texto_cambio = f"{aviso_cambio_tema}\n\n{resp_actual}"
         else:
-            resultado_ia["respuesta_usuario"] = f"{aviso_cambio_tema}\n{resp_actual}"
+            texto_cambio = f"{aviso_cambio_tema}\n{resp_actual}"
+        if isinstance(resp_actual, TextoIA):
+            resultado_ia["respuesta_usuario"] = TextoIA(texto_cambio)
+        else:
+            resultado_ia["respuesta_usuario"] = texto_cambio
 
     slot_activo = resultado_ia.get("slot_filling", False)
     confianza_val = resultado_ia.get("confianza", 0.0)
@@ -146,6 +151,14 @@ def procesar_despacho_y_respuesta(ctx: ContextoMensaje) -> None:
         tipo_msg_guardar = TipoMensajeWpp.TEXTO
         mensaje_usuario_guardar = mensaje_texto
         transcripcion_guardar = None
+
+    # Verificación de números en textos generados por la IA antes de persistir y enviar (Decisión 4)
+    if "respuesta_usuario" in resultado_ia:
+        resultado_ia["respuesta_usuario"] = verificar_texto_ia(
+            resultado_ia["respuesta_usuario"],
+            mensaje_texto,
+            intent=intent_detectado,
+        )
 
     nueva_conv = ConversacionWpp(
         usuario_id=usuario.id,
