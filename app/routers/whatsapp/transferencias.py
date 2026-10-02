@@ -139,11 +139,9 @@ def _confirmar_propuesta_transferencia(
     if tipo_op == "extraccion":
         msg_resp = f"Listo. Extracción de {formatear_monto(float(monto_origen), moneda_origen)} de {nom_orig} a {nom_dest} registrada."
     elif tipo_op == "compra_usd":
-        d_str = formatear_monto(float(monto_destino), Moneda.USD).replace("USD", "").replace("US$", "").strip()
-        msg_resp = f"Listo. Compra de USD {d_str} por {formatear_monto(float(monto_origen), Moneda.ARS)} registrada."
+        msg_resp = f"Listo. Compra de {formatear_monto(float(monto_destino), Moneda.USD)} por {formatear_monto(float(monto_origen), Moneda.ARS)} registrada."
     elif tipo_op == "venta_usd":
-        d_str = formatear_monto(float(monto_origen), Moneda.USD).replace("USD", "").replace("US$", "").strip()
-        msg_resp = f"Listo. Venta de USD {d_str} por {formatear_monto(float(monto_destino), Moneda.ARS)} registrada."
+        msg_resp = f"Listo. Venta de {formatear_monto(float(monto_origen), Moneda.USD)} por {formatear_monto(float(monto_destino), Moneda.ARS)} registrada."
     else:
         msg_resp = f"Listo. Transferí {formatear_monto(float(monto_origen), moneda_origen)} de {nom_orig} a {nom_dest}."
 
@@ -216,12 +214,10 @@ def _interpretar_transferencia(
                             f"o a un total de {c2_p_str} ({c2_c_str} por dólar)?"
                         )
                     else:
-                        c1_d_str = f"{int(c1_dolares)}" if c1_dolares == int(c1_dolares) else f"{c1_dolares:g}"
-                        c2_d_str = f"{int(c2_dolares)}" if c2_dolares == int(c2_dolares) else f"{c2_dolares:g}"
                         c2_c_str = formatear_monto(float(c2_cotiz), Moneda.ARS)
                         pregunta = (
-                            f"¿Te referís a una cotización de {c1_c_str} por dólar (recibís USD {c1_d_str}) "
-                            f"o a recibir USD {c2_d_str} ({c2_c_str} por dólar)?"
+                            f"¿Te referís a una cotización de {c1_c_str} por dólar (recibís {formatear_monto(float(c1_dolares), Moneda.USD)}) "
+                            f"o a recibir {formatear_monto(float(c2_dolares), Moneda.USD)} ({c2_c_str} por dólar)?"
                         )
                     return True, "slot_filling", estado_previo, pregunta
 
@@ -249,12 +245,10 @@ def _interpretar_transferencia(
                                 f"o a un total de {c2_p_str} ({c2_c_str} por dólar)?"
                             )
                         else:
-                            c1_d_str = f"{int(c1_dolares)}" if c1_dolares == int(c1_dolares) else f"{c1_dolares:g}"
-                            c2_d_str = f"{int(c2_dolares)}" if c2_dolares == int(c2_dolares) else f"{c2_dolares:g}"
                             c2_c_str = formatear_monto(float(c2_cotiz), Moneda.ARS)
                             pregunta = (
-                                f"¿Te referís a una cotización de {c1_c_str} por dólar (recibís USD {c1_d_str}) "
-                                f"o a recibir USD {c2_d_str} ({c2_c_str} por dólar)?"
+                                f"¿Te referís a una cotización de {c1_c_str} por dólar (recibís {formatear_monto(float(c1_dolares), Moneda.USD)}) "
+                                f"o a recibir {formatear_monto(float(c2_dolares), Moneda.USD)} ({c2_c_str} por dólar)?"
                             )
                         return True, "slot_filling", estado_previo, pregunta
                     if d1 <= d2:
@@ -307,10 +301,10 @@ def _interpretar_transferencia(
 
                 cotiz_fmt = formatear_monto(float(cotiz), Moneda.ARS)
                 pesos_fmt = formatear_monto(float(pesos), Moneda.ARS)
-                dolares_str = f"{int(dolares)}" if dolares == int(dolares) else f"{dolares:g}"
+                dolares_fmt = formatear_monto(float(dolares), Moneda.USD)
 
                 if tipo_op == "compra_usd":
-                    prop = f"Voy a registrar una compra de USD {dolares_str} a {cotiz_fmt}: salen {pesos_fmt} de {b_ars.nombre} y entran USD {dolares_str} a {b_usd.nombre}. ¿Confirmás?"
+                    prop = f"Voy a registrar una compra de {dolares_fmt} a {cotiz_fmt}: salen {pesos_fmt} de {b_ars.nombre} y entran {dolares_fmt} a {b_usd.nombre}. ¿Confirmás?"
                     entidades = {
                         "tipo_operacion": "compra_usd",
                         "billetera_origen_id": str(b_ars.id),
@@ -323,7 +317,7 @@ def _interpretar_transferencia(
                         "cotizacion": float(cotiz),
                     }
                 else:
-                    prop = f"Voy a registrar una venta de USD {dolares_str} a {cotiz_fmt}: salen USD {dolares_str} de {b_usd.nombre} y entran {pesos_fmt} a {b_ars.nombre}. ¿Confirmás?"
+                    prop = f"Voy a registrar una venta de {dolares_fmt} a {cotiz_fmt}: salen {dolares_fmt} de {b_usd.nombre} y entran {pesos_fmt} a {b_ars.nombre}. ¿Confirmás?"
                     entidades = {
                         "tipo_operacion": "venta_usd",
                         "billetera_origen_id": str(b_usd.id),
@@ -468,10 +462,10 @@ def _interpretar_transferencia(
 
             cotiz_fmt = formatear_monto(float(cotiz), Moneda.ARS)
             pesos_fmt = formatear_monto(float(pesos), Moneda.ARS)
-            dolares_str = f"{int(dolares)}" if dolares == int(dolares) else f"{dolares:g}"
+            dolares_fmt = formatear_monto(float(dolares), Moneda.USD)
 
             if es_compra:
-                prop = f"Voy a registrar una compra de USD {dolares_str} a {cotiz_fmt}: salen {pesos_fmt} de {b_ars.nombre} y entran USD {dolares_str} a {b_usd.nombre}. ¿Confirmás?"
+                prop = f"Voy a registrar una compra de {dolares_fmt} a {cotiz_fmt}: salen {pesos_fmt} de {b_ars.nombre} y entran {dolares_fmt} a {b_usd.nombre}. ¿Confirmás?"
                 entidades = {
                     "tipo_operacion": "compra_usd",
                     "billetera_origen_id": str(b_ars.id),
@@ -484,7 +478,7 @@ def _interpretar_transferencia(
                     "cotizacion": float(cotiz),
                 }
             else:
-                prop = f"Voy a registrar una venta de USD {dolares_str} a {cotiz_fmt}: salen USD {dolares_str} de {b_usd.nombre} y entran {pesos_fmt} a {b_ars.nombre}. ¿Confirmás?"
+                prop = f"Voy a registrar una venta de {dolares_fmt} a {cotiz_fmt}: salen {dolares_fmt} de {b_usd.nombre} y entran {pesos_fmt} a {b_ars.nombre}. ¿Confirmás?"
                 entidades = {
                     "tipo_operacion": "venta_usd",
                     "billetera_origen_id": str(b_usd.id),
@@ -647,10 +641,10 @@ def _interpretar_transferencia(
 
                 cotiz_fmt = formatear_monto(float(cotiz), Moneda.ARS)
                 pesos_fmt = formatear_monto(float(pesos), Moneda.ARS)
-                dolares_str = f"{int(dolares)}" if dolares == int(dolares) else f"{dolares:g}"
+                dolares_fmt = formatear_monto(float(dolares), Moneda.USD)
 
                 if es_compra:
-                    prop = f"Voy a registrar una compra de USD {dolares_str} a {cotiz_fmt}: salen {pesos_fmt} de {b_orig.nombre} y entran USD {dolares_str} a {b_dest.nombre}. ¿Confirmás?"
+                    prop = f"Voy a registrar una compra de {dolares_fmt} a {cotiz_fmt}: salen {pesos_fmt} de {b_orig.nombre} y entran {dolares_fmt} a {b_dest.nombre}. ¿Confirmás?"
                     entidades = {
                         "tipo_operacion": "compra_usd",
                         "billetera_origen_id": str(b_orig.id),
@@ -663,7 +657,7 @@ def _interpretar_transferencia(
                         "cotizacion": float(cotiz),
                     }
                 else:
-                    prop = f"Voy a registrar una venta de USD {dolares_str} a {cotiz_fmt}: salen USD {dolares_str} de {b_orig.nombre} y entran {pesos_fmt} a {b_dest.nombre}. ¿Confirmás?"
+                    prop = f"Voy a registrar una venta de {dolares_fmt} a {cotiz_fmt}: salen {dolares_fmt} de {b_orig.nombre} y entran {pesos_fmt} a {b_dest.nombre}. ¿Confirmás?"
                     entidades = {
                         "tipo_operacion": "venta_usd",
                         "billetera_origen_id": str(b_orig.id),

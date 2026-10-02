@@ -142,4 +142,58 @@ def test_frecuencia_financiera_con_ciclo_regla_no_rompe(db_session):
     assert perfil is not None
 
 
+def test_usuario_sin_ciclo_fallback_seguro(db_session):
+    """
+    Usuario con ciclo_tipo=None funciona con mes calendario como fallback seguro.
+    Verifica que _calcular_y_persistir_perfil_sync devuelve un perfil válido sin errores.
+    """
+    usuario = Usuario(
+        id=uuid4(),
+        email="test_sin_ciclo_fallback@argentum.com",
+        auth_provider=AuthProvider.EMAIL,
+        rol=RolUsuario.USUARIO,
+        estado=EstadoUsuario.ACTIVO,
+        ciclo_tipo=None,
+        ciclo_valor=None,
+    )
+    db_session.add(usuario)
 
+    billetera = Billetera(
+        id=uuid4(),
+        usuario_id=usuario.id,
+        nombre="Banco",
+        moneda=Moneda.ARS,
+        saldo_actual=Decimal("300000"),
+        estado=EstadoBilletera.ACTIVA,
+    )
+    db_session.add(billetera)
+
+    tx_antigua = Transaccion(
+        id=uuid4(),
+        usuario_id=usuario.id,
+        billetera_id=billetera.id,
+        tipo=TipoTransaccion.INGRESO,
+        origen=OrigenTransaccion.MANUAL,
+        descripcion="Ingreso Test",
+        monto=Decimal("150000"),
+        moneda=Moneda.ARS,
+        fecha=date.today() - timedelta(days=100),
+        estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+    )
+    tx_reciente = Transaccion(
+        id=uuid4(),
+        usuario_id=usuario.id,
+        billetera_id=billetera.id,
+        tipo=TipoTransaccion.EGRESO,
+        origen=OrigenTransaccion.MANUAL,
+        descripcion="Gasto Test",
+        monto=Decimal("50000"),
+        moneda=Moneda.ARS,
+        fecha=date.today() - timedelta(days=5),
+        estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+    )
+    db_session.add_all([tx_antigua, tx_reciente])
+    db_session.commit()
+
+    perfil = _calcular_y_persistir_perfil_sync(db_session, usuario.id)
+    assert perfil is not None

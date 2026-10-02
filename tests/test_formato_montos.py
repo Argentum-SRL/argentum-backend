@@ -116,11 +116,9 @@ def test_montos_hacia_usuario_usan_formatear_monto():
                             expr_str = ast.unparse(val_node)
                             # Si es un monto que no llama a formatear_monto ni _fmt
                             if not check_calls_formato(val_node):
-                                # Si no es un conteo/entero de dólares en transferencias (dolares_str, d_str)
-                                if expr_str not in ("dolares_str", "d_str", "c1_d_str", "c2_d_str"):
-                                    self.violaciones.append(
-                                        f"{self.filepath}:{node.lineno} Criterio 1: '{s}' seguido de '{expr_str}'"
-                                    )
+                                self.violaciones.append(
+                                    f"{self.filepath}:{node.lineno} Criterio 1: '{s}' seguido de '{expr_str}'"
+                                )
 
                 # Criterio 2: spec con , o .2f o .0f aplicado a un monto
                 if isinstance(val, ast.FormattedValue):

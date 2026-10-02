@@ -567,13 +567,13 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P9B.14", "punto": "Punto 9B", "match": "contiene",
             "nombre": "compré 100 dólares y responder 1500: cotización unitaria",
             "ejecutar": lambda: p9b_caso_14(datos),
-            "esperado": "compra de USD 100 a $1.500: salen $150.000",
+            "esperado": "compra de US$100 a $1.500: salen $150.000",
         },
         {
             "id": "P9B.15", "punto": "Punto 9B", "match": "contiene",
             "nombre": "compré 100 dólares y responder 150000: monto total",
             "ejecutar": lambda: p9b_caso_15(datos),
-            "esperado": "compra de USD 100 a $1.500: salen $150.000",
+            "esperado": "compra de US$100 a $1.500: salen $150.000",
         },
         {
             "id": "P9B.16", "punto": "Punto 9B", "match": "contiene",
@@ -585,7 +585,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P9B.17", "punto": "Punto 9B", "match": "contiene",
             "nombre": "compré 100 dólares a 1500 con la tabla de cotizaciones vacía: no rechaza, pide confirmación",
             "ejecutar": lambda: p9b_caso_17(datos),
-            "esperado": "Voy a registrar una compra de USD 100 a $1.500: salen $150.000",
+            "esperado": "Voy a registrar una compra de US$100 a $1.500: salen $150.000",
         },
         {
             "id": "P9B.18", "punto": "Punto 9B", "match": "contiene",
