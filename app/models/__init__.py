@@ -24,6 +24,8 @@ from app.models.tarjeta_credito import TarjetaCredito
 from app.models.transaccion import Transaccion
 from app.models.transferencia_interna import TransferenciaInterna
 from app.models.rendimiento_billetera import RendimientoBilletera
+from app.models.ajuste_saldo import AjusteSaldo
+from app.models.tasa_entidad import TasaEntidad
 from app.models.usuario import Usuario
 from app.models.tools import IPCCache
 from app.models.feriado import FeriadoAR
@@ -65,6 +67,8 @@ __all__ = [
     "Transaccion",
     "TransferenciaInterna",
     "RendimientoBilletera",
+    "AjusteSaldo",
+    "TasaEntidad",
     "IPCCache",
     "FeriadoAR",
     "EventoActualizacion",

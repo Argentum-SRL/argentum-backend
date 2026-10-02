@@ -443,6 +443,12 @@ def eliminar_usuario(db: Session, usuario: Usuario) -> dict:
             CorreccionImportacion.importacion_id.in_(select(ImportacionResumen.id).where(ImportacionResumen.usuario_id == usuario_id))
         ))
 
+        # Ajustes de saldo (vía Billetera)
+        from app.models.ajuste_saldo import AjusteSaldo
+        db.execute(delete(AjusteSaldo).where(
+            AjusteSaldo.billetera_id.in_(select(Billetera.id).where(Billetera.usuario_id == usuario_id))
+        ))
+
         # 2. Modelos con usuario_id
         modelos_usuario = [
             ConversacionWpp, Notificacion, RefreshToken, Suscripcion,

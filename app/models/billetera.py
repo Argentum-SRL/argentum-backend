@@ -11,6 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from app.models.ajuste_saldo import AjusteSaldo
     from app.models.rendimiento_billetera import RendimientoBilletera
 
 from app.core.database import Base
@@ -43,6 +44,8 @@ class Billetera(Base):
     es_efectivo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     es_inversion: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     tna: Mapped[Decimal | None] = mapped_column(Numeric(6, 2), nullable=True)
+    entidad_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    nivel_tasa: Mapped[str | None] = mapped_column(String(120), nullable=True)
     fecha_ultimo_rendimiento: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     estado: Mapped[EstadoBilletera] = mapped_column(
         SAEnum(EstadoBilletera, values_callable=lambda obj: [e.value for e in obj], name="estado_billetera_enum"),
@@ -56,6 +59,9 @@ class Billetera(Base):
     usuario: Mapped["Usuario"] = relationship("Usuario")
     rendimientos: Mapped[list["RendimientoBilletera"]] = relationship(
         "RendimientoBilletera", back_populates="billetera"
+    )
+    ajustes: Mapped[list["AjusteSaldo"]] = relationship(
+        "AjusteSaldo", back_populates="billetera"
     )
 
     def __repr__(self) -> str:

@@ -507,12 +507,12 @@ def ejecutar_inicio(paso: str) -> int:
     if err_ref:
         buf_00.write("STDERR:\n" + err_ref + "\n")
 
-    if rc_ref != 0 or "Total tablas: 38 | Tablas iguales: 38 | Tablas distintas: 0" not in out_ref:
-        print("CUÁNDO FRENAR: El refresco local no dio 38/38 tablas iguales. Abortando.")
-        buf_00.write("\nERROR CRÍTICO: Refresco local fallido (no dio 38/38).\n")
+    if rc_ref != 0 or "Total tablas: 40 | Tablas iguales: 40 | Tablas distintas: 0" not in out_ref:
+        print("CUÁNDO FRENAR: El refresco local no dio 40/40 tablas iguales. Abortando.")
+        buf_00.write("\nERROR CRÍTICO: Refresco local fallido (no dio 40/40).\n")
         (raw_dir / f"{paso}_00_inicio.txt").write_text(buf_00.getvalue(), encoding="utf-8")
         return 1
-    buf_00.write("OK: Refresco local exitoso (38/38 tablas iguales).\n")
+    buf_00.write("OK: Refresco local exitoso (40/40 tablas iguales).\n")
 
     # 3. Canario
     buf_00.write("\n--- 3. CANARIO DE USUARIOS ---\n")

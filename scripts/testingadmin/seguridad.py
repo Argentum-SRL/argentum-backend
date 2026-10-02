@@ -318,13 +318,17 @@ def ejecutar_borrado_testingadmin(db: Session, user: Usuario) -> Dict[str, int]:
     db.flush()
     conteos["transferencias_internas"] = cant_tr
 
-    # 9. Rendimientos de billetera
+    # 9. Rendimientos y ajustes de billetera
     billeteras_user = [b.id for b in db.query(Billetera.id).filter(Billetera.usuario_id == uid).all()]
     cant_rend = 0
+    cant_ajustes = 0
     if billeteras_user:
+        from app.models.ajuste_saldo import AjusteSaldo
         cant_rend = db.query(RendimientoBilletera).filter(RendimientoBilletera.billetera_id.in_(billeteras_user)).delete(synchronize_session=False)
+        cant_ajustes = db.query(AjusteSaldo).filter(AjusteSaldo.billetera_id.in_(billeteras_user)).delete(synchronize_session=False)
         db.flush()
     conteos["rendimientos_billetera"] = cant_rend
+    conteos["ajustes_saldo"] = cant_ajustes
 
     # 10. Calibraciones y Perfil Financiero
     cant_cal = db.query(CalibracionUsuario).filter(CalibracionUsuario.usuario_id == uid).delete(synchronize_session=False)

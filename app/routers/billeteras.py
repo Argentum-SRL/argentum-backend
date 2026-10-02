@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List
 from datetime import datetime, timezone
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, update, delete, exists, or_
 from sqlalchemy.orm import Session
@@ -13,6 +13,7 @@ from app.core.database import get_db
 from app.models.usuario import Usuario, Moneda
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.rendimiento_billetera import RendimientoBilletera
+from app.models.ajuste_saldo import AjusteSaldo
 from app.models.transaccion import Transaccion
 from app.models.transferencia_interna import TransferenciaInterna
 from app.models.tarjeta_credito import TarjetaCredito
@@ -22,7 +23,14 @@ from app.schemas.billetera import (
     RendimientoEstimadoResponse,
     ConfirmarRendimientoRequest,
 )
-from app.services import usuario_service, rendimiento_billetera_service
+from app.schemas.ajuste_saldo import (
+    ActualizarSaldoRequest,
+    AjusteSaldoRead,
+    AjustesBilleteraResponse,
+    CoberturaRead,
+    ControlSaldoPreview,
+)
+from app.services import usuario_service, rendimiento_billetera_service, ajuste_saldo_service
 
 router = APIRouter(prefix="/billeteras", tags=["billeteras"])
 
@@ -54,15 +62,16 @@ def list_billeteras(
     # Failsafe: asegurar que tenga las billeteras de efectivo default
     usuario_service.crear_billeteras_efectivo_default(db, current_user.id)
     
-    # Optimización N+1: Usar subqueries correlacionadas para verificar transacciones, transferencias y rendimientos
+    # Optimización N+1: Usar subqueries correlacionadas para verificar transacciones, transferencias, rendimientos y ajustes
     exists_tx = exists().where(Transaccion.billetera_id == Billetera.id)
     exists_tr = exists().where(
         (TransferenciaInterna.billetera_origen_id == Billetera.id) | 
         (TransferenciaInterna.billetera_destino_id == Billetera.id)
     )
     exists_rend = exists().where(RendimientoBilletera.billetera_id == Billetera.id)
+    exists_ajuste = exists().where(AjusteSaldo.billetera_id == Billetera.id)
     
-    stmt = select(Billetera, (exists_tx | exists_tr | exists_rend).label("has_tx")).where(Billetera.usuario_id == current_user.id)
+    stmt = select(Billetera, (exists_tx | exists_tr | exists_rend | exists_ajuste).label("has_tx")).where(Billetera.usuario_id == current_user.id)
     rows = db.execute(stmt).all()
     
     results = []
@@ -87,16 +96,17 @@ def get_billetera(
     if not billetera:
         raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
     
-    # Verificamos transacciones, transferencias y rendimientos por separado para mayor seguridad
+    # Verificamos transacciones, transferencias, rendimientos y ajustes por separado para mayor seguridad
     has_tx = db.query(exists().where(Transaccion.billetera_id == billetera_id)).scalar()
     has_tr = db.query(exists().where(or_(
         TransferenciaInterna.billetera_origen_id == billetera_id,
         TransferenciaInterna.billetera_destino_id == billetera_id
     ))).scalar()
     has_rend = db.query(exists().where(RendimientoBilletera.billetera_id == billetera_id)).scalar()
+    has_ajuste = db.query(exists().where(AjusteSaldo.billetera_id == billetera_id)).scalar()
     
     b_read = BilleteraRead.model_validate(billetera)
-    b_read.tiene_transacciones = bool(has_tx or has_tr or has_rend)
+    b_read.tiene_transacciones = bool(has_tx or has_tr or has_rend or has_ajuste)
     return b_read
 
 
@@ -127,9 +137,10 @@ def registrar_rendimiento(
         TransferenciaInterna.billetera_destino_id == billetera.id
     ))).scalar()
     has_rend = db.query(exists().where(RendimientoBilletera.billetera_id == billetera.id)).scalar()
+    has_ajuste = db.query(exists().where(AjusteSaldo.billetera_id == billetera.id)).scalar()
 
     b_read = BilleteraRead.model_validate(billetera)
-    b_read.tiene_transacciones = bool(has_tx or has_tr or has_rend)
+    b_read.tiene_transacciones = bool(has_tx or has_tr or has_rend or has_ajuste)
     return b_read
 
 
@@ -218,7 +229,8 @@ def update_billetera(
             (TransferenciaInterna.billetera_destino_id == billetera_id)
         )).scalar()
         has_rend = db.query(exists().where(RendimientoBilletera.billetera_id == billetera_id)).scalar()
-        if has_tx or has_tr or has_rend:
+        has_ajuste = db.query(exists().where(AjusteSaldo.billetera_id == billetera_id)).scalar()
+        if has_tx or has_tr or has_rend or has_ajuste:
             raise HTTPException(
                 status_code=400,
                 detail="No podés cambiar la moneda de una billetera que ya tiene transacciones o transferencias asociadas."
@@ -266,12 +278,14 @@ def delete_billetera(
     )
     exists_sub = exists().where(Suscripcion.billetera_id == billetera_id)
     exists_rend = exists().where(RendimientoBilletera.billetera_id == billetera_id)
+    exists_ajuste = exists().where(AjusteSaldo.billetera_id == billetera_id)
     
     check_stmt = select(
         exists_tx.label("has_tx"),
         exists_tr.label("has_tr"),
         exists_sub.label("has_sub"),
-        exists_rend.label("has_rend")
+        exists_rend.label("has_rend"),
+        exists_ajuste.label("has_ajuste"),
     )
     check_res = db.execute(check_stmt).one()
     
@@ -297,6 +311,12 @@ def delete_billetera(
         raise HTTPException(
             status_code=400,
             detail="No se puede eliminar la billetera porque tiene rendimientos asociados. Por favor, archivala."
+        )
+
+    if check_res.has_ajuste:
+        raise HTTPException(
+            status_code=400,
+            detail="No se puede eliminar la billetera porque tiene ajustes de saldo. Por favor, archivala."
         )
 
     # Chequear las tarjetas de crédito asociadas
@@ -364,3 +384,73 @@ def desarchivar_billetera(
     db.commit()
     db.refresh(billetera)
     return billetera
+
+
+@router.get("/{billetera_id}/control-saldo", response_model=ControlSaldoPreview)
+def previsualizar_control_saldo(
+    billetera_id: str,
+    saldo: Decimal = Query(..., description="Saldo declarado actual en la billetera"),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Genera la vista previa de un control de saldo antes de su confirmación."""
+    return ajuste_saldo_service.previsualizar_control(
+        db, current_user.id, billetera_id, saldo_declarado=saldo
+    )
+
+
+@router.post("/{billetera_id}/ajustes", response_model=BilleteraRead)
+def actualizar_saldo(
+    billetera_id: str,
+    body: ActualizarSaldoRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Registra un control de saldo ("Actualizar saldo") en la billetera."""
+    ajuste_saldo_service.registrar_control(
+        db,
+        current_user.id,
+        billetera_id,
+        saldo_declarado=body.saldo_declarado,
+        rendimiento=body.rendimiento,
+        commit=True,
+    )
+    billetera = db.get(Billetera, billetera_id)
+    has_tx = db.query(exists().where(Transaccion.billetera_id == billetera.id)).scalar()
+    has_tr = db.query(exists().where(or_(
+        TransferenciaInterna.billetera_origen_id == billetera.id,
+        TransferenciaInterna.billetera_destino_id == billetera.id
+    ))).scalar()
+    has_rend = db.query(exists().where(RendimientoBilletera.billetera_id == billetera.id)).scalar()
+    has_ajuste = db.query(exists().where(AjusteSaldo.billetera_id == billetera.id)).scalar()
+
+    b_read = BilleteraRead.model_validate(billetera)
+    b_read.tiene_transacciones = bool(has_tx or has_tr or has_rend or has_ajuste)
+    return b_read
+
+
+@router.get("/{billetera_id}/ajustes", response_model=AjustesBilleteraResponse)
+def listar_ajustes_billetera(
+    billetera_id: str,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Lista el historial de ajustes de saldo y la cobertura para la billetera."""
+    ajustes = ajuste_saldo_service.listar_ajustes(db, current_user.id, billetera_id)
+    cobertura_dict = ajuste_saldo_service.calcular_cobertura(db, billetera_id)
+    return AjustesBilleteraResponse(
+        ajustes=[AjusteSaldoRead.model_validate(a) for a in ajustes],
+        cobertura=CoberturaRead(**cobertura_dict),
+    )
+
+
+@router.delete("/{billetera_id}/ajustes/{ajuste_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_ajuste_billetera(
+    billetera_id: str,
+    ajuste_id: str,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Elimina y revierte un ajuste de saldo."""
+    ajuste_saldo_service.eliminar_ajuste(db, current_user.id, ajuste_id, commit=True)
+    return None

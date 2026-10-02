@@ -13,10 +13,13 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.models.billetera import Billetera
+from app.models.rendimiento_billetera import RendimientoBilletera
+from app.models.transaccion import EstadoVerificacionTransaccion, MetodoPago, TipoTransaccion, Transaccion
+from app.models.transferencia_interna import TransferenciaInterna
 from app.utils.fecha import hoy_argentina
 
 
@@ -36,6 +39,7 @@ def calcular_saldo_teorico(
             + sum(transferencias_entrantes)
             - sum(transferencias_salientes)
             + sum(rendimientos)
+            + sum(ajustes)
         )
 
     Reglas de filtro y consistencia con los servicios reales:
@@ -61,6 +65,9 @@ def calcular_saldo_teorico(
     4. Rendimientos:
        - Rendimientos registrados en rendimientos_billetera para la billetera con fecha <= hasta,
          reflejando el impacto directo realizado por rendimiento_billetera_service.confirmar_rendimiento.
+    5. Ajustes de saldo:
+       - Ajustes registrados en ajustes_saldo para la billetera con fecha <= hasta,
+         reflejando el impacto directo realizado por ajuste_saldo_service.registrar_control.
 
     Parámetros:
         db: Sesión activa de SQLAlchemy.
@@ -141,6 +148,126 @@ def calcular_saldo_teorico(
         ).scalar() or 0
     ))
 
-    # 5. Consolidación de saldo teórico
-    saldo_teorico = saldo_inicial + ingresos - egresos + tr_in - tr_out + rendimientos
+    # 5. Ajustes de saldo registrados con fecha <= hasta
+    ajustes = Decimal(str(
+        db.execute(
+            text("""
+                SELECT coalesce(sum(monto), 0)
+                FROM ajustes_saldo
+                WHERE billetera_id = :bid
+                  AND fecha <= :hasta
+            """),
+            {"bid": billetera_id, "hasta": hasta}
+        ).scalar() or 0
+    ))
+
+    # 6. Consolidación de saldo teórico
+    saldo_teorico = saldo_inicial + ingresos - egresos + tr_in - tr_out + rendimientos + ajustes
     return saldo_teorico
+
+
+def movimientos_por_dia(
+    db: Session,
+    billetera_id: UUID,
+    desde: Optional[date] = None,
+    hasta: Optional[date] = None,
+) -> dict[date, dict[str, Decimal]]:
+    """
+    Calcula los movimientos acumulados (entradas y salidas) agrupados por día para una billetera.
+    Escrita con select de SQLAlchemy (nada de text).
+
+    - salidas = egresos (mismos filtros de transacciones que calcular_saldo_teorico) + transferencias salientes (monto_origen)
+    - entradas = ingresos + transferencias entrantes (monto_destino) + rendimientos (func.date(fecha))
+    - no incluye ajustes.
+    """
+    res: dict[date, dict[str, Decimal]] = {}
+
+    # 1. Transacciones (ingresos y egresos)
+    stmt_tx = (
+        select(
+            Transaccion.fecha,
+            Transaccion.tipo,
+            func.coalesce(func.sum(Transaccion.monto), Decimal("0.00")).label("total"),
+        )
+        .where(
+            Transaccion.billetera_id == billetera_id,
+            (Transaccion.metodo_pago != MetodoPago.CREDITO) | (Transaccion.metodo_pago.is_(None)),
+            Transaccion.es_padre_cuotas.is_(False),
+            Transaccion.es_cuota_hija.is_(False),
+            (Transaccion.estado_verificacion.is_(None)) | (Transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE),
+        )
+    )
+    if desde is not None:
+        stmt_tx = stmt_tx.where(Transaccion.fecha >= desde)
+    if hasta is not None:
+        stmt_tx = stmt_tx.where(Transaccion.fecha <= hasta)
+    stmt_tx = stmt_tx.group_by(Transaccion.fecha, Transaccion.tipo)
+
+    for row in db.execute(stmt_tx).all():
+        f_dia, f_tipo, total = row[0], row[1], Decimal(str(row[2]))
+        d_obj = f_dia if isinstance(f_dia, date) else date.fromisoformat(str(f_dia))
+        entry = res.setdefault(d_obj, {"salidas": Decimal("0.00"), "entradas": Decimal("0.00")})
+        if f_tipo == TipoTransaccion.EGRESO or str(f_tipo).lower() == "egreso":
+            entry["salidas"] += total
+        elif f_tipo == TipoTransaccion.INGRESO or str(f_tipo).lower() == "ingreso":
+            entry["entradas"] += total
+
+    # 2. Transferencias salientes (monto_origen)
+    stmt_tr_out = (
+        select(
+            TransferenciaInterna.fecha,
+            func.coalesce(func.sum(TransferenciaInterna.monto_origen), Decimal("0.00")).label("total"),
+        )
+        .where(TransferenciaInterna.billetera_origen_id == billetera_id)
+    )
+    if desde is not None:
+        stmt_tr_out = stmt_tr_out.where(TransferenciaInterna.fecha >= desde)
+    if hasta is not None:
+        stmt_tr_out = stmt_tr_out.where(TransferenciaInterna.fecha <= hasta)
+    stmt_tr_out = stmt_tr_out.group_by(TransferenciaInterna.fecha)
+
+    for row in db.execute(stmt_tr_out).all():
+        f_dia, total = row[0], Decimal(str(row[1]))
+        d_obj = f_dia if isinstance(f_dia, date) else date.fromisoformat(str(f_dia))
+        res.setdefault(d_obj, {"salidas": Decimal("0.00"), "entradas": Decimal("0.00")})["salidas"] += total
+
+    # 3. Transferencias entrantes (monto_destino)
+    stmt_tr_in = (
+        select(
+            TransferenciaInterna.fecha,
+            func.coalesce(func.sum(TransferenciaInterna.monto_destino), Decimal("0.00")).label("total"),
+        )
+        .where(TransferenciaInterna.billetera_destino_id == billetera_id)
+    )
+    if desde is not None:
+        stmt_tr_in = stmt_tr_in.where(TransferenciaInterna.fecha >= desde)
+    if hasta is not None:
+        stmt_tr_in = stmt_tr_in.where(TransferenciaInterna.fecha <= hasta)
+    stmt_tr_in = stmt_tr_in.group_by(TransferenciaInterna.fecha)
+
+    for row in db.execute(stmt_tr_in).all():
+        f_dia, total = row[0], Decimal(str(row[1]))
+        d_obj = f_dia if isinstance(f_dia, date) else date.fromisoformat(str(f_dia))
+        res.setdefault(d_obj, {"salidas": Decimal("0.00"), "entradas": Decimal("0.00")})["entradas"] += total
+
+    # 4. Rendimientos (func.date(fecha))
+    stmt_rend = (
+        select(
+            func.date(RendimientoBilletera.fecha).label("dia"),
+            func.coalesce(func.sum(RendimientoBilletera.monto), Decimal("0.00")).label("total"),
+        )
+        .where(RendimientoBilletera.billetera_id == billetera_id)
+    )
+    if desde is not None:
+        stmt_rend = stmt_rend.where(func.date(RendimientoBilletera.fecha) >= desde)
+    if hasta is not None:
+        stmt_rend = stmt_rend.where(func.date(RendimientoBilletera.fecha) <= hasta)
+    stmt_rend = stmt_rend.group_by(func.date(RendimientoBilletera.fecha))
+
+    for row in db.execute(stmt_rend).all():
+        f_dia, total = row[0], Decimal(str(row[1]))
+        if f_dia is not None:
+            d_obj = f_dia if isinstance(f_dia, date) else date.fromisoformat(str(f_dia))
+            res.setdefault(d_obj, {"salidas": Decimal("0.00"), "entradas": Decimal("0.00")})["entradas"] += total
+
+    return res

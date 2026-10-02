@@ -65,10 +65,12 @@ from app.models.usuario import AuthProvider, EstadoUsuario, Moneda, RolUsuario, 
 from app.schemas.movimiento_meta import MovimientoMetaCreate
 from app.schemas.transaccion import InfoCuotas, TransaccionCreate, TransaccionUpdate
 from app.schemas.transferencia_interna import TransferenciaInternaCreate
+from app.models.ajuste_saldo import AjusteSaldo
 from app.services import (
     cuotas_service,
     meta_service,
     rendimiento_billetera_service,
+    ajuste_saldo_service,
     transaccion_service,
     transferencia_service,
 )
@@ -662,3 +664,56 @@ def test_rendimiento_billetera_commit_false_rollback(db_session):
         db_session.rollback()
 
     assert db_session.get(Billetera, b.id).saldo_actual == Decimal("10000.00")
+
+
+# 10. Ajustes de saldo (Actualizar saldo)
+def test_ajuste_saldo_registrar_commit_true(db_session):
+    u, b, cat = _crear_base(db_session)
+    with patch.object(db_session, "commit", wraps=db_session.commit) as mock_commit:
+        ajuste = ajuste_saldo_service.registrar_control(
+            db_session, u.id, b.id, Decimal("9000.00"), commit=True
+        )
+        assert mock_commit.call_count == 1
+        assert db_session.get(Billetera, b.id).saldo_actual == Decimal("9000.00")
+        assert db_session.get(AjusteSaldo, ajuste.id) is not None
+
+
+def test_ajuste_saldo_registrar_commit_false_rollback(db_session):
+    u, b, cat = _crear_base(db_session)
+    with patch.object(db_session, "commit", wraps=db_session.commit) as mock_commit:
+        ajuste = ajuste_saldo_service.registrar_control(
+            db_session, u.id, b.id, Decimal("9000.00"), commit=False
+        )
+        assert mock_commit.call_count == 0
+        ajuste_id = ajuste.id
+        db_session.rollback()
+
+    assert db_session.get(Billetera, b.id).saldo_actual == Decimal("10000.00")
+    assert db_session.get(AjusteSaldo, ajuste_id) is None
+
+
+def test_ajuste_saldo_eliminar_commit_true(db_session):
+    u, b, cat = _crear_base(db_session)
+    ajuste = ajuste_saldo_service.registrar_control(
+        db_session, u.id, b.id, Decimal("9000.00"), commit=True
+    )
+    with patch.object(db_session, "commit", wraps=db_session.commit) as mock_commit:
+        ajuste_saldo_service.eliminar_ajuste(db_session, u.id, ajuste.id, commit=True)
+        assert mock_commit.call_count == 1
+        assert db_session.get(Billetera, b.id).saldo_actual == Decimal("10000.00")
+        assert db_session.get(AjusteSaldo, ajuste.id) is None
+
+
+def test_ajuste_saldo_eliminar_commit_false_rollback(db_session):
+    u, b, cat = _crear_base(db_session)
+    ajuste = ajuste_saldo_service.registrar_control(
+        db_session, u.id, b.id, Decimal("9000.00"), commit=True
+    )
+    with patch.object(db_session, "commit", wraps=db_session.commit) as mock_commit:
+        ajuste_saldo_service.eliminar_ajuste(db_session, u.id, ajuste.id, commit=False)
+        assert mock_commit.call_count == 0
+        db_session.rollback()
+
+    assert db_session.get(Billetera, b.id).saldo_actual == Decimal("9000.00")
+    assert db_session.get(AjusteSaldo, ajuste.id) is not None
+
