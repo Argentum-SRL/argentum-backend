@@ -45,6 +45,14 @@ class Billetera(Base):
     es_inversion: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     tna: Mapped[Decimal | None] = mapped_column(Numeric(6, 2), nullable=True)
     entidad_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    @property
+    def bank_id(self) -> str | None:
+        return self.entidad_id
+
+    @bank_id.setter
+    def bank_id(self, value: str | None) -> None:
+        self.entidad_id = value
     nivel_tasa: Mapped[str | None] = mapped_column(String(120), nullable=True)
     fecha_ultimo_rendimiento: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     estado: Mapped[EstadoBilletera] = mapped_column(

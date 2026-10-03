@@ -53,7 +53,7 @@ def extraer_concepto_mensaje(mensaje: str | None, tipo: str = "egreso") -> str:
     # Quitar menciones de billeteras y métodos de pago
     billeteras_regex = (
         r"\b(mercado\s*pago|mercadopago|mp|merca|galicia|gali|santander|rio|"
-        r"bbva|frances|lemon|ual[aá]|efectivo|cash|brubank|bru|tarjeta|d[eé]bito|cr[eé]dito)\b"
+        r"bbva|frances|lemon|ual[aá]|efectivo|cash|brubank|bru|tarjeta|d[eé]bito|cr[eé]dito|arq|dolarapp)\b"
     )
     texto = re.sub(billeteras_regex, "", texto, flags=re.IGNORECASE)
 
@@ -138,6 +138,7 @@ JERGA ARGENTINA QUE DEBÉS ENTENDER:
 - bbva / frances = BBVA
 - lemon = Lemon
 - uala / ualá = Ualá
+- arq / dolarapp = ARQ
 - verdes / usd / dólares / dolar = USD
 - me entró / me depositaron / cobré = ingreso
 - me cobraron / saqué / pagué / gasté / puse / gatillé / garpé = egreso

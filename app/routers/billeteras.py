@@ -176,6 +176,7 @@ def create_billetera(
         es_efectivo=body.es_efectivo,
         es_inversion=body.es_inversion,
         tna=body.tna,
+        entidad_id=body.bank_id,
         fecha_ultimo_rendimiento=fecha_ultimo_rendimiento,
     )
     db.add(b)

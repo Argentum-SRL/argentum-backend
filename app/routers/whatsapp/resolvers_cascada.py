@@ -30,6 +30,8 @@ ALIAS_BILLETERAS = {
     "uala": "ualá",
     "efectivo": "efectivo",
     "cash": "efectivo",
+    "arq": "arq",
+    "dolarapp": "arq",
 }
 
 ALIAS_REDES_ARGENTINAS = {
