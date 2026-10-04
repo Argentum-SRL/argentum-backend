@@ -486,7 +486,7 @@ def crear_billeteras_efectivo_default(db: Session, usuario_id: UUID) -> None:
     if Moneda.ARS not in existentes:
         b_ars = Billetera(
             usuario_id=usuario_id,
-            nombre="Efectivo ARS",
+            nombre="Efectivo Pesos",
             moneda=Moneda.ARS,
             saldo_inicial=0,
             saldo_actual=0,
@@ -498,7 +498,7 @@ def crear_billeteras_efectivo_default(db: Session, usuario_id: UUID) -> None:
     if Moneda.USD not in existentes:
         b_usd = Billetera(
             usuario_id=usuario_id,
-            nombre="Efectivo USD",
+            nombre="Efectivo Dólares",
             moneda=Moneda.USD,
             saldo_inicial=0,
             saldo_actual=0,

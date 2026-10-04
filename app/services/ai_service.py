@@ -142,7 +142,7 @@ JERGA ARGENTINA QUE DEBÉS ENTENDER:
 - verdes / usd / dólares / dolar = USD
 - me entró / me depositaron / cobré = ingreso
 - me cobraron / saqué / pagué / gasté / puse / gatillé / garpé = egreso
-- efectivo / cash / plata física = Efectivo ARS
+- efectivo / cash / plata física = Efectivo Pesos (o Efectivo Dólares si especifica dólares)
 
 JERGA Y REGLAS DE TARJETAS DE CRÉDITO Y CUOTAS EN ARGENTINA:
 - Redes de tarjetas: visa, master, mastercard, amex, american express, naranja, cabal, y sus formas coloquiales (la visa, la master, la amex, etc.).
