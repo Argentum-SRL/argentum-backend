@@ -268,6 +268,7 @@ PALABRAS_FUERZAN_DEBITO = [
 ]
 
 
+@router.get("/webhook", response_class=PlainTextResponse)
 async def verify_webhook(request: Request) -> PlainTextResponse:
     """
     Handshake de verificación de webhook de Meta (WhatsApp Business Cloud API).
@@ -526,6 +527,7 @@ def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> Plain
     return resp
 
 
+@router.post("/webhook", response_class=PlainTextResponse)
 async def whatsapp_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -582,6 +584,7 @@ class TestIAMessageRequest(BaseModel):
 
 
 
+@router.post("/test")
 def test_ia(
     body: TestIAMessageRequest | None = None,
     mensaje: str | None = None,

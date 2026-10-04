@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import time
+from uuid import UUID
 from sqlalchemy import select
 import structlog
 
@@ -41,7 +42,7 @@ def procesar_vinculacion_o_desconocido(ctx: ContextoMensaje) -> None:
         texto_candidato = ctx.msg.get("text", {}).get("body", "").strip()
         logger.info(
             "whatsapp_webhook_mensaje_recibido",
-            from_number=ctx.from_number,
+            from_number=whatsapp_service._enmascarar_telefono(ctx.from_number),
             texto=texto_candidato,
             msg_type=ctx.msg_type,
         )
@@ -60,8 +61,13 @@ def procesar_vinculacion_o_desconocido(ctx: ContextoMensaje) -> None:
             tel_norm = normalizar_telefono_ar(ctx.from_number)
             tel_guardar = f"+{ctx.from_number.lstrip('+')}"
 
+            try:
+                uid_busqueda = UUID(str(entrada_vinc.usuario_id))
+            except (ValueError, TypeError):
+                uid_busqueda = entrada_vinc.usuario_id
+
             usuario_dueno = ctx.db.execute(
-                select(Usuario).where(Usuario.id == entrada_vinc.usuario_id)
+                select(Usuario).where(Usuario.id == uid_busqueda)
             ).scalar_one_or_none()
 
             if not usuario_dueno:

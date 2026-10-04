@@ -3,8 +3,8 @@ app/services/whatsapp_service.py — Servicio de mensajería y verificación por
 """
 
 import logging
-import random
 import re
+import secrets
 import time
 from dataclasses import dataclass
 
@@ -85,9 +85,9 @@ def generar_codigo_vinculacion(usuario_id: str | int) -> tuple[str, float]:
             .values(consumido=True, consumido_en=ahora)
         )
 
-        # Generar código único de 6 caracteres
+        # Generar código único de 6 caracteres con CSPRNG
         for _ in range(20):
-            candidato = "".join(random.choices(CARACTERES_CODIGO_VINCULACION, k=6))
+            candidato = "".join(secrets.choice(CARACTERES_CODIGO_VINCULACION) for _ in range(6))
             existe = db.execute(
                 select(CodigoVerificacion.id)
                 .where(
@@ -101,7 +101,7 @@ def generar_codigo_vinculacion(usuario_id: str | int) -> tuple[str, float]:
                 codigo = candidato
                 break
         else:
-            codigo = "".join(random.choices(CARACTERES_CODIGO_VINCULACION, k=6))
+            codigo = "".join(secrets.choice(CARACTERES_CODIGO_VINCULACION) for _ in range(6))
 
         nuevo = CodigoVerificacion(
             id=uuid4(),
@@ -169,18 +169,28 @@ def buscar_codigo_vinculacion(
 
         # 1. Coincidencia directa con códigos activos o recientemente vencidos
         for entrada in filas:
+            exp_dt = (
+                entrada.expiracion
+                if entrada.expiracion.tzinfo is not None
+                else entrada.expiracion.replace(tzinfo=timezone.utc)
+            )
             patron = (
                 r"(?<![A-Z0-9])"
                 + r"[\s\-]*".join(re.escape(c) for c in entrada.codigo)
                 + r"(?![A-Z0-9])"
             )
             if re.search(patron, texto_upper):
-                if ahora <= entrada.expiracion:
+                if ahora <= exp_dt:
+                    creado_dt = (
+                        entrada.creado_en
+                        if entrada.creado_en.tzinfo is not None
+                        else entrada.creado_en.replace(tzinfo=timezone.utc)
+                    )
                     ent = EntradaCodigoVinculacion(
                         usuario_id=entrada.identificador,
                         codigo=entrada.codigo,
-                        expiracion=entrada.expiracion.timestamp(),
-                        creado_en=entrada.creado_en.timestamp(),
+                        expiracion=exp_dt.timestamp(),
+                        creado_en=creado_dt.timestamp(),
                     )
                     return entrada.codigo, ent, False
                 return entrada.codigo, None, True
@@ -195,12 +205,22 @@ def buscar_codigo_vinculacion(
             if len(cand) == 6:
                 for entrada in filas:
                     if entrada.codigo == cand:
-                        if ahora <= entrada.expiracion:
+                        exp_dt = (
+                            entrada.expiracion
+                            if entrada.expiracion.tzinfo is not None
+                            else entrada.expiracion.replace(tzinfo=timezone.utc)
+                        )
+                        if ahora <= exp_dt:
+                            creado_dt = (
+                                entrada.creado_en
+                                if entrada.creado_en.tzinfo is not None
+                                else entrada.creado_en.replace(tzinfo=timezone.utc)
+                            )
                             ent = EntradaCodigoVinculacion(
                                 usuario_id=entrada.identificador,
                                 codigo=entrada.codigo,
-                                expiracion=entrada.expiracion.timestamp(),
-                                creado_en=entrada.creado_en.timestamp(),
+                                expiracion=exp_dt.timestamp(),
+                                creado_en=creado_dt.timestamp(),
                             )
                             return cand, ent, False
                         return cand, None, True

@@ -456,6 +456,12 @@ def _job_entrega_whatsapp_batched(db_session_factory):
 
         from app.services.whatsapp_service import enviar_whatsapp_template
 
+        total_usuarios_evaluados = len(usuarios)
+        total_notifs_pendientes = 0
+        total_enviadas_template = 0
+        total_enviadas_fallback = 0
+        total_fallidas = 0
+
         for u in usuarios:
             # Obtener todas las notificaciones pendientes de WhatsApp para el usuario
             notifs = (
@@ -471,6 +477,8 @@ def _job_entrega_whatsapp_batched(db_session_factory):
 
             if not notifs:
                 continue
+
+            total_notifs_pendientes += len(notifs)
 
             for notif in notifs:
                 try:
@@ -518,6 +526,10 @@ def _job_entrega_whatsapp_batched(db_session_factory):
                         template_name = "alerta_cambio_contrasena"
                         valores = []
 
+                    enviado = False
+                    enviado_template = False
+                    enviado_fallback = False
+
                     if template_name is not None and valores is not None:
                         componentes = [
                             {
@@ -526,15 +538,34 @@ def _job_entrega_whatsapp_batched(db_session_factory):
                             }
                         ] if valores else []
                         enviado = enviar_whatsapp_template(u.telefono, template_name, "es", componentes)
-                        if not enviado:
+                        if enviado:
+                            enviado_template = True
+                        else:
                             enviado = wpp_svc.enviar_whatsapp_notificacion(u.telefono, notif.mensaje)
+                            if enviado:
+                                enviado_fallback = True
                     else:
                         enviado = wpp_svc.enviar_whatsapp_notificacion(u.telefono, notif.mensaje)
+                        if enviado:
+                            enviado_fallback = True
 
                     if enviado:
+                        if enviado_template:
+                            total_enviadas_template += 1
+                        elif enviado_fallback:
+                            total_enviadas_fallback += 1
                         notif.enviada_whatsapp = True
                         db.commit()
+                    else:
+                        total_fallidas += 1
+                        logger.warning(
+                            "Fallo en entrega de notificación WhatsApp %s para usuario %s (template: %s)",
+                            notif.id,
+                            u.id,
+                            template_name or "sin_template",
+                        )
                 except Exception as notif_err:
+                    total_fallidas += 1
                     logger.error(
                         "Error entregando notificación %s a usuario %s: %s",
                         notif.id,
@@ -542,7 +573,17 @@ def _job_entrega_whatsapp_batched(db_session_factory):
                         notif_err,
                     )
 
-        logger.info("Job entrega_whatsapp_batched completado")
+        total_enviadas = total_enviadas_template + total_enviadas_fallback
+        logger.info(
+            "Job entrega_whatsapp_batched completado: usuarios_evaluados=%d, "
+            "notificaciones_pendientes=%d, enviadas=%d (template=%d, fallback=%d), fallidas=%d",
+            total_usuarios_evaluados,
+            total_notifs_pendientes,
+            total_enviadas,
+            total_enviadas_template,
+            total_enviadas_fallback,
+            total_fallidas,
+        )
 
     except Exception as e:
         logger.exception("Error en _job_entrega_whatsapp_batched")
