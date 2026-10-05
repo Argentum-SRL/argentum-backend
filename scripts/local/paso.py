@@ -71,6 +71,23 @@ def verificar_misma_fecha(fecha_inicio: str, fecha_cierre: str) -> bool:
     return fecha_inicio.strip() == fecha_cierre.strip()
 
 
+def verificar_resultado_refresco(out_ref: str, rc_ref: int = 0) -> tuple[bool, str, int]:
+    """
+    Verifica que el refresco local haya sido exitoso usando regex:
+    Total tablas: N | Tablas iguales: M | Tablas distintas: K
+    Acepta solo N == M y K == 0. Retorna (ok, mensaje_resumen, N).
+    """
+    if rc_ref != 0:
+        return False, "Código de retorno de refresco distinto de cero", 0
+    m = re.search(r"Total tablas:\s*(\d+)\s*\|\s*Tablas iguales:\s*(\d+)\s*\|\s*Tablas distintas:\s*(\d+)", out_ref)
+    if not m:
+        return False, "Formato de resumen de tablas no encontrado en salida", 0
+    n, m_val, k = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    if n == m_val and k == 0 and n > 0:
+        return True, f"Refresco local exitoso ({n}/{n} tablas iguales).", n
+    return False, f"Refresco local fallido (Total: {n}, Iguales: {m_val}, Distintas: {k}).", n
+
+
 def clasificar_estado_git(status_porcelain: str, rev_count_ahead: int) -> str:
     """Clasifica el estado git: CAMBIOS SIN COMITEAR, COMMITS SIN PUSH o SINCRONIZADO."""
     if status_porcelain.strip():
@@ -505,12 +522,13 @@ def ejecutar_inicio(paso: str) -> int:
     if err_ref:
         buf_00.write("STDERR:\n" + err_ref + "\n")
 
-    if rc_ref != 0 or "Total tablas: 40 | Tablas iguales: 40 | Tablas distintas: 0" not in out_ref:
-        print("CUÁNDO FRENAR: El refresco local no dio 40/40 tablas iguales. Abortando.")
-        buf_00.write("\nERROR CRÍTICO: Refresco local fallido (no dio 40/40).\n")
+    refresco_ok, msg_ref, n_tablas = verificar_resultado_refresco(out_ref, rc_ref)
+    if not refresco_ok:
+        print(f"CUÁNDO FRENAR: El refresco local no dio {n_tablas}/{n_tablas} tablas iguales. Abortando.")
+        buf_00.write(f"\nERROR CRÍTICO: Refresco local fallido (no dio {n_tablas}/{n_tablas}).\n")
         (raw_dir / f"{paso}_00_inicio.txt").write_text(buf_00.getvalue(), encoding="utf-8")
         return 1
-    buf_00.write("OK: Refresco local exitoso (40/40 tablas iguales).\n")
+    buf_00.write(f"OK: Refresco local exitoso ({n_tablas}/{n_tablas} tablas iguales).\n")
 
     # 3. Canario
     buf_00.write("\n--- 3. CANARIO DE USUARIOS ---\n")

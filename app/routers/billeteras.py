@@ -17,12 +17,14 @@ from app.models.ajuste_saldo import AjusteSaldo
 from app.models.transaccion import Transaccion
 from app.models.transferencia_interna import TransferenciaInterna
 from app.models.tarjeta_credito import TarjetaCredito
+from app.core.entidades import ENTIDADES
 from app.schemas.billetera import (
     BilleteraRead,
     BilleteraUpdate,
     RendimientoEstimadoResponse,
     ConfirmarRendimientoRequest,
 )
+from app.schemas.entidades import EntidadResponse, OpcionTasaEntidad
 from app.schemas.ajuste_saldo import (
     ActualizarSaldoRequest,
     AjusteSaldoRead,
@@ -31,6 +33,8 @@ from app.schemas.ajuste_saldo import (
     ControlSaldoPreview,
 )
 from app.services import usuario_service, rendimiento_billetera_service, ajuste_saldo_service
+from app.services.tasas_service import ultimas_tasas
+from app.utils.fecha import hoy_argentina
 
 router = APIRouter(prefix="/billeteras", tags=["billeteras"])
 
@@ -81,6 +85,104 @@ def list_billeteras(
         results.append(b_read)
 
     return results
+
+
+@router.get("/entidades", response_model=List[EntidadResponse])
+def listar_entidades(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Devuelve el catálogo de entidades financieras soportadas,
+    con sus opciones de tasas, topes y condiciones actualizadas.
+    """
+    hoy = hoy_argentina()
+
+    # Recolectar todas las claves de tasas requeridas
+    todas_claves = set()
+    for ent_id, info in ENTIDADES.items():
+        fuente_info = info.get("fuente")
+        if fuente_info and isinstance(fuente_info, dict):
+            if fuente_info.get("tipo") == "argentinadatos_cuentas":
+                if fuente_info.get("base"):
+                    todas_claves.add(fuente_info["base"])
+                for niv in fuente_info.get("niveles", []):
+                    todas_claves.add(niv)
+            elif fuente_info.get("tipo") == "argentinadatos_fci":
+                if fuente_info.get("fondo"):
+                    todas_claves.add(fuente_info["fondo"])
+
+    tasas_map = ultimas_tasas(db, list(todas_claves)) if todas_claves else {}
+
+    resultado = []
+    for ent_id, info in ENTIDADES.items():
+        nombre = info["nombre"]
+        fuente_info = info.get("fuente")
+
+        if not fuente_info or not isinstance(fuente_info, dict):
+            resultado.append(
+                EntidadResponse(
+                    id=ent_id,
+                    nombre=nombre,
+                    tipo_fuente=None,
+                    clave_base=None,
+                    opciones=[],
+                )
+            )
+            continue
+
+        tipo_fuente_raw = fuente_info.get("tipo")
+        tipo_fuente = "cuenta" if tipo_fuente_raw == "argentinadatos_cuentas" else ("fci" if tipo_fuente_raw == "argentinadatos_fci" else None)
+
+        if tipo_fuente == "cuenta":
+            clave_base = fuente_info.get("base")
+            niveles = list(fuente_info.get("niveles", []))
+            claves_opciones = ([clave_base] if clave_base else []) + niveles
+        elif tipo_fuente == "fci":
+            clave_base = fuente_info.get("fondo")
+            claves_opciones = [clave_base] if clave_base else []
+        else:
+            clave_base = None
+            claves_opciones = []
+
+        opciones = []
+        for c in claves_opciones:
+            fila = tasas_map.get(c)
+            if fila:
+                es_vieja = (hoy - fila.fecha_dato).days > 7
+                opciones.append(
+                    OpcionTasaEntidad(
+                        clave=fila.clave,
+                        tna=fila.tna,
+                        tope=fila.tope,
+                        condiciones=fila.condiciones,
+                        fecha_dato=fila.fecha_dato,
+                        vieja=es_vieja,
+                    )
+                )
+            else:
+                opciones.append(
+                    OpcionTasaEntidad(
+                        clave=c,
+                        tna=None,
+                        tope=None,
+                        condiciones=None,
+                        fecha_dato=None,
+                        vieja=False,
+                    )
+                )
+
+        resultado.append(
+            EntidadResponse(
+                id=ent_id,
+                nombre=nombre,
+                tipo_fuente=tipo_fuente,
+                clave_base=clave_base,
+                opciones=opciones,
+            )
+        )
+
+    return resultado
 
 
 @router.get("/{billetera_id}", response_model=BilleteraRead)
@@ -166,6 +268,8 @@ def create_billetera(
             update(Billetera).where(Billetera.usuario_id == current_user.id).values(es_principal=False)
         )
 
+    entidad_id = body.bank_id if (body.bank_id and body.bank_id in ENTIDADES) else None
+
     b = Billetera(
         usuario_id=current_user.id,
         nombre=body.nombre,
@@ -176,7 +280,7 @@ def create_billetera(
         es_efectivo=body.es_efectivo,
         es_inversion=body.es_inversion,
         tna=body.tna,
-        entidad_id=body.bank_id,
+        entidad_id=entidad_id,
         fecha_ultimo_rendimiento=fecha_ultimo_rendimiento,
     )
     db.add(b)
@@ -209,6 +313,57 @@ def update_billetera(
             detail="Una billetera de efectivo no puede tener tasa",
         )
 
+    # Validación de bank_id
+    if "bank_id" in body.model_fields_set and body.bank_id is not None:
+        if body.bank_id not in ENTIDADES:
+            raise HTTPException(status_code=400, detail="Esa entidad no existe.")
+
+    entidad_target = body.bank_id if "bank_id" in body.model_fields_set else billetera.entidad_id
+
+    # Validación de nivel_tasa
+    if "nivel_tasa" in body.model_fields_set and body.nivel_tasa is not None:
+        if not entidad_target or entidad_target not in ENTIDADES:
+            raise HTTPException(status_code=400, detail="Ese nivel no corresponde a esta billetera.")
+        fuente_info = ENTIDADES[entidad_target].get("fuente")
+        if not fuente_info or not isinstance(fuente_info, dict):
+            raise HTTPException(status_code=400, detail="Ese nivel no corresponde a esta billetera.")
+
+        if fuente_info.get("tipo") == "argentinadatos_cuentas":
+            base = fuente_info.get("base")
+            niveles = fuente_info.get("niveles", [])
+            valid_opts = ([base] if base else []) + list(niveles)
+            if body.nivel_tasa not in valid_opts:
+                raise HTTPException(status_code=400, detail="Ese nivel no corresponde a esta billetera.")
+        elif fuente_info.get("tipo") == "argentinadatos_fci":
+            fondo = fuente_info.get("fondo")
+            if body.nivel_tasa != fondo:
+                raise HTTPException(status_code=400, detail="Ese nivel no corresponde a esta billetera.")
+        else:
+            raise HTTPException(status_code=400, detail="Ese nivel no corresponde a esta billetera.")
+        billetera.nivel_tasa = body.nivel_tasa
+    elif "nivel_tasa" in body.model_fields_set and body.nivel_tasa is None:
+        billetera.nivel_tasa = None
+    elif "bank_id" in body.model_fields_set and billetera.nivel_tasa is not None:
+        # Si cambia la entidad y el nivel guardado deja de corresponder, el nivel pasa a None
+        es_valido = False
+        if entidad_target and entidad_target in ENTIDADES:
+            fuente_info = ENTIDADES[entidad_target].get("fuente")
+            if fuente_info and isinstance(fuente_info, dict):
+                if fuente_info.get("tipo") == "argentinadatos_cuentas":
+                    base = fuente_info.get("base")
+                    niveles = fuente_info.get("niveles", [])
+                    valid_opts = ([base] if base else []) + list(niveles)
+                    if billetera.nivel_tasa in valid_opts:
+                        es_valido = True
+                elif fuente_info.get("tipo") == "argentinadatos_fci":
+                    if billetera.nivel_tasa == fuente_info.get("fondo"):
+                        es_valido = True
+        if not es_valido:
+            billetera.nivel_tasa = None
+
+    if "bank_id" in body.model_fields_set:
+        billetera.entidad_id = body.bank_id
+
     if "tna" in body.model_fields_set:
         if body.tna is not None:
             billetera.tna = body.tna
@@ -216,7 +371,7 @@ def update_billetera(
                 billetera.fecha_ultimo_rendimiento = datetime.now(timezone.utc)
         else:
             billetera.tna = None
-            billetera.fecha_ultimo_rendimiento = None
+            # No borrar fecha_ultimo_rendimiento si tna pasa a None
 
     if body.es_principal:
         db.execute(
@@ -390,7 +545,7 @@ def desarchivar_billetera(
 @router.get("/{billetera_id}/control-saldo", response_model=ControlSaldoPreview)
 def previsualizar_control_saldo(
     billetera_id: str,
-    saldo: Decimal = Query(..., description="Saldo declarado actual en la billetera"),
+    saldo: Decimal = Query(..., ge=0, description="Saldo declarado actual en la billetera"),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
@@ -453,5 +608,7 @@ def eliminar_ajuste_billetera(
     current_user: Usuario = Depends(get_current_user),
 ):
     """Elimina y revierte un ajuste de saldo."""
-    ajuste_saldo_service.eliminar_ajuste(db, current_user.id, ajuste_id, commit=True)
+    ajuste_saldo_service.eliminar_ajuste(
+        db, current_user.id, ajuste_id, billetera_id=billetera_id, commit=True
+    )
     return None

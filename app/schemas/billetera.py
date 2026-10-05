@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -24,6 +24,7 @@ class BilleteraBase(BaseModel):
     fecha_ultimo_rendimiento: datetime | None = None
     estado: EstadoBilletera = EstadoBilletera.ACTIVA
     bank_id: str | None = Field(default=None, max_length=50)
+    nivel_tasa: str | None = Field(default=None, max_length=120)
 
     @field_validator("nombre")
     @classmethod
@@ -46,6 +47,8 @@ class BilleteraUpdate(BaseModel):
     es_inversion: bool | None = None
     tna: Decimal | None = Field(default=None, ge=Decimal("0"), decimal_places=2, max_digits=6)
     estado: EstadoBilletera | None = None
+    bank_id: str | None = Field(default=None, max_length=50)
+    nivel_tasa: str | None = Field(default=None, max_length=120)
 
     @field_validator("nombre")
     @classmethod
@@ -74,6 +77,13 @@ class RendimientoEstimadoResponse(BaseModel):
     dias_transcurridos: int | None = None
     fecha_ultimo_rendimiento: datetime | None = None
     rendimiento_estimado: DecimalJSON | None = None
+    origen_tasa: str | None = None
+    fecha_dato_tasa: date | None = None
+    tasa_vieja: bool = False
+    tope: DecimalJSON | None = None
+    entidad_id: str | None = None
+    clave_tasa: str | None = None
+    tna_automatica: DecimalJSON | None = None
 
 
 class ConfirmarRendimientoRequest(BaseModel):

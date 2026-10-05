@@ -508,6 +508,38 @@ def _job_recalcular_calibraciones():
         db.close()
 
 
+def _job_actualizar_tasas():
+    """Tarea programada: actualiza las tasas de entidades financieras públicas a las 10:00 y 19:00 ART."""
+    from app.services.tasas_service import actualizar_tasas
+    db = SessionLocal()
+    lock_adquirido = False
+    try:
+        if not intentar_tomar_lock_job(db, "_job_actualizar_tasas"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_actualizar_tasas",
+            )
+            return
+        lock_adquirido = True
+        res = actualizar_tasas(db, commit=True)
+        logger.info("Job actualizar_tasas ejecutado exitosamente: %s", res)
+    except Exception as e:
+        logger.exception("Error en job _job_actualizar_tasas")
+        try:
+            from app.services.alerta_service import enviar_alerta_admin
+            enviar_alerta_admin(
+                asunto="[Argentum] Falló el job _job_actualizar_tasas",
+                cuerpo=f"Error en job _job_actualizar_tasas: {e}",
+                clave="job:_job_actualizar_tasas",
+            )
+        except Exception as alerta_err:
+            logger.error("Error enviando alerta para job actualizar_tasas: %s", alerta_err)
+    finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_actualizar_tasas")
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Crear el scheduler y registrar jobs aquí para evitar que se
@@ -667,6 +699,18 @@ async def lifespan(app: FastAPI):
             minute=0,
             timezone=TZ_ARGENTINA,
             id="recalcular_calibraciones_nocturno",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        # Actualiza las tasas de entidades financieras públicas a las 10:00 y a las 19:00 ART
+        scheduler.add_job(
+            _job_actualizar_tasas,
+            "cron",
+            hour="10,19",
+            minute=0,
+            timezone=TZ_ARGENTINA,
+            id="actualizar_tasas_diarias",
             misfire_grace_time=300,
             max_instances=1,
             replace_existing=True,

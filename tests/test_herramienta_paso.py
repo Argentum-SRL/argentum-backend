@@ -14,6 +14,7 @@ from scripts.local.paso import (
     verificar_tamanio_lineas,
     verificar_misma_fecha,
     clasificar_estado_git,
+    verificar_resultado_refresco,
 )
 
 
@@ -159,3 +160,27 @@ def test_clasificar_estado_git():
     assert clasificar_estado_git(" M app/test.py", 0) == "CAMBIOS SIN COMITEAR"
     assert clasificar_estado_git("", 2) == "COMMITS SIN PUSH"
     assert clasificar_estado_git("", 0) == "SINCRONIZADO"
+
+
+def test_verificar_resultado_refresco_regex_c7():
+    # D9: con "Total tablas: 40 | Tablas iguales: 40 | Tablas distintas: 0" sigue (ok=True)
+    ok_40, msg_40, n_40 = verificar_resultado_refresco(
+        "Total tablas: 40 | Tablas iguales: 40 | Tablas distintas: 0", rc_ref=0
+    )
+    assert ok_40 is True
+    assert n_40 == 40
+
+    # D9: con "Total tablas: 41 | Tablas iguales: 41 | Tablas distintas: 0" sigue (ok=True)
+    ok_41, msg_41, n_41 = verificar_resultado_refresco(
+        "Total tablas: 41 | Tablas iguales: 41 | Tablas distintas: 0", rc_ref=0
+    )
+    assert ok_41 is True
+    assert n_41 == 41
+
+    # D9: con "Total tablas: 40 | Tablas iguales: 39 | Tablas distintas: 1" aborta (ok=False)
+    ok_dist, msg_dist, n_dist = verificar_resultado_refresco(
+        "Total tablas: 40 | Tablas iguales: 39 | Tablas distintas: 1", rc_ref=0
+    )
+    assert ok_dist is False
+    assert n_dist == 40
+

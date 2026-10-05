@@ -70,6 +70,7 @@ from app.services import ajuste_saldo_service
 from app.services.ajuste_saldo_service import (
     calcular_cobertura_desde,
     detectar_huecos,
+    es_diferencia_grande,
     mediana_salidas_semanales,
 )
 from app.services.conciliacion_service import calcular_saldo_teorico
@@ -288,18 +289,10 @@ def test_8_mediana_salidas_semanales():
 # -----------------------------------------------------------------------------
 def test_9_es_grande():
     salida_tipica = Decimal("10500.00")
-
-    def calc_es_grande(diferencia: Decimal, semanas: int, tipica: Decimal | None) -> bool:
-        if diferencia == Decimal("0"):
-            return False
-        if semanas < 2:
-            return True
-        return abs(diferencia) > tipica
-
-    assert calc_es_grande(Decimal("-9000.00"), semanas=4, tipica=salida_tipica) is False
-    assert calc_es_grande(Decimal("-11000.00"), semanas=4, tipica=salida_tipica) is True
-    assert calc_es_grande(Decimal("-9000.00"), semanas=1, tipica=salida_tipica) is True
-    assert calc_es_grande(Decimal("0.00"), semanas=4, tipica=salida_tipica) is False
+    assert es_diferencia_grande(Decimal("-9000.00"), semanas_con_historia=4, salida_semanal_tipica=salida_tipica) is False
+    assert es_diferencia_grande(Decimal("-11000.00"), semanas_con_historia=4, salida_semanal_tipica=salida_tipica) is True
+    assert es_diferencia_grande(Decimal("-9000.00"), semanas_con_historia=1, salida_semanal_tipica=salida_tipica) is True
+    assert es_diferencia_grande(Decimal("0.00"), semanas_con_historia=4, salida_semanal_tipica=salida_tipica) is False
 
 
 # -----------------------------------------------------------------------------

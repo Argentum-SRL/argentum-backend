@@ -66,8 +66,28 @@ def mediana_salidas_semanales(
     if not totales_semanas:
         return None, 0
 
-    mediana_val = Decimal(str(statistics.median(totales_semanas)))
+    mediana_val = Decimal(str(statistics.median(totales_semanas))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return mediana_val, len(totales_semanas)
+
+
+def es_diferencia_grande(
+    diferencia: Decimal,
+    semanas_con_historia: int,
+    salida_semanal_tipica: Optional[Decimal],
+) -> bool:
+    """
+    Evalúa si una diferencia en el control de saldo se considera grande / atípica.
+    - Con diferencia 0: False.
+    - Con menos de 2 semanas de historia: True (si diferencia != 0).
+    - Con al menos 2 semanas: True si |diferencia| > salida_semanal_tipica.
+    """
+    if diferencia == Decimal("0") or diferencia == Decimal("0.00"):
+        return False
+    if semanas_con_historia < 2:
+        return True
+    if salida_semanal_tipica is None:
+        return True
+    return abs(diferencia) > salida_semanal_tipica
 
 
 def detectar_huecos(
@@ -83,7 +103,7 @@ def detectar_huecos(
     - umbral = max(3, 2 × intervalo típico), o 3 si es None.
     - hueco = días sin movimiento estrictamente entre dos días con movimiento dentro de [desde, hoy],
       o desde el último día con movimiento + 1 hasta hoy, con largo >= umbral.
-    - si no hay movimientos en la ventana [desde, hoy], retorna un hueco [(desde, hoy)].
+    - si no hay movimientos en la ventana [desde, hoy], retorna un hueco [(desde, hoy)] solo si su largo es >= umbral.
     - retorna los 3 más largos ordenados cronológicamente por fecha de inicio.
     """
     dias_sorted = sorted(list(set(dias_con_movimiento)))
@@ -104,7 +124,8 @@ def detectar_huecos(
     dias_en_ventana = [d for d in dias_sorted if desde <= d <= hoy]
 
     if not dias_en_ventana:
-        if (hoy - desde).days >= 0:
+        largo_total = (hoy - desde).days + 1
+        if largo_total >= umbral:
             return [(desde, hoy)]
         return []
 
@@ -220,13 +241,14 @@ def previsualizar_control(
         if resp_rend.rendimiento_estimado is not None and resp_rend.rendimiento_estimado > Decimal("0.00"):
             rendimiento_propuesto = min(resp_rend.rendimiento_estimado, diferencia)
 
-    # 2. Historial de fechas de movimientos de la billetera
+    # 2. Historial de fechas de movimientos de la billetera (solo <= hoy)
     fechas_movimientos: set[date] = set()
 
-    # Transacciones confirmadas no crédito
+    # Transacciones confirmadas no crédito <= hoy
     tx_fechas = db.execute(
         select(Transaccion.fecha).where(
             Transaccion.billetera_id == billetera.id,
+            Transaccion.fecha <= hoy,
             (Transaccion.metodo_pago != MetodoPago.CREDITO) | (Transaccion.metodo_pago.is_(None)),
             Transaccion.es_padre_cuotas.is_(False),
             Transaccion.es_cuota_hija.is_(False),
@@ -235,25 +257,28 @@ def previsualizar_control(
     ).scalars().all()
     fechas_movimientos.update(tx_fechas)
 
-    # Transferencias
+    # Transferencias <= hoy
     tr_fechas = db.execute(
         select(TransferenciaInterna.fecha).where(
+            TransferenciaInterna.fecha <= hoy,
             (TransferenciaInterna.billetera_origen_id == billetera.id) |
             (TransferenciaInterna.billetera_destino_id == billetera.id)
         )
     ).scalars().all()
     fechas_movimientos.update(tr_fechas)
 
-    # Rendimientos
+    # Rendimientos <= hoy
     rend_fechas = db.execute(
         select(func.date(RendimientoBilletera.fecha)).where(
-            RendimientoBilletera.billetera_id == billetera.id
+            RendimientoBilletera.billetera_id == billetera.id,
+            func.date(RendimientoBilletera.fecha) <= hoy,
         )
     ).scalars().all()
     for rf in rend_fechas:
         if rf is not None:
             d_obj = rf if isinstance(rf, date) else date.fromisoformat(str(rf))
-            fechas_movimientos.add(d_obj)
+            if d_obj <= hoy:
+                fechas_movimientos.add(d_obj)
 
     primer_movimiento = min(fechas_movimientos) if fechas_movimientos else None
     ultimo_movimiento = max(fechas_movimientos) if fechas_movimientos else None
@@ -267,13 +292,7 @@ def previsualizar_control(
     )
 
     # 4. Clasificación de diferencia grande
-    if diferencia == Decimal("0.00"):
-        es_grande = False
-    elif semanas_con_historia < 2:
-        es_grande = True
-    else:
-        assert salida_semanal_tipica is not None
-        es_grande = abs(diferencia) > salida_semanal_tipica
+    es_grande = es_diferencia_grande(diferencia, semanas_con_historia, salida_semanal_tipica)
 
     # 5. Detección de huecos
     # previsualizar_control usa desde = max(hoy − 30, fecha del último control, primer movimiento)
@@ -450,16 +469,20 @@ def eliminar_ajuste(
     db: Session,
     usuario_id: UUID,
     ajuste_id: UUID | str,
+    billetera_id: Optional[UUID | str] = None,
     commit: bool = True,
 ) -> dict:
     """
     Revierte un ajuste de saldo:
-    - Valida que el ajuste pertenezca a una billetera del usuario.
+    - Valida que el ajuste pertenezca a una billetera del usuario (y a billetera_id si se especifica).
     - Bloquea la billetera con with_for_update, descuenta el monto del saldo_actual y elimina la fila.
     - Mantiene el esquema de atomicidad transaccional con commit/flush.
     """
     ajuste = db.get(AjusteSaldo, ajuste_id)
     if not ajuste:
+        raise HTTPException(status_code=404, detail="No encontramos ese ajuste de saldo.")
+
+    if billetera_id is not None and str(ajuste.billetera_id) != str(billetera_id):
         raise HTTPException(status_code=404, detail="No encontramos ese ajuste de saldo.")
 
     billetera = db.execute(

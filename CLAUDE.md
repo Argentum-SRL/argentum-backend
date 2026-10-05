@@ -29,6 +29,9 @@ Esta sección manda: si otra parte de este archivo dice algo distinto, vale lo q
 ### Suscripciones
 - Catálogo en app/core/catalogo_suscripciones.py y su .json (idéntico al del frontend). Un cobro automático se reconoce por suscripcion_id.
 
+### Tasas
+- app/core/entidades.py tiene el catálogo de entidades, con los mismos ids que el selector del frontend (src/lib/constants/banks.ts), y su fuente de tasa. Si se saca una entidad del selector, se saca también del catálogo; nunca se borran billeteras de usuarios por eso. app/services/tasas_service.py guarda en tasas_entidades lo que publica ArgentinaDatos (job a las 10:00 y a las 19:00). Una tasa con más de 7 días no se usa; la tasa manual de la billetera manda. El rendimiento estimado se calcula con el saldo de cada día.
+
 ### Base de datos
 - Las migraciones se aplican a mano a producción antes del push; Railway corre "alembic upgrade head" al deployar.
 
