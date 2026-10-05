@@ -4,44 +4,99 @@ Sincronizado exactamente con el selector del frontend (src/lib/constants/banks.t
 """
 from __future__ import annotations
 
+from decimal import Decimal
 import re
 import unicodedata
 from typing import Any, Optional
 
-# Catálogo completo de 32 entidades exactamente como en banks.ts
+# Catálogo completo de 32 entidades con nueva estructura de opciones
 ENTIDADES: dict[str, dict[str, Any]] = {
     "mercadopago": {
         "nombre": "Mercado Pago",
         "fuente": {
-            "tipo": "argentinadatos_fci",
-            "fondo": "Mercado Fondo - Clase A",
+            "base": "Mercado Fondo - Clase A",
+            "opciones": [
+                {
+                    "clave": "Mercado Fondo - Clase A",
+                    "fuente": "argentinadatos_fci",
+                    "etiqueta": "Fondo Mercado Fondo",
+                    "tope": None,
+                },
+            ],
         },
     },
     "uala": {
         "nombre": "Ualá",
         "fuente": {
-            "tipo": "argentinadatos_cuentas",
             "base": "UALA",
-            "niveles": ["UALA PLUS 1", "UALA PLUS 2"],
+            "opciones": [
+                {
+                    "clave": "UALA",
+                    "fuente": "argentinadatos_cuentas",
+                    "etiqueta": "Cuenta remunerada",
+                    "tope": None,
+                },
+                {
+                    "clave": "UALA PLUS 1",
+                    "fuente": "argentinadatos_cuentas",
+                    "etiqueta": "Ualá Plus 1",
+                    "tope": None,
+                },
+                {
+                    "clave": "UALA PLUS 2",
+                    "fuente": "argentinadatos_cuentas",
+                    "etiqueta": "Ualá Plus 2",
+                    "tope": None,
+                },
+                {
+                    "clave": "Ualintec Ahorro Pesos - Clase A",
+                    "fuente": "argentinadatos_fci",
+                    "etiqueta": "Fondo Ualintec Ahorro",
+                    "tope": None,
+                },
+            ],
         },
     },
     "naranjax": {
         "nombre": "Naranja X",
         "fuente": {
-            "tipo": "argentinadatos_cuentas",
             "base": "NARANJA X",
-            "niveles": [],
+            "opciones": [
+                {
+                    "clave": "NARANJA X",
+                    "fuente": "argentinadatos_cuentas",
+                    "etiqueta": "Cuenta remunerada",
+                    "tope": None,
+                },
+            ],
         },
     },
     "personalpay": {
         "nombre": "Personal Pay",
-        "fuente": None,
+        "fuente": {
+            "base": "Delta Pesos - Clase A",
+            "opciones": [
+                {
+                    "clave": "Delta Pesos - Clase A",
+                    "fuente": "argentinadatos_fci",
+                    "etiqueta": "Fondo Delta Pesos",
+                    "tope": None,
+                },
+            ],
+        },
     },
     "prex": {
         "nombre": "Prex",
         "fuente": {
-            "tipo": "argentinadatos_fci",
-            "fondo": "Allaria Ahorro - Clase E",
+            "base": "Allaria Ahorro - Clase E",
+            "opciones": [
+                {
+                    "clave": "Allaria Ahorro - Clase E",
+                    "fuente": "argentinadatos_fci",
+                    "etiqueta": "Fondo Allaria Ahorro",
+                    "tope": None,
+                },
+            ],
         },
     },
     "paypal": {
@@ -75,22 +130,44 @@ ENTIDADES: dict[str, dict[str, Any]] = {
     "fiwind": {
         "nombre": "Fiwind",
         "fuente": {
-            "tipo": "argentinadatos_cuentas",
             "base": "FIWIND",
-            "niveles": [],
+            "opciones": [
+                {
+                    "clave": "FIWIND",
+                    "fuente": "argentinadatos_cuentas",
+                    "etiqueta": "Cuenta remunerada",
+                    "tope": None,
+                },
+            ],
         },
     },
     "brubank": {
         "nombre": "Brubank",
         "fuente": {
-            "tipo": "argentinadatos_cuentas",
             "base": "BRUBANK",
-            "niveles": [],
+            "opciones": [
+                {
+                    "clave": "BRUBANK",
+                    "fuente": "argentinadatos_cuentas",
+                    "etiqueta": "Cuenta remunerada",
+                    "tope": None,
+                },
+            ],
         },
     },
     "lemon": {
         "nombre": "Lemon",
-        "fuente": None,
+        "fuente": {
+            "base": "Vinci Compass Liquidez - Clase F",
+            "opciones": [
+                {
+                    "clave": "Vinci Compass Liquidez - Clase F",
+                    "fuente": "argentinadatos_fci",
+                    "etiqueta": "Fondo Vinci Compass Liquidez",
+                    "tope": Decimal("2000000"),
+                },
+            ],
+        },
     },
     "cuentadni": {
         "nombre": "Cuenta DNI",
@@ -98,26 +175,78 @@ ENTIDADES: dict[str, dict[str, Any]] = {
     },
     "galicia": {
         "nombre": "Galicia",
-        "fuente": None,
+        "fuente": {
+            "base": None,
+            "opciones": [
+                {
+                    "clave": "Fima Premium - Clase A",
+                    "fuente": "argentinadatos_fci",
+                    "etiqueta": "Fondo Fima Premium",
+                    "tope": None,
+                },
+            ],
+        },
     },
     "santander": {
         "nombre": "Santander",
-        "fuente": None,
+        "fuente": {
+            "base": None,
+            "opciones": [
+                {
+                    "clave": "Super Ahorro $ - Clase A",
+                    "fuente": "argentinadatos_fci",
+                    "etiqueta": "Fondo Super Ahorro $",
+                    "tope": None,
+                },
+            ],
+        },
     },
     "bbva": {
         "nombre": "BBVA",
-        "fuente": None,
+        "fuente": {
+            "base": None,
+            "opciones": [
+                {
+                    "clave": "FBA Money Market Pesos - Clase A",
+                    "fuente": "argentinadatos_fci",
+                    "etiqueta": "Fondo FBA Money Market",
+                    "tope": None,
+                },
+            ],
+        },
     },
     "macro": {
         "nombre": "Macro",
-        "fuente": None,
+        "fuente": {
+            "base": None,
+            "opciones": [
+                {
+                    "clave": "Pionero Pesos - Clase A",
+                    "fuente": "argentinadatos_fci",
+                    "etiqueta": "Fondo Pionero Pesos",
+                    "tope": None,
+                },
+            ],
+        },
     },
     "nacion": {
         "nombre": "Banco Nación",
         "fuente": {
-            "tipo": "argentinadatos_cuentas",
             "base": None,
-            "niveles": ["BNA"],
+            "opciones": [
+                {
+                    "clave": "BNA",
+                    "fuente": "argentinadatos_cuentas",
+                    "etiqueta": "Cuenta sueldo",
+                    "tope": None,
+                },
+                {
+                    "clave": "Pellegrini Renta Pesos - Clase A",
+                    "fuente": "argentinadatos_fci",
+                    "etiqueta": "Fondo Pellegrini Renta Pesos",
+                    "tope": None,
+                },
+            ],
         },
     },
     "provincia": {
@@ -126,11 +255,31 @@ ENTIDADES: dict[str, dict[str, Any]] = {
     },
     "hipotecario": {
         "nombre": "Banco Hipotecario",
-        "fuente": None,
+        "fuente": {
+            "base": None,
+            "opciones": [
+                {
+                    "clave": "Toronto Trust Ahorro - Clase A",
+                    "fuente": "argentinadatos_fci",
+                    "etiqueta": "Fondo Toronto Trust Ahorro",
+                    "tope": None,
+                },
+            ],
+        },
     },
     "icbc": {
         "nombre": "ICBC",
-        "fuente": None,
+        "fuente": {
+            "base": None,
+            "opciones": [
+                {
+                    "clave": "Alpha Pesos - Clase A",
+                    "fuente": "argentinadatos_fci",
+                    "etiqueta": "Fondo Alpha Pesos",
+                    "tope": None,
+                },
+            ],
+        },
     },
     "hsbc": {
         "nombre": "HSBC",
@@ -139,9 +288,27 @@ ENTIDADES: dict[str, dict[str, Any]] = {
     "supervielle": {
         "nombre": "Supervielle",
         "fuente": {
-            "tipo": "argentinadatos_cuentas",
             "base": None,
-            "niveles": ["SUPERVIELLE", "SUPERVIELLE HIT IOL"],
+            "opciones": [
+                {
+                    "clave": "SUPERVIELLE",
+                    "fuente": "argentinadatos_cuentas",
+                    "etiqueta": "Plan sueldo",
+                    "tope": None,
+                },
+                {
+                    "clave": "SUPERVIELLE HIT IOL",
+                    "fuente": "argentinadatos_cuentas",
+                    "etiqueta": "Cuenta Hit IOL",
+                    "tope": None,
+                },
+                {
+                    "clave": "Premier Renta CP en Pesos - Clase A",
+                    "fuente": "argentinadatos_fci",
+                    "etiqueta": "Fondo Premier Renta",
+                    "tope": None,
+                },
+            ],
         },
     },
     "bancosantafe": {
@@ -154,7 +321,17 @@ ENTIDADES: dict[str, dict[str, Any]] = {
     },
     "balanz": {
         "nombre": "Balanz",
-        "fuente": None,
+        "fuente": {
+            "base": None,
+            "opciones": [
+                {
+                    "clave": "Balanz Capital Money Market - Clase A",
+                    "fuente": "argentinadatos_fci",
+                    "etiqueta": "Fondo Balanz Money Market",
+                    "tope": None,
+                },
+            ],
+        },
     },
     "iol": {
         "nombre": "IOL (InvertirOnline)",
@@ -214,10 +391,10 @@ def entidad_de_billetera(b: Any) -> Optional[str]:
 
 def opciones_de_entidad(entidad_id: Optional[str]) -> tuple[str | None, str | None, list[str]]:
     """
-    Devuelve (tipo, clave_base, claves_validas) para una entidad:
-    - tipo: "cuenta", "fci" o None
-    - clave_base: clave base de tasa (o fondo para fci) o None
-    - claves_validas: lista de claves válidas en orden: base si existe, después los niveles; para fci, [fondo]
+    Devuelve (tipo_base, clave_base, claves_validas) para una entidad:
+    - tipo_base: "cuenta", "fci" si clave_base no es None; si no, None
+    - clave_base: clave base de tasa o None
+    - claves_validas: lista de claves de todas las opciones en orden
     """
     if not entidad_id or entidad_id not in ENTIDADES:
         return (None, None, [])
@@ -227,18 +404,38 @@ def opciones_de_entidad(entidad_id: Optional[str]) -> tuple[str | None, str | No
     if not fuente_info or not isinstance(fuente_info, dict):
         return (None, None, [])
 
-    tipo_raw = fuente_info.get("tipo")
-    if tipo_raw == "argentinadatos_cuentas":
-        tipo = "cuenta"
-        base = fuente_info.get("base")
-        niveles = list(fuente_info.get("niveles", []))
-        claves_validas = ([base] if base else []) + niveles
-        return (tipo, base, claves_validas)
-    elif tipo_raw == "argentinadatos_fci":
-        tipo = "fci"
-        fondo = fuente_info.get("fondo")
-        claves_validas = [fondo] if fondo else []
-        return (tipo, fondo, claves_validas)
+    base = fuente_info.get("base")
+    opciones = fuente_info.get("opciones", [])
+    claves_validas = [opt["clave"] for opt in opciones]
 
-    return (None, None, [])
+    tipo_base = None
+    if base is not None:
+        for opt in opciones:
+            if opt["clave"] == base:
+                fuente_opt = opt.get("fuente")
+                if fuente_opt == "argentinadatos_cuentas":
+                    tipo_base = "cuenta"
+                elif fuente_opt == "argentinadatos_fci":
+                    tipo_base = "fci"
+                break
+
+    return (tipo_base, base, claves_validas)
+
+
+def opcion_de_entidad(entidad_id: Optional[str], clave: Optional[str]) -> Optional[dict[str, Any]]:
+    """
+    Busca y devuelve la opción de tasa correspondiente a una entidad y clave.
+    """
+    if not entidad_id or entidad_id not in ENTIDADES or not clave:
+        return None
+
+    info = ENTIDADES[entidad_id]
+    fuente_info = info.get("fuente")
+    if not fuente_info or not isinstance(fuente_info, dict):
+        return None
+
+    for opt in fuente_info.get("opciones", []):
+        if opt["clave"] == clave:
+            return opt
+    return None
 

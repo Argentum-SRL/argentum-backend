@@ -110,9 +110,9 @@ def listar_entidades(
     resultado = []
     for ent_id, info in ENTIDADES.items():
         nombre = info["nombre"]
-        tipo_fuente, clave_base, claves_opciones = opciones_de_entidad(ent_id)
+        fuente_info = info.get("fuente")
 
-        if not tipo_fuente:
+        if not fuente_info or not isinstance(fuente_info, dict):
             resultado.append(
                 EntidadResponse(
                     id=ent_id,
@@ -124,27 +124,39 @@ def listar_entidades(
             )
             continue
 
+        tipo_fuente, clave_base, _ = opciones_de_entidad(ent_id)
         opciones = []
-        for c in claves_opciones:
-            fila = tasas_map.get(c)
+        for opt_cfg in fuente_info.get("opciones", []):
+            clave = opt_cfg["clave"]
+            tipo_opt = "cuenta" if opt_cfg.get("fuente") == "argentinadatos_cuentas" else "fci"
+            etiqueta = opt_cfg.get("etiqueta", clave)
+            tope_fijo = opt_cfg.get("tope")
+            fila = tasas_map.get(clave)
+
             if fila:
                 es_vieja = (hoy - fila.fecha_dato).days > 7
+                tope_val = Decimal(str(tope_fijo)) if tope_fijo is not None else fila.tope
                 opciones.append(
                     OpcionTasaEntidad(
-                        clave=fila.clave,
+                        clave=clave,
+                        tipo=tipo_opt,
+                        etiqueta=etiqueta,
                         tna=fila.tna,
-                        tope=fila.tope,
+                        tope=tope_val,
                         condiciones=fila.condiciones,
                         fecha_dato=fila.fecha_dato,
                         vieja=es_vieja,
                     )
                 )
             else:
+                tope_val = Decimal(str(tope_fijo)) if tope_fijo is not None else None
                 opciones.append(
                     OpcionTasaEntidad(
-                        clave=c,
+                        clave=clave,
+                        tipo=tipo_opt,
+                        etiqueta=etiqueta,
                         tna=None,
-                        tope=None,
+                        tope=tope_val,
                         condiciones=None,
                         fecha_dato=None,
                         vieja=False,

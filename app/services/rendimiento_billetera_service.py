@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.entidades import entidad_de_billetera, opciones_de_entidad
+from app.core.entidades import ENTIDADES, entidad_de_billetera, opciones_de_entidad, opcion_de_entidad
 from app.models.ajuste_saldo import AjusteSaldo
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.rendimiento_billetera import RendimientoBilletera
@@ -74,21 +74,27 @@ def calcular_rendimiento_estimado(
 
     # 4. Tasa automática vigente (independientemente de si manda la manual)
     tna_automatica: Decimal | None = None
-    if not billetera.es_efectivo and tipo_fuente:
-        clave_auto = None
-        if tipo_fuente == "cuenta":
-            if billetera.nivel_tasa and billetera.nivel_tasa in claves_validas:
+    if not billetera.es_efectivo and ent_id and ent_id in ENTIDADES:
+        fuente_info = ENTIDADES[ent_id].get("fuente")
+        if fuente_info and isinstance(fuente_info, dict):
+            base = fuente_info.get("base")
+            opciones = fuente_info.get("opciones", [])
+            opciones_validas = [opt["clave"] for opt in opciones]
+            if billetera.nivel_tasa and billetera.nivel_tasa in opciones_validas:
                 clave_auto = billetera.nivel_tasa
             else:
-                clave_auto = clave_base
-        elif tipo_fuente == "fci":
-            clave_auto = clave_base
+                clave_auto = base
 
-        if clave_auto and clave_auto in tasas_por_clave:
-            fila_auto = tasas_por_clave[clave_auto]
-            if (hoy - fila_auto.fecha_dato).days <= 7:
-                tna_automatica = fila_auto.tna
+            if clave_auto and clave_auto in tasas_por_clave:
+                fila_auto = tasas_por_clave[clave_auto]
+                if (hoy - fila_auto.fecha_dato).days <= 7:
+                    tna_automatica = fila_auto.tna
 
+    etiqueta_tasa: str | None = None
+    if tasa_ef.clave and ent_id:
+        opt_info = opcion_de_entidad(ent_id, tasa_ef.clave)
+        if opt_info:
+            etiqueta_tasa = opt_info.get("etiqueta")
 
     tiene_tna = (tasa_ef.tna is not None and not tasa_ef.vieja)
 
@@ -128,6 +134,7 @@ def calcular_rendimiento_estimado(
         tope=tasa_ef.tope,
         entidad_id=tasa_ef.entidad_id,
         clave_tasa=tasa_ef.clave,
+        etiqueta_tasa=etiqueta_tasa,
         tna_automatica=tna_automatica,
     )
 

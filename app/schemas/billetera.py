@@ -85,6 +85,7 @@ class RendimientoEstimadoResponse(BaseModel):
     tope: DecimalJSON | None = None
     entidad_id: str | None = None
     clave_tasa: str | None = None
+    etiqueta_tasa: str | None = None
     tna_automatica: DecimalJSON | None = None
 
 

@@ -12,6 +12,8 @@ from app.schemas.tipos import DecimalJSON
 
 class OpcionTasaEntidad(BaseModel):
     clave: str
+    tipo: str = Field(description="'cuenta' o 'fci'")
+    etiqueta: str = Field(description="Etiqueta visible de la opción")
     tna: Optional[DecimalJSON] = Field(default=None, description="Tasa Nominal Anual en porcentaje (ej: 19.00)")
     tope: Optional[DecimalJSON] = Field(default=None, description="Tope remunerable si aplica")
     condiciones: Optional[str] = Field(default=None, description="Condiciones del nivel de tasa")

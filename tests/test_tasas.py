@@ -543,10 +543,200 @@ def test_d9_regex_refresco_base_c7():
 # FASE 4A_4: Tests B1 a B4
 # -----------------------------------------------------------------------------
 def test_b1_opciones_de_entidad():
-    assert opciones_de_entidad("uala") == ("cuenta", "UALA", ["UALA", "UALA PLUS 1", "UALA PLUS 2"])
-    assert opciones_de_entidad("supervielle") == ("cuenta", None, ["SUPERVIELLE", "SUPERVIELLE HIT IOL"])
+    assert opciones_de_entidad("uala") == (
+        "cuenta",
+        "UALA",
+        ["UALA", "UALA PLUS 1", "UALA PLUS 2", "Ualintec Ahorro Pesos - Clase A"],
+    )
+    assert opciones_de_entidad("supervielle") == (
+        None,
+        None,
+        ["SUPERVIELLE", "SUPERVIELLE HIT IOL", "Premier Renta CP en Pesos - Clase A"],
+    )
     assert opciones_de_entidad("mercadopago") == ("fci", "Mercado Fondo - Clase A", ["Mercado Fondo - Clase A"])
-    assert opciones_de_entidad("galicia") == (None, None, [])
+    assert opciones_de_entidad("galicia") == (None, None, ["Fima Premium - Clase A"])
+    assert opciones_de_entidad("paypal") == (None, None, [])
+
+
+# -----------------------------------------------------------------------------
+# FASE 4A_5: Tests de múltiples opciones, fondos con tope y esquema de entidades
+# -----------------------------------------------------------------------------
+def test_fase4a_5_nacion_con_y_sin_nivel():
+    hoy = date(2026, 10, 5)
+    tasas = {
+        "BNA": TasaEntidad(
+            fuente="argentinadatos_cuentas",
+            clave="BNA",
+            tna=Decimal("22.0000"),
+            tope=None,
+            fecha_dato=hoy,
+        ),
+        "Pellegrini Renta Pesos - Clase A": TasaEntidad(
+            fuente="argentinadatos_fci",
+            clave="Pellegrini Renta Pesos - Clase A",
+            tna=Decimal("33.2000"),
+            tope=None,
+            fecha_dato=hoy,
+        ),
+    }
+
+    # 1. nacion sin nivel: sin tasa
+    b_sin_nivel = Billetera(nombre="Nación Sin Nivel", entidad_id="nacion", tna=None, nivel_tasa=None, es_efectivo=False)
+    te_sin_nivel = tasa_efectiva(b_sin_nivel, tasas, Decimal("500000.00"), hoy)
+    assert te_sin_nivel.tna is None
+    assert te_sin_nivel.origen is None
+
+    # 2. nacion con nivel "Pellegrini Renta Pesos - Clase A": usa la tasa de ese fondo
+    b_con_fci = Billetera(
+        nombre="Nación FCI",
+        entidad_id="nacion",
+        tna=None,
+        nivel_tasa="Pellegrini Renta Pesos - Clase A",
+        es_efectivo=False,
+    )
+    te_con_fci = tasa_efectiva(b_con_fci, tasas, Decimal("500000.00"), hoy)
+    assert te_con_fci.tna == Decimal("33.2000")
+    assert te_con_fci.clave == "Pellegrini Renta Pesos - Clase A"
+    assert te_con_fci.origen == "automatica"
+
+
+def test_fase4a_5_lemon_tope_fijo():
+    hoy = date(2026, 10, 5)
+    tasas = {
+        "Vinci Compass Liquidez - Clase F": TasaEntidad(
+            fuente="argentinadatos_fci",
+            clave="Vinci Compass Liquidez - Clase F",
+            tna=Decimal("35.0000"),
+            tope=None,  # En DB la fila no tiene tope, pero la opción sí
+            fecha_dato=hoy,
+        )
+    }
+
+    b_lemon = Billetera(
+        nombre="Lemon Cash",
+        entidad_id="lemon",
+        tna=None,
+        nivel_tasa=None,
+        es_efectivo=False,
+    )
+    te_lemon = tasa_efectiva(b_lemon, tasas, Decimal("3000000.00"), hoy)
+    assert te_lemon.tna == Decimal("35.0000")
+    assert te_lemon.tope == Decimal("2000000")
+    assert te_lemon.origen == "automatica"
+
+    # Rendimiento con saldo 3.000.000 usa tope 2.000.000
+    saldos = {hoy - timedelta(days=1): Decimal("3000000.00")}
+    rend = rendimiento_por_saldos(saldos, te_lemon.tna, te_lemon.tope)
+    esperado = (Decimal("2000000.00") * Decimal("35.0000") / Decimal("100") / Decimal("365")).quantize(
+        Decimal("0.01")
+    )
+    assert rend == esperado
+
+
+def test_fase4a_5_uala_sigue_igual():
+    hoy = date(2026, 10, 5)
+    tasas = {
+        "UALA": TasaEntidad(
+            fuente="argentinadatos_cuentas",
+            clave="UALA",
+            tna=Decimal("19.0000"),
+            tope=Decimal("1000000.00"),
+            fecha_dato=hoy,
+        ),
+        "UALA PLUS 1": TasaEntidad(
+            fuente="argentinadatos_cuentas",
+            clave="UALA PLUS 1",
+            tna=Decimal("21.0000"),
+            tope=None,
+            fecha_dato=hoy,
+        ),
+    }
+
+    # Ualá base
+    b_base = Billetera(nombre="Ualá", entidad_id="uala", tna=None, nivel_tasa=None, es_efectivo=False)
+    te_base = tasa_efectiva(b_base, tasas, Decimal("1500000.00"), hoy)
+    assert te_base.tna == Decimal("19.0000")
+    assert te_base.tope == Decimal("1000000.00")
+
+    # Ualá Plus 1
+    b_plus = Billetera(nombre="Ualá", entidad_id="uala", tna=None, nivel_tasa="UALA PLUS 1", es_efectivo=False)
+    te_plus = tasa_efectiva(b_plus, tasas, Decimal("1500000.00"), hoy)
+    assert te_plus.tna == Decimal("21.0000")
+    assert te_plus.tope is None
+
+
+def test_fase4a_5_listar_entidades_etiqueta_y_tipo(db_session):
+    u = _crear_usuario(db_session)
+    hoy = hoy_argentina()
+
+    tasas = [
+        TasaEntidad(
+            fuente="argentinadatos_cuentas",
+            clave="UALA",
+            tna=Decimal("19.0000"),
+            tope=Decimal("1000000.00"),
+            fecha_dato=hoy,
+        ),
+        TasaEntidad(
+            fuente="argentinadatos_fci",
+            clave="Mercado Fondo - Clase A",
+            tna=Decimal("36.0000"),
+            tope=None,
+            fecha_dato=hoy,
+        ),
+        TasaEntidad(
+            fuente="argentinadatos_fci",
+            clave="Vinci Compass Liquidez - Clase F",
+            tna=Decimal("35.0000"),
+            tope=None,
+            fecha_dato=hoy,
+        ),
+    ]
+    db_session.add_all(tasas)
+    db_session.commit()
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_current_user] = lambda: u
+
+    client = TestClient(app)
+    resp = client.get("/billeteras/entidades")
+    assert resp.status_code == 200
+    entidades_res = {item["id"]: item for item in resp.json()}
+
+    # Ualá
+    uala = entidades_res["uala"]
+    assert uala["clave_base"] == "UALA"
+    assert uala["tipo_fuente"] == "cuenta"
+    opts_uala = {o["clave"]: o for o in uala["opciones"]}
+    assert opts_uala["UALA"]["tipo"] == "cuenta"
+    assert opts_uala["UALA"]["etiqueta"] == "Cuenta remunerada"
+    assert opts_uala["Ualintec Ahorro Pesos - Clase A"]["tipo"] == "fci"
+    assert opts_uala["Ualintec Ahorro Pesos - Clase A"]["etiqueta"] == "Fondo Ualintec Ahorro"
+
+    # Mercado Pago
+    mp = entidades_res["mercadopago"]
+    assert mp["clave_base"] == "Mercado Fondo - Clase A"
+    assert mp["tipo_fuente"] == "fci"
+    assert mp["opciones"][0]["tipo"] == "fci"
+    assert mp["opciones"][0]["etiqueta"] == "Fondo Mercado Fondo"
+
+    # Lemon
+    lemon = entidades_res["lemon"]
+    assert lemon["clave_base"] == "Vinci Compass Liquidez - Clase F"
+    assert lemon["opciones"][0]["tope"] == 2000000.0
+    assert lemon["opciones"][0]["etiqueta"] == "Fondo Vinci Compass Liquidez"
+
+    # Nación
+    nacion = entidades_res["nacion"]
+    assert nacion["clave_base"] is None
+    assert nacion["tipo_fuente"] is None
+    opts_nacion = {o["clave"]: o for o in nacion["opciones"]}
+    assert opts_nacion["BNA"]["tipo"] == "cuenta"
+    assert opts_nacion["BNA"]["etiqueta"] == "Cuenta sueldo"
+    assert opts_nacion["Pellegrini Renta Pesos - Clase A"]["tipo"] == "fci"
+    assert opts_nacion["Pellegrini Renta Pesos - Clase A"]["etiqueta"] == "Fondo Pellegrini Renta Pesos"
+
+    app.dependency_overrides.clear()
 
 
 def test_b2_patch_nivel_tasa_infiere_entidad(db_session):

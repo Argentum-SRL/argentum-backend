@@ -159,10 +159,12 @@ def actualizar_tasas(
             fondos_fci = set()
             for ent_info in ENTIDADES.values():
                 fuente_info = ent_info.get("fuente")
-                if fuente_info and isinstance(fuente_info, dict) and fuente_info.get("tipo") == "argentinadatos_fci":
-                    fondo_nombre = fuente_info.get("fondo")
-                    if fondo_nombre:
-                        fondos_fci.add(fondo_nombre)
+                if fuente_info and isinstance(fuente_info, dict):
+                    for opt in fuente_info.get("opciones", []):
+                        if opt.get("fuente") == "argentinadatos_fci":
+                            fondo_nombre = opt.get("clave")
+                            if fondo_nombre:
+                                fondos_fci.add(fondo_nombre)
 
             for fondo in fondos_fci:
                 item_u = mm_u_map.get(fondo)
@@ -264,8 +266,8 @@ def tasa_efectiva(
     - Si es efectivo: todo None.
     - Si tiene tasa manual: origen='manual', tna manual, sin tope.
     - Si no, resuelve clave según el catálogo y nivel:
-      - cuenta: nivel_tasa si es base/nivel válido, o clave base.
-      - fci: clave del fondo.
+      - nivel_tasa si está entre las opciones; si no, la base.
+    - El tope es el de la opción si tiene uno; si no, el de la fila.
     - Si la tasa tiene más de 7 días de antigüedad: tna=None, vieja=True.
     """
     if getattr(billetera, "es_efectivo", False):
@@ -301,36 +303,34 @@ def tasa_efectiva(
             tna=None, origen=None, clave=None, fecha_dato=None, vieja=False, tope=None, entidad_id=ent_id
         )
 
-    tipo = fuente_info.get("tipo")
-    clave_elegida = None
-    tope = None
+    base = fuente_info.get("base")
+    opciones = fuente_info.get("opciones", [])
+    opciones_validas = [opt["clave"] for opt in opciones]
+    nivel_billetera = getattr(billetera, "nivel_tasa", None)
 
-    if tipo == "argentinadatos_cuentas":
-        base = fuente_info.get("base")
-        niveles = fuente_info.get("niveles", [])
-        opciones_validas = ([base] if base else []) + list(niveles)
-        nivel_billetera = getattr(billetera, "nivel_tasa", None)
-
-        if nivel_billetera and nivel_billetera in opciones_validas:
-            clave_elegida = nivel_billetera
-        else:
-            clave_elegida = base
-
-    elif tipo == "argentinadatos_fci":
-        clave_elegida = fuente_info.get("fondo")
+    if nivel_billetera and nivel_billetera in opciones_validas:
+        clave_elegida = nivel_billetera
+    else:
+        clave_elegida = base
 
     if not clave_elegida:
         return TasaEfectiva(
             tna=None, origen=None, clave=None, fecha_dato=None, vieja=False, tope=None, entidad_id=ent_id
         )
 
+    opt_elegida = next((o for o in opciones if o["clave"] == clave_elegida), None)
+    tope_fijo = opt_elegida.get("tope") if opt_elegida else None
+
     fila = tasas_por_clave.get(clave_elegida)
     if not fila:
+        tope_inicial = Decimal(str(tope_fijo)) if tope_fijo is not None else None
         return TasaEfectiva(
-            tna=None, origen=None, clave=clave_elegida, fecha_dato=None, vieja=False, tope=None, entidad_id=ent_id
+            tna=None, origen=None, clave=clave_elegida, fecha_dato=None, vieja=False, tope=tope_inicial, entidad_id=ent_id
         )
 
-    if tipo == "argentinadatos_cuentas":
+    if tope_fijo is not None:
+        tope = Decimal(str(tope_fijo))
+    else:
         tope = fila.tope
 
     es_vieja = (hoy - fila.fecha_dato).days > 7
