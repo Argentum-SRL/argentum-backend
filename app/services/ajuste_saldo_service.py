@@ -322,6 +322,12 @@ def previsualizar_control(
     if diferencia > Decimal("0.00"):
         posibles_duplicados = _buscar_posibles_duplicados(db, billetera.id, hoy)
 
+    resto_con_rendimiento: Optional[Decimal] = (
+        diferencia - rendimiento_propuesto
+        if rendimiento_propuesto is not None
+        else None
+    )
+
     return {
         "billetera_id": billetera.id,
         "moneda": billetera.moneda,
@@ -329,6 +335,7 @@ def previsualizar_control(
         "saldo_declarado": saldo_declarado,
         "diferencia": diferencia,
         "rendimiento_propuesto": rendimiento_propuesto,
+        "resto_con_rendimiento": resto_con_rendimiento,
         "es_grande": es_grande,
         "salida_semanal_tipica": salida_semanal_tipica,
         "semanas_con_historia": semanas_con_historia,

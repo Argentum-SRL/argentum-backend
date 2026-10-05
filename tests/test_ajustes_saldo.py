@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import ast
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -459,3 +459,50 @@ def test_14_delete_billetera_con_ajuste_y_tiene_transacciones(db_session):
         delete_billetera(str(b.id), db=db_session, current_user=u)
     assert exc.value.status_code == 400
     assert exc.value.detail == "No se puede eliminar la billetera porque tiene ajustes de saldo. Por favor, archivala."
+
+
+# -----------------------------------------------------------------------------
+# 15. previsualizar_control con rendimiento propuesto y resto_con_rendimiento
+# -----------------------------------------------------------------------------
+def test_15_previsualizar_control_resto_con_rendimiento(db_session):
+    hoy = hoy_argentina()
+    hace_10_dias = datetime.combine(hoy - timedelta(days=10), time(12, 0), tzinfo=timezone.utc)
+
+    u = Usuario(
+        id=uuid4(),
+        email=f"user_{uuid4().hex[:6]}@argentum.com",
+        auth_provider=AuthProvider.EMAIL,
+        rol=RolUsuario.USUARIO,
+        estado=EstadoUsuario.ACTIVO,
+        moneda_principal=Moneda.ARS,
+    )
+    b = Billetera(
+        id=uuid4(),
+        usuario_id=u.id,
+        nombre="Mercado Pago Test",
+        moneda=Moneda.ARS,
+        saldo_inicial=Decimal("100000.00"),
+        saldo_actual=Decimal("100000.00"),
+        tna=Decimal("36.5"),
+        fecha_ultimo_rendimiento=hace_10_dias,
+        estado=EstadoBilletera.ACTIVA,
+    )
+    db_session.add_all([u, b])
+    db_session.commit()
+
+    # Caso 1: Declarado 101.500 -> rendimiento_propuesto 1000.00 y resto_con_rendimiento 500.00
+    prev_pos = ajuste_saldo_service.previsualizar_control(
+        db_session, u.id, b.id, saldo_declarado=Decimal("101500.00"), hoy=hoy
+    )
+    assert prev_pos["diferencia"] == Decimal("1500.00")
+    assert prev_pos["rendimiento_propuesto"] == Decimal("1000.00")
+    assert prev_pos["resto_con_rendimiento"] == Decimal("500.00")
+
+    # Caso 2: Declarado 99.000 -> rendimiento_propuesto None y resto_con_rendimiento None
+    prev_neg = ajuste_saldo_service.previsualizar_control(
+        db_session, u.id, b.id, saldo_declarado=Decimal("99000.00"), hoy=hoy
+    )
+    assert prev_neg["diferencia"] == Decimal("-1000.00")
+    assert prev_neg["rendimiento_propuesto"] is None
+    assert prev_neg["resto_con_rendimiento"] is None
+

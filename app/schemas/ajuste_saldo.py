@@ -58,6 +58,7 @@ class ControlSaldoPreview(BaseModel):
     saldo_declarado: DecimalJSON
     diferencia: DecimalJSON
     rendimiento_propuesto: DecimalJSON | None = None
+    resto_con_rendimiento: DecimalJSON | None = None
     es_grande: bool
     salida_semanal_tipica: DecimalJSON | None = None
     semanas_con_historia: int

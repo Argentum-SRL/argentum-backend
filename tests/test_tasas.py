@@ -55,10 +55,9 @@ from app.services.tasas_service import (
     rendimiento_por_saldos,
     saldos_diarios,
     tasa_efectiva,
-    ultimas_tasas,
 )
 from app.routers.billeteras import create_billetera, update_billetera, CrearBilleteraRequest
-from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
+from app.utils.fecha import hoy_argentina
 from scripts.local.paso import verificar_resultado_refresco
 
 
@@ -90,7 +89,6 @@ def db_session_fixture(monkeypatch):
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    import app.models  # noqa: F401
     Base.metadata.create_all(bind=engine)
     TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     session = TestingSession()
