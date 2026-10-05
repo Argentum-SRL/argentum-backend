@@ -27,7 +27,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, BackgroundTasks, Cookie
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.limiter import limiter
@@ -45,7 +45,7 @@ from app.core.auth import (
     limpiar_cookies_auth,
 )
 from app.core.database import get_db
-from app.core.security import get_password_hash, verify_password
+from app.core.security import get_password_hash, verify_password, normalizar_email
 from app.models.usuario import AuthProvider, EstadoUsuario, Usuario
 from app.utils.telefono import normalizar_telefono_ar
 from urllib.parse import quote
@@ -147,12 +147,12 @@ def register(request: Request, user_in: RegisterRequest, background_tasks: Backg
             detail="La verificación de seguridad (captcha) falló o es inválida. Por favor, intentá de nuevo.",
         )
 
-    email_clean = user_in.email.strip().lower()
+    email_clean = normalizar_email(user_in.email)
     tel_clean = user_in.telefono.strip() if user_in.telefono else None
     tel_norm = normalizar_telefono_ar(tel_clean) if tel_clean else None
 
     email_existente = db.execute(
-        select(Usuario).where(Usuario.email.ilike(email_clean))
+        select(Usuario).where(func.lower(Usuario.email) == email_clean)
     ).scalar_one_or_none()
     if email_existente:
         if email_existente.auth_provider == AuthProvider.GOOGLE:
@@ -212,8 +212,8 @@ def login(
     db: Session = Depends(get_db)
 ):
     """Login con email y password. Requiere email verificado y contraseña configurada."""
-    email_clean = user_in.email.strip().lower()
-    user = db.execute(select(Usuario).where(Usuario.email.ilike(email_clean))).scalar_one_or_none()
+    email_clean = normalizar_email(user_in.email)
+    user = db.execute(select(Usuario).where(func.lower(Usuario.email) == email_clean)).scalar_one_or_none()
 
     if not user:
         raise HTTPException(status_code=401, detail="El email o la contraseña no son correctos. Revisalos e intentá de nuevo.")
@@ -287,8 +287,8 @@ def recuperar_password(
     db: Session = Depends(get_db)
 ):
     """Inicia recuperación de contraseña. No revela si el email existe."""
-    email_clean = body.email.strip().lower()
-    user = db.execute(select(Usuario).where(Usuario.email.ilike(email_clean))).scalar_one_or_none()
+    email_clean = normalizar_email(body.email)
+    user = db.execute(select(Usuario).where(func.lower(Usuario.email) == email_clean)).scalar_one_or_none()
     if user and user.email_verificado:
         codigo = generar_codigo_recuperacion()
         guardar_codigo_recuperacion(email_clean, codigo)
@@ -307,11 +307,11 @@ def verificar_recuperacion(
     db: Session = Depends(get_db)
 ):
     """Verifica el código de recuperación y actualiza la contraseña con revocación de sesiones previas."""
-    email_clean = body.email.strip().lower()
+    email_clean = normalizar_email(body.email)
     if not verificar_codigo_recuperacion(email_clean, body.codigo):
         raise HTTPException(status_code=400, detail="El código que ingresaste no es válido. Revisalo o pedí uno nuevo.")
 
-    user = db.execute(select(Usuario).where(Usuario.email.ilike(email_clean))).scalar_one_or_none()
+    user = db.execute(select(Usuario).where(func.lower(Usuario.email) == email_clean)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="No encontramos una cuenta con esos datos.")
 
@@ -473,7 +473,7 @@ def enviar_codigo_email(
     Respuesta uniforme e idéntica exista o no el usuario, y también si ya está verificado.
     Rate limit por IP (SlowAPI) y por email (en memoria).
     """
-    email_clean = body.email.strip().lower()
+    email_clean = normalizar_email(body.email)
 
     if not _verificar_rate_limit_reenvio_email(email_clean):
         raise HTTPException(
@@ -481,7 +481,7 @@ def enviar_codigo_email(
             detail="Demasiadas solicitudes de reenvío para este email. Por favor, esperá unos minutos.",
         )
 
-    user = db.execute(select(Usuario).where(Usuario.email.ilike(email_clean))).scalar_one_or_none()
+    user = db.execute(select(Usuario).where(func.lower(Usuario.email) == email_clean)).scalar_one_or_none()
     if user and not user.email_verificado:
         background_tasks.add_task(generar_y_enviar_verificacion_email, email_clean, nombre=user.nombre)
 
@@ -498,7 +498,7 @@ def verificar_email_link(email: str, codigo: str, request: Request, db: Session 
     from fastapi.responses import RedirectResponse
     import urllib.parse
 
-    email_clean = email.strip().lower()
+    email_clean = normalizar_email(email)
     ok, error = verificar_codigo_email(email_clean, codigo.strip())
     if not ok:
         query_params = urllib.parse.urlencode({
@@ -509,7 +509,7 @@ def verificar_email_link(email: str, codigo: str, request: Request, db: Session 
             url=f"{settings.FRONTEND_URL}/auth/verificar-email?" + query_params
         )
 
-    user = db.execute(select(Usuario).where(Usuario.email.ilike(email_clean))).scalar_one_or_none()
+    user = db.execute(select(Usuario).where(func.lower(Usuario.email) == email_clean)).scalar_one_or_none()
     if not user:
         query_params = urllib.parse.urlencode({
             "email": email_clean,
@@ -552,12 +552,12 @@ def verificar_email(
     Activa la cuenta y emite tokens de autenticación para que el usuario pueda
     solicitar la vinculación de WhatsApp o continuar a su cuenta.
     """
-    email_clean = body.email.strip().lower()
+    email_clean = normalizar_email(body.email)
     ok, error = verificar_codigo_email(email_clean, body.codigo.strip())
     if not ok:
         raise HTTPException(status_code=400, detail=error)
 
-    user = db.execute(select(Usuario).where(Usuario.email.ilike(email_clean))).scalar_one_or_none()
+    user = db.execute(select(Usuario).where(func.lower(Usuario.email) == email_clean)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="No encontramos una cuenta con esos datos.")
 
@@ -572,7 +572,7 @@ def verificar_email(
     return AuthResponse(
         access_token=access,
         usuario=UsuarioRead.model_validate(user),
-        requiere_verificacion_telefono=not user.telefono_verificado,
+        requiere_verificacion_telefono=False,
         requiere_onboarding=_requiere_onboarding(user),
     )
 
@@ -599,16 +599,23 @@ def login_google(
     )
 
     token_info = verify_google_token(body.token)
+    if not token_info.get("email_verified"):
+        raise HTTPException(
+            status_code=400,
+            detail="El email de tu cuenta de Google no está verificado.",
+        )
+
     email = token_info.get("email")
     if not email:
         logger.warning('[Auth][Google][Backend] Token válido pero sin email')
         raise HTTPException(status_code=400, detail="El token de Google no contiene un email válido.")
 
-    user = db.execute(select(Usuario).where(Usuario.email == email)).scalar_one_or_none()
+    email_clean = normalizar_email(email)
+    user = db.execute(select(Usuario).where(func.lower(Usuario.email) == email_clean)).scalar_one_or_none()
 
     logger.debug(
         '[Auth][Google][Backend] Usuario buscado email=%s exists=%s authProvider=%s',
-        email,
+        email_clean,
         bool(user),
         getattr(user.auth_provider, 'value', None) if user else None,
     )
@@ -635,7 +642,7 @@ def login_google(
 
         logger.info(
             '[Auth][Google][Backend] Creando usuario nuevo email=%s nombre=%s apellido=%s picture=%s',
-            email,
+            email_clean,
             nombre,
             apellido,
             bool(token_info.get('picture')),
@@ -644,7 +651,7 @@ def login_google(
         user = Usuario(
             nombre=nombre or None,
             apellido=apellido or None,
-            email=email,
+            email=email_clean,
             telefono=None,
             telefono_normalizado=None,
             foto_url=token_info.get("picture"),
@@ -752,8 +759,8 @@ def completar_perfil(
     registraron solo con teléfono. Al terminar, requiere verificar email.
     """
     # Verificar que el email no esté tomado
-    email_clean = body.email.strip().lower()
-    email_existente = db.execute(select(Usuario).where(Usuario.email.ilike(email_clean))).scalar_one_or_none()
+    email_clean = normalizar_email(body.email)
+    email_existente = db.execute(select(Usuario).where(func.lower(Usuario.email) == email_clean)).scalar_one_or_none()
     if email_existente and email_existente.id != current_user.id:
         raise HTTPException(status_code=400, detail="Ya existe una cuenta con ese email.")
 

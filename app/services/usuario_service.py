@@ -4,7 +4,7 @@ import shutil
 import time
 from uuid import UUID
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, update, func
 from sqlalchemy.orm import Session
 
 from app.models.usuario import Usuario, AuthProvider, CicloTipo, Moneda
@@ -29,7 +29,7 @@ from app.models.periodo_presupuesto import PeriodoPresupuesto
 from app.models.presupuesto_categoria import PresupuestoCategoria
 from app.models.tarjeta_credito import TarjetaCredito
 from app.models.importacion import ImportacionResumen, CorreccionImportacion
-from app.core.security import get_password_hash, verify_password
+from app.core.security import get_password_hash, verify_password, normalizar_email
 from app.services import email_service, whatsapp_service
 from app.services.storage_service import storage_service
 from app.utils.telefono import normalizar_telefono_ar
@@ -88,18 +88,18 @@ def actualizar_email(
             detail="Tu cuenta usa Google para autenticarse. El email lo gestiona Google directamente."
         )
     
-    email_limpio = datos.email_nuevo.strip().lower()
+    email_limpio = normalizar_email(datos.email_nuevo)
     if not email_limpio or "@" not in email_limpio or "." not in email_limpio.split("@")[-1]:
         raise HTTPException(status_code=400, detail="Ingresá un formato de email válido.")
     
-    if usuario.email and email_limpio == usuario.email.lower():
+    if usuario.email and email_limpio == normalizar_email(usuario.email):
         raise HTTPException(status_code=400, detail="El email ingresado es igual a tu email actual.")
     
     if usuario.password_configurada and usuario.password_hash:
         if not datos.password_actual or not verify_password(datos.password_actual, usuario.password_hash):
             raise HTTPException(status_code=400, detail="La contraseña actual no es correcta.")
     
-    result = db.execute(select(Usuario).where(Usuario.email == email_limpio, Usuario.id != usuario.id))
+    result = db.execute(select(Usuario).where(func.lower(Usuario.email) == email_limpio, Usuario.id != usuario.id))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Ese email ya está siendo usado por otra cuenta.")
     
