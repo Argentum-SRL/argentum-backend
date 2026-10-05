@@ -65,8 +65,10 @@ class BilleteraRead(BilleteraBase):
     id: UUID
     fecha_creacion: datetime
     tiene_transacciones: bool = False
+    entidad_efectiva: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
 
 
 class RendimientoEstimadoResponse(BaseModel):

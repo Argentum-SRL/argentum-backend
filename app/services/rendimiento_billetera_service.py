@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.entidades import ENTIDADES, entidad_de_billetera
+from app.core.entidades import entidad_de_billetera, opciones_de_entidad
 from app.models.ajuste_saldo import AjusteSaldo
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.rendimiento_billetera import RendimientoBilletera
@@ -66,45 +66,29 @@ def calcular_rendimiento_estimado(
 
     # 2. Obtención de tasas relevantes
     ent_id = entidad_de_billetera(billetera)
-    claves_buscar = set()
-    if ent_id and ent_id in ENTIDADES:
-        fuente_info = ENTIDADES[ent_id].get("fuente")
-        if fuente_info and isinstance(fuente_info, dict):
-            if fuente_info.get("tipo") == "argentinadatos_cuentas":
-                if fuente_info.get("base"):
-                    claves_buscar.add(fuente_info["base"])
-                for niv in fuente_info.get("niveles", []):
-                    claves_buscar.add(niv)
-            elif fuente_info.get("tipo") == "argentinadatos_fci":
-                if fuente_info.get("fondo"):
-                    claves_buscar.add(fuente_info["fondo"])
-
-    tasas_por_clave = ultimas_tasas(db, list(claves_buscar)) if claves_buscar else {}
+    tipo_fuente, clave_base, claves_validas = opciones_de_entidad(ent_id)
+    tasas_por_clave = ultimas_tasas(db, claves_validas) if claves_validas else {}
 
     # 3. Tasa efectiva
     tasa_ef = tasa_efectiva(billetera, tasas_por_clave, billetera.saldo_actual, hoy)
 
     # 4. Tasa automática vigente (independientemente de si manda la manual)
     tna_automatica: Decimal | None = None
-    if not billetera.es_efectivo and ent_id and ent_id in ENTIDADES:
-        fuente_info = ENTIDADES[ent_id].get("fuente")
-        if fuente_info and isinstance(fuente_info, dict):
-            clave_auto = None
-            if fuente_info.get("tipo") == "argentinadatos_cuentas":
-                base = fuente_info.get("base")
-                niveles = fuente_info.get("niveles", [])
-                valid_opts = ([base] if base else []) + list(niveles)
-                if billetera.nivel_tasa and billetera.nivel_tasa in valid_opts:
-                    clave_auto = billetera.nivel_tasa
-                else:
-                    clave_auto = base
-            elif fuente_info.get("tipo") == "argentinadatos_fci":
-                clave_auto = fuente_info.get("fondo")
+    if not billetera.es_efectivo and tipo_fuente:
+        clave_auto = None
+        if tipo_fuente == "cuenta":
+            if billetera.nivel_tasa and billetera.nivel_tasa in claves_validas:
+                clave_auto = billetera.nivel_tasa
+            else:
+                clave_auto = clave_base
+        elif tipo_fuente == "fci":
+            clave_auto = clave_base
 
-            if clave_auto and clave_auto in tasas_por_clave:
-                fila_auto = tasas_por_clave[clave_auto]
-                if (hoy - fila_auto.fecha_dato).days <= 7:
-                    tna_automatica = fila_auto.tna
+        if clave_auto and clave_auto in tasas_por_clave:
+            fila_auto = tasas_por_clave[clave_auto]
+            if (hoy - fila_auto.fecha_dato).days <= 7:
+                tna_automatica = fila_auto.tna
+
 
     tiene_tna = (tasa_ef.tna is not None and not tasa_ef.vieja)
 

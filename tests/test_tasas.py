@@ -27,7 +27,8 @@ def compile_jsonb_sqlite(type_, compiler, **kw):
 
 from app.core.database import Base, get_db
 from app.core.auth import get_current_user
-from app.core.entidades import inferir_entidad
+from app.core.entidades import inferir_entidad, opciones_de_entidad
+
 from app.main import app
 from app.models.ajuste_saldo import AjusteSaldo
 from app.models.billetera import Billetera
@@ -536,3 +537,137 @@ def test_d9_regex_refresco_base_c7():
     ok_dist, msg_dist, n_dist = verificar_resultado_refresco("Total tablas: 40 | Tablas iguales: 39 | Tablas distintas: 1")
     assert ok_dist is False
     assert n_dist == 40
+
+
+# -----------------------------------------------------------------------------
+# FASE 4A_4: Tests B1 a B4
+# -----------------------------------------------------------------------------
+def test_b1_opciones_de_entidad():
+    assert opciones_de_entidad("uala") == ("cuenta", "UALA", ["UALA", "UALA PLUS 1", "UALA PLUS 2"])
+    assert opciones_de_entidad("supervielle") == ("cuenta", None, ["SUPERVIELLE", "SUPERVIELLE HIT IOL"])
+    assert opciones_de_entidad("mercadopago") == ("fci", "Mercado Fondo - Clase A", ["Mercado Fondo - Clase A"])
+    assert opciones_de_entidad("galicia") == (None, None, [])
+
+
+def test_b2_patch_nivel_tasa_infiere_entidad(db_session):
+    u = _crear_usuario(db_session)
+    b = Billetera(
+        id=uuid4(),
+        usuario_id=u.id,
+        nombre="Ualá",
+        moneda=Moneda.ARS,
+        saldo_inicial=Decimal("10000.00"),
+        saldo_actual=Decimal("10000.00"),
+        entidad_id=None,
+        nivel_tasa=None,
+    )
+    db_session.add(b)
+    db_session.commit()
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_current_user] = lambda: u
+
+    client = TestClient(app)
+    resp = client.patch(f"/billeteras/{b.id}", json={"nivel_tasa": "UALA PLUS 2"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["nivel_tasa"] == "UALA PLUS 2"
+    assert data["bank_id"] == "uala"
+    assert data["entidad_efectiva"] == "uala"
+
+    # Verificar en la base de datos
+    db_session.refresh(b)
+    assert b.nivel_tasa == "UALA PLUS 2"
+    assert b.entidad_id == "uala"
+
+    app.dependency_overrides.clear()
+
+
+def test_b3_entidad_efectiva():
+    b_mp = Billetera(nombre="Mercado Pago", entidad_id=None)
+    assert b_mp.entidad_efectiva == "mercadopago"
+
+    b_sebas = Billetera(nombre="MP Sebas", entidad_id=None)
+    assert b_sebas.entidad_efectiva is None
+
+    b_uala_exp = Billetera(nombre="Personalizada", entidad_id="uala")
+    assert b_uala_exp.entidad_efectiva == "uala"
+
+
+def test_b4_estimar_rendimiento_endpoint(db_session):
+    u = _crear_usuario(db_session)
+    hoy = hoy_argentina()
+
+    # Cargar tasas de prueba
+    tasas = [
+        TasaEntidad(
+            fuente="argentinadatos_cuentas",
+            clave="UALA",
+            tna=Decimal("19.0000"),
+            tope=Decimal("1000000.00"),
+            fecha_dato=hoy,
+        ),
+        TasaEntidad(
+            fuente="argentinadatos_cuentas",
+            clave="UALA PLUS 2",
+            tna=Decimal("24.0000"),
+            tope=None,
+            fecha_dato=hoy,
+        ),
+        TasaEntidad(
+            fuente="argentinadatos_cuentas",
+            clave="BRUBANK",
+            tna=Decimal("27.0000"),
+            tope=Decimal("750000.00"),
+            fecha_dato=date(2025, 8, 6),
+        ),
+    ]
+    db_session.add_all(tasas)
+    db_session.commit()
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_current_user] = lambda: u
+
+    client = TestClient(app)
+
+    # 1. Entidad uala con saldo 1.500.000: tna 19, tope 1.000.000, por_dia 520.55 y por_mes 15616.44
+    r1 = client.get("/billeteras/estimar-rendimiento", params={"saldo": "1500000", "entidad_id": "uala"})
+    assert r1.status_code == 200
+    d1 = r1.json()
+    assert d1["tna"] == 19.0
+    assert d1["tope"] == 1000000.0
+    assert d1["por_dia"] == 520.55
+    assert d1["por_mes"] == 15616.44
+    assert d1["vieja"] is False
+
+    # 2. tna 36,5 sin entidad y saldo 100.000: origen "manual", por_dia 100.00 y por_mes 3000.00
+    r2 = client.get("/billeteras/estimar-rendimiento", params={"saldo": "100000", "tna": "36.5"})
+    assert r2.status_code == 200
+    d2 = r2.json()
+    assert d2["origen"] == "manual"
+    assert d2["por_dia"] == 100.00
+    assert d2["por_mes"] == 3000.00
+
+    # 3. Entidad galicia: tna None y por_dia None
+    r3 = client.get("/billeteras/estimar-rendimiento", params={"saldo": "100000", "entidad_id": "galicia"})
+    assert r3.status_code == 200
+    d3 = r3.json()
+    assert d3["tna"] is None
+    assert d3["por_dia"] is None
+    assert d3["por_mes"] is None
+
+    # 4. brubank con dato del 2025-08-06: vieja True y por_dia None
+    r4 = client.get("/billeteras/estimar-rendimiento", params={"saldo": "100000", "entidad_id": "brubank"})
+    assert r4.status_code == 200
+    d4 = r4.json()
+    assert d4["vieja"] is True
+    assert d4["por_dia"] is None
+    assert d4["por_mes"] is None
+
+    # 5. GET /billeteras/estimar-rendimiento no cae en /{billetera_id} (TestClient)
+    # Si cayera en /{billetera_id}, daría 404 porque no existe una billetera con id 'estimar-rendimiento'
+    assert r1.status_code == 200
+    assert "por_dia" in d1
+
+    app.dependency_overrides.clear()
+

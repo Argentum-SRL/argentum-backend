@@ -53,6 +53,12 @@ class Billetera(Base):
     @bank_id.setter
     def bank_id(self, value: str | None) -> None:
         self.entidad_id = value
+
+    @property
+    def entidad_efectiva(self) -> str | None:
+        from app.core.entidades import entidad_de_billetera
+        return entidad_de_billetera(self)
+
     nivel_tasa: Mapped[str | None] = mapped_column(String(120), nullable=True)
     fecha_ultimo_rendimiento: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     estado: Mapped[EstadoBilletera] = mapped_column(

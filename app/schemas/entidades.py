@@ -25,3 +25,16 @@ class EntidadResponse(BaseModel):
     tipo_fuente: Optional[str] = Field(default=None, description="'cuenta', 'fci' o None")
     clave_base: Optional[str] = Field(default=None, description="Clave de la tasa base si aplica")
     opciones: List[OpcionTasaEntidad] = Field(default_factory=list, description="Opciones y niveles de tasa disponibles")
+
+
+class EstimacionRendimientoResponse(BaseModel):
+    entidad_id: Optional[str] = None
+    tna: Optional[DecimalJSON] = None
+    origen: Optional[str] = None
+    clave: Optional[str] = None
+    fecha_dato: Optional[date] = None
+    vieja: bool = False
+    tope: Optional[DecimalJSON] = None
+    por_dia: Optional[DecimalJSON] = None
+    por_mes: Optional[DecimalJSON] = None
+

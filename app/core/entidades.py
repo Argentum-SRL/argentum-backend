@@ -210,3 +210,35 @@ def entidad_de_billetera(b: Any) -> Optional[str]:
         return ent_id
     nombre = getattr(b, "nombre", None)
     return inferir_entidad(nombre)
+
+
+def opciones_de_entidad(entidad_id: Optional[str]) -> tuple[str | None, str | None, list[str]]:
+    """
+    Devuelve (tipo, clave_base, claves_validas) para una entidad:
+    - tipo: "cuenta", "fci" o None
+    - clave_base: clave base de tasa (o fondo para fci) o None
+    - claves_validas: lista de claves válidas en orden: base si existe, después los niveles; para fci, [fondo]
+    """
+    if not entidad_id or entidad_id not in ENTIDADES:
+        return (None, None, [])
+
+    info = ENTIDADES[entidad_id]
+    fuente_info = info.get("fuente")
+    if not fuente_info or not isinstance(fuente_info, dict):
+        return (None, None, [])
+
+    tipo_raw = fuente_info.get("tipo")
+    if tipo_raw == "argentinadatos_cuentas":
+        tipo = "cuenta"
+        base = fuente_info.get("base")
+        niveles = list(fuente_info.get("niveles", []))
+        claves_validas = ([base] if base else []) + niveles
+        return (tipo, base, claves_validas)
+    elif tipo_raw == "argentinadatos_fci":
+        tipo = "fci"
+        fondo = fuente_info.get("fondo")
+        claves_validas = [fondo] if fondo else []
+        return (tipo, fondo, claves_validas)
+
+    return (None, None, [])
+
