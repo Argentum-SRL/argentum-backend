@@ -9,9 +9,7 @@ from app.models.usuario import Usuario
 from app.schemas.meta import (
     MetaCreate,
     MetaUpdate,
-    MetaRead,
-    GoalAnalyticsResponse,
-    GoalSummaryResponse
+    MetaRead
 )
 from app.schemas.movimiento_meta import (
     MovimientoMetaCreate,
@@ -38,13 +36,6 @@ def crear_meta(
     usuario: Usuario = Depends(get_current_user)
 ):
     return meta_service.crear_meta(db, usuario.id, data)
-
-@router.get("/summary", response_model=GoalSummaryResponse)
-def obtener_summary(
-    db: Session = Depends(get_db),
-    usuario: Usuario = Depends(get_current_user)
-):
-    return meta_service.obtener_summary(db, usuario.id)
 
 @router.get("/{id}", response_model=MetaRead)
 def obtener_meta(
@@ -90,11 +81,3 @@ def eliminar_movimiento(
 ):
     meta_service.eliminar_movimiento(db, usuario.id, id, movimiento_id)
     return {"detail": "Movimiento eliminado correctamente"}
-
-@router.get("/{id}/analytics", response_model=GoalAnalyticsResponse)
-def obtener_analytics(
-    id: UUID,
-    db: Session = Depends(get_db),
-    usuario: Usuario = Depends(get_current_user)
-):
-    return meta_service.obtener_analytics(db, usuario.id, id)

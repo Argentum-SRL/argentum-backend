@@ -100,18 +100,3 @@ class MetaRead(MetaBase):
     movimientos: List[MovimientoMetaRead] = []
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class GoalAnalyticsResponse(BaseModel):
-    chart_data: List[Dict[str, Any]]
-    velocidad_mensual: float
-    meses_restantes: float | None
-    fecha_estimada_finalizacion: date | None
-    porcentaje_progreso: float
-    monto_faltante: float
-
-
-class GoalSummaryResponse(BaseModel):
-    total_metas: int
-    completadas: int
-    proximo_vencimiento: date | None
