@@ -42,7 +42,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P3.2", "punto": "Punto 3", "match": "exacto",
             "nombre": "Usuario sin billetera principal, lo mismo",
             "ejecutar": lambda: p3_caso_2(datos),
-            "esperado": "¿Desde qué billetera salió la plata?\n\n1. Efectivo ARS\n2. Galicia\n3. Santander",
+            "esperado": "¿Desde qué billetera salió la plata?\n\n1. Efectivo Pesos\n2. Galicia\n3. Santander",
         },
         {
             "id": "P3.3", "punto": "Punto 3", "match": "exacto",
@@ -84,13 +84,13 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P3.9", "punto": "Punto 3", "match": "exacto",
             "nombre": "Dice 'cobré 800000 de sueldo' y elige billetera de destino",
             "ejecutar": lambda: p3_caso_9(datos),
-            "esperado": "¿A qué billetera entró la plata?\n\n1. Efectivo ARS\n2. Galicia\n3. Santander\n---\nListo. Ingreso de $800.000 en Sueldo a Efectivo ARS — registrado.",
+            "esperado": "¿A qué billetera entró la plata?\n\n1. Efectivo Pesos\n2. Galicia\n3. Santander\n---\nListo. Ingreso de $800.000 en Sueldo a Efectivo Pesos — registrado.",
         },
         {
             "id": "P3.10", "punto": "Punto 3", "match": "exacto",
             "nombre": "Usuario con una sola billetera en pesos dice 'gasté 5000'",
             "ejecutar": lambda: p3_caso_10(datos),
-            "esperado": "Listo. $5.000 en Otros desde Efectivo ARS — registrado.\nLa billetera quedó en negativo.",
+            "esperado": "Listo. $5.000 en Otros desde Efectivo Pesos — registrado.\nLa billetera quedó en negativo.",
         },
         {
             "id": "P4.1", "punto": "Punto 4", "match": "exacto",
@@ -102,7 +102,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P4.2", "punto": "Punto 4", "match": "exacto",
             "nombre": "Operación a medias y manda un gasto distinto",
             "ejecutar": lambda: p4_caso_2(datos),
-            "esperado": "Descarté la de $5.000 en Kiosco. Para los $12.000 en Verdulería:\n\n¿Desde qué billetera salió la plata?\n\n1. Efectivo ARS\n2. Galicia\n3. Santander",
+            "esperado": "Descarté la de $5.000 en Kiosco. Para los $12.000 en Verdulería:\n\n¿Desde qué billetera salió la plata?\n\n1. Efectivo Pesos\n2. Galicia\n3. Santander",
         },
         {
             "id": "P4.3", "punto": "Punto 4", "match": "exacto",
@@ -268,21 +268,21 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P6.6", "punto": "Punto 6", "match": "exacto",
             "nombre": "Gasto en dólares",
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto USD", {
-                "monto": 50, "moneda": "USD", "tipo": "egreso", "categoria": "Otros", "billetera_origen": "Efectivo USD", "fecha": hoy.isoformat()
+                "monto": 50, "moneda": "USD", "tipo": "egreso", "categoria": "Otros", "billetera_origen": "Efectivo Dólares", "fecha": hoy.isoformat()
             }, forzar_cero=True),
-            "esperado": "Propuesta:\nVoy a anotar US$50 en Otros desde Efectivo USD. ¿Va?\nConfirmación:\nListo. US$50 en Otros desde Efectivo USD — registrado.\nLa billetera quedó en negativo.",
+            "esperado": "Propuesta:\nVoy a anotar US$50 en Otros desde Efectivo Dólares. ¿Va?\nConfirmación:\nListo. US$50 en Otros desde Efectivo Dólares — registrado.\nLa billetera quedó en negativo.",
         },
         {
             "id": "P6.7", "punto": "Punto 6", "match": "exacto",
             "nombre": "Lote con uno descartado",
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Lote descalce", {
-                "monto": 1000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Efectivo ARS", "fecha": hoy.isoformat(),
+                "monto": 1000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Efectivo Pesos", "fecha": hoy.isoformat(),
                 "transacciones_adicionales": [
                     {"monto": 2000, "moneda": "ARS", "tipo": "egreso", "categoria": "Panadería", "fecha": ayer.isoformat()},
                     {"monto": 10, "moneda": "USD", "tipo": "egreso", "categoria": "Farmacia", "fecha": hoy.isoformat()}
                 ]
             }, forzar_cero=True),
-            "esperado": "Propuesta:\nNo se pudo registrar Farmacia de US$10 porque es en dólares y la billetera Efectivo ARS es en pesos.\nVoy a anotar 2 movimientos desde Efectivo ARS:\n\n- $1.000 en Kiosco\n- $2.000 en Panadería (ayer)\n\n¿Va?\nConfirmación:\nListo, 2 movimientos desde Efectivo ARS:\n\n- $1.000 en Kiosco\n- $2.000 en Panadería (ayer)\n\nRegistrados.\nLa billetera quedó en negativo.",
+            "esperado": "Propuesta:\nNo se pudo registrar Farmacia de US$10 porque es en dólares y la billetera Efectivo Pesos es en pesos.\nVoy a anotar 2 movimientos desde Efectivo Pesos:\n\n- $1.000 en Kiosco\n- $2.000 en Panadería (ayer)\n\n¿Va?\nConfirmación:\nListo, 2 movimientos desde Efectivo Pesos:\n\n- $1.000 en Kiosco\n- $2.000 en Panadería (ayer)\n\nRegistrados.\nLa billetera quedó en negativo.",
         },
         {
             "id": "P6.8", "punto": "Punto 6", "match": "exacto",
@@ -304,12 +304,12 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P6.10", "punto": "Punto 6", "match": "exacto",
             "nombre": "Lote con todos descartados",
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Lote todos descartados", {
-                "monto": 10, "moneda": "USD", "tipo": "egreso", "categoria": "Farmacia", "billetera_origen": "Efectivo ARS", "fecha": hoy.isoformat(),
+                "monto": 10, "moneda": "USD", "tipo": "egreso", "categoria": "Farmacia", "billetera_origen": "Efectivo Pesos", "fecha": hoy.isoformat(),
                 "transacciones_adicionales": [
                     {"monto": 20, "moneda": "USD", "tipo": "egreso", "categoria": "Supermercado", "fecha": hoy.isoformat()}
                 ]
             }),
-            "esperado": "Propuesta:\nNo se pudo registrar Farmacia de US$10 porque es en dólares y la billetera Efectivo ARS es en pesos.\nNo se pudo registrar Supermercado de US$20 porque es en dólares y la billetera Efectivo ARS es en pesos.\nNo se puede registrar ningún movimiento.\nConfirmación:\nNO_APLICA",
+            "esperado": "Propuesta:\nNo se pudo registrar Farmacia de US$10 porque es en dólares y la billetera Efectivo Pesos es en pesos.\nNo se pudo registrar Supermercado de US$20 porque es en dólares y la billetera Efectivo Pesos es en pesos.\nNo se puede registrar ningún movimiento.\nConfirmación:\nNO_APLICA",
         },
         {
             "id": "P7.1", "punto": "Punto 7", "match": "exacto",
@@ -417,7 +417,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P8.11", "punto": "Punto 8", "match": "exacto",
             "nombre": "Con propuesta pendiente, 'no, fue en Santander' corrige propuesta y no movimiento anterior",
             "ejecutar": lambda: p8_caso_11(datos),
-            "esperado": "Respuesta:\nVoy a corregir el último movimiento:\nAntes: $5.000 en Kiosco desde Galicia\nAhora: $5.000 en Kiosco desde Santander\n¿Confirmás?\nMovimiento anterior intacto en Efectivo ARS: True",
+            "esperado": "Respuesta:\nVoy a corregir el último movimiento:\nAntes: $5.000 en Kiosco desde Galicia\nAhora: $5.000 en Kiosco desde Santander\n¿Confirmás?\nMovimiento anterior intacto en Efectivo Pesos: True",
         },
         {
             "id": "P9.1", "punto": "Punto 9A", "match": "contiene",
@@ -597,7 +597,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P9B.18", "punto": "Punto 9B", "match": "contiene",
             "nombre": "pasé 50000 de Galicia a Efectivo USD: no transfiere 1:1, pregunta cotización o dólares",
             "ejecutar": lambda: p9b_caso_18(datos),
-            "esperado": "¿A qué cotización compraste o cuántos dólares recibís en Efectivo USD? | Sin acreditar 1a1: True",
+            "esperado": "¿A qué cotización compraste o cuántos dólares recibís en Efectivo Dólares? | Sin acreditar 1a1: True",
         },
         {
             "id": "P9B.19", "punto": "Punto 9B", "match": "contiene",

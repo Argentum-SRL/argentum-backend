@@ -112,8 +112,8 @@ def verificar_reconciliacion_billeteras(db: Session = None):
 
 SALDOS_REFERENCIA_21 = {
     ("testingadmin@argentum.com", "Ahorro con rendimiento", "ARS"): Decimal("2082358.73"),
-    ("testingadmin@argentum.com", "Efectivo ARS", "ARS"): Decimal("566340.50"),
-    ("testingadmin@argentum.com", "Efectivo USD", "USD"): Decimal("388.00"),
+    ("testingadmin@argentum.com", "Efectivo Pesos", "ARS"): Decimal("566340.50"),
+    ("testingadmin@argentum.com", "Efectivo Dólares", "USD"): Decimal("388.00"),
     ("testingadmin@argentum.com", "Galicia", "ARS"): Decimal("3554871.05"),
     ("testingadmin@argentum.com", "Santander", "ARS"): Decimal("404460.37"),
 }

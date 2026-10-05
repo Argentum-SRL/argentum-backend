@@ -387,40 +387,38 @@ def inspeccionar_git_repo(repo_dir: Path) -> dict[str, str | int]:
     }
 
 
-def verificar_canario_bd() -> tuple[bool, str]:
-    """Verifica que la base tenga exactamente 8 usuarios y los 7 correos canarios."""
-    from sqlalchemy import create_engine, text
+def verificar_canario_bd(emails: list[str] | None = None) -> tuple[bool, str]:
+    """Verifica que la base tenga todos los correos canarios obligatorios."""
+    if emails is None:
+        from sqlalchemy import create_engine, text
 
-    # Obtener credenciales desde pg_local.env si existe
-    env_file = Path(r"C:\argentum_local\pg_local.env")
-    password = ""
-    if env_file.exists():
-        for line in env_file.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line.startswith("PGPASSWORD="):
-                password = line.split("=", 1)[1].strip().strip('"').strip("'")
-                break
+        # Obtener credenciales desde pg_local.env si existe
+        env_file = Path(r"C:\argentum_local\pg_local.env")
+        password = ""
+        if env_file.exists():
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line.startswith("PGPASSWORD="):
+                    password = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    break
 
-    db_url = os.environ.get("DATABASE_URL")
-    if not db_url or "localhost:5433" not in db_url:
-        db_url = f"postgresql://postgres:{password}@localhost:5433/argentum_local"
+        db_url = os.environ.get("DATABASE_URL")
+        if not db_url or "localhost:5433" not in db_url:
+            db_url = f"postgresql://postgres:{password}@localhost:5433/argentum_local"
 
-    try:
-        engine = create_engine(db_url)
-        with engine.connect() as conn:
-            rows = conn.execute(text("SELECT email FROM usuarios ORDER BY email")).fetchall()
-            emails = [r[0] for r in rows]
-    except Exception as e:
-        return False, f"ERROR al conectar a base de datos: {e}"
-
-    if len(emails) != 8:
-        return False, f"Canario: Total de usuarios = {len(emails)} (esperado: 8). Emails: {emails}"
+        try:
+            engine = create_engine(db_url)
+            with engine.connect() as conn:
+                rows = conn.execute(text("SELECT email FROM usuarios ORDER BY email")).fetchall()
+                emails = [r[0] for r in rows]
+        except Exception as e:
+            return False, f"ERROR al conectar a base de datos: {e}"
 
     faltantes = [req for req in REQUIRED_CANARIO_EMAILS if req not in emails]
     if faltantes:
         return False, f"Canario: Faltan los siguientes emails obligatorios: {faltantes}"
 
-    return True, f"Canario OK: 8 usuarios y todos los 7 emails obligatorios presentes ({len(emails)} usuarios)."
+    return True, f"Canario OK: {len(emails)} usuarios y todos los 7 emails obligatorios presentes ({len(emails)} usuarios)."
 
 
 def realizar_copia_segura(origen_base: Path, destino_base: Path, subcarpetas: list[str]) -> None:

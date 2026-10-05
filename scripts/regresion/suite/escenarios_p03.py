@@ -76,7 +76,7 @@ def p3_caso_3(datos):
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
         respuestas.clear()
-        # Opción 2 en menú de testingadmin (Efectivo ARS, Galicia, Santander) es Galicia
+        # Opción 2 en menú de testingadmin (Efectivo Pesos, Galicia, Santander) es Galicia
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "2"), time.perf_counter())
         return respuestas[-1][1] if respuestas else "SIN_RESPUESTA"
     return run_isolated(test)
@@ -128,7 +128,7 @@ def p3_caso_7(datos):
             wamid=f"wamid_venc_{uuid.uuid4().hex[:8]}",
             mensaje_usuario="gasté 5000 en el kiosco",
             tipo_mensaje=TipoMensajeWpp.TEXTO,
-            mensaje_bot="¿Desde qué billetera salió la plata?\n1. Efectivo ARS\n2. Galicia\n3. Santander",
+            mensaje_bot="¿Desde qué billetera salió la plata?\n1. Efectivo Pesos\n2. Galicia\n3. Santander",
             intent_detectado="slot_filling",
             entidades={"monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "datos_faltantes": ["billetera_origen"]},
             slot_filling_activo=True,
@@ -189,7 +189,7 @@ def p3_caso_10(datos):
     u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE billeteras SET estado = 'archivada' WHERE usuario_id = :uid AND nombre IN ('Galicia', 'Santander')"), {"uid": u.id})
-        conn.execute(text("UPDATE billeteras SET saldo_actual = 0 WHERE usuario_id = :uid AND nombre = 'Efectivo ARS'"), {"uid": u.id})
+        conn.execute(text("UPDATE billeteras SET saldo_actual = 0 WHERE usuario_id = :uid AND nombre = 'Efectivo Pesos'"), {"uid": u.id})
         conn.execute(text("UPDATE billeteras SET es_principal = false WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         respuestas.clear()

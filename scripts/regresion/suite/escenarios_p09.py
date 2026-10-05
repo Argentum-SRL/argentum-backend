@@ -246,7 +246,7 @@ def p9b_caso_3(datos):
         s = Session()
         txs_ini = s.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         bg_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
-        be_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo ARS", Billetera.usuario_id == u.id)).scalar()
+        be_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo Pesos", Billetera.usuario_id == u.id)).scalar()
         
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "saqué 50000 del cajero"), time.perf_counter())
@@ -255,7 +255,7 @@ def p9b_caso_3(datos):
         conf = respuestas[-1][1] if respuestas else ""
         
         bg_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
-        be_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo ARS", Billetera.usuario_id == u.id)).scalar()
+        be_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo Pesos", Billetera.usuario_id == u.id)).scalar()
         txs_fin = s.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         
         saldos_ok = (bg_fin == bg_ini - Decimal("50000") and be_fin == be_ini + Decimal("50000"))
@@ -294,7 +294,7 @@ def p9b_caso_5(datos):
         s = Session()
         txs_ini = s.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         bg_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
-        bu_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo USD", Billetera.usuario_id == u.id)).scalar()
+        bu_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo Dólares", Billetera.usuario_id == u.id)).scalar()
         
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "compré 100 dólares a 1500"), time.perf_counter())
@@ -303,7 +303,7 @@ def p9b_caso_5(datos):
         conf = respuestas[-1][1] if respuestas else ""
         
         bg_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
-        bu_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo USD", Billetera.usuario_id == u.id)).scalar()
+        bu_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo Dólares", Billetera.usuario_id == u.id)).scalar()
         txs_fin = s.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         
         saldos_ok = (bg_fin == bg_ini - Decimal("150000") and bu_fin == bu_ini + Decimal("100"))
@@ -328,11 +328,11 @@ def p9b_caso_7(datos):
     u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
-        conn.execute(text("UPDATE billeteras SET saldo_actual = 100 WHERE usuario_id = :uid AND nombre = 'Efectivo USD'"), {"uid": u.id})
+        conn.execute(text("UPDATE billeteras SET saldo_actual = 100 WHERE usuario_id = :uid AND nombre = 'Efectivo Dólares'"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         s = Session()
         bg_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
-        bu_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo USD", Billetera.usuario_id == u.id)).scalar()
+        bu_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo Dólares", Billetera.usuario_id == u.id)).scalar()
         
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "vendí 50 dólares a 1450"), time.perf_counter())
@@ -341,7 +341,7 @@ def p9b_caso_7(datos):
         conf = respuestas[-1][1] if respuestas else ""
         
         bg_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
-        bu_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo USD", Billetera.usuario_id == u.id)).scalar()
+        bu_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo Dólares", Billetera.usuario_id == u.id)).scalar()
         
         saldos_ok = (bu_fin == bu_ini - Decimal("50") and bg_fin == bg_ini + Decimal("72500"))
         return f"Propuesta: {prop} | Confirmación: {conf} | Saldos ajustados: {saldos_ok}"
@@ -443,7 +443,7 @@ def p9b_caso_13(datos):
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         s = Session()
         bg_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
-        bu_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo USD", Billetera.usuario_id == u.id)).scalar()
+        bu_ini = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo Dólares", Billetera.usuario_id == u.id)).scalar()
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "compré 5 dólares"), time.perf_counter())
@@ -458,7 +458,7 @@ def p9b_caso_13(datos):
         r3 = respuestas[-1][1] if respuestas else ""
 
         bg_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()
-        bu_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo USD", Billetera.usuario_id == u.id)).scalar()
+        bu_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Efectivo Dólares", Billetera.usuario_id == u.id)).scalar()
 
         saldos_ok = (bu_fin == bu_ini + Decimal("5") and bg_fin == bg_ini - Decimal("7500"))
         return f"R1: {r1} | R2: {r2} | R3: {r3} | Saldos: {saldos_ok}"

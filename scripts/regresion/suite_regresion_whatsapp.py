@@ -209,6 +209,18 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
 
     disparos_guarda = comun._disparos_guarda
 
+    # Anonimización para reportes (Decisión 2: testingadmin con email real, demás Usuario_01, Usuario_02, ...)
+    otros_emails = sorted(list({
+        d["email"] for d in (detalles_ref + detalles_rec)
+        if d.get("email") and d["email"] != USUARIO_PRUEBAS_EMAIL
+    }))
+    mapa_anon = {em: f"Usuario_{i+1:02d}" for i, em in enumerate(otros_emails)}
+
+    def _fmt_email(em: str | None) -> str:
+        if not em or em == USUARIO_PRUEBAS_EMAIL:
+            return em or "testingadmin@argentum.com"
+        return mapa_anon.get(em, "Usuario_XX")
+
     if verbose:
         print("\n=== RESUMEN DE EJECUCION ===")
         print(f"Total: {total} | Aprobados: {aprobados} | Omitidos: {omitidos} | Fallidos: {fallidos} | Tiempo: {dur_total:.2f}s")
@@ -234,32 +246,36 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
 
         print(f"\n=== VERIFICACION DE SALDOS CONTRA REFERENCIA HISTORICA ({total_billeteras} BILLETERAS) ===")
         for d in detalles_ref:
+            u_label = _fmt_email(d["email"])
             if d["email"] == USUARIO_PRUEBAS_EMAIL:
                 st = "OK" if d["diff"] == Decimal("0.00") else f"DESVIO ({d['diff']})"
-                print(f"  {d['email']} | {d['billetera']} {d['moneda']}: antes={d['referencia']} | después={d['actual']} | diferencia={d['diff']} | criterio=referencia -> {st}")
+                print(f"  {u_label} | {d['billetera']} {d['moneda']}: antes={d['referencia']} | después={d['actual']} | diferencia={d['diff']} | criterio=referencia -> {st}")
             else:
                 st = "OK" if d["diff"] == Decimal("0.00") else f"CAMBIO ({d['diff']})"
-                print(f"  {d['email']} | {d['billetera']} {d['moneda']}: antes={d['saldo_inicial']} | después={d['actual']} | diferencia={d['diff']} | criterio=foto_inicio -> {st}")
+                print(f"  {u_label} | {d['billetera']} {d['moneda']}: antes={d['saldo_inicial']} | después={d['actual']} | diferencia={d['diff']} | criterio=foto_inicio -> {st}")
         print(f"¿Todos los saldos de testingadmin cumplen la referencia?: {'SÍ' if saldos_ref_ok else 'NO'}")
         if not saldos_ref_ok:
             print(f"ALERTA: Se detectaron {len(desvios_ref)} billeteras con saldos alterados:")
             for desv in desvios_ref:
-                print(f"  - {desv['email']} ({desv['billetera']} {desv['moneda']}): antes={desv['referencia']}, después={desv['actual']}, diferencia={desv['diff']}")
+                u_label = _fmt_email(desv["email"])
+                print(f"  - {u_label} ({desv['billetera']} {desv['moneda']}): antes={desv['referencia']}, después={desv['actual']}, diferencia={desv['diff']}")
         print(f"Actividad en otras cuentas: {movs_otros_nuevos} movimientos nuevos, {billeteras_ajenas_cambiadas} billeteras con saldo distinto")
         print(f"Guarda graph.facebook.com: {disparos_guarda} disparos")
 
         print(f"\n=== VERIFICACION DE RECONCILIACION ({total_billeteras} BILLETERAS) ===")
         for d in detalles_rec:
+            u_label = _fmt_email(d["email"])
             if d["ok"]:
                 st = f"OK (baseline {d['esperado_diff']:+.2f})" if d["esperado_diff"] != Decimal("0.00") else "OK"
             else:
                 st = f"DESVIO_NO_ESPERADO (diff={d['diferencia']:+.2f}, esperado={d['esperado_diff']:+.2f})"
-                print(f"  {d['email']} | {d['billetera']}: guardado={d['guardado']} | calc={d['calculado']} | diff={d['diferencia']} -> {st}")
+                print(f"  {u_label} | {d['billetera']}: guardado={d['guardado']} | calc={d['calculado']} | diff={d['diferencia']} -> {st}")
         print(f"¿Reconciliación de todas las billeteras dentro del baseline?: {'SÍ' if rec_ok else 'NO'}")
         if not rec_ok:
             print(f"ALERTA: Se detectaron {len(discrepancias)} billeteras con desviaciones fuera del baseline:")
             for disc in discrepancias:
-                print(f"  - {disc['email']} ({disc['billetera']}): guardado={disc['guardado']}, calculado={disc['calculado']}, diff={disc['diferencia']}, esperado={disc['esperado_diff']}")
+                u_label = _fmt_email(disc["email"])
+                print(f"  - {u_label} ({disc['billetera']}): guardado={disc['guardado']}, calculado={disc['calculado']}, diff={disc['diferencia']}, esperado={disc['esperado_diff']}")
     else:
         # Modo compacto (menos de 30 líneas en verde)
         print("\n=== RESUMEN DE EJECUCION ===")
@@ -271,7 +287,8 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
         else:
             print(f"Saldos {total_billeteras} billeteras: DESVIO ({len(desvios_ref)} billeteras)")
             for desv in desvios_ref:
-                print(f"  - {desv['email']} ({desv['billetera']} {desv['moneda']}): antes={desv['referencia']}, después={desv['actual']}, diferencia={desv['diff']}")
+                u_label = _fmt_email(desv["email"])
+                print(f"  - {u_label} ({desv['billetera']} {desv['moneda']}): antes={desv['referencia']}, después={desv['actual']}, diferencia={desv['diff']}")
         print(f"Actividad en otras cuentas: {movs_otros_nuevos} movimientos nuevos, {billeteras_ajenas_cambiadas} billeteras con saldo distinto")
         print(f"Guarda graph.facebook.com: {'OK (0 disparos)' if disparos_guarda == 0 else f'DISPARADA ({disparos_guarda})'}")
         if rec_ok:
@@ -279,7 +296,8 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
         else:
             print(f"Reconciliación {total_billeteras} billeteras: DESVIO ({len(discrepancias)} fuera de baseline)")
             for disc in discrepancias:
-                print(f"  - {disc['email']} ({disc['billetera']}): guardado={disc['guardado']}, calc={disc['calculado']}, diff={disc['diferencia']}")
+                u_label = _fmt_email(disc["email"])
+                print(f"  - {u_label} ({disc['billetera']}): guardado={disc['guardado']}, calc={disc['calculado']}, diff={disc['diferencia']}")
 
     return total, aprobados, omitidos, fallidos, detalles_fallidos
 

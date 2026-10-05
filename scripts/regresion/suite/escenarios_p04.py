@@ -166,7 +166,7 @@ def p4_caso_7(datos):
             wamid=f"wamid_venc_{uuid.uuid4().hex[:8]}",
             mensaje_usuario="gasté 5000 en el kiosco",
             tipo_mensaje=TipoMensajeWpp.TEXTO,
-            mensaje_bot="¿Desde qué billetera salió la plata?\n1. Efectivo ARS\n2. Galicia\n3. Santander",
+            mensaje_bot="¿Desde qué billetera salió la plata?\n1. Efectivo Pesos\n2. Galicia\n3. Santander",
             intent_detectado="slot_filling",
             entidades={"monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "datos_faltantes": ["billetera_origen"]},
             slot_filling_activo=True,

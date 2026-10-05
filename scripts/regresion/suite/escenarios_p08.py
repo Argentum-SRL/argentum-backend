@@ -364,13 +364,13 @@ def p8_caso_10(datos):
 
 def p8_caso_11(datos):
     u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
-    b_ef = datos[USUARIO_PRUEBAS_EMAIL]["billeteras"]["Efectivo ARS"]
+    b_ef = datos[USUARIO_PRUEBAS_EMAIL]["billeteras"]["Efectivo Pesos"]
     def test(conn, Session, respuestas):
         db = Session()
         conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
 
-        # 1. Movimiento previo A registrado en Efectivo ARS
+        # 1. Movimiento previo A registrado en Efectivo Pesos
         cat_id, sub_id = _resolver_categoria_y_subcategoria("Kiosco", u.id, db, "egreso")
         tx_prev = Transaccion(
             usuario_id=u.id,
@@ -397,7 +397,7 @@ def p8_caso_11(datos):
             wamid=f"wamid_prev_{uuid.uuid4().hex[:8]}",
             mensaje_usuario="golosinas 1000",
             tipo_mensaje=TipoMensajeWpp.TEXTO,
-            mensaje_bot="Listo. $1.000 en Kiosco desde Efectivo ARS — registrado.",
+            mensaje_bot="Listo. $1.000 en Kiosco desde Efectivo Pesos — registrado.",
             intent_detectado="registrar_transaccion",
             entidades={},
             slot_filling_activo=False,
@@ -416,9 +416,9 @@ def p8_caso_11(datos):
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "no, fue en Santander"), time.perf_counter())
         resp_corr_prop = respuestas[-1][1] if respuestas else ""
 
-        # Verificar que el movimiento previo A sigue intacto en Efectivo ARS
+        # Verificar que el movimiento previo A sigue intacto en Efectivo Pesos
         db.refresh(tx_prev)
         ok_previa = (tx_prev and tx_prev.billetera_id == b_ef.id)
 
-        return f"Respuesta:\n{resp_corr_prop}\nMovimiento anterior intacto en Efectivo ARS: {ok_previa}"
+        return f"Respuesta:\n{resp_corr_prop}\nMovimiento anterior intacto en Efectivo Pesos: {ok_previa}"
     return run_isolated(test)
