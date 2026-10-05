@@ -79,8 +79,8 @@ class CatalogoEntidades:
 
         self.b_galicia = self.billeteras["Galicia"]
         self.b_santander = self.billeteras["Santander"]
-        self.b_efectivo_ars = self.billeteras["Efectivo ARS"]
-        self.b_efectivo_usd = self.billeteras["Efectivo USD"]
+        self.b_efectivo_ars = self.billeteras["Efectivo Pesos"]
+        self.b_efectivo_usd = self.billeteras["Efectivo Dólares"]
         self.b_inversion = self.billeteras["Ahorro con rendimiento"]
 
         # 2. Tarjetas

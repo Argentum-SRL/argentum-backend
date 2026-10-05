@@ -60,6 +60,18 @@ FORMAS_GENERICAS_TARJETA = [
     "con credito", "con crédito"
 ]
 
+def _moneda_de_efectivo(nombre_norm: str) -> Moneda | None:
+    """Identifica si el texto normalizado refiere a efectivo en una moneda determinada."""
+    palabras = set(nombre_norm.split())
+    if not palabras & {"efectivo", "cash"}:
+        return None
+    if palabras & {"usd", "dolar", "dolares", "verdes", "u$s"}:
+        return Moneda.USD
+    if palabras & {"ars", "peso", "pesos"}:
+        return Moneda.ARS
+    return None
+
+
 def resolver_billetera_cascada(
     nombre: str | None,
     billeteras: list[Billetera],
@@ -88,6 +100,13 @@ def resolver_billetera_cascada(
         return exactas[0], exactas
     elif len(exactas) > 1:
         return None, exactas
+
+    # Coincidencia de efectivo por moneda
+    moneda_ef = _moneda_de_efectivo(nombre_norm)
+    if moneda_ef is not None:
+        efectivo = [b for b in billeteras if b.es_efectivo and b.moneda == moneda_ef]
+        if len(efectivo) == 1:
+            return efectivo[0], efectivo
 
     # 2. Coincidencia por alias argentinos
     alias_target = ALIAS_BILLETERAS.get(nombre_norm)
