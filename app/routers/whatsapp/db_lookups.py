@@ -406,7 +406,7 @@ def _buscar_propuesta_pendiente(usuario_id: UUID, db: Session) -> ConversacionWp
 def _buscar_propuesta_confirmable_mas_reciente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
     """
     Busca la propuesta pendiente más reciente entre todos los tipos confirmables (deshacer,
-    corregir, transferir, suscripciones, registrar movimiento) dentro de la ventana de vigencia (30 min).
+    corregir, transferir, suscripciones, registrar movimiento, memoria) dentro de la ventana de vigencia (30 min).
     Garantiza que la confirmación ('sí', 'dale') aplique a lo último que el bot propuso.
     """
     limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
@@ -419,6 +419,8 @@ def _buscar_propuesta_confirmable_mas_reciente(usuario_id: UUID, db: Session) ->
         "agregar_suscripcion",
         "aportar_meta",
         "registrar_transaccion",
+        "memoria_comercio",
+        "memoria_anteriores",
     ]
     return db.execute(
         select(ConversacionWpp)

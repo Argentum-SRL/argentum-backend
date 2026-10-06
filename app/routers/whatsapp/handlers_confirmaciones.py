@@ -131,6 +131,9 @@ def manejar_cancelacion(
     if not _es_cancelacion(mensaje_texto):
         return False
 
+    propuesta_ganadora = _buscar_propuesta_confirmable_mas_reciente(usuario.id, db)
+    intent_ganador = propuesta_ganadora.intent_detectado if propuesta_ganadora else None
+
     txs_pend = db.execute(
         select(Transaccion)
         .where(
@@ -161,7 +164,9 @@ def manejar_cancelacion(
             ConversacionWpp.usuario_id == usuario.id,
             ConversacionWpp.intent_detectado.in_([
                 "registrar_transaccion", "deshacer", "corregir",
-                "agregar_suscripcion", "dar_baja_suscripcion", "cambiar_precio_suscripcion"
+                "agregar_suscripcion", "dar_baja_suscripcion", "cambiar_precio_suscripcion",
+                "aportar_meta", "transferir_fondos",
+                "memoria_comercio", "memoria_anteriores",
             ]),
             ConversacionWpp.accion_ejecutada.is_(None),
         )
@@ -169,7 +174,13 @@ def manejar_cancelacion(
     for p in props_pend:
         p.accion_ejecutada = "cancelada"
 
-    msg_cancel = "Listo, cancelado."
+    if intent_ganador == "memoria_comercio":
+        msg_cancel = "Listo, solo esta vez."
+    elif intent_ganador == "memoria_anteriores":
+        msg_cancel = "Listo, quedan como estaban."
+    else:
+        msg_cancel = "Listo, cancelado."
+
     nueva_conv = ConversacionWpp(
         usuario_id=usuario.id,
         wamid=wamid,
@@ -213,6 +224,11 @@ def manejar_confirmacion(
         _confirmar_propuesta_corregir,
         _confirmar_propuesta_deshacer,
     )
+    from app.routers.whatsapp.memoria_comercio_wpp import (
+        confirmar_anteriores,
+        confirmar_memoria,
+        preguntar_memoria_tras_correccion,
+    )
     from app.routers.whatsapp.registro import _confirmar_propuesta_transaccion
     from app.routers.whatsapp.transferencias import _confirmar_propuesta_transferencia
 
@@ -241,6 +257,7 @@ def manejar_confirmacion(
         return True
 
     elif intent_ganador == "corregir":
+        cambios = (propuesta_ganadora.entidades or {}).get("cambios") if propuesta_ganadora else {}
         tx_corregida, msg_confirm, ya_conf = _confirmar_propuesta_corregir(usuario, db)
         nueva_conv = ConversacionWpp(
             usuario_id=usuario.id,
@@ -259,6 +276,16 @@ def manejar_confirmacion(
         db.add(nueva_conv)
         db.commit()
         whatsapp_service.enviar_whatsapp(from_number, msg_confirm)
+        if tx_corregida:
+            preguntar_memoria_tras_correccion(usuario, db, from_number, tx_corregida, cambios)
+        return True
+
+    elif intent_ganador == "memoria_comercio":
+        confirmar_memoria(usuario, db, from_number, propuesta_ganadora)
+        return True
+
+    elif intent_ganador == "memoria_anteriores":
+        confirmar_anteriores(usuario, db, from_number, propuesta_ganadora)
         return True
 
     elif intent_ganador == "transferir_fondos":

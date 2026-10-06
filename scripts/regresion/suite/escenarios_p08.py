@@ -31,7 +31,8 @@ from app.models.transaccion import (
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion, FrecuenciaSuscripcion
 from app.models.historial_suscripcion import HistorialSuscripcion
 from app.schemas.suscripcion import SuscripcionCreate
-from app.services import suscripcion_service, ai_service
+from app.schemas.transaccion import TransaccionCreate
+from app.services import ai_service, memoria_comercio_service, suscripcion_service, transaccion_service
 from app.routers.whatsapp_ia import _procesar_webhook_whatsapp_sync
 from app.routers.whatsapp.propuestas import _construir_propuesta_transaccion
 from app.routers.whatsapp.registro import _confirmar_propuesta_transaccion
@@ -159,7 +160,7 @@ def p8_caso_5(datos):
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
-        resp_conf = respuestas[-1][1] if respuestas else ""
+        resp_conf = "\n".join(r[1] for r in respuestas) if respuestas else ""
 
         tx = db.execute(select(Transaccion).where(Transaccion.usuario_id == u.id, Transaccion.origen == OrigenTransaccion.IA_WPP)).scalars().first()
         sub = db.get(Subcategoria, tx.subcategoria_id) if tx and tx.subcategoria_id else None
@@ -167,6 +168,157 @@ def p8_caso_5(datos):
         cat_nom = sub.nombre if sub else (cat.nombre if cat else "")
 
         return f"Propuesta:\n{resp_prop}\nConfirmación:\n{resp_conf}\nCategoría final: {cat_nom}"
+    return run_isolated(test)
+
+
+def p8_caso_5b(datos):
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    b_gal = datos[USUARIO_PRUEBAS_EMAIL]["billeteras"]["Galicia"]
+    def test(conn, Session, respuestas):
+        db = Session()
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+
+        cat_kiosco_id, sub_kiosco_id = _resolver_categoria_y_subcategoria("Kiosco", u.id, db, "egreso")
+        transaccion_service.crear_transaccion(
+            db=db,
+            usuario_id=u.id,
+            data=TransaccionCreate(
+                monto=Decimal("5000"),
+                moneda=Moneda.ARS,
+                tipo=TipoTransaccion.EGRESO,
+                descripcion="kiosco",
+                categoria_id=cat_kiosco_id,
+                subcategoria_id=sub_kiosco_id,
+                metodo_pago=MetodoPago.DEBITO,
+                billetera_id=b_gal.id,
+                fecha=hoy_argentina(),
+                origen=OrigenTransaccion.IA_WPP,
+            ),
+        )
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "eso era supermercado"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        resp_mem = respuestas[-1][1] if respuestas else ""
+
+        mem = memoria_comercio_service.buscar(db, u.id, "kiosco", "egreso")
+        mem_guardada = mem is not None
+
+        return f"Respuesta memoria:\n{resp_mem}\nMemoria guardada: {mem_guardada}"
+    return run_isolated(test)
+
+
+def p8_caso_5c(datos):
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    b_gal = datos[USUARIO_PRUEBAS_EMAIL]["billeteras"]["Galicia"]
+    def test(conn, Session, respuestas):
+        db = Session()
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+
+        cat_kiosco_id, sub_kiosco_id = _resolver_categoria_y_subcategoria("Kiosco", u.id, db, "egreso")
+        transaccion_service.crear_transaccion(
+            db=db,
+            usuario_id=u.id,
+            data=TransaccionCreate(
+                monto=Decimal("5000"),
+                moneda=Moneda.ARS,
+                tipo=TipoTransaccion.EGRESO,
+                descripcion="kiosco",
+                categoria_id=cat_kiosco_id,
+                subcategoria_id=sub_kiosco_id,
+                metodo_pago=MetodoPago.DEBITO,
+                billetera_id=b_gal.id,
+                fecha=hoy_argentina(),
+                origen=OrigenTransaccion.IA_WPP,
+            ),
+        )
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "eso era supermercado"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "no"), time.perf_counter())
+        resp_cancel = respuestas[-1][1] if respuestas else ""
+
+        mem = memoria_comercio_service.buscar(db, u.id, "kiosco", "egreso")
+        mem_guardada = mem is not None
+
+        return f"Respuesta cancelación:\n{resp_cancel}\nMemoria guardada: {mem_guardada}"
+    return run_isolated(test)
+
+
+def p8_caso_5d(datos):
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    b_gal = datos[USUARIO_PRUEBAS_EMAIL]["billeteras"]["Galicia"]
+    def test(conn, Session, respuestas):
+        db = Session()
+        conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
+        conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
+
+        cat_kiosco_id, sub_kiosco_id = _resolver_categoria_y_subcategoria("Kiosco", u.id, db, "egreso")
+
+        # Movimiento anterior en Kiosco
+        tx_ant = transaccion_service.crear_transaccion(
+            db=db,
+            usuario_id=u.id,
+            data=TransaccionCreate(
+                monto=Decimal("3000"),
+                moneda=Moneda.ARS,
+                tipo=TipoTransaccion.EGRESO,
+                descripcion="kiosco",
+                categoria_id=cat_kiosco_id,
+                subcategoria_id=sub_kiosco_id,
+                metodo_pago=MetodoPago.DEBITO,
+                billetera_id=b_gal.id,
+                fecha=hoy_argentina() - timedelta(days=5),
+                origen=OrigenTransaccion.IA_WPP,
+            ),
+        )
+
+        # Movimiento de hoy en Kiosco
+        transaccion_service.crear_transaccion(
+            db=db,
+            usuario_id=u.id,
+            data=TransaccionCreate(
+                monto=Decimal("5000"),
+                moneda=Moneda.ARS,
+                tipo=TipoTransaccion.EGRESO,
+                descripcion="kiosco",
+                categoria_id=cat_kiosco_id,
+                subcategoria_id=sub_kiosco_id,
+                metodo_pago=MetodoPago.DEBITO,
+                billetera_id=b_gal.id,
+                fecha=hoy_argentina(),
+                origen=OrigenTransaccion.IA_WPP,
+            ),
+        )
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "eso era supermercado"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+
+        respuestas.clear()
+        # Primer "sí": confirma la memoria y propone pasar anteriores
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        resp_mem = respuestas[-1][1] if respuestas else ""
+
+        respuestas.clear()
+        # Segundo "sí": confirma pasar anteriores
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        resp_ant = respuestas[-1][1] if respuestas else ""
+
+        db.refresh(tx_ant)
+        cat_db = db.get(Categoria, tx_ant.categoria_id) if tx_ant.categoria_id else None
+        sub_db = db.get(Subcategoria, tx_ant.subcategoria_id) if tx_ant.subcategoria_id else None
+        cat_nom_ant = sub_db.nombre if sub_db else (cat_db.nombre if cat_db else "")
+
+        return f"Propuesta anteriores:\n{resp_mem}\nConfirmación anteriores:\n{resp_ant}\nCategoría anterior final: {cat_nom_ant}"
     return run_isolated(test)
 
 

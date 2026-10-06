@@ -381,7 +381,25 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P8.5", "punto": "Punto 8", "match": "exacto",
             "nombre": "Registrar un gasto y decir 'eso era supermercado', verificar la categoría",
             "ejecutar": lambda: p8_caso_5(datos),
-            "esperado": "Propuesta:\nVoy a corregir el último movimiento:\nAntes: $5.000 en Kiosco desde Galicia\nAhora: $5.000 en Supermercado desde Galicia\n¿Confirmás?\nConfirmación:\nListo, movimiento corregido.\nCategoría final: Supermercado",
+            "esperado": "Propuesta:\nVoy a corregir el último movimiento:\nAntes: $5.000 en Kiosco desde Galicia\nAhora: $5.000 en Supermercado desde Galicia\n¿Confirmás?\nConfirmación:\nListo, movimiento corregido.\n¿Siempre que diga \"kiosco\" lo pongo en Supermercado? Respondé sí o no.\nCategoría final: Supermercado",
+        },
+        {
+            "id": "P8.5b", "punto": "Punto 8", "match": "exacto",
+            "nombre": "Confirmar memoria de comercio ('sí') tras corregir categoría",
+            "ejecutar": lambda: p8_caso_5b(datos),
+            "esperado": "Respuesta memoria:\nListo, lo voy a recordar.\nMemoria guardada: True",
+        },
+        {
+            "id": "P8.5c", "punto": "Punto 8", "match": "exacto",
+            "nombre": "Cancelar memoria de comercio ('no') tras corregir categoría",
+            "ejecutar": lambda: p8_caso_5c(datos),
+            "esperado": "Respuesta cancelación:\nListo, solo esta vez.\nMemoria guardada: False",
+        },
+        {
+            "id": "P8.5d", "punto": "Punto 8", "match": "exacto",
+            "nombre": "Confirmar memoria y aplicar a movimientos anteriores ('sí' y 'sí')",
+            "ejecutar": lambda: p8_caso_5d(datos),
+            "esperado": "Propuesta anteriores:\nListo, lo voy a recordar. Tenés 1 movimiento(s) anterior(es) de \"kiosco\" en otra categoría. ¿Los paso también a Supermercado? Respondé sí o no.\nConfirmación anteriores:\nListo: 1 movimiento(s) actualizado(s).\nCategoría anterior final: Supermercado",
         },
         {
             "id": "P8.6", "punto": "Punto 8", "match": "exacto",
