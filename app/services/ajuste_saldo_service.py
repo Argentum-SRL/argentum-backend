@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from app.models.ajuste_saldo import AjusteSaldo
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.rendimiento_billetera import RendimientoBilletera
-from app.models.transaccion import EstadoVerificacionTransaccion, MetodoPago, TipoTransaccion, Transaccion
+from app.models.transaccion import EstadoVerificacionTransaccion, MetodoPago, Transaccion
 from app.models.transferencia_interna import TransferenciaInterna
 from app.services.conciliacion_service import movimientos_por_dia
 from app.services.rendimiento_billetera_service import (
@@ -354,7 +354,6 @@ def _buscar_posibles_duplicados(
     Busca grupos de egresos con idéntica fecha y monto en los últimos 30 días con cantidad >= 2.
     """
     from app.services import duplicados_service
-    _ = TipoTransaccion
     billetera = db.get(Billetera, billetera_id)
     if not billetera:
         return []
