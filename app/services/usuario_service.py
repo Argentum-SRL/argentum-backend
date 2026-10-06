@@ -449,13 +449,17 @@ def eliminar_usuario(db: Session, usuario: Usuario) -> dict:
             AjusteSaldo.billetera_id.in_(select(Billetera.id).where(Billetera.usuario_id == usuario_id))
         ))
 
+        # Memoria de comercios
+        from app.models.memoria_comercio import MemoriaComercio
+        db.execute(delete(MemoriaComercio).where(MemoriaComercio.usuario_id == usuario_id))
+
         # 2. Modelos con usuario_id
         modelos_usuario = [
             ConversacionWpp, Notificacion, RefreshToken, Suscripcion,
             Presupuesto, Meta, GrupoCuotas, 
             TransferenciaInterna, CategoriaExcluida, ConfiguracionNotificacion,
             Transaccion, ImportacionResumen, TarjetaCredito, Billetera,
-            PerfilFinanciero, HistorialPerfilFinanciero
+            PerfilFinanciero, HistorialPerfilFinanciero, MemoriaComercio
         ]
         
         for modelo in modelos_usuario:

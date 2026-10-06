@@ -46,6 +46,8 @@ def procesar_llamada_ia_y_normalizacion(ctx: ContextoMensaje) -> None:
     Ejecuta el procesamiento del modelo de IA sobre el mensaje y normaliza entidades.
     Actualiza resultado_ia, aviso_montos_faltantes, aviso_cambio_tema y confianza_ia_raw en ctx.
     """
+    from app.services.memoria_comercio_service import aplicar_memoria_a_movimiento
+
     mensaje_texto = ctx.mensaje_texto
     usuario = ctx.usuario
     db = ctx.db
@@ -125,8 +127,13 @@ def procesar_llamada_ia_y_normalizacion(ctx: ContextoMensaje) -> None:
     if isinstance(resultado_ia.get("entidades"), dict):
         propagar_fechas_lote(resultado_ia["entidades"])
         ajustar_categoria_marcas(resultado_ia["entidades"])
+        tipo_principal = "ingreso" if resultado_ia["entidades"].get("tipo") == "ingreso" else "egreso"
+        aplicar_memoria_a_movimiento(db, usuario.id, resultado_ia["entidades"], tipo_principal)
         for ad in resultado_ia["entidades"].get("transacciones_adicionales", []):
-            ajustar_categoria_marcas(ad)
+            if isinstance(ad, dict):
+                ajustar_categoria_marcas(ad)
+                tipo_ad = "ingreso" if ad.get("tipo") == "ingreso" else "egreso"
+                aplicar_memoria_a_movimiento(db, usuario.id, ad, tipo_ad)
 
     intent_ia_raw = resultado_ia.get("intent")
     confianza_ia_raw = float(resultado_ia.get("confianza", 1.0))

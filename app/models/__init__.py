@@ -26,6 +26,7 @@ from app.models.transferencia_interna import TransferenciaInterna
 from app.models.rendimiento_billetera import RendimientoBilletera
 from app.models.ajuste_saldo import AjusteSaldo
 from app.models.tasa_entidad import TasaEntidad
+from app.models.memoria_comercio import MemoriaComercio
 from app.models.usuario import Usuario
 from app.models.tools import IPCCache
 from app.models.feriado import FeriadoAR
@@ -69,6 +70,7 @@ __all__ = [
     "RendimientoBilletera",
     "AjusteSaldo",
     "TasaEntidad",
+    "MemoriaComercio",
     "IPCCache",
     "FeriadoAR",
     "EventoActualizacion",

@@ -330,12 +330,15 @@ def ejecutar_borrado_testingadmin(db: Session, user: Usuario) -> Dict[str, int]:
     conteos["rendimientos_billetera"] = cant_rend
     conteos["ajustes_saldo"] = cant_ajustes
 
-    # 10. Calibraciones y Perfil Financiero
+    # 10. Calibraciones, Perfil Financiero y Memoria de Comercios
     cant_cal = db.query(CalibracionUsuario).filter(CalibracionUsuario.usuario_id == uid).delete(synchronize_session=False)
     cant_perf = db.query(PerfilFinanciero).filter(PerfilFinanciero.usuario_id == uid).delete(synchronize_session=False)
+    from app.models.memoria_comercio import MemoriaComercio
+    cant_memoria = db.query(MemoriaComercio).filter(MemoriaComercio.usuario_id == uid).delete(synchronize_session=False)
     db.flush()
     conteos["calibraciones_usuario"] = cant_cal
     conteos["perfiles_financieros"] = cant_perf
+    conteos["memoria_comercios"] = cant_memoria
 
     # 11. Resetear saldos de billeteras a 0.00
     billeteras = db.query(Billetera).filter(Billetera.usuario_id == uid).all()

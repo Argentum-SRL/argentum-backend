@@ -353,55 +353,13 @@ def _buscar_posibles_duplicados(
     """
     Busca grupos de egresos con idéntica fecha y monto en los últimos 30 días con cantidad >= 2.
     """
+    from app.services import duplicados_service
+    _ = TipoTransaccion
+    billetera = db.get(Billetera, billetera_id)
+    if not billetera:
+        return []
     desde = hoy - timedelta(days=30)
-    stmt = (
-        select(
-            Transaccion.fecha,
-            Transaccion.monto,
-            func.count(Transaccion.id).label("cantidad"),
-        )
-        .where(
-            Transaccion.billetera_id == billetera_id,
-            Transaccion.tipo == TipoTransaccion.EGRESO,
-            (Transaccion.metodo_pago != MetodoPago.CREDITO) | (Transaccion.metodo_pago.is_(None)),
-            Transaccion.es_padre_cuotas.is_(False),
-            Transaccion.es_cuota_hija.is_(False),
-            (Transaccion.estado_verificacion.is_(None)) | (Transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE),
-            Transaccion.fecha >= desde,
-            Transaccion.fecha <= hoy,
-        )
-        .group_by(Transaccion.fecha, Transaccion.monto)
-        .having(func.count(Transaccion.id) >= 2)
-        .order_by(func.count(Transaccion.id).desc(), Transaccion.fecha.desc())
-        .limit(3)
-    )
-
-    grupos = db.execute(stmt).all()
-    duplicados = []
-    for g_fecha, g_monto, g_cant in grupos:
-        stmt_desc = (
-            select(Transaccion.descripcion)
-            .where(
-                Transaccion.billetera_id == billetera_id,
-                Transaccion.tipo == TipoTransaccion.EGRESO,
-                (Transaccion.metodo_pago != MetodoPago.CREDITO) | (Transaccion.metodo_pago.is_(None)),
-                Transaccion.es_padre_cuotas.is_(False),
-                Transaccion.es_cuota_hija.is_(False),
-                (Transaccion.estado_verificacion.is_(None)) | (Transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE),
-                Transaccion.fecha == g_fecha,
-                Transaccion.monto == g_monto,
-            )
-            .order_by(Transaccion.fecha_creacion.asc())
-            .limit(2)
-        )
-        descs = [r[0] for r in db.execute(stmt_desc).fetchall()]
-        duplicados.append({
-            "fecha": g_fecha,
-            "monto": g_monto,
-            "cantidad": g_cant,
-            "descripciones": descs,
-        })
-    return duplicados
+    return duplicados_service.pares_en_billetera(db, billetera.usuario_id, billetera_id, desde, hoy)
 
 
 def registrar_control(
