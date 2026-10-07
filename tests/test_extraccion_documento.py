@@ -646,3 +646,272 @@ def test_preparar_rendimientos_fechas_invalidas():
     assert "Vi un rendimiento de $100 que no pude anotar (billetera o fecha dudosa). Cargalo desde Billeteras." in av_none[0]
 
 
+def test_motivo_omision_casos_exactos():
+    """D1: Verifica clasificación determinística de motivo_omision y su orden de precedencia."""
+    from app.routers.whatsapp.extraccion_documento import motivo_omision
+
+    # Aprobado común
+    assert motivo_omision("Café Martínez", "Compra", "Dinero disponible", "Aprobado", False) is None
+
+    # No aprobado: Rechazado, Cancelado, estado None
+    assert motivo_omision("Café Martínez", "Compra", "Dinero disponible", "Rechazado", False) == "no_aprobado"
+    assert motivo_omision("Café Martínez", "Compra", "Dinero disponible", "Cancelado", False) == "no_aprobado"
+    assert motivo_omision("Café Martínez", "Compra", "Dinero disponible", None, False) is None
+
+    # Pase propio: contraparte_es_usuario True
+    assert motivo_omision("Julián Mendoza Ruiz", "Transferencia enviada", "Dinero disponible", "Aprobado", True) == "pase_propio"
+
+    # Pase propio: 'Ingreso de dinero' como descripción y como tipo_operacion
+    assert motivo_omision("Ingreso de dinero", None, "Con transferencia", "Aprobado", False) == "pase_propio"
+    assert motivo_omision("Varios", "Ingreso de dinero", "Con transferencia", "Aprobado", False) == "pase_propio"
+
+    # Crédito vs Débito vs Dinero disponible
+    assert motivo_omision("Meli+", "Pago automático", "Mastercard crédito", "Aprobado", False) == "credito"
+    assert motivo_omision("Kiosco Sur", "Pago en tienda física", "Mastercard débito", "Aprobado", False) is None
+    assert motivo_omision("Tienda Lunar", "Compra", "Dinero disponible", "Aprobado", False) is None
+
+    # Orden de precedencia:
+    # 1. no_aprobado prevalece sobre pase_propio y credito
+    assert motivo_omision("Ingreso de dinero", "Ingreso de dinero", "Mastercard crédito", "Rechazado", True) == "no_aprobado"
+    # 2. pase_propio prevalece sobre credito
+    assert motivo_omision("Julián Mendoza", "Compra", "Mastercard crédito", "Aprobado", True) == "pase_propio"
+    assert motivo_omision("Ingreso de dinero", None, "Mastercard crédito", "Aprobado", False) == "pase_propio"
+
+
+def test_esquema_extraccion_campos_required():
+    """D1: Verifica que ESQUEMA_EXTRACCION tenga los 4 campos nuevos y estén en required (strict: True)."""
+    items_schema = ESQUEMA_EXTRACCION["json_schema"]["schema"]["properties"]["movimientos"]["items"]
+    props = items_schema["properties"]
+    required = items_schema["required"]
+
+    for campo in ["tipo_operacion", "medio_pago", "estado", "contraparte_es_usuario"]:
+        assert campo in props, f"Falta campo {campo} en properties"
+        assert campo in required, f"Falta campo {campo} en required"
+
+    assert ESQUEMA_EXTRACCION["json_schema"]["strict"] is True
+
+
+def test_extraccion_omitidos_parchada():
+    """D1: Los omitidos no cuentan para el tope de 10 ni para total_vistos; ILEGIBLE solo si no hay nada."""
+    from app.routers.whatsapp.extraccion_documento import extraer_movimientos_de_imagen
+    import json
+
+    # 12 comunes + 2 omitidos + 1 rendimiento
+    movs = []
+    for i in range(1, 13):
+        movs.append({
+            "fecha": "2026-10-06",
+            "monto": 1000 * i,
+            "moneda": "ARS",
+            "descripcion": f"Comercio {i}",
+            "sentido": "egreso",
+            "categoria": None,
+            "tipo_operacion": "Compra",
+            "medio_pago": "Dinero disponible",
+            "estado": "Aprobado",
+            "contraparte_es_usuario": False,
+        })
+    # Omitido 1: Rechazado
+    movs.append({
+        "fecha": "2026-10-06",
+        "monto": 500,
+        "moneda": "ARS",
+        "descripcion": "Kiosco",
+        "sentido": "egreso",
+        "categoria": None,
+        "tipo_operacion": "Compra",
+        "medio_pago": "Mastercard débito",
+        "estado": "Rechazado",
+        "contraparte_es_usuario": False,
+    })
+    # Omitido 2: Pase propio
+    movs.append({
+        "fecha": "2026-10-06",
+        "monto": 40000,
+        "moneda": "ARS",
+        "descripcion": "Ingreso de dinero",
+        "sentido": "ingreso",
+        "categoria": None,
+        "tipo_operacion": None,
+        "medio_pago": "Con transferencia",
+        "estado": "Aprobado",
+        "contraparte_es_usuario": False,
+    })
+    # Rendimiento
+    movs.append({
+        "fecha": "2026-10-06",
+        "monto": 250,
+        "moneda": "ARS",
+        "descripcion": "Rendimientos",
+        "sentido": "rendimiento",
+        "categoria": None,
+        "tipo_operacion": None,
+        "medio_pago": None,
+        "estado": "Aprobado",
+        "contraparte_es_usuario": False,
+    })
+
+    mock_resp = MagicMock()
+    mock_resp.choices = [
+        MagicMock(message=MagicMock(content=json.dumps({
+            "legible": True,
+            "documento_tipo": "captura_actividad",
+            "billetera_texto": "Mercado Pago",
+            "vencimiento": None,
+            "movimientos": movs,
+        })))
+    ]
+
+    with patch("app.routers.whatsapp.extraccion_documento.get_openai_client") as mock_client:
+        mock_client.return_value.chat.completions.create.return_value = mock_resp
+        res, err = extraer_movimientos_de_imagen(b"fake_image_bytes")
+
+        assert err is None
+        assert res is not None
+        assert res.total_vistos == 12  # Solo los comunes cuentan para total_vistos
+        assert len(res.movimientos) == 10  # Tope de 10
+        assert len(res.omitidos) == 2  # 2 omitidos
+        assert len(res.rendimientos) == 1
+
+    # Solo omitidos: NO devuelve ILEGIBLE
+    mock_resp_solo_omitidos = MagicMock()
+    mock_resp_solo_omitidos.choices = [
+        MagicMock(message=MagicMock(content=json.dumps({
+            "legible": True,
+            "documento_tipo": "captura_actividad",
+            "billetera_texto": "Mercado Pago",
+            "vencimiento": None,
+            "movimientos": [movs[12], movs[13]],  # Solo los 2 omitidos
+        })))
+    ]
+    with patch("app.routers.whatsapp.extraccion_documento.get_openai_client") as mock_client:
+        mock_client.return_value.chat.completions.create.return_value = mock_resp_solo_omitidos
+        res_so, err_so = extraer_movimientos_de_imagen(b"fake_image_bytes")
+        assert err_so is None
+        assert res_so is not None
+        assert len(res_so.movimientos) == 0
+        assert res_so.total_vistos == 0
+        assert len(res_so.omitidos) == 2
+
+    # Nada: devuelve ILEGIBLE
+    mock_resp_vacio = MagicMock()
+    mock_resp_vacio.choices = [
+        MagicMock(message=MagicMock(content=json.dumps({
+            "legible": True,
+            "documento_tipo": "otro",
+            "billetera_texto": None,
+            "vencimiento": None,
+            "movimientos": [],
+        })))
+    ]
+    with patch("app.routers.whatsapp.extraccion_documento.get_openai_client") as mock_client:
+        mock_client.return_value.chat.completions.create.return_value = mock_resp_vacio
+        res_v, err_v = extraer_movimientos_de_imagen(b"fake_image_bytes")
+        assert res_v is None
+        assert err_v == "ILEGIBLE"
+
+
+def test_a_entidades_billetera_nombre_por_movimiento():
+    """D1: a_entidades usa billetera_nombre de cada movimiento y devuelve {} si no hay nada."""
+    from app.routers.whatsapp.extraccion_documento import MovimientoExtraido, ResultadoExtraccion, a_entidades
+    from datetime import date
+
+    m0 = MovimientoExtraido(
+        fecha=date(2026, 10, 6),
+        monto=Decimal("52500"),
+        moneda="ARS",
+        descripcion="Tienda Lunar",
+        sentido="egreso",
+        categoria=None,
+        billetera_nombre="Mercado Pago",
+    )
+    m1 = MovimientoExtraido(
+        fecha=date(2026, 10, 4),
+        monto=Decimal("7000"),
+        moneda="ARS",
+        descripcion="Market Ya",
+        sentido="egreso",
+        categoria=None,
+        billetera_nombre="Galicia",
+    )
+    m2 = MovimientoExtraido(
+        fecha=date(2026, 10, 1),
+        monto=Decimal("2000"),
+        moneda="ARS",
+        descripcion="Carlos Turri",
+        sentido="egreso",
+        categoria=None,
+        billetera_nombre=None,  # Toma billetera_defecto
+    )
+
+    res = ResultadoExtraccion(
+        documento_tipo="captura_actividad",
+        movimientos=[m0, m1, m2],
+        billetera_texto=None,
+        vencimiento=None,
+        total_vistos=3,
+    )
+
+    ent = a_entidades(res, billetera_nombre="Galicia")
+    assert ent["billetera"] == "Mercado Pago"
+    assert ent["transacciones_adicionales"][0]["billetera"] == "Galicia"
+    assert ent["transacciones_adicionales"][1]["billetera"] == "Galicia"
+
+    # Si no hay comunes ni rendimientos: devuelve {}
+    res_vacio = ResultadoExtraccion(
+        documento_tipo="otro",
+        movimientos=[],
+        billetera_texto=None,
+        vencimiento=None,
+        total_vistos=0,
+    )
+    assert a_entidades(res_vacio, "Galicia") == {}
+
+
+def test_textos_omitidos_decision_5():
+    """D1: Textos exactos de la decisión 5 en singular y plural, y caso solo omitidos."""
+    from app.routers.whatsapp.lote_documento import formatear_lineas_omitidos, armar_resultado_ia_documento
+
+    # 1. Singular
+    omitidos_sing = [
+        {"motivo": "pase_propio", "descripcion": "Ingreso de dinero", "monto": Decimal("40000"), "moneda": "ARS"},
+        {"motivo": "credito", "descripcion": "Meli+", "monto": Decimal("20990"), "moneda": "ARS"},
+        {"motivo": "no_aprobado", "descripcion": "Kiosco Sur", "monto": Decimal("1500"), "moneda": "ARS"},
+    ]
+    lineas_sing = formatear_lineas_omitidos(omitidos_sing)
+    assert lineas_sing[0] == "Salteé 1 pase entre tus cuentas ($40.000). Si querés registrarlos, mandame cada uno como una transferencia entre tus cuentas."
+    assert lineas_sing[1] == "Salteé 1 pago con tarjeta de crédito (Meli+ $20.990): necesito la tarjeta y las cuotas. Mandámelo escrito."
+    assert lineas_sing[2] == "Salteé 1 movimiento que no figura como aprobado."
+
+    # 2. Plural
+    omitidos_plur = [
+        {"motivo": "pase_propio", "descripcion": "Ingreso de dinero", "monto": Decimal("40000"), "moneda": "ARS"},
+        {"motivo": "pase_propio", "descripcion": "Julian Mendoza", "monto": Decimal("905.50"), "moneda": "ARS"},
+        {"motivo": "credito", "descripcion": "Meli+", "monto": Decimal("20990"), "moneda": "ARS"},
+        {"motivo": "credito", "descripcion": "Uber", "monto": Decimal("5000"), "moneda": "ARS"},
+        {"motivo": "no_aprobado", "descripcion": "Kiosco Sur", "monto": Decimal("1500"), "moneda": "ARS"},
+        {"motivo": "no_aprobado", "descripcion": "Farmacia", "monto": Decimal("2500"), "moneda": "ARS"},
+    ]
+    lineas_plur = formatear_lineas_omitidos(omitidos_plur)
+    assert lineas_plur[0] == "Salteé 2 pases entre tus cuentas ($40.000, $905,50). Si querés registrarlos, mandame cada uno como una transferencia entre tus cuentas."
+    assert lineas_plur[1] == "Salteé 2 pagos con tarjeta de crédito (Meli+ $20.990, Uber $5.000): necesito la tarjeta y las cuotas. Mandámelo escrito."
+    assert lineas_plur[2] == "Salteé 2 movimientos que no figuran como aprobados."
+
+    # 3. Caso solo omitidos en armar_resultado_ia_documento
+    res_so = armar_resultado_ia_documento(
+        entidades={},
+        duplicados=[],
+        billetera_nombre="Galicia",
+        se_asumio_principal=False,
+        omitidos=omitidos_sing,
+    )
+    assert res_so["intent"] == "duplicado"
+    assert res_so["entidades"] == {}
+    resp_texto = res_so["respuesta_usuario"]
+    assert resp_texto.startswith("No encontré movimientos para anotar en la imagen.")
+    assert "Salteé 1 pase entre tus cuentas ($40.000)." in resp_texto
+    assert "Salteé 1 pago con tarjeta de crédito (Meli+ $20.990):" in resp_texto
+    assert "Salteé 1 movimiento que no figura como aprobado." in resp_texto
+
+
+

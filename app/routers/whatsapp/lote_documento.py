@@ -16,7 +16,10 @@ from app.models.ajuste_saldo import AjusteSaldo
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.rendimiento_billetera import RendimientoBilletera
 from app.models.usuario import Moneda
-from app.routers.whatsapp.extraccion_documento import parsear_fecha_documento
+from app.routers.whatsapp.extraccion_documento import (
+    ResultadoExtraccion,
+    parsear_fecha_documento,
+)
 from app.routers.whatsapp.parsers import (
     _formatear_fecha_natural,
     _resolver_y_validar_fecha,
@@ -26,8 +29,53 @@ from app.routers.whatsapp.resolvers_cascada import resolver_billetera_cascada
 from app.services import duplicados_service
 from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
 from app.utils.formato import formatear_monto
+from app.utils.texto import normalizar_texto
 
 logger = structlog.get_logger(__name__)
+
+
+def asignar_billeteras(
+    resultado: ResultadoExtraccion,
+    billeteras_pesos: list[Billetera],
+    billetera_defecto_nombre: str,
+    se_asumio_defecto: bool = True,
+) -> bool:
+    """
+    Asigna billetera_nombre a cada movimiento en resultado.movimientos:
+    - Si medio_pago normalizado contiene "dinero disponible" y el usuario tiene EXACTAMENTE
+      una billetera ARS activa (no inversión) con entidad_efectiva "mercadopago", ese movimiento
+      va a esa billetera.
+    - Todos los demás van a billetera_defecto_nombre.
+    Retorna True si algún movimiento común queda en la principal asumida.
+    """
+    mp_billeteras = [
+        b for b in billeteras_pesos
+        if not getattr(b, "es_inversion", False)
+        and getattr(b, "estado", EstadoBilletera.ACTIVA) == EstadoBilletera.ACTIVA
+        and getattr(b, "entidad_efectiva", None) == "mercadopago"
+    ]
+    tiene_exactamente_un_mp = len(mp_billeteras) == 1
+    billetera_mp_nombre = mp_billeteras[0].nombre if tiene_exactamente_un_mp else None
+
+    b_ppal = next((b for b in billeteras_pesos if getattr(b, "es_principal", False)), None)
+    if not b_ppal and billeteras_pesos:
+        b_ppal = billeteras_pesos[0]
+    b_ppal_nombre = b_ppal.nombre if b_ppal else None
+
+    defecto_es_principal_asumida = se_asumio_defecto and (billetera_defecto_nombre == b_ppal_nombre)
+    alguno_en_principal_asumida = False
+
+    for m in resultado.movimientos:
+        medio_norm = normalizar_texto(m.medio_pago)
+        if "dinero disponible" in medio_norm and tiene_exactamente_un_mp:
+            m.billetera_nombre = billetera_mp_nombre
+        else:
+            m.billetera_nombre = billetera_defecto_nombre
+
+        if defecto_es_principal_asumida and m.billetera_nombre == billetera_defecto_nombre:
+            alguno_en_principal_asumida = True
+
+    return alguno_en_principal_asumida
 
 
 def separar_duplicados(
@@ -35,14 +83,26 @@ def separar_duplicados(
     usuario_id: UUID,
     billetera: Billetera | None,
     entidades: dict[str, Any],
+    billeteras_usuario: list[Billetera] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """
     Verifica contra la base de datos si alguno de los movimientos propuestos ya existe
     utilizando duplicados_service.buscar_coincidencias (máximo 10 consultas, 1 por ítem).
+    Compara cada movimiento con la billetera de ese movimiento (se resuelve por nombre entre
+    las billeteras del usuario) y usa la billetera recibida solo como respaldo.
     Devuelve (entidades_sin_duplicados, lista_duplicados).
     """
     if not entidades or entidades.get("monto") is None:
         return {}, []
+
+    if billeteras_usuario is None and db is not None and usuario_id is not None:
+        try:
+            from app.routers.whatsapp.db_lookups import _obtener_billeteras_activas
+            billeteras_usuario = _obtener_billeteras_activas(usuario_id, db)
+        except Exception:
+            billeteras_usuario = [billetera] if billetera else []
+    elif billeteras_usuario is None:
+        billeteras_usuario = [billetera] if billetera else []
 
     # Extraer todos los ítems candidatos
     items_candidatos: list[dict[str, Any]] = []
@@ -77,14 +137,22 @@ def separar_duplicados(
     no_duplicados: list[dict[str, Any]] = []
     duplicados: list[dict[str, Any]] = []
 
-    billetera_id = billetera.id if billetera else None
-
     for it in items_candidatos:
         monto_it = it["monto"]
         moneda_it = it["moneda"]
         tipo_it = it["tipo"]
         fecha_res, _ = _resolver_y_validar_fecha(it.get("fecha"))
         desc_it = it.get("descripcion")
+
+        nom_b = it.get("billetera") or it.get("billetera_origen") or it.get("billetera_destino")
+        b_item: Billetera | None = None
+        if nom_b and billeteras_usuario:
+            b_item = next((b for b in billeteras_usuario if b.nombre.lower() == nom_b.lower()), None)
+            if not b_item:
+                b_item, _ = resolver_billetera_cascada(nom_b, billeteras_usuario)
+
+        b_efectiva = b_item if b_item is not None else billetera
+        billetera_id = b_efectiva.id if b_efectiva else None
 
         coincs = duplicados_service.buscar_coincidencias(
             db=db,
@@ -281,6 +349,62 @@ def preparar_rendimientos(
     return rendimientos_a_anotar, avisos
 
 
+def formatear_lineas_omitidos(omitidos: list[dict[str, Any]] | None) -> list[str]:
+    """
+    Genera las líneas de texto fijo para movimientos omitidos según Decisión 5:
+    - pase_propio: "Salteé {n} pase entre tus cuentas ({montos separados por coma}). Si querés registrarlos, mandame cada uno como una transferencia entre tus cuentas." (plural: "pases entre tus cuentas"). Sin nombres.
+    - credito: "Salteé {n} pago con tarjeta de crédito ({descripcion monto, separados por coma}): necesito la tarjeta y las cuotas. Mandámelo escrito." (plural: "pagos con tarjeta de crédito").
+    - no_aprobado: "Salteé {n} movimiento que no figura como aprobado." (plural: "movimientos que no figuran como aprobados").
+    """
+    if not omitidos:
+        return []
+
+    lineas: list[str] = []
+
+    # 1. pase_propio
+    pases = [o for o in omitidos if (o.get("motivo") if isinstance(o, dict) else getattr(o, "motivo", None)) == "pase_propio"]
+    if pases:
+        n = len(pases)
+        montos_str = []
+        for p in pases:
+            m_val = p.get("monto") if isinstance(p, dict) else getattr(p, "monto", None)
+            m_mon = p.get("moneda", "ARS") if isinstance(p, dict) else getattr(p, "moneda", "ARS")
+            montos_str.append(formatear_monto(m_val, m_mon))
+        montos_unidos = ", ".join(montos_str)
+        if n == 1:
+            lineas.append(f"Salteé 1 pase entre tus cuentas ({montos_unidos}). Si querés registrarlos, mandame cada uno como una transferencia entre tus cuentas.")
+        else:
+            lineas.append(f"Salteé {n} pases entre tus cuentas ({montos_unidos}). Si querés registrarlos, mandame cada uno como una transferencia entre tus cuentas.")
+
+    # 2. credito
+    creditos = [o for o in omitidos if (o.get("motivo") if isinstance(o, dict) else getattr(o, "motivo", None)) == "credito"]
+    if creditos:
+        n = len(creditos)
+        items_str = []
+        for c in creditos:
+            desc = (c.get("descripcion") if isinstance(c, dict) else getattr(c, "descripcion", None)) or "Gasto"
+            m_val = c.get("monto") if isinstance(c, dict) else getattr(c, "monto", None)
+            m_mon = c.get("moneda", "ARS") if isinstance(c, dict) else getattr(c, "moneda", "ARS")
+            m_fmt = formatear_monto(m_val, m_mon)
+            items_str.append(f"{desc} {m_fmt}")
+        items_unidos = ", ".join(items_str)
+        if n == 1:
+            lineas.append(f"Salteé 1 pago con tarjeta de crédito ({items_unidos}): necesito la tarjeta y las cuotas. Mandámelo escrito.")
+        else:
+            lineas.append(f"Salteé {n} pagos con tarjeta de crédito ({items_unidos}): necesito la tarjeta y las cuotas. Mandámelo escrito.")
+
+    # 3. no_aprobado
+    no_aprobados = [o for o in omitidos if (o.get("motivo") if isinstance(o, dict) else getattr(o, "motivo", None)) == "no_aprobado"]
+    if no_aprobados:
+        n = len(no_aprobados)
+        if n == 1:
+            lineas.append("Salteé 1 movimiento que no figura como aprobado.")
+        else:
+            lineas.append(f"Salteé {n} movimientos que no figuran como aprobados.")
+
+    return lineas
+
+
 def armar_resultado_ia_documento(
     entidades: dict[str, Any],
     duplicados: list[dict[str, Any]],
@@ -293,12 +417,15 @@ def armar_resultado_ia_documento(
     avisos_rendimientos: list[str] | None = None,
     camino: str = "B",
     solo_rendimientos: bool = False,
+    omitidos: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
     Construye el dict resultado_ia para un documento o imagen con extracción estructurada.
-    Aplica las reglas de decisiones 3 (tope 10), 5 (avisos de duplicados), 7 (factura de servicios)
-    y rendimientos (decisiones 4, 7 y 9).
+    Aplica las reglas de decisiones 3 (tope 10), 5 (avisos de duplicados y omitidos),
+    7 (factura de servicios) y rendimientos (decisiones 4, 7 y 9).
     """
+    lineas_omitidos = formatear_lineas_omitidos(omitidos)
+
     if solo_rendimientos:
         if camino == "A":
             msg_solo = "Veo solo rendimientos y eso lo calculo yo. Mandame los gastos o ingresos que quieras anotar."
@@ -312,7 +439,23 @@ def armar_resultado_ia_documento(
             "respuesta_usuario": msg_solo,
         }
 
-    if not entidades or entidades.get("monto") is None:
+    tiene_comunes = bool(entidades and entidades.get("monto") is not None)
+    tiene_rendimientos = bool(rendimientos_a_anotar)
+
+    # Caso: Solo hay omitidos (sin comunes ni rendimientos a anotar)
+    if not tiene_comunes and not tiene_rendimientos and omitidos:
+        msg_solo = "No encontré movimientos para anotar en la imagen."
+        if lineas_omitidos:
+            msg_solo += "\n" + "\n".join(lineas_omitidos)
+        return {
+            "intent": "duplicado",
+            "confianza": 0.90,
+            "slot_filling": False,
+            "entidades": {},
+            "respuesta_usuario": msg_solo,
+        }
+
+    if not tiene_comunes and not tiene_rendimientos:
         # Todos son duplicados: no se propone nada ni queda confirmable
         return {
             "intent": "duplicado",
@@ -347,6 +490,11 @@ def armar_resultado_ia_documento(
     if avisos_rendimientos:
         for av in avisos_rendimientos:
             texto_propuesta += f"\n{av}"
+
+    # Líneas de omitidos (Decisión 5: se agregan antes del aviso del tope de 10)
+    if lineas_omitidos:
+        for om_line in lineas_omitidos:
+            texto_propuesta += f"\n{om_line}"
 
     # Decisión 3: Tope de 10 movimientos
     if total_vistos > 10:

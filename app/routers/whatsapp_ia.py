@@ -474,6 +474,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                     separar_duplicados,
                     armar_resultado_ia_documento,
                     preparar_rendimientos,
+                    asignar_billeteras,
                 )
 
                 billeteras_todas = _obtener_billeteras_activas(usuario.id, db)
@@ -485,15 +486,22 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
 
                 if b_match:
                     b_final = b_match
-                    se_asumio_principal = False
+                    se_asumio_defecto = False
                 else:
                     b_ppal = next((b for b in billeteras_pesos if b.es_principal), None)
                     if not b_ppal and billeteras_pesos:
                         b_ppal = billeteras_pesos[0]
                     b_final = b_ppal
-                    se_asumio_principal = True
+                    se_asumio_defecto = True
 
                 billetera_nombre = b_final.nombre if b_final else "tu billetera"
+
+                se_asumio_principal = asignar_billeteras(
+                    resultado=ctx.extraccion,
+                    billeteras_pesos=billeteras_pesos,
+                    billetera_defecto_nombre=billetera_nombre,
+                    se_asumio_defecto=se_asumio_defecto,
+                )
 
                 entidades_raw = a_entidades(ctx.extraccion, billetera_nombre)
                 rend_a_anotar, avisos_rend = preparar_rendimientos(
@@ -506,7 +514,10 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                 )
 
                 tiene_movimientos_comunes = entidades_raw.get("monto") is not None
-                if not tiene_movimientos_comunes:
+                tiene_rendimientos_extraidos = bool(getattr(ctx.extraccion, "rendimientos", []))
+                omitidos = getattr(ctx.extraccion, "omitidos", [])
+
+                if not tiene_movimientos_comunes and tiene_rendimientos_extraidos:
                     ctx.resultado_ia = armar_resultado_ia_documento(
                         entidades=entidades_raw,
                         duplicados=[],
@@ -519,10 +530,28 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                         avisos_rendimientos=avisos_rend,
                         camino="B",
                         solo_rendimientos=True,
+                        omitidos=omitidos,
+                    )
+                elif not tiene_movimientos_comunes and not tiene_rendimientos_extraidos:
+                    ctx.resultado_ia = armar_resultado_ia_documento(
+                        entidades=entidades_raw,
+                        duplicados=[],
+                        billetera_nombre=billetera_nombre,
+                        se_asumio_principal=se_asumio_principal,
+                        billeteras_usuario=billeteras_todas,
+                        documento_tipo=ctx.extraccion.documento_tipo,
+                        total_vistos=ctx.extraccion.total_vistos,
+                        rendimientos_a_anotar=rend_a_anotar,
+                        avisos_rendimientos=avisos_rend,
+                        camino="B",
+                        solo_rendimientos=False,
+                        omitidos=omitidos,
                     )
                 else:
                     aplicar_marcas_y_memoria(db, usuario.id, entidades_raw)
-                    entidades_sin_dups, dups = separar_duplicados(db, usuario.id, b_final, entidades_raw)
+                    entidades_sin_dups, dups = separar_duplicados(
+                        db, usuario.id, b_final, entidades_raw, billeteras_usuario=billeteras_todas
+                    )
 
                     ctx.resultado_ia = armar_resultado_ia_documento(
                         entidades=entidades_sin_dups,
@@ -536,6 +565,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                         avisos_rendimientos=avisos_rend,
                         camino="B",
                         solo_rendimientos=False,
+                        omitidos=omitidos,
                     )
             else:
                 # Etapa 3: Estados pendientes y handlers determinísticos

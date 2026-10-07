@@ -881,36 +881,11 @@ def p19_caso_14(datos):
         ext = ResultadoExtraccion(
             documento_tipo="captura_actividad",
             movimientos=[
-                MovimientoExtraido(
-                    fecha=hoy,
-                    monto=Decimal("2000"),
-                    moneda="ARS",
-                    descripcion="Kiosco San José",
-                    sentido="egreso",
-                    categoria="Kiosco",
-                ),
-                MovimientoExtraido(
-                    fecha=hoy,
-                    monto=Decimal("3500"),
-                    moneda="ARS",
-                    descripcion="Farmacia Central",
-                    sentido="egreso",
-                    categoria="Farmacia",
-                ),
+                MovimientoExtraido(hoy, Decimal("2000"), "ARS", "Kiosco San José", "egreso", "Kiosco"),
+                MovimientoExtraido(hoy, Decimal("3500"), "ARS", "Farmacia Central", "egreso", "Farmacia"),
             ],
-            billetera_texto=None,
-            vencimiento=None,
-            total_vistos=2,
-            rendimientos=[
-                MovimientoExtraido(
-                    fecha=hoy,
-                    monto=Decimal("500.00"),
-                    moneda="ARS",
-                    descripcion="Rendimientos",
-                    sentido="rendimiento",
-                    categoria=None,
-                )
-            ],
+            billetera_texto=None, vencimiento=None, total_vistos=2,
+            rendimientos=[MovimientoExtraido(hoy, Decimal("500.00"), "ARS", "Rendimientos", "rendimiento", None)],
         )
 
         respuestas.clear()
@@ -964,29 +939,9 @@ def p19_caso_15(datos):
 
         ext = ResultadoExtraccion(
             documento_tipo="captura_actividad",
-            movimientos=[
-                MovimientoExtraido(
-                    fecha=hoy,
-                    monto=Decimal("2000"),
-                    moneda="ARS",
-                    descripcion="Kiosco San José",
-                    sentido="egreso",
-                    categoria="Kiosco",
-                )
-            ],
-            billetera_texto=None,
-            vencimiento=None,
-            total_vistos=1,
-            rendimientos=[
-                MovimientoExtraido(
-                    fecha=ayer,
-                    monto=Decimal("500.00"),
-                    moneda="ARS",
-                    descripcion="Rendimientos",
-                    sentido="rendimiento",
-                    categoria=None,
-                )
-            ],
+            movimientos=[MovimientoExtraido(hoy, Decimal("2000"), "ARS", "Kiosco San José", "egreso", "Kiosco")],
+            billetera_texto=None, vencimiento=None, total_vistos=1,
+            rendimientos=[MovimientoExtraido(ayer, Decimal("500.00"), "ARS", "Rendimientos", "rendimiento", None)],
         )
 
         respuestas.clear()
@@ -1039,29 +994,9 @@ def p19_caso_16(datos):
 
         ext = ResultadoExtraccion(
             documento_tipo="captura_actividad",
-            movimientos=[
-                MovimientoExtraido(
-                    fecha=hoy,
-                    monto=Decimal("2000"),
-                    moneda="ARS",
-                    descripcion="Kiosco San José",
-                    sentido="egreso",
-                    categoria="Kiosco",
-                )
-            ],
-            billetera_texto=None,
-            vencimiento=None,
-            total_vistos=1,
-            rendimientos=[
-                MovimientoExtraido(
-                    fecha=fecha_70,
-                    monto=Decimal("500.00"),
-                    moneda="ARS",
-                    descripcion="Rendimientos",
-                    sentido="rendimiento",
-                    categoria=None,
-                )
-            ],
+            movimientos=[MovimientoExtraido(hoy, Decimal("2000"), "ARS", "Kiosco San José", "egreso", "Kiosco")],
+            billetera_texto=None, vencimiento=None, total_vistos=1,
+            rendimientos=[MovimientoExtraido(fecha_70, Decimal("500.00"), "ARS", "Rendimientos", "rendimiento", None)],
         )
 
         respuestas.clear()
@@ -1114,29 +1049,9 @@ def p19_caso_17(datos):
 
         ext = ResultadoExtraccion(
             documento_tipo="captura_actividad",
-            movimientos=[
-                MovimientoExtraido(
-                    fecha=hoy,
-                    monto=Decimal("2000"),
-                    moneda="ARS",
-                    descripcion="Kiosco San José",
-                    sentido="egreso",
-                    categoria="Kiosco",
-                )
-            ],
-            billetera_texto=None,
-            vencimiento=None,
-            total_vistos=1,
-            rendimientos=[
-                MovimientoExtraido(
-                    fecha=ayer,
-                    monto=Decimal("500.00"),
-                    moneda="ARS",
-                    descripcion="Rendimientos",
-                    sentido="rendimiento",
-                    categoria=None,
-                )
-            ],
+            movimientos=[MovimientoExtraido(hoy, Decimal("2000"), "ARS", "Kiosco San José", "egreso", "Kiosco")],
+            billetera_texto=None, vencimiento=None, total_vistos=1,
+            rendimientos=[MovimientoExtraido(ayer, Decimal("500.00"), "ARS", "Rendimientos", "rendimiento", None)],
         )
 
         respuestas.clear()
@@ -1164,5 +1079,214 @@ def p19_caso_17(datos):
         return f"Propuesta tna: {propuesta_ok} | Registrado tras sí: {registrado_ok} | Txs creadas: {txs_creadas} | Rends creados: {rends_creados}"
 
     return run_isolated(test)
+
+
+def p19_caso_18(datos):
+    """P19.18: captura con 2 movimientos 'Dinero disponible' y 1 'Mastercard débito'.
+    Propuesta nombrando Mercado Pago para los 2 primeros y principal para el 3ro."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    hoy = hoy_argentina()
+
+    def test(conn, Session, respuestas):
+        _preparar_base_escenario(conn, u.id)
+        b_sec_id = conn.execute(
+            select(Billetera.id).where(Billetera.usuario_id == u.id, Billetera.moneda == Moneda.ARS, Billetera.nombre != "Galicia", Billetera.es_inversion == False)
+        ).scalar()
+        conn.execute(text("UPDATE billeteras SET nombre = 'Mercado Pago', entidad_id = 'mercadopago' WHERE id = :bid"), {"bid": b_sec_id})
+        b_galicia_id = conn.execute(select(Billetera.id).where(Billetera.usuario_id == u.id, Billetera.nombre == "Galicia")).scalar()
+
+        saldo_mp_antes = conn.execute(select(Billetera.saldo_actual).where(Billetera.id == b_sec_id)).scalar()
+        saldo_gal_antes = conn.execute(select(Billetera.saldo_actual).where(Billetera.id == b_galicia_id)).scalar()
+        txs_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+
+        ext = ResultadoExtraccion(
+            documento_tipo="captura_actividad",
+            movimientos=[
+                MovimientoExtraido(hoy, Decimal("10000"), "ARS", "Tienda Lunar", "egreso", None, "Compra", "Dinero disponible", "Aprobado", False),
+                MovimientoExtraido(hoy, Decimal("5000"), "ARS", "Kiosco Norte", "egreso", None, "Compra", "Dinero disponible", "Aprobado", False),
+                MovimientoExtraido(hoy, Decimal("3000"), "ARS", "Market Ya", "egreso", None, "Compra", "Mastercard débito", "Aprobado", False),
+            ],
+            billetera_texto=None, vencimiento=None, total_vistos=3,
+        )
+
+        respuestas.clear()
+        with patch("app.routers.whatsapp.etapa_entrada._descargar_medio_meta", return_value=(b"fake_bytes", "image/jpeg")), \
+             patch("app.routers.whatsapp.etapa_entrada.extraer_movimientos_de_imagen", return_value=(ext, None)):
+            _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
+
+        resp1 = respuestas[-1][1] if respuestas else ""
+        propuesta_ok = ("desde Mercado Pago" in resp1 and "desde Galicia" in resp1 and resp1.count("desde Mercado Pago") == 2 and resp1.count("desde Galicia") == 1)
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+
+        txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        txs_creadas = txs_despues - txs_antes
+        txs_mp = conn.execute(select(Transaccion).where(Transaccion.usuario_id == u.id, Transaccion.billetera_id == b_sec_id)).scalars().all()
+        txs_gal = conn.execute(select(Transaccion).where(Transaccion.usuario_id == u.id, Transaccion.billetera_id == b_galicia_id)).scalars().all()
+        asignacion_billeteras_ok = (len(txs_mp) >= 2 and len(txs_gal) >= 1)
+
+        delta_mp = conn.execute(select(Billetera.saldo_actual).where(Billetera.id == b_sec_id)).scalar() - saldo_mp_antes
+        delta_gal = conn.execute(select(Billetera.saldo_actual).where(Billetera.id == b_galicia_id)).scalar() - saldo_gal_antes
+        saldos_ok = (delta_mp == Decimal("-15000") and delta_gal == Decimal("-3000"))
+
+        return f"Propuesta billeteras: {propuesta_ok} | Txs creadas: {txs_creadas} | Asignacion OK: {asignacion_billeteras_ok} | Saldos OK: {saldos_ok}"
+
+    return run_isolated(test)
+
+
+def p19_caso_19(datos):
+    """P19.19: captura con 1 común, 2 pases propios, 1 crédito y 1 rechazado.
+    La propuesta trae 1 movimiento y las 3 líneas 'Salteé' con textos exactos."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    hoy = hoy_argentina()
+
+    def test(conn, Session, respuestas):
+        _preparar_base_escenario(conn, u.id)
+        b_sec_id = conn.execute(
+            select(Billetera.id).where(
+                Billetera.usuario_id == u.id, Billetera.moneda == Moneda.ARS,
+                Billetera.nombre != "Galicia", Billetera.es_inversion == False,
+            )
+        ).scalar()
+        if b_sec_id:
+            conn.execute(text("UPDATE billeteras SET nombre = 'Mercado Pago', entidad_id = 'mercadopago' WHERE id = :bid"), {"bid": b_sec_id})
+
+        txs_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+
+        ext = ResultadoExtraccion(
+            documento_tipo="captura_actividad",
+            movimientos=[MovimientoExtraido(hoy, Decimal("12000"), "ARS", "Farmacia Azul", "egreso", None, "Compra", "Dinero disponible", "Aprobado", False)],
+            billetera_texto=None, vencimiento=None, total_vistos=1,
+            omitidos=[
+                {"motivo": "pase_propio", "descripcion": "Usuario Prueba", "monto": Decimal("15000"), "moneda": "ARS"},
+                {"motivo": "pase_propio", "descripcion": "Ingreso de dinero", "monto": Decimal("25000"), "moneda": "ARS"},
+                {"motivo": "credito", "descripcion": "Meli+", "monto": Decimal("18500"), "moneda": "ARS"},
+                {"motivo": "no_aprobado", "descripcion": "Kiosco", "monto": Decimal("4000"), "moneda": "ARS"},
+            ],
+        )
+
+        respuestas.clear()
+        with patch("app.routers.whatsapp.etapa_entrada._descargar_medio_meta", return_value=(b"fake_bytes", "image/jpeg")), \
+             patch("app.routers.whatsapp.etapa_entrada.extraer_movimientos_de_imagen", return_value=(ext, None)):
+            _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
+
+        resp1 = respuestas[-1][1] if respuestas else ""
+        linea_pase_esperada = "Salteé 2 pases entre tus cuentas ($15.000, $25.000). Si querés registrarlos, mandame cada uno como una transferencia entre tus cuentas."
+        linea_cred_esperada = "Salteé 1 pago con tarjeta de crédito (Meli+ $18.500): necesito la tarjeta y las cuotas. Mandámelo escrito."
+        linea_rech_esperada = "Salteé 1 movimiento que no figura como aprobado."
+
+        lineas_saltee_ok = (linea_pase_esperada in resp1 and linea_cred_esperada in resp1 and linea_rech_esperada in resp1)
+        propuesta_mov_ok = "12.000" in resp1
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+
+        txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        txs_creadas = txs_despues - txs_antes
+
+        return f"Propuesta comun: {propuesta_mov_ok} | Saltee exactos: {lineas_saltee_ok} | Txs creadas: {txs_creadas}"
+
+    return run_isolated(test)
+
+
+def p19_caso_20(datos):
+    """P19.20: captura que solo trae omitidos: mensaje fijo más líneas, sin propuesta confirmable."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+
+    def test(conn, Session, respuestas):
+        _preparar_base_escenario(conn, u.id)
+        txs_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+
+        ext = ResultadoExtraccion(
+            documento_tipo="captura_actividad", movimientos=[],
+            billetera_texto=None, vencimiento=None, total_vistos=0,
+            omitidos=[
+                {"motivo": "pase_propio", "descripcion": "Ingreso de dinero", "monto": Decimal("5000"), "moneda": "ARS"},
+                {"motivo": "credito", "descripcion": "Zara", "monto": Decimal("8000"), "moneda": "ARS"},
+                {"motivo": "no_aprobado", "descripcion": "Cafetería", "monto": Decimal("2500"), "moneda": "ARS"},
+            ],
+        )
+
+        respuestas.clear()
+        with patch("app.routers.whatsapp.etapa_entrada._descargar_medio_meta", return_value=(b"fake_bytes", "image/jpeg")), \
+             patch("app.routers.whatsapp.etapa_entrada.extraer_movimientos_de_imagen", return_value=(ext, None)):
+            _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
+
+        resp1 = respuestas[-1][1] if respuestas else ""
+        linea_pase = "Salteé 1 pase entre tus cuentas ($5.000). Si querés registrarlos, mandame cada uno como una transferencia entre tus cuentas."
+        linea_cred = "Salteé 1 pago con tarjeta de crédito (Zara $8.000): necesito la tarjeta y las cuotas. Mandámelo escrito."
+        linea_rech = "Salteé 1 movimiento que no figura como aprobado."
+
+        mensaje_ok = (
+            resp1.startswith("No encontré movimientos para anotar en la imagen.")
+            and linea_pase in resp1 and linea_cred in resp1 and linea_rech in resp1
+        )
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        resp2 = respuestas[-1][1] if respuestas else ""
+
+        txs_creadas = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar() - txs_antes
+        sin_propuesta_confirmable = (txs_creadas == 0 and "No tenés ninguna operación pendiente" in resp2)
+
+        return f"Mensaje omitidos: {mensaje_ok} | Sin propuesta confirmable: {sin_propuesta_confirmable} | Txs creadas: {txs_creadas}"
+
+    return run_isolated(test)
+
+
+def p19_caso_21(datos):
+    """P19.21: captura donde un movimiento común coincide en monto y fecha con uno de OTRA billetera.
+    NO se marca como duplicado (la comparación es por billetera del movimiento)."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    hoy = hoy_argentina()
+
+    def test(conn, Session, respuestas):
+        _preparar_base_escenario(conn, u.id)
+        b_sec_id = conn.execute(
+            select(Billetera.id).where(
+                Billetera.usuario_id == u.id, Billetera.moneda == Moneda.ARS,
+                Billetera.nombre != "Galicia", Billetera.es_inversion == False,
+            )
+        ).scalar()
+        assert b_sec_id is not None
+        conn.execute(
+            text("UPDATE billeteras SET nombre = 'Mercado Pago', entidad_id = 'mercadopago' WHERE id = :bid"),
+            {"bid": b_sec_id},
+        )
+        b_galicia_id = conn.execute(
+            select(Billetera.id).where(Billetera.usuario_id == u.id, Billetera.nombre == "Galicia")
+        ).scalar()
+
+        db = Session()
+        tx_existente = Transaccion(
+            usuario_id=u.id, monto=Decimal("15000"), moneda=Moneda.ARS, tipo=TipoTransaccion.EGRESO,
+            fecha=hoy, descripcion="Supermercado Coto", billetera_id=b_galicia_id,
+            metodo_pago=MetodoPago.DEBITO, origen=OrigenTransaccion.MANUAL,
+            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+        )
+        db.add(tx_existente)
+        db.commit()
+        db.close()
+
+        ext = ResultadoExtraccion(
+            documento_tipo="captura_actividad",
+            movimientos=[MovimientoExtraido(hoy, Decimal("15000"), "ARS", "Supermercado Coto", "egreso", None, "Compra", "Dinero disponible", "Aprobado", False)],
+            billetera_texto=None, vencimiento=None, total_vistos=1,
+        )
+
+        respuestas.clear()
+        with patch("app.routers.whatsapp.etapa_entrada._descargar_medio_meta", return_value=(b"fake_bytes", "image/jpeg")), \
+             patch("app.routers.whatsapp.etapa_entrada.extraer_movimientos_de_imagen", return_value=(ext, None)):
+            _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
+
+        resp1 = respuestas[-1][1] if respuestas else ""
+        no_es_duplicado = "Ya tenías cargado" not in resp1
+        propone_en_mp = "desde Mercado Pago" in resp1 and "15.000" in resp1
+
+        return f"No es duplicado: {no_es_duplicado} | Propone en MP: {propone_en_mp}"
+
+    return run_isolated(test)
+
 
 

@@ -40,6 +40,10 @@ from scripts.regresion.suite.escenarios_p19 import (
     p19_caso_15,
     p19_caso_16,
     p19_caso_17,
+    p19_caso_18,
+    p19_caso_19,
+    p19_caso_20,
+    p19_caso_21,
 )
 
 
@@ -1265,5 +1269,29 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "nombre": "Billetera con tna y es_inversion=false como única que rinde anota rendimiento tras sí",
             "ejecutar": lambda: p19_caso_17(datos),
             "esperado": "Propuesta tna: True | Registrado tras sí: True | Txs creadas: 1 | Rends creados: 1",
+        },
+        {
+            "id": "P19.18", "punto": "Punto 19", "match": "exacto",
+            "nombre": "Captura con 2 Dinero disponible y 1 débito reparte billeteras y actualiza saldos",
+            "ejecutar": lambda: p19_caso_18(datos),
+            "esperado": "Propuesta billeteras: True | Txs creadas: 3 | Asignacion OK: True | Saldos OK: True",
+        },
+        {
+            "id": "P19.19", "punto": "Punto 19", "match": "exacto",
+            "nombre": "Captura con común, pase propio, crédito y rechazado avisa salteos y anota 1 tx",
+            "ejecutar": lambda: p19_caso_19(datos),
+            "esperado": "Propuesta comun: True | Saltee exactos: True | Txs creadas: 1",
+        },
+        {
+            "id": "P19.20", "punto": "Punto 19", "match": "exacto",
+            "nombre": "Captura solo omitidos informa no encontré y líneas sin propuesta confirmable",
+            "ejecutar": lambda: p19_caso_20(datos),
+            "esperado": "Mensaje omitidos: True | Sin propuesta confirmable: True | Txs creadas: 0",
+        },
+        {
+            "id": "P19.21", "punto": "Punto 19", "match": "exacto",
+            "nombre": "Movimiento con igual monto y fecha en otra billetera no se marca duplicado",
+            "ejecutar": lambda: p19_caso_21(datos),
+            "esperado": "No es duplicado: True | Propone en MP: True",
         },
     ]
