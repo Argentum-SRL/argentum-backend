@@ -6,7 +6,7 @@ Utiliza Structured Outputs de OpenAI (gpt-4o) con esquema estricto (strict: true
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 import json
@@ -37,6 +37,7 @@ class ResultadoExtraccion:
     billetera_texto: str | None
     vencimiento: date | None
     total_vistos: int = 0
+    rendimientos: list[MovimientoExtraido] = field(default_factory=list)
 
 
 ESQUEMA_EXTRACCION: dict[str, Any] = {
@@ -93,7 +94,7 @@ ESQUEMA_EXTRACCION: dict[str, Any] = {
                             },
                             "sentido": {
                                 "type": "string",
-                                "enum": ["egreso", "ingreso"],
+                                "enum": ["egreso", "ingreso", "rendimiento"],
                             },
                             "categoria": {
                                 "type": ["string", "null"],
@@ -216,6 +217,7 @@ def extraer_movimientos_de_imagen(
         "- Montos: los montos en documentos argentinos usan punto de miles y coma decimal. Devolvé el número como número positivo sin separador de miles y con punto decimal (ejemplo: 18450.50).\n"
         "- Fechas: devolver fecha en formato YYYY-MM-DD si es legible; si no es visible, devolver null.\n"
         "- Capturas de actividad: devolver un movimiento por cada línea de movimiento visible en la captura, con el signo reflejado en 'sentido' ('egreso' o 'ingreso').\n"
+        "- Acreditaciones de intereses o rendimientos de una billetera o fondo (por ejemplo 'Rendimientos' o 'Acreditación de rendimiento'): 'sentido' es 'rendimiento'. Los reintegros, devoluciones y transferencias recibidas son 'ingreso'.\n"
         "- Tickets de compra y facturas: 'sentido' es 'egreso'. Si es factura de servicio con vencimiento visible, extraer 'vencimiento' en formato YYYY-MM-DD.\n"
         "- Comprobantes de transferencia:\n"
         "  * Si el usuario de la app es el DESTINATARIO (en 'Para', 'A', 'Destinatario'): 'sentido' es 'ingreso'.\n"
@@ -289,28 +291,42 @@ def extraer_movimientos_de_imagen(
             return None, "ILEGIBLE"
 
         raw_movs = data.get("movimientos") or []
-        total_vistos = len(raw_movs)
         movs_validos: list[MovimientoExtraido] = []
+        rendimientos_validos: list[MovimientoExtraido] = []
 
         for m in raw_movs:
             monto_dec = parsear_monto_documento(m.get("monto"))
             if monto_dec is None or monto_dec <= Decimal("0"):
                 continue
             fecha_obj = parsear_fecha_documento(m.get("fecha"))
-            movs_validos.append(
-                MovimientoExtraido(
-                    fecha=fecha_obj,
-                    monto=monto_dec,
-                    moneda=str(m.get("moneda") or "ARS").upper(),
-                    descripcion=str(m.get("descripcion") or "").strip() or "Varios",
-                    sentido="ingreso" if m.get("sentido") == "ingreso" else "egreso",
-                    categoria=m.get("categoria"),
+            sentido_raw = m.get("sentido")
+            if sentido_raw == "rendimiento":
+                rendimientos_validos.append(
+                    MovimientoExtraido(
+                        fecha=fecha_obj,
+                        monto=monto_dec,
+                        moneda=str(m.get("moneda") or "ARS").upper(),
+                        descripcion=str(m.get("descripcion") or "").strip() or "Rendimientos",
+                        sentido="rendimiento",
+                        categoria=m.get("categoria"),
+                    )
                 )
-            )
+            else:
+                movs_validos.append(
+                    MovimientoExtraido(
+                        fecha=fecha_obj,
+                        monto=monto_dec,
+                        moneda=str(m.get("moneda") or "ARS").upper(),
+                        descripcion=str(m.get("descripcion") or "").strip() or "Varios",
+                        sentido="ingreso" if sentido_raw == "ingreso" else "egreso",
+                        categoria=m.get("categoria"),
+                    )
+                )
 
-        if not movs_validos:
+        if not movs_validos and not rendimientos_validos:
             return None, "ILEGIBLE"
 
+        total_vistos = len(movs_validos)
         movs_top10 = movs_validos[:10]
         venc_obj = parsear_fecha_documento(data.get("vencimiento"))
 
@@ -320,6 +336,7 @@ def extraer_movimientos_de_imagen(
             billetera_texto=data.get("billetera_texto"),
             vencimiento=venc_obj,
             total_vistos=total_vistos,
+            rendimientos=rendimientos_validos,
         )
         return resultado, None
 
@@ -334,7 +351,17 @@ def a_entidades(resultado: ResultadoExtraccion, billetera_nombre: str | None = N
     interno de lote de WhatsApp (monto, descripcion, categoria, tipo, transacciones_adicionales, etc.).
     Función pura sin acceso a base de datos.
     """
+    rend_dicts = [
+        {
+            "fecha": r.fecha.isoformat() if r.fecha else None,
+            "monto": Decimal(str(r.monto)),
+        }
+        for r in (getattr(resultado, "rendimientos", []) or [])
+    ]
+
     if not resultado.movimientos:
+        if rend_dicts:
+            return {"rendimientos": rend_dicts}
         return {}
 
     m0 = resultado.movimientos[0]
@@ -352,6 +379,7 @@ def a_entidades(resultado: ResultadoExtraccion, billetera_nombre: str | None = N
         "origen_imagen": True,
         "documento_tipo": resultado.documento_tipo,
         "total_vistos": resultado.total_vistos,
+        "rendimientos": rend_dicts,
     }
 
     for m in resultado.movimientos[1:]:

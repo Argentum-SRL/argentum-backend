@@ -7,7 +7,7 @@ Todos los escenarios usan extracciones simuladas (sin llamadas a OpenAI ni Meta)
 """
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import time
 from unittest.mock import patch
@@ -15,6 +15,7 @@ from unittest.mock import patch
 from sqlalchemy import func, select, text
 
 from app.models.billetera import Billetera
+from app.models.rendimiento_billetera import RendimientoBilletera
 from app.models.transaccion import (
     EstadoVerificacionTransaccion,
     MetodoPago,
@@ -547,3 +548,355 @@ def p19_caso_9(datos):
         return f"Propuesta Galicia sin Santander con va: {propuesta_ok} | Registrado tras sí: {registrado_ok} | Creadas: {txs_creadas}"
 
     return run_isolated(test)
+
+
+def p19_caso_10(datos):
+    """P19.10: captura con 2 gastos y 1 rendimiento (billetera_texto null, y testingadmin tiene UNA billetera que rinde).
+    La propuesta trae la línea 'Además anoto el rendimiento...' y tras 'sí' se crean 2 transacciones y 1 fila nueva
+    en rendimientos_billetera, sin transacción extra y con el saldo de esa billetera subiendo exactamente el monto."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    hoy = hoy_argentina()
+    ayer = hoy - timedelta(days=1)
+
+    def test(conn, Session, respuestas):
+        _preparar_base_escenario(conn, u.id)
+        # Buscar la única billetera que rinde de testingadmin
+        b_inv_id = conn.execute(
+            select(Billetera.id).where(
+                Billetera.usuario_id == u.id,
+                Billetera.es_inversion == True,
+            )
+        ).scalar()
+
+        txs_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        rends_antes = conn.execute(select(func.count(RendimientoBilletera.id)).where(RendimientoBilletera.billetera_id == b_inv_id)).scalar()
+        saldo_antes = conn.execute(select(Billetera.saldo_actual).where(Billetera.id == b_inv_id)).scalar()
+
+        ext = ResultadoExtraccion(
+            documento_tipo="captura_actividad",
+            movimientos=[
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("2000"),
+                    moneda="ARS",
+                    descripcion="Kiosco San José",
+                    sentido="egreso",
+                    categoria="Kiosco",
+                ),
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("3500"),
+                    moneda="ARS",
+                    descripcion="Farmacia Central",
+                    sentido="egreso",
+                    categoria="Farmacia",
+                ),
+            ],
+            billetera_texto=None,
+            vencimiento=None,
+            total_vistos=2,
+            rendimientos=[
+                MovimientoExtraido(
+                    fecha=ayer,
+                    monto=Decimal("500.00"),
+                    moneda="ARS",
+                    descripcion="Rendimientos",
+                    sentido="rendimiento",
+                    categoria=None,
+                )
+            ],
+        )
+
+        respuestas.clear()
+        with patch("app.routers.whatsapp.etapa_entrada._descargar_medio_meta", return_value=(b"fake_bytes", "image/jpeg")), \
+             patch("app.routers.whatsapp.etapa_entrada.extraer_movimientos_de_imagen", return_value=(ext, None)):
+            _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
+
+        resp1 = respuestas[-1][1] if respuestas else ""
+        propuesta_ok = (
+            "Además anoto el rendimiento de $500 en Ahorro con rendimiento" in resp1
+            and "no cuenta como ingreso" in resp1
+        )
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        resp2 = respuestas[-1][1] if respuestas else ""
+        registrado_ok = "Listo" in resp2 and "Rendimiento de $500 anotado en Ahorro con rendimiento" in resp2
+
+        txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        rends_despues = conn.execute(select(func.count(RendimientoBilletera.id)).where(RendimientoBilletera.billetera_id == b_inv_id)).scalar()
+        saldo_despues = conn.execute(select(Billetera.saldo_actual).where(Billetera.id == b_inv_id)).scalar()
+
+        txs_creadas = txs_despues - txs_antes
+        rends_creados = rends_despues - rends_antes
+        saldo_subio = (saldo_despues - saldo_antes) == Decimal("500.00")
+
+        return f"Propuesta rendimiento: {propuesta_ok} | Registrado tras sí: {registrado_ok} | Txs creadas: {txs_creadas} | Rends creados: {rends_creados} | Saldo subio: {saldo_subio}"
+
+    return run_isolated(test)
+
+
+def p19_caso_11(datos):
+    """P19.11: el rendimiento de esa fecha ya existe (crearlo antes con el servicio):
+    línea 'Ya tenías el rendimiento...' y tras 'sí' no se crea otra fila."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    hoy = hoy_argentina()
+    ayer = hoy - timedelta(days=1)
+
+    def test(conn, Session, respuestas):
+        _preparar_base_escenario(conn, u.id)
+        b_inv_id = conn.execute(
+            select(Billetera.id).where(
+                Billetera.usuario_id == u.id,
+                Billetera.es_inversion == True,
+            )
+        ).scalar()
+
+        # Crear el rendimiento existente previo para ayer
+        with Session() as sess:
+            import app.services.rendimiento_billetera_service as rbs_service
+            rbs_service.confirmar_rendimiento(
+                sess,
+                u.id,
+                b_inv_id,
+                monto=Decimal("500.00"),
+                fecha=datetime(ayer.year, ayer.month, ayer.day, 12, 0, 0, tzinfo=timezone.utc),
+                commit=True,
+            )
+
+        txs_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        rends_antes = conn.execute(select(func.count(RendimientoBilletera.id)).where(RendimientoBilletera.billetera_id == b_inv_id)).scalar()
+
+        ext = ResultadoExtraccion(
+            documento_tipo="captura_actividad",
+            movimientos=[
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("2000"),
+                    moneda="ARS",
+                    descripcion="Kiosco San José",
+                    sentido="egreso",
+                    categoria="Kiosco",
+                ),
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("3500"),
+                    moneda="ARS",
+                    descripcion="Farmacia Central",
+                    sentido="egreso",
+                    categoria="Farmacia",
+                ),
+            ],
+            billetera_texto=None,
+            vencimiento=None,
+            total_vistos=2,
+            rendimientos=[
+                MovimientoExtraido(
+                    fecha=ayer,
+                    monto=Decimal("500.00"),
+                    moneda="ARS",
+                    descripcion="Rendimientos",
+                    sentido="rendimiento",
+                    categoria=None,
+                )
+            ],
+        )
+
+        respuestas.clear()
+        with patch("app.routers.whatsapp.etapa_entrada._descargar_medio_meta", return_value=(b"fake_bytes", "image/jpeg")), \
+             patch("app.routers.whatsapp.etapa_entrada.extraer_movimientos_de_imagen", return_value=(ext, None)):
+            _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
+
+        resp1 = respuestas[-1][1] if respuestas else ""
+        linea_ya_tenias_ok = "Ya tenías el rendimiento de" in resp1 or "Ya tenías el rendimiento del" in resp1
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+
+        txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        rends_despues = conn.execute(select(func.count(RendimientoBilletera.id)).where(RendimientoBilletera.billetera_id == b_inv_id)).scalar()
+
+        txs_creadas = txs_despues - txs_antes
+        rends_creados = rends_despues - rends_antes
+
+        return f"Linea ya tenias: {linea_ya_tenias_ok} | Txs creadas: {txs_creadas} | Rends creados: {rends_creados}"
+
+    return run_isolated(test)
+
+
+def p19_caso_12(datos):
+    """P19.12: captura con solo rendimientos: mensaje fijo y nada confirmable."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    hoy = hoy_argentina()
+
+    def test(conn, Session, respuestas):
+        _preparar_base_escenario(conn, u.id)
+        txs_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        rends_antes = conn.execute(select(func.count(RendimientoBilletera.id))).scalar()
+
+        ext = ResultadoExtraccion(
+            documento_tipo="captura_actividad",
+            movimientos=[],
+            billetera_texto=None,
+            vencimiento=None,
+            total_vistos=0,
+            rendimientos=[
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("500.00"),
+                    moneda="ARS",
+                    descripcion="Rendimientos",
+                    sentido="rendimiento",
+                    categoria=None,
+                )
+            ],
+        )
+
+        respuestas.clear()
+        with patch("app.routers.whatsapp.etapa_entrada._descargar_medio_meta", return_value=(b"fake_bytes", "image/jpeg")), \
+             patch("app.routers.whatsapp.etapa_entrada.extraer_movimientos_de_imagen", return_value=(ext, None)):
+            _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
+
+        resp1 = respuestas[-1][1] if respuestas else ""
+        msg_ok = resp1 == "Veo solo rendimientos. Los cargás desde Billeteras o mandame los gastos o ingresos que quieras anotar."
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        resp2 = respuestas[-1][1] if respuestas else ""
+        nada_conf_ok = "No tenés ninguna operación pendiente para confirmar." in resp2
+
+        txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        rends_despues = conn.execute(select(func.count(RendimientoBilletera.id))).scalar()
+
+        txs_creadas = txs_despues - txs_antes
+        rends_creados = rends_despues - rends_antes
+
+        return f"Mensaje solo rendimientos: {msg_ok} | Nada confirmable tras sí: {nada_conf_ok} | Txs creadas: {txs_creadas} | Rends creados: {rends_creados}"
+
+    return run_isolated(test)
+
+
+def p19_caso_13(datos):
+    """P19.13: rendimiento con billetera_texto que resuelve a una billetera que no rinde (Galicia): línea de 'no pude anotar'."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    hoy = hoy_argentina()
+
+    def test(conn, Session, respuestas):
+        _preparar_base_escenario(conn, u.id)
+        txs_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        rends_antes = conn.execute(select(func.count(RendimientoBilletera.id))).scalar()
+
+        ext = ResultadoExtraccion(
+            documento_tipo="captura_actividad",
+            movimientos=[
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("2000"),
+                    moneda="ARS",
+                    descripcion="Kiosco San José",
+                    sentido="egreso",
+                    categoria="Kiosco",
+                )
+            ],
+            billetera_texto="Galicia",
+            vencimiento=None,
+            total_vistos=1,
+            rendimientos=[
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("500.00"),
+                    moneda="ARS",
+                    descripcion="Rendimientos",
+                    sentido="rendimiento",
+                    categoria=None,
+                )
+            ],
+        )
+
+        respuestas.clear()
+        with patch("app.routers.whatsapp.etapa_entrada._descargar_medio_meta", return_value=(b"fake_bytes", "image/jpeg")), \
+             patch("app.routers.whatsapp.etapa_entrada.extraer_movimientos_de_imagen", return_value=(ext, None)):
+            _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
+
+        resp1 = respuestas[-1][1] if respuestas else ""
+        linea_no_pude_ok = "Vi un rendimiento de $500 que no pude anotar (billetera o fecha dudosa). Cargalo desde Billeteras." in resp1
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+
+        txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        rends_despues = conn.execute(select(func.count(RendimientoBilletera.id))).scalar()
+
+        txs_creadas = txs_despues - txs_antes
+        rends_creados = rends_despues - rends_antes
+
+        return f"Linea no pude anotar: {linea_no_pude_ok} | Txs creadas: {txs_creadas} | Rends creados: {rends_creados}"
+
+    return run_isolated(test)
+
+
+def p19_caso_14(datos):
+    """P19.14: 'no' tras la propuesta mixta: 0 transacciones y 0 rendimientos nuevos."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    hoy = hoy_argentina()
+
+    def test(conn, Session, respuestas):
+        _preparar_base_escenario(conn, u.id)
+        txs_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        rends_antes = conn.execute(select(func.count(RendimientoBilletera.id))).scalar()
+
+        ext = ResultadoExtraccion(
+            documento_tipo="captura_actividad",
+            movimientos=[
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("2000"),
+                    moneda="ARS",
+                    descripcion="Kiosco San José",
+                    sentido="egreso",
+                    categoria="Kiosco",
+                ),
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("3500"),
+                    moneda="ARS",
+                    descripcion="Farmacia Central",
+                    sentido="egreso",
+                    categoria="Farmacia",
+                ),
+            ],
+            billetera_texto=None,
+            vencimiento=None,
+            total_vistos=2,
+            rendimientos=[
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("500.00"),
+                    moneda="ARS",
+                    descripcion="Rendimientos",
+                    sentido="rendimiento",
+                    categoria=None,
+                )
+            ],
+        )
+
+        respuestas.clear()
+        with patch("app.routers.whatsapp.etapa_entrada._descargar_medio_meta", return_value=(b"fake_bytes", "image/jpeg")), \
+             patch("app.routers.whatsapp.etapa_entrada.extraer_movimientos_de_imagen", return_value=(ext, None)):
+            _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "no"), time.perf_counter())
+        resp_no = respuestas[-1][1] if respuestas else ""
+        cancelado_ok = "cancelado" in resp_no.lower() or "listo" in resp_no.lower()
+
+        txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        rends_despues = conn.execute(select(func.count(RendimientoBilletera.id))).scalar()
+
+        txs_creadas = txs_despues - txs_antes
+        rends_creados = rends_despues - rends_antes
+
+        return f"Cancelado tras no: {cancelado_ok} | Txs creadas: {txs_creadas} | Rends creados: {rends_creados}"
+
+    return run_isolated(test)
+

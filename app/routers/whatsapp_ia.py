@@ -470,7 +470,11 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
             if ctx.extraccion is not None:
                 from app.routers.whatsapp.extraccion_documento import a_entidades
                 from app.routers.whatsapp.etapa_ia import aplicar_marcas_y_memoria
-                from app.routers.whatsapp.lote_documento import separar_duplicados, armar_resultado_ia_documento
+                from app.routers.whatsapp.lote_documento import (
+                    separar_duplicados,
+                    armar_resultado_ia_documento,
+                    preparar_rendimientos,
+                )
 
                 billeteras_todas = _obtener_billeteras_activas(usuario.id, db)
                 billeteras_pesos = [b for b in billeteras_todas if b.moneda == Moneda.ARS]
@@ -492,18 +496,47 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                 billetera_nombre = b_final.nombre if b_final else "tu billetera"
 
                 entidades_raw = a_entidades(ctx.extraccion, billetera_nombre)
-                aplicar_marcas_y_memoria(db, usuario.id, entidades_raw)
-                entidades_sin_dups, dups = separar_duplicados(db, usuario.id, b_final, entidades_raw)
-
-                ctx.resultado_ia = armar_resultado_ia_documento(
-                    entidades=entidades_sin_dups,
-                    duplicados=dups,
-                    billetera_nombre=billetera_nombre,
-                    se_asumio_principal=se_asumio_principal,
-                    billeteras_usuario=billeteras_todas,
-                    documento_tipo=ctx.extraccion.documento_tipo,
-                    total_vistos=ctx.extraccion.total_vistos,
+                rend_a_anotar, avisos_rend = preparar_rendimientos(
+                    db,
+                    usuario.id,
+                    entidades_raw,
+                    ctx.extraccion.billetera_texto,
+                    ctx.extraccion.documento_tipo,
+                    camino="B",
                 )
+
+                tiene_movimientos_comunes = entidades_raw.get("monto") is not None
+                if not tiene_movimientos_comunes:
+                    ctx.resultado_ia = armar_resultado_ia_documento(
+                        entidades=entidades_raw,
+                        duplicados=[],
+                        billetera_nombre=billetera_nombre,
+                        se_asumio_principal=se_asumio_principal,
+                        billeteras_usuario=billeteras_todas,
+                        documento_tipo=ctx.extraccion.documento_tipo,
+                        total_vistos=ctx.extraccion.total_vistos,
+                        rendimientos_a_anotar=rend_a_anotar,
+                        avisos_rendimientos=avisos_rend,
+                        camino="B",
+                        solo_rendimientos=True,
+                    )
+                else:
+                    aplicar_marcas_y_memoria(db, usuario.id, entidades_raw)
+                    entidades_sin_dups, dups = separar_duplicados(db, usuario.id, b_final, entidades_raw)
+
+                    ctx.resultado_ia = armar_resultado_ia_documento(
+                        entidades=entidades_sin_dups,
+                        duplicados=dups,
+                        billetera_nombre=billetera_nombre,
+                        se_asumio_principal=se_asumio_principal,
+                        billeteras_usuario=billeteras_todas,
+                        documento_tipo=ctx.extraccion.documento_tipo,
+                        total_vistos=ctx.extraccion.total_vistos,
+                        rendimientos_a_anotar=rend_a_anotar,
+                        avisos_rendimientos=avisos_rend,
+                        camino="B",
+                        solo_rendimientos=False,
+                    )
             else:
                 # Etapa 3: Estados pendientes y handlers determinísticos
                 procesar_estados_y_handlers_deterministicos(ctx)

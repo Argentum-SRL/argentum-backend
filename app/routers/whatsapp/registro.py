@@ -484,6 +484,46 @@ def _confirmar_propuesta_transaccion(
             if b_chk and b_chk.saldo_actual < 0:
                 msg_resp += f"\nLa billetera quedó en negativo."
 
+        rendimientos_conf = entidades.get("rendimientos")
+        if rendimientos_conf and isinstance(rendimientos_conf, list):
+            from datetime import date
+            import app.services.rendimiento_billetera_service as rbs_mod
+            for r_item in rendimientos_conf:
+                if isinstance(r_item, dict) and r_item.get("billetera_id") and r_item.get("monto") is not None:
+                    try:
+                        m_r = Decimal(str(r_item["monto"]))
+                        b_id_r = UUID(str(r_item["billetera_id"]))
+                        f_r_raw = r_item.get("fecha")
+                        f_r_dt = None
+                        if f_r_raw:
+                            if isinstance(f_r_raw, str):
+                                d_r = date.fromisoformat(f_r_raw)
+                            elif isinstance(f_r_raw, date):
+                                d_r = f_r_raw
+                            else:
+                                d_r = None
+                            if d_r:
+                                f_r_dt = datetime(d_r.year, d_r.month, d_r.day, 12, 0, 0, tzinfo=timezone.utc)
+                        with db.begin_nested():
+                            rbs_mod.confirmar_rendimiento(
+                                db=db,
+                                usuario_id=usuario.id,
+                                billetera_id=b_id_r,
+                                monto=m_r,
+                                fecha=f_r_dt,
+                                commit=False,
+                            )
+                        b_nom_r = r_item.get("billetera_nombre")
+                        if not b_nom_r:
+                            b_obj_r = db.get(Billetera, b_id_r)
+                            b_nom_r = b_obj_r.nombre if b_obj_r else "tu billetera"
+                        m_fmt_r = formatear_monto(float(m_r), Moneda.ARS)
+                        msg_resp += f"\nRendimiento de {m_fmt_r} anotado en {b_nom_r}."
+                    except HTTPException as e_rend:
+                        msg_resp += f"\nNo pude anotar el rendimiento: {e_rend.detail}."
+                    except Exception as e_rend:
+                        msg_resp += f"\nNo pude anotar el rendimiento: {str(e_rend)}."
+
         if conv_previa:
             conv_previa.accion_ejecutada = f"lote:{','.join(str(t.id) for t in txs_registradas)}"
         emitir_evento_actualizacion(db, usuario.id, "transacciones")
@@ -698,6 +738,46 @@ def _confirmar_propuesta_transaccion(
     # salvo que el usuario los pida explícitamente (privacidad de pantalla).
     if billetera.saldo_actual < 0:
         msg_resp += "\nLa billetera quedó en negativo."
+
+    rendimientos_conf = entidades.get("rendimientos")
+    if rendimientos_conf and isinstance(rendimientos_conf, list):
+        from datetime import date
+        import app.services.rendimiento_billetera_service as rbs_mod
+        for r_item in rendimientos_conf:
+            if isinstance(r_item, dict) and r_item.get("billetera_id") and r_item.get("monto") is not None:
+                try:
+                    m_r = Decimal(str(r_item["monto"]))
+                    b_id_r = UUID(str(r_item["billetera_id"]))
+                    f_r_raw = r_item.get("fecha")
+                    f_r_dt = None
+                    if f_r_raw:
+                        if isinstance(f_r_raw, str):
+                            d_r = date.fromisoformat(f_r_raw)
+                        elif isinstance(f_r_raw, date):
+                            d_r = f_r_raw
+                        else:
+                            d_r = None
+                        if d_r:
+                            f_r_dt = datetime(d_r.year, d_r.month, d_r.day, 12, 0, 0, tzinfo=timezone.utc)
+                    with db.begin_nested():
+                        rbs_mod.confirmar_rendimiento(
+                            db=db,
+                            usuario_id=usuario.id,
+                            billetera_id=b_id_r,
+                            monto=m_r,
+                            fecha=f_r_dt,
+                            commit=False,
+                        )
+                    b_nom_r = r_item.get("billetera_nombre")
+                    if not b_nom_r:
+                        b_obj_r = db.get(Billetera, b_id_r)
+                        b_nom_r = b_obj_r.nombre if b_obj_r else "tu billetera"
+                    m_fmt_r = formatear_monto(float(m_r), Moneda.ARS)
+                    msg_resp += f"\nRendimiento de {m_fmt_r} anotado en {b_nom_r}."
+                except HTTPException as e_rend:
+                    msg_resp += f"\nNo pude anotar el rendimiento: {e_rend.detail}."
+                except Exception as e_rend:
+                    msg_resp += f"\nNo pude anotar el rendimiento: {str(e_rend)}."
 
     return transaccion, msg_resp, False
 

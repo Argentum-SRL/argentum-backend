@@ -273,3 +273,236 @@ def test_esquema_sin_limite_de_cantidad():
     )
     assert "máximo" not in movimientos_schema.get("description", "").lower()
     assert "maxItems" not in movimientos_schema
+
+
+def test_esquema_con_rendimiento_en_enum():
+    """D1: Verifica que el enum de 'sentido' incluye 'rendimiento' junto a 'egreso' e 'ingreso'."""
+    sentido_enum = (
+        ESQUEMA_EXTRACCION["json_schema"]["schema"]["properties"]["movimientos"]["items"]["properties"]["sentido"]["enum"]
+    )
+    assert "rendimiento" in sentido_enum
+    assert set(sentido_enum) == {"egreso", "ingreso", "rendimiento"}
+
+
+def test_a_entidades_con_y_sin_rendimientos():
+    """D1: a_entidades maneja rendimientos con y sin movimientos comunes."""
+    hoy = hoy_argentina()
+    r1 = MovimientoExtraido(
+        fecha=hoy,
+        monto=Decimal("5650.20"),
+        moneda="ARS",
+        descripcion="Rendimientos",
+        sentido="rendimiento",
+        categoria=None,
+    )
+    m1 = MovimientoExtraido(
+        fecha=hoy,
+        monto=Decimal("1200.00"),
+        moneda="ARS",
+        descripcion="Kiosco",
+        sentido="egreso",
+        categoria="Kiosco",
+    )
+
+    # 1. Con comunes y con rendimientos
+    res_mixto = ResultadoExtraccion(
+        documento_tipo="captura_actividad",
+        movimientos=[m1],
+        billetera_texto="Mercado Pago",
+        vencimiento=None,
+        total_vistos=1,
+        rendimientos=[r1],
+    )
+    ent_mixto = a_entidades(res_mixto, billetera_nombre="Mercado Pago")
+    assert ent_mixto["monto"] == Decimal("1200.00")
+    assert "rendimientos" in ent_mixto
+    assert len(ent_mixto["rendimientos"]) == 1
+    assert ent_mixto["rendimientos"][0]["monto"] == Decimal("5650.20")
+    assert ent_mixto["rendimientos"][0]["fecha"] == hoy.isoformat()
+
+    # 2. Solo rendimientos (sin comunes)
+    res_solo_rend = ResultadoExtraccion(
+        documento_tipo="captura_actividad",
+        movimientos=[],
+        billetera_texto="Mercado Pago",
+        vencimiento=None,
+        total_vistos=0,
+        rendimientos=[r1],
+    )
+    ent_solo = a_entidades(res_solo_rend, billetera_nombre="Mercado Pago")
+    assert "monto" not in ent_solo
+    assert "rendimientos" in ent_solo
+    assert len(ent_solo["rendimientos"]) == 1
+    assert ent_solo["rendimientos"][0]["monto"] == Decimal("5650.20")
+
+    # 3. Sin nada
+    res_vacio = ResultadoExtraccion(
+        documento_tipo="captura_actividad",
+        movimientos=[],
+        billetera_texto=None,
+        vencimiento=None,
+        total_vistos=0,
+        rendimientos=[],
+    )
+    assert a_entidades(res_vacio) == {}
+
+
+def test_tope_de_10_no_cuenta_rendimientos():
+    """D1: El tope de 10 y total_vistos cuentan solo los movimientos comunes, los rendimientos quedan íntegros."""
+    from app.routers.whatsapp.extraccion_documento import extraer_movimientos_de_imagen
+    import json
+
+    movs_json = [
+        {
+            "fecha": "2026-10-07",
+            "monto": i * 1000,
+            "moneda": "ARS",
+            "descripcion": f"Gasto {i}",
+            "sentido": "egreso",
+            "categoria": None,
+        }
+        for i in range(1, 13)
+    ]
+    rend_json = [
+        {
+            "fecha": "2026-10-01",
+            "monto": 5650.20,
+            "moneda": "ARS",
+            "descripcion": "Rendimientos",
+            "sentido": "rendimiento",
+            "categoria": None,
+        }
+    ]
+    doc_json = {
+        "legible": True,
+        "documento_tipo": "captura_actividad",
+        "billetera_texto": "Mercado Pago",
+        "vencimiento": None,
+        "movimientos": movs_json + rend_json,
+    }
+
+    mock_choice = MagicMock()
+    mock_choice.message.content = json.dumps(doc_json)
+    mock_resp = MagicMock()
+    mock_resp.choices = [mock_choice]
+    mock_resp.usage.prompt_tokens = 100
+    mock_resp.usage.completion_tokens = 50
+
+    with patch("app.routers.whatsapp.extraccion_documento.get_openai_client") as mock_client:
+        mock_client.return_value.chat.completions.create.return_value = mock_resp
+        res, err = extraer_movimientos_de_imagen(b"fake_bytes")
+        assert err is None
+        assert res is not None
+        assert res.total_vistos == 12
+        assert len(res.movimientos) == 10
+        assert len(res.rendimientos) == 1
+        assert res.rendimientos[0].monto == Decimal("5650.20")
+
+
+def test_ilegible_solo_si_no_hay_nada():
+    """D1: extraer_movimientos_de_imagen devuelve ILEGIBLE solo si no hay comunes NI rendimientos válidos."""
+    from app.routers.whatsapp.extraccion_documento import extraer_movimientos_de_imagen
+    import json
+
+    # Caso A: Solo rendimientos válidos -> NO es ilegible
+    doc_rend = {
+        "legible": True,
+        "documento_tipo": "captura_actividad",
+        "billetera_texto": "Mercado Pago",
+        "vencimiento": None,
+        "movimientos": [
+            {
+                "fecha": "2026-10-01",
+                "monto": 312.40,
+                "moneda": "ARS",
+                "descripcion": "Rendimientos",
+                "sentido": "rendimiento",
+                "categoria": None,
+            }
+        ],
+    }
+    mock_choice = MagicMock()
+    mock_choice.message.content = json.dumps(doc_rend)
+    mock_resp = MagicMock()
+    mock_resp.choices = [mock_choice]
+    mock_resp.usage.prompt_tokens = 100
+    mock_resp.usage.completion_tokens = 50
+
+    with patch("app.routers.whatsapp.extraccion_documento.get_openai_client") as mock_client:
+        mock_client.return_value.chat.completions.create.return_value = mock_resp
+        res, err = extraer_movimientos_de_imagen(b"fake_bytes")
+        assert err is None
+        assert res is not None
+        assert len(res.movimientos) == 0
+        assert len(res.rendimientos) == 1
+        assert res.total_vistos == 0
+
+    # Caso B: Ningún movimiento válido -> ILEGIBLE
+    doc_vacio = {
+        "legible": True,
+        "documento_tipo": "captura_actividad",
+        "billetera_texto": None,
+        "vencimiento": None,
+        "movimientos": [],
+    }
+    mock_choice.message.content = json.dumps(doc_vacio)
+    with patch("app.routers.whatsapp.extraccion_documento.get_openai_client") as mock_client:
+        mock_client.return_value.chat.completions.create.return_value = mock_resp
+        res, err = extraer_movimientos_de_imagen(b"fake_bytes")
+        assert res is None
+        assert err == "ILEGIBLE"
+
+
+def test_textos_exactos_decision_9_camino_b():
+    """D1: Verifica los textos exactos de la decisión 9 (camino B)."""
+    from app.routers.whatsapp.lote_documento import preparar_rendimientos
+
+    uid = uuid4()
+    mock_db = MagicMock()
+
+    b_inv = MagicMock()
+    b_inv.id = uuid4()
+    b_inv.nombre = "Ahorro con rendimiento"
+    b_inv.es_inversion = True
+    b_inv.tna = Decimal("34.00")
+    b_inv.moneda = "ARS"
+
+    # 1. Propuesta con rendimiento a anotar
+    entidades = {
+        "monto": Decimal("1000"),
+        "rendimientos": [{"fecha": "2026-10-01", "monto": Decimal("5650.20")}],
+    }
+    # Mocking DB query para billeteras que rinden y duplicados
+    mock_db.execute.return_value.scalars.return_value.all.return_value = [b_inv]
+    mock_db.execute.return_value.scalar_one_or_none.return_value = None  # No existe duplicado
+
+    r_anotar, avisos = preparar_rendimientos(mock_db, uid, entidades, None, "captura_actividad", camino="B")
+    assert len(r_anotar) == 1
+    assert len(avisos) == 1
+    assert "Además anoto el rendimiento de $5.650,20 en Ahorro con rendimiento (el 1 de octubre); no cuenta como ingreso." in avisos[0]
+
+    # 2. Rendimiento ya existente
+    mock_db.execute.return_value.scalar_one_or_none.return_value = uuid4()  # Ya existe
+    r_anotar_dup, avisos_dup = preparar_rendimientos(mock_db, uid, entidades, None, "captura_actividad", camino="B")
+    assert len(r_anotar_dup) == 0
+    assert "Ya tenías el rendimiento del 1 de octubre en Ahorro con rendimiento." in avisos_dup[0]
+
+    # 3. Sin billetera usable (billetera que no rinde)
+    mock_db.execute.return_value.scalars.return_value.all.return_value = []
+    r_anotar_sin, avisos_sin = preparar_rendimientos(mock_db, uid, entidades, "Galicia", "captura_actividad", camino="B")
+    assert len(r_anotar_sin) == 0
+    assert "Vi un rendimiento de $5.650,20 que no pude anotar (billetera o fecha dudosa). Cargalo desde Billeteras." in avisos_sin[0]
+
+    # 4. Solo rendimientos camino B en armar_resultado_ia_documento
+    res_solo = armar_resultado_ia_documento(
+        entidades={},
+        duplicados=[],
+        billetera_nombre="Ahorro con rendimiento",
+        se_asumio_principal=False,
+        solo_rendimientos=True,
+        camino="B",
+    )
+    assert res_solo["intent"] == "duplicado"
+    assert res_solo["entidades"] == {}
+    assert res_solo["respuesta_usuario"] == "Veo solo rendimientos. Los cargás desde Billeteras o mandame los gastos o ingresos que quieras anotar."
+
