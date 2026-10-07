@@ -4,17 +4,19 @@ Separación de movimientos duplicados y construcción de propuestas de transacci
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.models.ajuste_saldo import AjusteSaldo
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.rendimiento_billetera import RendimientoBilletera
 from app.models.usuario import Moneda
+from app.routers.whatsapp.extraccion_documento import parsear_fecha_documento
 from app.routers.whatsapp.parsers import (
     _formatear_fecha_natural,
     _resolver_y_validar_fecha,
@@ -22,7 +24,7 @@ from app.routers.whatsapp.parsers import (
 from app.routers.whatsapp.propuestas import _construir_propuesta_transaccion
 from app.routers.whatsapp.resolvers_cascada import resolver_billetera_cascada
 from app.services import duplicados_service
-from app.utils.fecha import hoy_argentina
+from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
 from app.utils.formato import formatear_monto
 
 logger = structlog.get_logger(__name__)
@@ -148,12 +150,15 @@ def preparar_rendimientos(
         palabra = "rendimiento" if n == 1 else "rendimientos"
         return [], [f"Salteé {n} {palabra}: eso lo calculo yo."]
 
-    # Camino B: billeteras que rinden (billeteras de inversión)
+    # Camino B: billeteras que rinden (activas con es_inversion=True O tna no nula)
     billeteras_rinden = db.execute(
         select(Billetera).where(
             Billetera.usuario_id == usuario_id,
             Billetera.estado == EstadoBilletera.ACTIVA,
-            Billetera.es_inversion == True,
+            or_(
+                Billetera.es_inversion == True,
+                Billetera.tna.isnot(None),
+            ),
         ).order_by(Billetera.nombre.asc(), Billetera.id.asc())
     ).scalars().all()
 
@@ -180,6 +185,36 @@ def preparar_rendimientos(
     rendimientos_a_anotar: list[dict[str, Any]] = []
     avisos: list[str] = []
     fechas_usadas: set[date] = set()
+    billeteras_aviso_cobertura: set[UUID] = set()
+
+    ancla: date | None = None
+    if billetera_elegida:
+        # Replicación del cálculo del ancla según rendimiento_billetera_service.calcular_rendimiento_estimado
+        fur = getattr(billetera_elegida, "fecha_ultimo_rendimiento", None)
+        if fur is not None and isinstance(fur, datetime):
+            dt_rend = fur
+            if dt_rend.tzinfo is None:
+                dt_rend = dt_rend.replace(tzinfo=timezone.utc)
+            ancla = dt_rend.astimezone(TZ_ARGENTINA).date()
+        else:
+            dt_creacion = getattr(billetera_elegida, "fecha_creacion", None)
+            if isinstance(dt_creacion, datetime):
+                if dt_creacion.tzinfo is None:
+                    dt_creacion = dt_creacion.replace(tzinfo=timezone.utc)
+                fecha_creacion_date = dt_creacion.astimezone(TZ_ARGENTINA).date()
+            else:
+                fecha_creacion_date = date(2000, 1, 1)
+
+            ultimo_ajuste_res = db.execute(
+                select(func.max(AjusteSaldo.fecha)).where(AjusteSaldo.billetera_id == billetera_elegida.id)
+            ).scalar_one_or_none()
+            ultimo_ajuste_fecha = ultimo_ajuste_res if isinstance(ultimo_ajuste_res, (date, datetime)) else None
+
+            if ultimo_ajuste_fecha is not None:
+                ajuste_date = ultimo_ajuste_fecha if isinstance(ultimo_ajuste_fecha, date) else ultimo_ajuste_fecha.date()
+                ancla = max(fecha_creacion_date, ajuste_date)
+            else:
+                ancla = fecha_creacion_date
 
     for r in rendimientos_raw:
         monto_raw = r.get("monto")
@@ -199,23 +234,27 @@ def preparar_rendimientos(
             continue
 
         fecha_raw = r.get("fecha")
-        if not fecha_raw:
-            avisos.append(
-                f"Vi un rendimiento de {monto_fmt} que no pude anotar (billetera o fecha dudosa). Cargalo desde Billeteras."
-            )
-            continue
-
-        fecha_obj, _ = _resolver_y_validar_fecha(fecha_raw)
+        fecha_obj = parsear_fecha_documento(fecha_raw) if fecha_raw else None
         if not fecha_obj or fecha_obj > hoy or (hoy - fecha_obj).days > 60:
             avisos.append(
                 f"Vi un rendimiento de {monto_fmt} que no pude anotar (billetera o fecha dudosa). Cargalo desde Billeteras."
             )
             continue
 
+        if ancla is not None and fecha_obj <= ancla:
+            if billetera_elegida.id not in billeteras_aviso_cobertura:
+                billeteras_aviso_cobertura.add(billetera_elegida.id)
+                f_nat_ancla = _formatear_fecha_natural(ancla)
+                hasta_str = f"hasta {f_nat_ancla}" if f_nat_ancla else "hasta hoy"
+                avisos.append(
+                    f"Ya tenías cargados los rendimientos de {billetera_elegida.nombre} {hasta_str}."
+                )
+            continue
+
         existe_db = db.execute(
             select(RendimientoBilletera.id).where(
                 RendimientoBilletera.billetera_id == billetera_elegida.id,
-                func.date(RendimientoBilletera.fecha) == fecha_obj,
+                func.date(func.timezone("America/Argentina/Buenos_Aires", RendimientoBilletera.fecha)) == fecha_obj,
             )
         ).scalar_one_or_none()
 

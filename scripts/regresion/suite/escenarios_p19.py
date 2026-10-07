@@ -567,6 +567,14 @@ def p19_caso_10(datos):
                 Billetera.es_inversion == True,
             )
         ).scalar()
+        conn.execute(
+            text("UPDATE billeteras SET tna = NULL WHERE usuario_id = :uid AND id != :bid"),
+            {"uid": u.id, "bid": b_inv_id},
+        )
+        conn.execute(
+            text("UPDATE billeteras SET fecha_ultimo_rendimiento = :fur WHERE id = :bid"),
+            {"fur": datetime.now(timezone.utc) - timedelta(days=10), "bid": b_inv_id},
+        )
 
         txs_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         rends_antes = conn.execute(select(func.count(RendimientoBilletera.id)).where(RendimientoBilletera.billetera_id == b_inv_id)).scalar()
@@ -651,6 +659,10 @@ def p19_caso_11(datos):
                 Billetera.es_inversion == True,
             )
         ).scalar()
+        conn.execute(
+            text("UPDATE billeteras SET tna = NULL WHERE usuario_id = :uid AND id != :bid"),
+            {"uid": u.id, "bid": b_inv_id},
+        )
 
         # Crear el rendimiento existente previo para ayer
         with Session() as sess:
@@ -663,6 +675,11 @@ def p19_caso_11(datos):
                 fecha=datetime(ayer.year, ayer.month, ayer.day, 12, 0, 0, tzinfo=timezone.utc),
                 commit=True,
             )
+
+        conn.execute(
+            text("UPDATE billeteras SET fecha_ultimo_rendimiento = :fur WHERE id = :bid"),
+            {"fur": datetime.now(timezone.utc) - timedelta(days=10), "bid": b_inv_id},
+        )
 
         txs_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         rends_antes = conn.execute(select(func.count(RendimientoBilletera.id)).where(RendimientoBilletera.billetera_id == b_inv_id)).scalar()
@@ -842,6 +859,22 @@ def p19_caso_14(datos):
 
     def test(conn, Session, respuestas):
         _preparar_base_escenario(conn, u.id)
+        b_inv_id = conn.execute(
+            select(Billetera.id).where(
+                Billetera.usuario_id == u.id,
+                Billetera.nombre == "Ahorro con rendimiento",
+            )
+        ).scalar_one()
+
+        conn.execute(
+            text("UPDATE billeteras SET tna = NULL WHERE usuario_id = :uid AND id != :bid"),
+            {"uid": u.id, "bid": b_inv_id},
+        )
+        conn.execute(
+            text("UPDATE billeteras SET fecha_ultimo_rendimiento = :fur WHERE id = :bid"),
+            {"fur": datetime.now(timezone.utc) - timedelta(days=10), "bid": b_inv_id},
+        )
+
         txs_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         rends_antes = conn.execute(select(func.count(RendimientoBilletera.id))).scalar()
 
@@ -899,4 +932,237 @@ def p19_caso_14(datos):
         return f"Cancelado tras no: {cancelado_ok} | Txs creadas: {txs_creadas} | Rends creados: {rends_creados}"
 
     return run_isolated(test)
+
+
+def p19_caso_15(datos):
+    """P19.15: el rendimiento del documento tiene fecha menor o igual al ancla de la billetera:
+    no se crea ninguna fila y el texto trae el aviso 'Ya tenías cargados los rendimientos de ...'."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    hoy = hoy_argentina()
+    ayer = hoy - timedelta(days=1)
+
+    def test(conn, Session, respuestas):
+        _preparar_base_escenario(conn, u.id)
+        b_inv_id = conn.execute(
+            select(Billetera.id).where(
+                Billetera.usuario_id == u.id,
+                Billetera.es_inversion == True,
+            )
+        ).scalar()
+        conn.execute(
+            text("UPDATE billeteras SET tna = NULL WHERE usuario_id = :uid AND id != :bid"),
+            {"uid": u.id, "bid": b_inv_id},
+        )
+        # Fijar ancla en ayer
+        conn.execute(
+            text("UPDATE billeteras SET fecha_ultimo_rendimiento = :fur WHERE id = :bid"),
+            {"fur": datetime(ayer.year, ayer.month, ayer.day, 12, 0, 0, tzinfo=timezone.utc), "bid": b_inv_id},
+        )
+
+        txs_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        rends_antes = conn.execute(select(func.count(RendimientoBilletera.id)).where(RendimientoBilletera.billetera_id == b_inv_id)).scalar()
+
+        ext = ResultadoExtraccion(
+            documento_tipo="captura_actividad",
+            movimientos=[
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("2000"),
+                    moneda="ARS",
+                    descripcion="Kiosco San José",
+                    sentido="egreso",
+                    categoria="Kiosco",
+                )
+            ],
+            billetera_texto=None,
+            vencimiento=None,
+            total_vistos=1,
+            rendimientos=[
+                MovimientoExtraido(
+                    fecha=ayer,
+                    monto=Decimal("500.00"),
+                    moneda="ARS",
+                    descripcion="Rendimientos",
+                    sentido="rendimiento",
+                    categoria=None,
+                )
+            ],
+        )
+
+        respuestas.clear()
+        with patch("app.routers.whatsapp.etapa_entrada._descargar_medio_meta", return_value=(b"fake_bytes", "image/jpeg")), \
+             patch("app.routers.whatsapp.etapa_entrada.extraer_movimientos_de_imagen", return_value=(ext, None)):
+            _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
+
+        resp1 = respuestas[-1][1] if respuestas else ""
+        aviso_cobertura_ok = "Ya tenías cargados los rendimientos de Ahorro con rendimiento hasta ayer." in resp1
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+
+        txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        rends_despues = conn.execute(select(func.count(RendimientoBilletera.id)).where(RendimientoBilletera.billetera_id == b_inv_id)).scalar()
+
+        txs_creadas = txs_despues - txs_antes
+        rends_creados = rends_despues - rends_antes
+
+        return f"Aviso cobertura: {aviso_cobertura_ok} | Txs creadas: {txs_creadas} | Rends creados: {rends_creados}"
+
+    return run_isolated(test)
+
+
+def p19_caso_16(datos):
+    """P19.16: rendimiento de hace 70 días: aviso de 'no pude anotar' y ninguna fila."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    hoy = hoy_argentina()
+    fecha_70 = hoy - timedelta(days=70)
+
+    def test(conn, Session, respuestas):
+        _preparar_base_escenario(conn, u.id)
+        b_inv_id = conn.execute(
+            select(Billetera.id).where(
+                Billetera.usuario_id == u.id,
+                Billetera.es_inversion == True,
+            )
+        ).scalar()
+        conn.execute(
+            text("UPDATE billeteras SET tna = NULL WHERE usuario_id = :uid AND id != :bid"),
+            {"uid": u.id, "bid": b_inv_id},
+        )
+        conn.execute(
+            text("UPDATE billeteras SET fecha_ultimo_rendimiento = :fur WHERE id = :bid"),
+            {"fur": datetime.now(timezone.utc) - timedelta(days=80), "bid": b_inv_id},
+        )
+
+        txs_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        rends_antes = conn.execute(select(func.count(RendimientoBilletera.id)).where(RendimientoBilletera.billetera_id == b_inv_id)).scalar()
+
+        ext = ResultadoExtraccion(
+            documento_tipo="captura_actividad",
+            movimientos=[
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("2000"),
+                    moneda="ARS",
+                    descripcion="Kiosco San José",
+                    sentido="egreso",
+                    categoria="Kiosco",
+                )
+            ],
+            billetera_texto=None,
+            vencimiento=None,
+            total_vistos=1,
+            rendimientos=[
+                MovimientoExtraido(
+                    fecha=fecha_70,
+                    monto=Decimal("500.00"),
+                    moneda="ARS",
+                    descripcion="Rendimientos",
+                    sentido="rendimiento",
+                    categoria=None,
+                )
+            ],
+        )
+
+        respuestas.clear()
+        with patch("app.routers.whatsapp.etapa_entrada._descargar_medio_meta", return_value=(b"fake_bytes", "image/jpeg")), \
+             patch("app.routers.whatsapp.etapa_entrada.extraer_movimientos_de_imagen", return_value=(ext, None)):
+            _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
+
+        resp1 = respuestas[-1][1] if respuestas else ""
+        aviso_no_pude_ok = "Vi un rendimiento de $500 que no pude anotar (billetera o fecha dudosa). Cargalo desde Billeteras." in resp1
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+
+        txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        rends_despues = conn.execute(select(func.count(RendimientoBilletera.id)).where(RendimientoBilletera.billetera_id == b_inv_id)).scalar()
+
+        txs_creadas = txs_despues - txs_antes
+        rends_creados = rends_despues - rends_antes
+
+        return f"Aviso fecha vieja: {aviso_no_pude_ok} | Txs creadas: {txs_creadas} | Rends creados: {rends_creados}"
+
+    return run_isolated(test)
+
+
+def p19_caso_17(datos):
+    """P19.17: una billetera con tna y es_inversion=false como única billetera que rinde:
+    el rendimiento se anota en esa billetera tras 'sí'."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    hoy = hoy_argentina()
+    ayer = hoy - timedelta(days=1)
+
+    def test(conn, Session, respuestas):
+        _preparar_base_escenario(conn, u.id)
+        # Desactivar inversión y tna en todas las billeteras
+        conn.execute(
+            text("UPDATE billeteras SET es_inversion = false, tna = NULL WHERE usuario_id = :uid"),
+            {"uid": u.id},
+        )
+        # Dejar Galicia con tna=35.00 y es_inversion=false
+        b_galicia_id = conn.execute(
+            select(Billetera.id).where(Billetera.usuario_id == u.id, Billetera.nombre == "Galicia")
+        ).scalar()
+        conn.execute(
+            text("UPDATE billeteras SET tna = 35.00, es_inversion = false, fecha_ultimo_rendimiento = :fur WHERE id = :bid"),
+            {"bid": b_galicia_id, "fur": datetime.now(timezone.utc) - timedelta(days=10)},
+        )
+
+        txs_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        rends_antes = conn.execute(select(func.count(RendimientoBilletera.id)).where(RendimientoBilletera.billetera_id == b_galicia_id)).scalar()
+
+        ext = ResultadoExtraccion(
+            documento_tipo="captura_actividad",
+            movimientos=[
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("2000"),
+                    moneda="ARS",
+                    descripcion="Kiosco San José",
+                    sentido="egreso",
+                    categoria="Kiosco",
+                )
+            ],
+            billetera_texto=None,
+            vencimiento=None,
+            total_vistos=1,
+            rendimientos=[
+                MovimientoExtraido(
+                    fecha=ayer,
+                    monto=Decimal("500.00"),
+                    moneda="ARS",
+                    descripcion="Rendimientos",
+                    sentido="rendimiento",
+                    categoria=None,
+                )
+            ],
+        )
+
+        respuestas.clear()
+        with patch("app.routers.whatsapp.etapa_entrada._descargar_medio_meta", return_value=(b"fake_bytes", "image/jpeg")), \
+             patch("app.routers.whatsapp.etapa_entrada.extraer_movimientos_de_imagen", return_value=(ext, None)):
+            _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
+
+        resp1 = respuestas[-1][1] if respuestas else ""
+        propuesta_ok = (
+            "Además anoto el rendimiento de $500 en Galicia" in resp1
+            and "no cuenta como ingreso" in resp1
+        )
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        resp2 = respuestas[-1][1] if respuestas else ""
+        registrado_ok = "Listo" in resp2 and "Rendimiento de $500 anotado en Galicia" in resp2
+
+        txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        rends_despues = conn.execute(select(func.count(RendimientoBilletera.id)).where(RendimientoBilletera.billetera_id == b_galicia_id)).scalar()
+
+        txs_creadas = txs_despues - txs_antes
+        rends_creados = rends_despues - rends_antes
+
+        return f"Propuesta tna: {propuesta_ok} | Registrado tras sí: {registrado_ok} | Txs creadas: {txs_creadas} | Rends creados: {rends_creados}"
+
+    return run_isolated(test)
+
 

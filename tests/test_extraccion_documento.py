@@ -506,3 +506,143 @@ def test_textos_exactos_decision_9_camino_b():
     assert res_solo["entidades"] == {}
     assert res_solo["respuesta_usuario"] == "Veo solo rendimientos. Los cargás desde Billeteras o mandame los gastos o ingresos que quieras anotar."
 
+
+def test_prompt_sistema_contiene_fecha_hoy_y_reglas():
+    """D1: Verifica que el prompt de sistema generado contenga la fecha de hoy y reglas de descripción/categoría."""
+    import json
+    from app.routers.whatsapp.extraccion_documento import extraer_movimientos_de_imagen
+    from app.utils.fecha import hoy_argentina
+
+    hoy = hoy_argentina()
+    dias_semana = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+    dia_semana = dias_semana[hoy.weekday()]
+
+    with patch("app.routers.whatsapp.extraccion_documento.get_openai_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_resp = MagicMock()
+        mock_resp.choices = [
+            MagicMock(message=MagicMock(content=json.dumps({
+                "legible": True,
+                "documento_tipo": "otro",
+                "billetera_texto": None,
+                "vencimiento": None,
+                "movimientos": [],
+            })))
+        ]
+        mock_client.chat.completions.create.return_value = mock_resp
+
+        extraer_movimientos_de_imagen(b"fake_bytes")
+
+        call_args = mock_client.chat.completions.create.call_args
+        messages = call_args.kwargs.get("messages", [])
+        prompt_sys = messages[0]["content"]
+
+        # Fecha de hoy y día de semana
+        assert hoy.isoformat() in prompt_sys
+        assert dia_semana in prompt_sys
+
+        # Reglas de descripción
+        assert "descripcion es SOLO el nombre del comercio o persona" in prompt_sys
+        assert "sin 'Pagaste'" in prompt_sys
+
+        # Reglas de categoría
+        assert "categoria solo si el nombre es una marca o comercio ampliamente conocido" in prompt_sys
+        assert "null" in prompt_sys
+
+        # Verbos de sentido
+        assert "Pagaste" in prompt_sys and "Transferiste" in prompt_sys and "Enviaste" in prompt_sys
+        assert "Te transfirieron" in prompt_sys and "Recibiste" in prompt_sys
+
+
+def test_esquema_extraccion_descriptions_nuevas():
+    """D1: Verifica que el ESQUEMA_EXTRACCION tenga las descriptions nuevas."""
+    from app.routers.whatsapp.extraccion_documento import ESQUEMA_EXTRACCION
+
+    props = ESQUEMA_EXTRACCION["json_schema"]["schema"]["properties"]["movimientos"]["items"]["properties"]
+    desc_descripcion = props["descripcion"]["description"]
+    desc_categoria = props["categoria"]["description"]
+
+    assert "Solo el nombre del comercio o persona tal como aparece" in desc_descripcion
+    assert "sin 'Pagaste'" in desc_descripcion
+    assert "Categoría solo si es marca ampliamente conocida" in desc_categoria
+    assert "null" in desc_categoria
+
+
+def test_anotar_rendimientos_confirmados_manejo_errores():
+    """D1: Verifica que _anotar_rendimientos_confirmados devuelva mensaje genérico ante Exception y detail ante HTTPException."""
+    from app.routers.whatsapp.registro import _anotar_rendimientos_confirmados
+    from fastapi import HTTPException
+
+    mock_db = MagicMock()
+    mock_user = MagicMock()
+    mock_user.id = uuid4()
+
+    entidades = {
+        "rendimientos": [
+            {
+                "billetera_id": str(uuid4()),
+                "billetera_nombre": "Mercado Pago",
+                "monto": Decimal("500"),
+                "fecha": "2026-10-01",
+            }
+        ]
+    }
+
+    # Caso 1: Excepción genérica -> devuelve exactamente "No pude anotar el rendimiento."
+    with patch("app.services.rendimiento_billetera_service.confirmar_rendimiento", side_effect=Exception("Database error")):
+        res = _anotar_rendimientos_confirmados(mock_db, mock_user, entidades)
+        assert res.strip() == "No pude anotar el rendimiento."
+        assert "Database error" not in res
+
+    # Caso 2: HTTPException -> muestra su detail
+    with patch("app.services.rendimiento_billetera_service.confirmar_rendimiento", side_effect=HTTPException(status_code=400, detail="Saldo insuficiente")):
+        res_http = _anotar_rendimientos_confirmados(mock_db, mock_user, entidades)
+        assert res_http.strip() == "No pude anotar el rendimiento: Saldo insuficiente."
+
+
+def test_preparar_rendimientos_fechas_invalidas():
+    """D1: Verifica que preparar_rendimientos con fecha de hace 70 días, futura o None avise y no anote."""
+    from datetime import datetime, timezone, timedelta
+    from app.routers.whatsapp.lote_documento import preparar_rendimientos
+    from app.utils.fecha import hoy_argentina
+
+    hoy = hoy_argentina()
+    uid = uuid4()
+    mock_db = MagicMock()
+
+    b_inv = MagicMock()
+    b_inv.id = uuid4()
+    b_inv.nombre = "Ahorro Plus"
+    b_inv.es_inversion = True
+    b_inv.tna = Decimal("30.00")
+    b_inv.fecha_ultimo_rendimiento = None
+    b_inv.fecha_creacion = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    mock_db.execute.return_value.scalars.return_value.all.return_value = [b_inv]
+    mock_db.execute.return_value.scalar_one_or_none.return_value = None
+
+    # Caso hace 70 días
+    fecha_70 = (hoy - timedelta(days=70)).isoformat()
+    ent_70 = {"rendimientos": [{"monto": Decimal("100"), "fecha": fecha_70}]}
+    r_70, av_70 = preparar_rendimientos(mock_db, uid, ent_70, None, "captura_actividad", camino="B")
+    assert len(r_70) == 0
+    assert len(av_70) == 1
+    assert "Vi un rendimiento de $100 que no pude anotar (billetera o fecha dudosa). Cargalo desde Billeteras." in av_70[0]
+
+    # Caso futura (+5 días)
+    fecha_fut = (hoy + timedelta(days=5)).isoformat()
+    ent_fut = {"rendimientos": [{"monto": Decimal("100"), "fecha": fecha_fut}]}
+    r_fut, av_fut = preparar_rendimientos(mock_db, uid, ent_fut, None, "captura_actividad", camino="B")
+    assert len(r_fut) == 0
+    assert len(av_fut) == 1
+    assert "Vi un rendimiento de $100 que no pude anotar (billetera o fecha dudosa). Cargalo desde Billeteras." in av_fut[0]
+
+    # Caso None
+    ent_none = {"rendimientos": [{"monto": Decimal("100"), "fecha": None}]}
+    r_none, av_none = preparar_rendimientos(mock_db, uid, ent_none, None, "captura_actividad", camino="B")
+    assert len(r_none) == 0
+    assert len(av_none) == 1
+    assert "Vi un rendimiento de $100 que no pude anotar (billetera o fecha dudosa). Cargalo desde Billeteras." in av_none[0]
+
+

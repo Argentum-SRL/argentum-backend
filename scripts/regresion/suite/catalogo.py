@@ -37,6 +37,9 @@ from scripts.regresion.suite.escenarios_p19 import (
     p19_caso_12,
     p19_caso_13,
     p19_caso_14,
+    p19_caso_15,
+    p19_caso_16,
+    p19_caso_17,
 )
 
 
@@ -1244,5 +1247,23 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "nombre": "Respuesta no tras propuesta mixta cancela y no crea ni transacciones ni rendimientos",
             "ejecutar": lambda: p19_caso_14(datos),
             "esperado": "Cancelado tras no: True | Txs creadas: 0 | Rends creados: 0",
+        },
+        {
+            "id": "P19.15", "punto": "Punto 19", "match": "exacto",
+            "nombre": "Rendimiento menor o igual al ancla, aviso de ya tenías cargados hasta y no se anota",
+            "ejecutar": lambda: p19_caso_15(datos),
+            "esperado": "Aviso cobertura: True | Txs creadas: 1 | Rends creados: 0",
+        },
+        {
+            "id": "P19.16", "punto": "Punto 19", "match": "exacto",
+            "nombre": "Rendimiento de hace 70 días, aviso de no pude anotar y no se crea rendimiento",
+            "ejecutar": lambda: p19_caso_16(datos),
+            "esperado": "Aviso fecha vieja: True | Txs creadas: 1 | Rends creados: 0",
+        },
+        {
+            "id": "P19.17", "punto": "Punto 19", "match": "exacto",
+            "nombre": "Billetera con tna y es_inversion=false como única que rinde anota rendimiento tras sí",
+            "ejecutar": lambda: p19_caso_17(datos),
+            "esperado": "Propuesta tna: True | Registrado tras sí: True | Txs creadas: 1 | Rends creados: 1",
         },
     ]
