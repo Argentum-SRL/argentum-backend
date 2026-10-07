@@ -5,7 +5,7 @@ separación de duplicados y textos exactos de avisos de WhatsApp (fase4c1).
 """
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
@@ -15,6 +15,8 @@ from app.routers.whatsapp.extraccion_documento import (
     MovimientoExtraido,
     ResultadoExtraccion,
     a_entidades,
+    extraer_movimientos_de_imagen,
+    normalizar_anio_documento,
     parsear_monto_documento,
 )
 from app.routers.whatsapp.lote_documento import (
@@ -912,6 +914,112 @@ def test_textos_omitidos_decision_5():
     assert "Salteé 1 pase entre tus cuentas ($40.000)." in resp_texto
     assert "Salteé 1 pago con tarjeta de crédito (Meli+ $20.990):" in resp_texto
     assert "Salteé 1 movimiento que no figura como aprobado." in resp_texto
+
+
+def test_normalizar_anio_documento_casos_exactos():
+    """C1: normalizar_anio_documento con casos exactos y hoy fijo (2026-10-07)."""
+    hoy_fijo = date(2026, 10, 7)
+    # 2023-10-06 devuelve 2026-10-06
+    assert normalizar_anio_documento(date(2023, 10, 6), hoy_fijo) == date(2026, 10, 6)
+    # 2026-10-06 queda igual
+    assert normalizar_anio_documento(date(2026, 10, 6), hoy_fijo) == date(2026, 10, 6)
+    # 2027-10-06 devuelve 2026-10-06
+    assert normalizar_anio_documento(date(2027, 10, 6), hoy_fijo) == date(2026, 10, 6)
+    # 2023-12-28 con hoy 2026-01-05 devuelve 2025-12-28
+    assert normalizar_anio_documento(date(2023, 12, 28), date(2026, 1, 5)) == date(2025, 12, 28)
+    # 2024-02-29 con hoy 2026-03-01 devuelve 2026-02-28
+    assert normalizar_anio_documento(date(2024, 2, 29), date(2026, 3, 1)) == date(2026, 2, 28)
+    # None devuelve None
+    assert normalizar_anio_documento(None, hoy_fijo) is None
+    # 2026-10-08 (mañana) queda igual
+    assert normalizar_anio_documento(date(2026, 10, 8), hoy_fijo) == date(2026, 10, 8)
+    # 2025-10-08 (un año y un día antes de hoy, justo en el límite) queda igual
+    assert normalizar_anio_documento(date(2025, 10, 8), hoy_fijo) == date(2025, 10, 8)
+    # 2025-10-06 (más de 366 días) devuelve 2026-10-06
+    assert normalizar_anio_documento(date(2025, 10, 6), hoy_fijo) == date(2026, 10, 6)
+
+
+def test_extraer_movimientos_normalizacion_fechas_y_prompt():
+    """C1: extraer_movimientos_de_imagen normaliza fechas con OpenAI mockeado y envía regla de año en el prompt."""
+    hoy = hoy_argentina()
+    mock_content = {
+        "legible": True,
+        "documento_tipo": "captura_actividad",
+        "billetera_texto": "Mercado Pago",
+        "vencimiento": None,
+        "movimientos": [
+            {
+                "fecha": "2023-10-06",
+                "monto": 1500,
+                "moneda": "ARS",
+                "descripcion": "Kiosco San José",
+                "sentido": "egreso",
+                "categoria": None,
+                "tipo_operacion": "Compra",
+                "medio_pago": "Dinero disponible",
+                "estado": "Aprobado",
+                "contraparte_es_usuario": False,
+            },
+            {
+                "fecha": "2023-09-21",
+                "monto": 25000,
+                "moneda": "ARS",
+                "descripcion": "Coco",
+                "sentido": "egreso",
+                "categoria": None,
+                "tipo_operacion": "Compra",
+                "medio_pago": "Dinero disponible",
+                "estado": "Aprobado",
+                "contraparte_es_usuario": False,
+            },
+            {
+                "fecha": "2023-10-05",
+                "monto": 500,
+                "moneda": "ARS",
+                "descripcion": "Rendimientos",
+                "sentido": "rendimiento",
+                "categoria": None,
+                "tipo_operacion": None,
+                "medio_pago": None,
+                "estado": None,
+                "contraparte_es_usuario": False,
+            },
+        ],
+    }
+
+    mock_choice = MagicMock()
+    import json
+    mock_choice.message.content = json.dumps(mock_content)
+    mock_resp = MagicMock()
+    mock_resp.choices = [mock_choice]
+    mock_resp.usage.prompt_tokens = 250
+    mock_resp.usage.completion_tokens = 120
+
+    with patch("app.routers.whatsapp.extraccion_documento.get_openai_client") as mock_client:
+        mock_client.return_value.chat.completions.create.return_value = mock_resp
+        res, err = extraer_movimientos_de_imagen(b"fake_image_bytes")
+
+        assert err is None
+        assert res is not None
+
+        # 1. Verificar fechas normalizadas
+        assert len(res.movimientos) == 2
+        assert res.movimientos[0].fecha == date(hoy.year, 10, 6)
+        assert res.movimientos[1].fecha == date(hoy.year, 9, 21)
+        assert len(res.rendimientos) == 1
+        assert res.rendimientos[0].fecha == date(hoy.year, 10, 5)
+
+        # 2. Verificar prompt de sistema con regla de año (decisión 3)
+        args, kwargs = mock_client.return_value.chat.completions.create.call_args
+        messages = kwargs["messages"]
+        system_content = messages[0]["content"]
+        regla_esperada = (
+            f"- Año: hoy es {hoy.isoformat()}. Si la imagen no muestra el año "
+            f"(por ejemplo un encabezado '6 de octubre'), el año de esa fecha es {hoy.year}; "
+            f"solo usá otro año si está escrito en la imagen."
+        )
+        assert regla_esperada in system_content
+
 
 
 
