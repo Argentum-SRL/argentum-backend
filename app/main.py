@@ -67,6 +67,7 @@ from app.services.notificacion_scheduler_service import (
     _job_resumen_semanal,
     _job_proyeccion_negativa,
 )
+from app.services.factura_avisos_service import _job_notificaciones_facturas
 
 # ---------------------------------------------------------------------------
 # Inicialización automática de Base de Datos
@@ -365,6 +366,10 @@ def job_proyeccion_negativa():
     _job_proyeccion_negativa(SessionLocal)
 
 
+def job_notificaciones_facturas():
+    _job_notificaciones_facturas(SessionLocal)
+
+
 def _job_actualizar_perfiles():
     """Tarea programada: Recalcula el perfil financiero de todos los usuarios activos a las 02:00 UTC."""
     from sqlalchemy import select
@@ -653,6 +658,16 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
+            job_notificaciones_facturas,
+            "cron",
+            hour=7,
+            minute=30,
+            id="notificaciones_facturas",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
             job_resumen_semanal,
             "cron",
             day_of_week="mon",
@@ -925,7 +940,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 
-from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin, perfil_financiero, importacion, reporte_error, memoria_comercios
+from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin, perfil_financiero, importacion, reporte_error, memoria_comercios, facturas
 
 app.include_router(auth.router)
 app.include_router(onboarding.router)
@@ -936,6 +951,7 @@ app.include_router(transacciones.router)
 app.include_router(transferencias.router)
 app.include_router(categorias.router)
 app.include_router(memoria_comercios.router)
+app.include_router(facturas.router)
 app.include_router(dashboard.router)
 app.include_router(presupuestos.router, prefix="/presupuestos")
 app.include_router(suscripciones.router)

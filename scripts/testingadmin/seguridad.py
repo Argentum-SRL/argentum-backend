@@ -335,10 +335,13 @@ def ejecutar_borrado_testingadmin(db: Session, user: Usuario) -> Dict[str, int]:
     cant_perf = db.query(PerfilFinanciero).filter(PerfilFinanciero.usuario_id == uid).delete(synchronize_session=False)
     from app.models.memoria_comercio import MemoriaComercio
     cant_memoria = db.query(MemoriaComercio).filter(MemoriaComercio.usuario_id == uid).delete(synchronize_session=False)
+    from app.models.factura import Factura
+    cant_facturas = db.query(Factura).filter(Factura.usuario_id == uid).delete(synchronize_session=False)
     db.flush()
     conteos["calibraciones_usuario"] = cant_cal
     conteos["perfiles_financieros"] = cant_perf
     conteos["memoria_comercios"] = cant_memoria
+    conteos["facturas"] = cant_facturas
 
     # 11. Resetear saldos de billeteras a 0.00
     billeteras = db.query(Billetera).filter(Billetera.usuario_id == uid).all()

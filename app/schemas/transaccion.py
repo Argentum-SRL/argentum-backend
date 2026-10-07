@@ -66,6 +66,7 @@ class TransaccionBase(BaseModel):
 
 class TransaccionCreate(TransaccionBase):
     info_cuotas: InfoCuotas | None = None
+    factura_id: UUID | None = None
 
     @field_validator("descripcion")
     @classmethod

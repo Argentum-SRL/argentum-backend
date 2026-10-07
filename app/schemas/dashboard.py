@@ -69,12 +69,14 @@ class PagoDashboard(BaseModel):
     moneda: str = Field(..., description="Moneda: 'ARS' o 'USD'")
     fecha_cobro: str = Field(..., description="Fecha de vencimiento/cobro en formato YYYY-MM-DD")
     dias_restantes: int = Field(..., description="Días restantes hasta la fecha de cobro")
-    tipo: str = Field(..., description="Tipo: 'suscripcion', 'cuota', 'resumen_tarjeta'")
+    tipo: str = Field(..., description="Tipo: 'suscripcion', 'cuota', 'resumen_tarjeta', 'factura'")
     color: Optional[str] = None
     red: Optional[str] = None
     billetera_nombre: Optional[str] = None
     billetera_id: Optional[str] = None
     es_vencido: Optional[bool] = False
+    factura_id: Optional[str] = None
+    estado_factura: Optional[str] = None
 
 
 class CategoriaGastoItem(BaseModel):

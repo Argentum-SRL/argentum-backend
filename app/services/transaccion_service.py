@@ -181,6 +181,16 @@ def crear_transaccion(
     data: TransaccionCreate,
     commit: bool = True,  # commit=False: la operación de afuera hace el único commit
 ) -> Transaccion:
+    # 0. Validar factura_id si se especificó (Decisión 3)
+    factura_a_marcar = None
+    if getattr(data, "factura_id", None) is not None:
+        from app.models.factura import Factura
+        factura_a_marcar = db.get(Factura, data.factura_id)
+        if not factura_a_marcar or factura_a_marcar.usuario_id != usuario_id:
+            raise HTTPException(status_code=404, detail="No encontré esa factura.")
+        if factura_a_marcar.estado != "pendiente":
+            raise HTTPException(status_code=400, detail="Esa factura ya no está pendiente.")
+
     # 1. Validar billetera
     billetera = db.execute(
         select(Billetera).where(
@@ -247,7 +257,7 @@ def crear_transaccion(
         
         # Crear transaccion padre (no impacta saldo)
         nueva_transaccion = Transaccion(
-            **data.model_dump(exclude={"usuario_id", "info_cuotas", "monto"}),
+            **data.model_dump(exclude={"usuario_id", "info_cuotas", "monto", "factura_id"}),
             usuario_id=usuario_id,
             monto=data.info_cuotas.monto_total # Guardamos el total en el padre para registro
         )
@@ -326,9 +336,18 @@ def crear_transaccion(
         # Actualizar la transaccion padre con el link al grupo (opcional pero util)
         nueva_transaccion.grupo_cuotas_id = grupo.id
 
-            # Al crear un grupo de cuotas, NINGUNA impacta el saldo hoy
-            # porque la primera empieza el mes que viene.
-        
+        # Marcar factura específica si vino en cuotas
+        if factura_a_marcar:
+            from app.services import factura_service
+            factura_service.marcar_pagada(
+                db=db,
+                factura_id=factura_a_marcar.id,
+                usuario_id=usuario_id,
+                transaccion_id=nueva_transaccion.id,
+                pagada_automaticamente=False,
+                commit=False
+            )
+
         if commit:
             db.commit()
             db.refresh(nueva_transaccion)
@@ -341,7 +360,7 @@ def crear_transaccion(
         _validar_tarjeta(db, data.tarjeta_id, usuario_id)
 
     nueva_transaccion = Transaccion(
-        **data.model_dump(exclude={"usuario_id", "info_cuotas"}),
+        **data.model_dump(exclude={"usuario_id", "info_cuotas", "factura_id"}),
         usuario_id=usuario_id
     )
     
@@ -379,11 +398,31 @@ def crear_transaccion(
                 except Exception:
                     pass
 
-
     # Impacto en presupuestos
     presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False, commit=False)
 
     db.add(nueva_transaccion)
+    db.flush()
+
+    # Marcado de facturas (Decisión 2 y 3)
+    if factura_a_marcar:
+        from app.services import factura_service
+        factura_service.marcar_pagada(
+            db=db,
+            factura_id=factura_a_marcar.id,
+            usuario_id=usuario_id,
+            transaccion_id=nueva_transaccion.id,
+            pagada_automaticamente=False,
+            commit=False
+        )
+    elif nueva_transaccion.tipo == TipoTransaccion.EGRESO and not getattr(data, "es_cuota_hija", False) and not getattr(data, "es_padre_cuotas", False):
+        from app.services import factura_service
+        factura_service.marcar_pagada_por_coincidencia(
+            db=db,
+            transaccion=nueva_transaccion,
+            commit=False
+        )
+
     if commit:
         db.commit()
         db.refresh(nueva_transaccion)
@@ -536,6 +575,7 @@ def eliminar_transaccion(
     transaccion_id: UUID,
     commit: bool = True,  # commit=False: la operación de afuera hace el único commit
 ):
+    from app.services import factura_service
     transaccion = obtener_transaccion(db, usuario_id, transaccion_id)
     
     # Manejo de cascada para cuotas
@@ -589,6 +629,10 @@ def eliminar_transaccion(
             db.flush()
 
             # 4. Eliminar en orden
+            if id_hijas:
+                for h_id in id_hijas:
+                    factura_service.al_eliminar_transaccion(db, h_id, commit=False)
+            factura_service.al_eliminar_transaccion(db, id_padre, commit=False)
             db.execute(delete(GrupoCuotas).where(GrupoCuotas.id == grupo.id))
             if id_hijas:
                 db.execute(delete(Transaccion).where(Transaccion.id.in_(id_hijas)))
@@ -722,6 +766,9 @@ def eliminar_transaccion(
             
     # Impacto en presupuestos
     presupuesto_service.registrar_impacto_presupuesto(db, transaccion, revertir=True, commit=False)
+
+    # Reversión de facturas pagadas por esta transacción (Decisión 4)
+    factura_service.al_eliminar_transaccion(db, transaccion.id, commit=False)
 
     db.delete(transaccion)
     if commit:

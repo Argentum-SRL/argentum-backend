@@ -456,8 +456,22 @@ def get_dashboard_resumen(
      .join(Categoria, Transaccion.categoria_id == Categoria.id, isouter=True)\
      .join(Subcategoria, Transaccion.subcategoria_id == Subcategoria.id, isouter=True)\
      .where(c_stmt_where)
-
-    actividad = db.execute(m_stmt.union_all(s_stmt, c_stmt)).all()
+    m_sub = m_stmt.subquery()
+    m_sub_stmt = select(
+        m_sub.c.item_tipo,
+        m_sub.c.id,
+        m_sub.c.nombre,
+        m_sub.c.monto,
+        m_sub.c.moneda,
+        m_sub.c.fecha,
+        m_sub.c.extra_1,
+        m_sub.c.extra_2,
+        m_sub.c.extra_3,
+        m_sub.c.extra_4,
+        m_sub.c.extra_5,
+        m_sub.c.extra_6,
+    )
+    actividad = db.execute(m_sub_stmt.union_all(s_stmt, c_stmt)).all()
 
     # --- Procesamiento de Resultados ---
     # Balance ya calculado por calcular_balance_ciclo con reglas canónicas
@@ -571,6 +585,45 @@ def get_dashboard_resumen(
                 "billetera_id": str(tarjeta.billetera_id),
                 "es_vencido": dias_restantes < 0
             })
+
+    # --- AGREGAR FACTURAS (Decisión 8) ---
+    from app.models.factura import Factura
+    facturas_query = db.query(Factura).filter(
+        Factura.usuario_id == usuario.id,
+        or_(
+            and_(
+                Factura.estado == "pendiente",
+                Factura.fecha_vencimiento >= hoy - timedelta(days=30),
+                Factura.fecha_vencimiento <= limite_pagos,
+            ),
+            and_(
+                Factura.estado == "pagada",
+                Factura.pagada_automaticamente == True,
+                Factura.fecha_vencimiento >= hoy,
+                Factura.fecha_vencimiento <= limite_pagos,
+            ),
+        ),
+    ).all()
+
+    for f in facturas_query:
+        dias_rest = (f.fecha_vencimiento - hoy).days
+        estado_fac = "vencida" if (f.estado == "pendiente" and f.fecha_vencimiento < hoy) else ("pagada" if f.estado == "pagada" else "pendiente")
+        proximos_pagos.append({
+            "id": str(f.id),
+            "nombre": f"Factura de {f.descripcion}",
+            "monto": float(f.monto),
+            "moneda": f.moneda.value if hasattr(f.moneda, "value") else str(f.moneda),
+            "fecha_cobro": f.fecha_vencimiento.isoformat(),
+            "dias_restantes": dias_rest,
+            "tipo": "factura",
+            "color": None,
+            "red": None,
+            "billetera_nombre": None,
+            "billetera_id": None,
+            "es_vencido": dias_rest < 0,
+            "factura_id": str(f.id),
+            "estado_factura": estado_fac,
+        })
 
     from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
     disp_ctx = _calcular_saldo_disponible_sync(db, usuario.id, billetera_ids)

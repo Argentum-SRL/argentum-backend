@@ -36,6 +36,9 @@ Esta sección manda: si otra parte de este archivo dice algo distinto, vale lo q
 - En WhatsApp, la categoría se busca primero en la memoria por comercio del usuario (app/services/memoria_comercio_service.py, tabla memoria_comercios), después en marcas y al final en la IA. La memoria solo se guarda cuando el usuario responde que sí a "¿Siempre así?", y los movimientos anteriores solo cambian si el usuario lo confirma. Por WhatsApp, la pregunta llega después de confirmar una corrección de categoría.
 - Los duplicados se buscan con app/services/duplicados_service.py: mismo monto y medio de pago, fechas a 10 días o menos y, si pasan más de 3 días, misma descripción.
 
+### Facturas pendientes y marcado automático
+- Las facturas ingresadas por foto o PDF viven en la tabla `facturas` (app/services/factura_service.py). Al registrar un egreso (que no sea cuota hija), se busca una factura pendiente con mismo monto, moneda, en ventana de fechas (llegada a vencimiento + 10 días) y coincidencia de subcategoría, categoría (distinta de "Otros") o clave de comercio. Si hay exactamente una candidata, se marca pagada automáticamente vinculando transaccion_id. Al eliminar la transacción, la factura vuelve a pendiente.
+
 ### Base de datos
 - Las migraciones se aplican a mano a producción antes del push; Railway corre "alembic upgrade head" al deployar.
 
