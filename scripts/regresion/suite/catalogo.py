@@ -31,6 +31,7 @@ from scripts.regresion.suite.escenarios_p19 import (
     p19_caso_6,
     p19_caso_7,
     p19_caso_8,
+    p19_caso_9,
 )
 
 
@@ -1202,5 +1203,11 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "nombre": "Respuesta no tras propuesta por imagen cancela y no registra nada",
             "ejecutar": lambda: p19_caso_8(datos),
             "esperado": "Respuesta cancelado tras no: True | Creadas: 0",
+        },
+        {
+            "id": "P19.9", "punto": "Punto 19", "match": "exacto",
+            "nombre": "Comprobante de transferencia no usa billetera_texto, asume principal Galicia y registra con sí",
+            "ejecutar": lambda: p19_caso_9(datos),
+            "esperado": "Propuesta Galicia sin Santander con va: True | Registrado tras sí: True | Creadas: 1",
         },
     ]

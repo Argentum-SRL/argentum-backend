@@ -62,7 +62,6 @@ def procesar_llamada_ia_y_normalizacion(ctx: ContextoMensaje) -> None:
     Ejecuta el procesamiento del modelo de IA sobre el mensaje y normaliza entidades.
     Actualiza resultado_ia, aviso_montos_faltantes, aviso_cambio_tema y confianza_ia_raw en ctx.
     """
-    from app.services.memoria_comercio_service import aplicar_memoria_a_movimiento
 
     mensaje_texto = ctx.mensaje_texto
     usuario = ctx.usuario

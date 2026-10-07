@@ -63,7 +63,7 @@ ESQUEMA_EXTRACCION: dict[str, Any] = {
                 },
                 "billetera_texto": {
                     "type": ["string", "null"],
-                    "description": "Nombre de la billetera, banco o app visible (ej: Galicia, Mercado Pago, Santander, Ualá), o null.",
+                    "description": "Solo para capturas de actividad de una app o banco: nombre de esa app o banco (ej: Mercado Pago, Galicia). En tickets, facturas y comprobantes de transferencia: null.",
                 },
                 "vencimiento": {
                     "type": ["string", "null"],
@@ -71,7 +71,7 @@ ESQUEMA_EXTRACCION: dict[str, Any] = {
                 },
                 "movimientos": {
                     "type": "array",
-                    "description": "Lista de movimientos extraídos (máximo 10).",
+                    "description": "Un elemento por cada movimiento visible en el documento, sin omitir ninguno.",
                     "items": {
                         "type": "object",
                         "properties": {
@@ -220,9 +220,10 @@ def extraer_movimientos_de_imagen(
         "- Comprobantes de transferencia:\n"
         "  * Si el usuario de la app es el DESTINATARIO (en 'Para', 'A', 'Destinatario'): 'sentido' es 'ingreso'.\n"
         "  * Si el usuario de la app es el ORIGEN (en 'De', 'Desde', 'Remitente'): 'sentido' es 'egreso'.\n"
-        "- Billetera o banco: si es visible el nombre de la app o entidad bancaria (ej: Galicia, Santander, Mercado Pago, Ualá), extraerlo en 'billetera_texto'. Si no, null.\n"
+        "- Billetera o banco: SOLO en capturas de actividad, extraer en 'billetera_texto' el nombre de la app o banco cuya actividad se muestra. En tickets, facturas y comprobantes de transferencia devolver null.\n"
         "- Descripción: comercio o concepto visible sin datos personales de terceros (no incluir CUIT, CBU, teléfonos ni números de cuenta ajenos).\n"
         "- Categoría: sólo puede ser una de las categorías válidas de la lista proporcionada por el usuario (o null si ninguna aplica con certeza).\n"
+        "- No limites la cantidad de movimientos: devolvé todos los que veas.\n"
         "- Si no se puede leer ningún monto o la imagen no corresponde a un comprobante financiero, responder legible=false y movimientos=[].\n"
     )
 

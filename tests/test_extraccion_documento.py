@@ -264,3 +264,12 @@ def test_textos_exactos_avisos():
         total_vistos=1,
     )
     assert "Si todavía no la pagaste, respondé no y no la cargo." in res7["respuesta_usuario"]
+
+
+def test_esquema_sin_limite_de_cantidad():
+    """Verifica que en ESQUEMA_EXTRACCION la description de movimientos no contiene 'máximo' y no existe maxItems."""
+    movimientos_schema = (
+        ESQUEMA_EXTRACCION["json_schema"]["schema"]["properties"]["movimientos"]
+    )
+    assert "máximo" not in movimientos_schema.get("description", "").lower()
+    assert "maxItems" not in movimientos_schema

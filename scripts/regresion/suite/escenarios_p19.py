@@ -500,3 +500,50 @@ def p19_caso_8(datos):
         return f"Respuesta cancelado tras no: {resp_cancel_ok} | Creadas: {txs_creadas}"
 
     return run_isolated(test)
+
+
+def p19_caso_9(datos):
+    """P19.9: comprobante_transferencia con billetera_texto 'Santander' ignora la billetera del documento, asume principal Galicia, y 'sí' registra 1 movimiento."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    hoy = hoy_argentina()
+
+    def test(conn, Session, respuestas):
+        _preparar_base_escenario(conn, u.id)
+        txs_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+
+        ext = ResultadoExtraccion(
+            documento_tipo="comprobante_transferencia",
+            movimientos=[
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("15000"),
+                    moneda="ARS",
+                    descripcion="Transferencia Recibida",
+                    sentido="ingreso",
+                    categoria="Otros Ingresos",
+                )
+            ],
+            billetera_texto="Santander",
+            vencimiento=None,
+            total_vistos=1,
+        )
+
+        respuestas.clear()
+        with patch("app.routers.whatsapp.etapa_entrada._descargar_medio_meta", return_value=(b"fake_bytes", "image/jpeg")), \
+             patch("app.routers.whatsapp.etapa_entrada.extraer_movimientos_de_imagen", return_value=(ext, None)):
+            _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
+
+        resp1 = respuestas[-1][1] if respuestas else ""
+        propuesta_ok = "Galicia" in resp1 and "Santander" not in resp1 and "¿Va?" in resp1
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        resp2 = respuestas[-1][1] if respuestas else ""
+        registrado_ok = "Listo" in resp2 and "Galicia" in resp2
+
+        txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        txs_creadas = txs_despues - txs_antes
+
+        return f"Propuesta Galicia sin Santander con va: {propuesta_ok} | Registrado tras sí: {registrado_ok} | Creadas: {txs_creadas}"
+
+    return run_isolated(test)

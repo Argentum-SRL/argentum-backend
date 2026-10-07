@@ -476,7 +476,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                 billeteras_pesos = [b for b in billeteras_todas if b.moneda == Moneda.ARS]
 
                 b_match = None
-                if ctx.extraccion.billetera_texto:
+                if ctx.extraccion.billetera_texto and ctx.extraccion.documento_tipo == "captura_actividad":
                     b_match, _ = resolver_billetera_cascada(ctx.extraccion.billetera_texto, billeteras_pesos)
 
                 if b_match:
