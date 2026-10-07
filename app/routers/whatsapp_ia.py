@@ -152,7 +152,6 @@ from app.routers.whatsapp.handlers_transferencias import (
 )
 from app.routers.whatsapp.media import (
     _descargar_medio_meta,
-    _extraer_transaccion_de_imagen,
     _obtener_duracion_audio_bytes,
     _transcribir_audio,
 )
@@ -468,20 +467,58 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
             if ctx.terminado:
                 return
 
-            # Etapa 3: Estados pendientes y handlers determinísticos
-            procesar_estados_y_handlers_deterministicos(ctx)
-            if ctx.terminado:
-                return
+            if ctx.extraccion is not None:
+                from app.routers.whatsapp.extraccion_documento import a_entidades
+                from app.routers.whatsapp.etapa_ia import aplicar_marcas_y_memoria
+                from app.routers.whatsapp.lote_documento import separar_duplicados, armar_resultado_ia_documento
 
-            # Etapa 4: Llamada a IA y normalización de entidades
-            procesar_llamada_ia_y_normalizacion(ctx)
-            if ctx.terminado:
-                return
+                billeteras_todas = _obtener_billeteras_activas(usuario.id, db)
+                billeteras_pesos = [b for b in billeteras_todas if b.moneda == Moneda.ARS]
 
-            # Etapa 5: Resolución de billeteras, cuotas, lotes y propuestas
-            procesar_resolucion_billetera_y_propuestas(ctx)
-            if ctx.terminado:
-                return
+                b_match = None
+                if ctx.extraccion.billetera_texto:
+                    b_match, _ = resolver_billetera_cascada(ctx.extraccion.billetera_texto, billeteras_pesos)
+
+                if b_match:
+                    b_final = b_match
+                    se_asumio_principal = False
+                else:
+                    b_ppal = next((b for b in billeteras_pesos if b.es_principal), None)
+                    if not b_ppal and billeteras_pesos:
+                        b_ppal = billeteras_pesos[0]
+                    b_final = b_ppal
+                    se_asumio_principal = True
+
+                billetera_nombre = b_final.nombre if b_final else "tu billetera"
+
+                entidades_raw = a_entidades(ctx.extraccion, billetera_nombre)
+                aplicar_marcas_y_memoria(db, usuario.id, entidades_raw)
+                entidades_sin_dups, dups = separar_duplicados(db, usuario.id, b_final, entidades_raw)
+
+                ctx.resultado_ia = armar_resultado_ia_documento(
+                    entidades=entidades_sin_dups,
+                    duplicados=dups,
+                    billetera_nombre=billetera_nombre,
+                    se_asumio_principal=se_asumio_principal,
+                    billeteras_usuario=billeteras_todas,
+                    documento_tipo=ctx.extraccion.documento_tipo,
+                    total_vistos=ctx.extraccion.total_vistos,
+                )
+            else:
+                # Etapa 3: Estados pendientes y handlers determinísticos
+                procesar_estados_y_handlers_deterministicos(ctx)
+                if ctx.terminado:
+                    return
+
+                # Etapa 4: Llamada a IA y normalización de entidades
+                procesar_llamada_ia_y_normalizacion(ctx)
+                if ctx.terminado:
+                    return
+
+                # Etapa 5: Resolución de billeteras, cuotas, lotes y propuestas
+                procesar_resolucion_billetera_y_propuestas(ctx)
+                if ctx.terminado:
+                    return
 
             # Etapa 6: Despacho por intent, ejecución y registro
             procesar_despacho_y_respuesta(ctx)

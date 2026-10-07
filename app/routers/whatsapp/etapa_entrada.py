@@ -16,8 +16,10 @@ from app.models.usuario import Usuario
 from app.routers.whatsapp.contexto import ContextoMensaje
 from app.routers.whatsapp.db_lookups import _verificar_rate_limit_vinculacion
 from app.routers.whatsapp.detectors import _debe_responder_no_registrado
-from app.routers.whatsapp.media import _extraer_transaccion_de_imagen, _transcribir_audio
+from app.routers.whatsapp.extraccion_documento import extraer_movimientos_de_imagen
+from app.routers.whatsapp.media import _descargar_medio_meta, _transcribir_audio
 from app.services import whatsapp_service
+from app.services.ai_service import obtener_categorias_permitidas
 from app.services.evento_service import emitir_evento_actualizacion
 from app.utils.telefono import normalizar_telefono_ar
 
@@ -216,8 +218,21 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
 
         if media_id:
             t_media_start = time.perf_counter()
-            descripcion_imagen, error_img = _extraer_transaccion_de_imagen(
-                media_id, mime_type, nombre_usuario, max_bytes=5 * 1024 * 1024
+            image_bytes, mime = _descargar_medio_meta(media_id)
+            if not image_bytes:
+                whatsapp_service.enviar_whatsapp(
+                    ctx.from_number, "No pude leer el comprobante. Mandame los datos en texto."
+                )
+                ctx.terminado = True
+                return
+
+            categorias_usuario = obtener_categorias_permitidas(ctx.db)
+            resultado_extraccion, error_img = extraer_movimientos_de_imagen(
+                image_bytes=image_bytes,
+                mime_type=mime or mime_type,
+                nombre_usuario=nombre_usuario,
+                categorias_usuario=categorias_usuario,
+                usuario_id=ctx.usuario.id if ctx.usuario else None,
             )
             t_media_end = time.perf_counter()
             logger.info(
@@ -233,14 +248,15 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
                 ctx.terminado = True
                 return
 
-            if descripcion_imagen:
+            if resultado_extraccion:
+                ctx.extraccion = resultado_extraccion
                 ctx.es_imagen = True
                 ctx.caption_imagen = caption
-                ctx.mensaje_texto = descripcion_imagen
-                if settings.ENVIRONMENT == "production":
-                    logger.info("Imagen analizada exitosamente (longitud: %d caracteres)", len(descripcion_imagen))
-                else:
-                    logger.info("Imagen analizada: '%s'", descripcion_imagen[:100])
+                logger.info(
+                    "whatsapp_imagen_extraida_exitosamente",
+                    tipo=resultado_extraccion.documento_tipo,
+                    movimientos=len(resultado_extraccion.movimientos),
+                )
             else:
                 whatsapp_service.enviar_whatsapp(
                     ctx.from_number, "No pude leer el comprobante. Mandame los datos en texto."
@@ -254,19 +270,21 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
             ctx.terminado = True
             return
 
-    if not ctx.mensaje_texto:
-        whatsapp_service.enviar_whatsapp(
-            ctx.from_number,
-            "No entendí bien lo que quisiste decir. Podés contarme qué gastaste, por ejemplo: *Almuerzo $1.500*",
-        )
-        ctx.terminado = True
-        return
+    # Si hay extracción estructurada, no se aplican los chequeos de texto vacío o 1500 caracteres
+    if ctx.extraccion is None:
+        if not ctx.mensaje_texto:
+            whatsapp_service.enviar_whatsapp(
+                ctx.from_number,
+                "No entendí bien lo que quisiste decir. Podés contarme qué gastaste, por ejemplo: *Almuerzo $1.500*",
+            )
+            ctx.terminado = True
+            return
 
-    if len(ctx.mensaje_texto) > 1500:
-        logger.warning("whatsapp_texto_limite_caracteres_superado", longitud=len(ctx.mensaje_texto))
-        whatsapp_service.enviar_whatsapp(
-            ctx.from_number,
-            "El mensaje es muy largo (máximo 1500 caracteres). Por favor mandalo más resumido.",
-        )
-        ctx.terminado = True
-        return
+        if len(ctx.mensaje_texto) > 1500:
+            logger.warning("whatsapp_texto_limite_caracteres_superado", longitud=len(ctx.mensaje_texto))
+            whatsapp_service.enviar_whatsapp(
+                ctx.from_number,
+                "El mensaje es muy largo (máximo 1500 caracteres). Por favor mandalo más resumido.",
+            )
+            ctx.terminado = True
+            return

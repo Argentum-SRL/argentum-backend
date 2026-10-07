@@ -140,7 +140,12 @@ def procesar_despacho_y_respuesta(ctx: ContextoMensaje) -> None:
     if es_imagen:
         tipo_msg_guardar = TipoMensajeWpp.IMAGEN
         mensaje_usuario_guardar = caption_imagen
-        transcripcion_guardar = mensaje_texto
+        if ctx.extraccion is not None:
+            cant_movs = len(ctx.extraccion.movimientos)
+            mov_txt = "1 movimiento" if cant_movs == 1 else f"{cant_movs} movimientos"
+            transcripcion_guardar = f"Imagen: {ctx.extraccion.documento_tipo}, {mov_txt}"
+        else:
+            transcripcion_guardar = mensaje_texto
         if isinstance(resultado_ia.get("entidades"), dict):
             resultado_ia["entidades"]["origen_imagen"] = True
     elif transcripcion:

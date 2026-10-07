@@ -355,6 +355,42 @@ def make_payload(from_number: str, message: str, wamid: str | None = None) -> by
     }
     return json.dumps(payload).encode("utf-8")
 
+
+def make_payload_image(
+    from_number: str = TELEFONO_TEST,
+    media_id: str = "media_img_test",
+    caption: str = "",
+    mime_type: str = "image/jpeg",
+    wamid: str | None = None,
+) -> bytes:
+    if not wamid:
+        wamid = f"wamid_img_{uuid.uuid4().hex[:12]}"
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "messages": [
+                                {
+                                    "id": wamid,
+                                    "from": from_number or TELEFONO_TEST,
+                                    "type": "image",
+                                    "image": {
+                                        "id": media_id,
+                                        "mime_type": mime_type,
+                                        "caption": caption,
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+    return json.dumps(payload).encode("utf-8")
+
 _testingadmin_id = None
 
 def _mock_buscar_usuario_testingadmin(from_number, db_session):

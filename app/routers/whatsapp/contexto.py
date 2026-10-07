@@ -32,6 +32,7 @@ class ContextoMensaje:
     es_credito: bool = False
     es_lote: bool = False
     caption_imagen: str = ""
+    extraccion: Any | None = None
 
     # Estados previos y conversaciones activas
     conv_activa: ConversacionWpp | None = None

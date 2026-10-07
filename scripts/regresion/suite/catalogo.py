@@ -22,6 +22,16 @@ from scripts.regresion.suite.escenarios_p18 import (
     p18_caso_3,
     p18_caso_4,
 )
+from scripts.regresion.suite.escenarios_p19 import (
+    p19_caso_1,
+    p19_caso_2,
+    p19_caso_3,
+    p19_caso_4,
+    p19_caso_5,
+    p19_caso_6,
+    p19_caso_7,
+    p19_caso_8,
+)
 
 
 def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
@@ -1144,5 +1154,53 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "nombre": "Consulta permitirse sin precio: me lo puedo permitir",
             "ejecutar": lambda: p18_caso_4(datos),
             "esperado": "Intent: puede_permitirse | Respuesta ok: True",
+        },
+        {
+            "id": "P19.1", "punto": "Punto 19", "match": "exacto",
+            "nombre": "Ticket único por imagen con propuesta nombrando billetera y confirmación con sí",
+            "ejecutar": lambda: p19_caso_1(datos),
+            "esperado": "Propuesta billetera nombrada: True | Registrado tras sí: True | Total txs: 1",
+        },
+        {
+            "id": "P19.2", "punto": "Punto 19", "match": "exacto",
+            "nombre": "Captura con 3 movimientos por imagen, propuesta de lote y confirmación con sí",
+            "ejecutar": lambda: p19_caso_2(datos),
+            "esperado": "Propuesta lote 3: True | Registrados tras sí: True | Total txs: 3",
+        },
+        {
+            "id": "P19.3", "punto": "Punto 19", "match": "exacto",
+            "nombre": "Captura con 3 movimientos donde 1 ya existe, propuesta de 2 y aviso de ya tenías cargado",
+            "ejecutar": lambda: p19_caso_3(datos),
+            "esperado": "Propuesta 2 movs: True | Linea ya tenias cargado: True | Registrados tras sí: True | Total txs: True",
+        },
+        {
+            "id": "P19.4", "punto": "Punto 19", "match": "exacto",
+            "nombre": "Captura con todos movimientos duplicados, sin propuesta confirmable pendiente",
+            "ejecutar": lambda: p19_caso_4(datos),
+            "esperado": "Respuesta todos duplicados: True | Sin propuesta pendiente tras sí: True | Creadas: 0",
+        },
+        {
+            "id": "P19.5", "punto": "Punto 19", "match": "exacto",
+            "nombre": "Captura con 12 movimientos, propuesta de los primeros 10 y aviso",
+            "ejecutar": lambda: p19_caso_5(datos),
+            "esperado": "Propuesta 10 movs: True | Aviso tope 12: True",
+        },
+        {
+            "id": "P19.6", "punto": "Punto 19", "match": "exacto",
+            "nombre": "Imagen ilegible, texto de reintento y sin propuesta pendiente",
+            "ejecutar": lambda: p19_caso_6(datos),
+            "esperado": "Texto ilegible: True | Nada pendiente tras sí: True | Creadas: 0",
+        },
+        {
+            "id": "P19.7", "punto": "Punto 19", "match": "exacto",
+            "nombre": "Factura de servicio con línea explicativa de no pago",
+            "ejecutar": lambda: p19_caso_7(datos),
+            "esperado": "Linea si no la pagaste: True | Registrado tras sí: True | Creadas: 1",
+        },
+        {
+            "id": "P19.8", "punto": "Punto 19", "match": "exacto",
+            "nombre": "Respuesta no tras propuesta por imagen cancela y no registra nada",
+            "ejecutar": lambda: p19_caso_8(datos),
+            "esperado": "Respuesta cancelado tras no: True | Creadas: 0",
         },
     ]
