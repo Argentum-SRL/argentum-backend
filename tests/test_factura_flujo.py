@@ -221,3 +221,43 @@ def test_vencimiento_por_texto():
     # 4. Dos fechas distintas después de vence el -> None
     t4 = "vence el 10/10/2026 y también vence el 20/10/2026"
     assert vencimiento_por_texto(t4) is None
+
+
+def test_linea_facturas_pagadas(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    from uuid import uuid4
+
+    from app.routers.whatsapp.factura_wpp import linea_facturas_pagadas
+
+    db_mock = MagicMock()
+    tx1 = uuid4()
+    tx2 = uuid4()
+
+    # 1. Sin facturas: ""
+    assert linea_facturas_pagadas(db_mock, []) == ""
+
+    monkeypatch.setattr("app.services.factura_service.facturas_pagadas_por", lambda db, ids: [])
+    assert linea_facturas_pagadas(db_mock, [tx1]) == ""
+
+    # 2. 1 factura pagada automáticamente: una línea con el texto exacto
+    f1 = SimpleNamespace(transaccion_id=tx1, descripcion="Aguas Santafesinas", pagada_automaticamente=True)
+    monkeypatch.setattr("app.services.factura_service.facturas_pagadas_por", lambda db, ids: [f1])
+    assert linea_facturas_pagadas(db_mock, [tx1]) == "\nMarqué pagada la factura de Aguas Santafesinas."
+
+    # 3. 2 facturas: dos líneas, en orden
+    f2 = SimpleNamespace(transaccion_id=tx2, descripcion="EPE", pagada_automaticamente=True)
+    # Devueltas desordenadas por la base para verificar que ordena según transaccion_ids
+    monkeypatch.setattr("app.services.factura_service.facturas_pagadas_por", lambda db, ids: [f2, f1])
+
+    res_1_2 = linea_facturas_pagadas(db_mock, [tx1, tx2])
+    assert res_1_2 == "\nMarqué pagada la factura de Aguas Santafesinas.\nMarqué pagada la factura de EPE."
+
+    res_2_1 = linea_facturas_pagadas(db_mock, [tx2, tx1])
+    assert res_2_1 == "\nMarqué pagada la factura de EPE.\nMarqué pagada la factura de Aguas Santafesinas."
+
+    # 4. Una factura pagada con factura_id explícito (pagada_automaticamente false): no aparece
+    f_explicita = SimpleNamespace(transaccion_id=tx1, descripcion="Telecom", pagada_automaticamente=False)
+    monkeypatch.setattr("app.services.factura_service.facturas_pagadas_por", lambda db, ids: [f_explicita])
+    assert linea_facturas_pagadas(db_mock, [tx1]) == ""
+

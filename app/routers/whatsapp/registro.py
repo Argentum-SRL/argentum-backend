@@ -540,6 +540,8 @@ def _confirmar_propuesta_transaccion(
                 msg_resp += f"\nLa billetera quedó en negativo."
 
         msg_resp += _anotar_rendimientos_confirmados(db, usuario, entidades)
+        from app.routers.whatsapp.factura_wpp import linea_facturas_pagadas
+        msg_resp += linea_facturas_pagadas(db, [t.id for t in txs_registradas if t and t.id])
 
         if conv_previa:
             conv_previa.accion_ejecutada = f"lote:{','.join(str(t.id) for t in txs_registradas)}"
@@ -620,6 +622,10 @@ def _confirmar_propuesta_transaccion(
         else:
             total_fmt = formatear_monto(float(monto_total), tarjeta.moneda)
             msg_resp = f"Listo. 1 cuota de {total_fmt} en {cat_disp} con tarjeta {tarjeta.nombre} — registrado. Va a ingresar en el resumen de {venc_mes} {venc_anio}."
+
+        if transaccion and transaccion.id:
+            from app.routers.whatsapp.factura_wpp import linea_facturas_pagadas
+            msg_resp += linea_facturas_pagadas(db, [transaccion.id])
 
         return transaccion, msg_resp, False
 
@@ -772,6 +778,11 @@ def _confirmar_propuesta_transaccion(
         )
         if aviso_cuotas:
             msg_resp += aviso_cuotas
+
+    tx_ids = [t.id for t in ([transaccion] + adicionales_registradas) if t and t.id]
+    if tx_ids:
+        from app.routers.whatsapp.factura_wpp import linea_facturas_pagadas
+        msg_resp += linea_facturas_pagadas(db, tx_ids)
 
     return transaccion, msg_resp, False
 
@@ -1034,6 +1045,10 @@ def _registrar_movimiento_directo(
             total_fmt = formatear_monto(float(monto_total), tarjeta.moneda)
             msg_resp = f"Listo. 1 cuota de {total_fmt} en {cat_disp} con tarjeta {tarjeta.nombre} — registrado. Va a ingresar en el resumen de {venc_mes} {venc_anio}."
 
+        if tx and tx.id:
+            from app.routers.whatsapp.factura_wpp import linea_facturas_pagadas
+            msg_resp += linea_facturas_pagadas(db, [tx.id])
+
         return tx, msg_resp
 
     nombre_billetera = entidades.get("billetera_resuelta_nombre") or (
@@ -1155,6 +1170,11 @@ def _registrar_movimiento_directo(
     # salvo que el usuario los pida explícitamente (privacidad de pantalla).
     if billetera.saldo_actual < 0:
         msg_resp += "\nLa billetera quedó en negativo."
+
+    tx_ids = [t.id for t in ([tx] + adicionales_registradas) if t and t.id]
+    if tx_ids:
+        from app.routers.whatsapp.factura_wpp import linea_facturas_pagadas
+        msg_resp += linea_facturas_pagadas(db, tx_ids)
 
     return tx, msg_resp
 

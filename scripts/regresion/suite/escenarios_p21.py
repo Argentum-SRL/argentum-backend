@@ -681,8 +681,198 @@ def p21_caso_8(datos):
     return run_isolated(test)
 
 
+def p21_caso_9(datos):
+    """P21.9: Factura pendiente (hoy+5), comprobante transferencia $12.345,67 y 'sí' -> marca factura pagada automáticamente y agrega línea al Listo."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    hoy = hoy_argentina()
+
+    def test(conn, Session, respuestas):
+        _preparar_base_escenario(conn, u.id)
+        tx_ids_antes = set(conn.execute(select(Transaccion.id).where(Transaccion.usuario_id == u.id)).scalars().all())
+        fac_ids_antes = set(conn.execute(select(Factura.id).where(Factura.usuario_id == u.id)).scalars().all())
+
+        venc = hoy + timedelta(days=5)
+
+        # 1. Factura con vencimiento (como P21.1) y 'no' -> 1 factura pendiente
+        ext_fac = ResultadoExtraccion(
+            documento_tipo="factura_servicio",
+            movimientos=[
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("12345.67"),
+                    moneda="ARS",
+                    descripcion="Aguas Santafesinas",
+                    sentido="egreso",
+                    categoria="Agua",
+                )
+            ],
+            billetera_texto=None,
+            vencimiento=venc,
+            total_vistos=1,
+        )
+
+        respuestas.clear()
+        with patch("app.routers.whatsapp.etapa_entrada._descargar_medio_meta", return_value=(b"fake_bytes", "image/jpeg")), \
+             patch("app.routers.whatsapp.etapa_entrada.extraer_movimientos_de_imagen", return_value=(ext_fac, None)):
+            _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "no"), time.perf_counter())
+
+        # Verificar que quedó la factura pendiente
+        db = Session()
+        fac_pend = db.execute(
+            select(Factura).where(Factura.usuario_id == u.id, Factura.id.not_in(fac_ids_antes))
+        ).scalars().first()
+        fac_pend_ok = fac_pend is not None and fac_pend.estado == "pendiente"
+
+        # 2. Foto de comprobante_transferencia de $12.345,67 en Agua con descripción 'Aguas Santafesinas'
+        ext_comp = ResultadoExtraccion(
+            documento_tipo="comprobante_transferencia",
+            movimientos=[
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("12345.67"),
+                    moneda="ARS",
+                    descripcion="Aguas Santafesinas",
+                    sentido="egreso",
+                    categoria="Agua",
+                )
+            ],
+            billetera_texto=None,
+            vencimiento=None,
+            total_vistos=1,
+        )
+
+        respuestas.clear()
+        with patch("app.routers.whatsapp.etapa_entrada._descargar_medio_meta", return_value=(b"fake_bytes", "image/jpeg")), \
+             patch("app.routers.whatsapp.etapa_entrada.extraer_movimientos_de_imagen", return_value=(ext_comp, None)):
+            _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
+
+        resp_prop = respuestas[-1][1] if respuestas else ""
+        prop_ok = "12.345,67" in resp_prop and "Agua" in resp_prop and "Galicia" in resp_prop and "¿Va?" in resp_prop
+
+        # 3. Respuesta 'sí'
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        resp_conf = respuestas[-1][1] if respuestas else ""
+        esperado_conf = (
+            "Listo. $12.345,67 en Agua desde Galicia — registrado.\n"
+            "Marqué pagada la factura de Aguas Santafesinas."
+        )
+        conf_ok = resp_conf == esperado_conf
+
+        # 4. Estado en base de datos
+        db.refresh(fac_pend)
+        tx_nueva = db.execute(
+            select(Transaccion).where(Transaccion.usuario_id == u.id, Transaccion.id.not_in(tx_ids_antes))
+        ).scalars().first()
+
+        fac_pagada_ok = (
+            fac_pend.estado == "pagada"
+            and fac_pend.pagada_automaticamente is True
+            and tx_nueva is not None
+            and fac_pend.transaccion_id == tx_nueva.id
+        )
+        db.close()
+
+        return f"FacturaPendiente: {fac_pend_ok} | Propuesta: {prop_ok} | Respuesta: {conf_ok} | FacturaPagada: {fac_pagada_ok}"
+
+    return run_isolated(test)
+
+
+def p21_caso_10(datos):
+    """P21.10: Lo mismo con comprobante de $12.345,00 -> Listo queda sin la línea y la factura sigue pendiente."""
+    u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    hoy = hoy_argentina()
+
+    def test(conn, Session, respuestas):
+        _preparar_base_escenario(conn, u.id)
+        fac_ids_antes = set(conn.execute(select(Factura.id).where(Factura.usuario_id == u.id)).scalars().all())
+
+        venc = hoy + timedelta(days=5)
+
+        # 1. Factura con vencimiento (como P21.1) y 'no' -> 1 factura pendiente
+        ext_fac = ResultadoExtraccion(
+            documento_tipo="factura_servicio",
+            movimientos=[
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("12345.67"),
+                    moneda="ARS",
+                    descripcion="Aguas Santafesinas",
+                    sentido="egreso",
+                    categoria="Agua",
+                )
+            ],
+            billetera_texto=None,
+            vencimiento=venc,
+            total_vistos=1,
+        )
+
+        respuestas.clear()
+        with patch("app.routers.whatsapp.etapa_entrada._descargar_medio_meta", return_value=(b"fake_bytes", "image/jpeg")), \
+             patch("app.routers.whatsapp.etapa_entrada.extraer_movimientos_de_imagen", return_value=(ext_fac, None)):
+            _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
+
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "no"), time.perf_counter())
+
+        db = Session()
+        fac_pend = db.execute(
+            select(Factura).where(Factura.usuario_id == u.id, Factura.id.not_in(fac_ids_antes))
+        ).scalars().first()
+        fac_pend_ok = fac_pend is not None and fac_pend.estado == "pendiente"
+
+        # 2. Foto de comprobante_transferencia de $12.345,00 en Agua con descripción 'Aguas Santafesinas'
+        ext_comp = ResultadoExtraccion(
+            documento_tipo="comprobante_transferencia",
+            movimientos=[
+                MovimientoExtraido(
+                    fecha=hoy,
+                    monto=Decimal("12345.00"),
+                    moneda="ARS",
+                    descripcion="Aguas Santafesinas",
+                    sentido="egreso",
+                    categoria="Agua",
+                )
+            ],
+            billetera_texto=None,
+            vencimiento=None,
+            total_vistos=1,
+        )
+
+        respuestas.clear()
+        with patch("app.routers.whatsapp.etapa_entrada._descargar_medio_meta", return_value=(b"fake_bytes", "image/jpeg")), \
+             patch("app.routers.whatsapp.etapa_entrada.extraer_movimientos_de_imagen", return_value=(ext_comp, None)):
+            _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
+
+        resp_prop = respuestas[-1][1] if respuestas else ""
+        prop_ok = "$12.345" in resp_prop and "Agua" in resp_prop and "Galicia" in resp_prop and "¿Va?" in resp_prop
+
+        # 3. Respuesta 'sí'
+        respuestas.clear()
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        resp_conf = respuestas[-1][1] if respuestas else ""
+        esperado_conf = "Listo. $12.345 en Agua desde Galicia — registrado."
+        conf_ok = resp_conf == esperado_conf and "Marqué pagada" not in resp_conf
+
+        # 4. Estado en base de datos: la factura sigue pendiente
+        db.refresh(fac_pend)
+        fac_sigue_pend_ok = (
+            fac_pend.estado == "pendiente"
+            and fac_pend.pagada_automaticamente is False
+            and fac_pend.transaccion_id is None
+        )
+        db.close()
+
+        return f"FacturaPendiente: {fac_pend_ok} | Propuesta: {prop_ok} | Respuesta: {conf_ok} | FacturaSiguePendiente: {fac_sigue_pend_ok}"
+
+    return run_isolated(test)
+
+
 def entradas_p21(datos) -> list[dict]:
-    """Retorna las entradas de catálogo para los escenarios P21.1 a P21.8."""
+    """Retorna las entradas de catálogo para los escenarios P21.1 a P21.10."""
     return [
         {
             "id": "P21.1", "punto": "Punto 21", "match": "exacto",
@@ -732,4 +922,17 @@ def entradas_p21(datos) -> list[dict]:
             "ejecutar": lambda: p21_caso_8(datos),
             "esperado": "Propuesta: True | Cancelado: True | Movimientos: True | Facturas: True",
         },
+        {
+            "id": "P21.9", "punto": "Punto 21", "match": "exacto",
+            "nombre": "Comprobante que coincide con factura pendiente la marca pagada",
+            "ejecutar": lambda: p21_caso_9(datos),
+            "esperado": "FacturaPendiente: True | Propuesta: True | Respuesta: True | FacturaPagada: True",
+        },
+        {
+            "id": "P21.10", "punto": "Punto 21", "match": "exacto",
+            "nombre": "Comprobante con monto distinto no marca factura pendiente",
+            "ejecutar": lambda: p21_caso_10(datos),
+            "esperado": "FacturaPendiente: True | Propuesta: True | Respuesta: True | FacturaSiguePendiente: True",
+        },
     ]
+

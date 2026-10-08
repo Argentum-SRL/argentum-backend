@@ -246,3 +246,37 @@ def manejar_factura_no_pagada(
     db.commit()
     whatsapp_service.enviar_whatsapp(from_number, msg_resp)
     return True
+
+
+def linea_facturas_pagadas(
+    db: Session,
+    transaccion_ids: list[UUID],
+) -> str:
+    """
+    Construye las líneas de notificación para facturas pagadas automáticamente (Decisión 1).
+    Por cada factura con pagada_automaticamente=True asociada a las transacciones,
+    agrega una línea '\\nMarqué pagada la factura de {descripción}.', en el orden de las transacciones.
+    Si no hay facturas, retorna ''.
+    """
+    if not transaccion_ids:
+        return ""
+
+    from app.services.factura_service import facturas_pagadas_por
+
+    facturas = facturas_pagadas_por(db, transaccion_ids)
+    facturas_auto = [f for f in facturas if getattr(f, "pagada_automaticamente", False)]
+    if not facturas_auto:
+        return ""
+
+    facturas_por_tx: dict[UUID, list[Factura]] = {}
+    for f in facturas_auto:
+        if f.transaccion_id:
+            facturas_por_tx.setdefault(f.transaccion_id, []).append(f)
+
+    lineas: list[str] = []
+    for tx_id in transaccion_ids:
+        for f in facturas_por_tx.get(tx_id, []):
+            lineas.append(f"\nMarqué pagada la factura de {f.descripcion}.")
+
+    return "".join(lineas)
+
