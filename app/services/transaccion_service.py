@@ -143,17 +143,37 @@ def _validar_moneda_coincide(moneda_operacion, billetera: Billetera) -> None:
 
 def deducir_metodo_pago(
     billetera: Optional[Billetera], 
-    tarjeta_id: Optional[UUID] = None
+    tarjeta_id: Optional[UUID] = None,
+    tipo: Optional[TipoTransaccion | str] = None,
 ) -> MetodoPago:
     """
     Deduce el método de pago de una transacción según las siguientes reglas en orden de prioridad:
-    1. Si la transacción tiene tarjeta_id asignado (no nulo) -> MetodoPago.CREDITO.
-    2. Si no, y la billetera tiene es_efectivo == True -> MetodoPago.EFECTIVO.
-    3. En cualquier otro caso -> MetodoPago.DEBITO.
+    1. Si es INGRESO:
+       - Si la billetera tiene es_efectivo == True -> MetodoPago.EFECTIVO.
+       - En cualquier otro caso -> MetodoPago.TRANSFERENCIA.
+       (Nunca MetodoPago.DEBITO ni MetodoPago.CREDITO para ingresos).
+    2. Si es EGRESO (o no especificado):
+       - Si la transacción tiene tarjeta_id asignado (no nulo) -> MetodoPago.CREDITO.
+       - Si la billetera tiene es_efectivo == True -> MetodoPago.EFECTIVO.
+       - En cualquier otro caso -> MetodoPago.DEBITO.
 
     Si billetera es None (y tarjeta_id es None), se emite un log de nivel WARNING
-    y se devuelve MetodoPago.DEBITO. Nunca retorna None.
+    y se devuelve MetodoPago.TRANSFERENCIA si es ingreso o MetodoPago.DEBITO si es egreso.
     """
+    es_ingreso = False
+    if tipo is not None:
+        if isinstance(tipo, TipoTransaccion):
+            es_ingreso = (tipo == TipoTransaccion.INGRESO)
+        elif isinstance(tipo, str):
+            es_ingreso = (tipo.lower() == "ingreso")
+
+    if es_ingreso:
+        if getattr(billetera, "es_efectivo", False):
+            return MetodoPago.EFECTIVO
+        if billetera is None:
+            logger.warning("Billetera no provista al deducir método de pago para ingreso; usando TRANSFERENCIA por defecto.")
+        return MetodoPago.TRANSFERENCIA
+
     if tarjeta_id is not None:
         return MetodoPago.CREDITO
     if billetera is None:
@@ -201,6 +221,10 @@ def crear_transaccion(
 
     if not billetera:
         raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
+
+    # Coherencia semántica: un ingreso nunca puede ser débito ni crédito
+    if data.tipo == TipoTransaccion.INGRESO and data.metodo_pago in (MetodoPago.DEBITO, MetodoPago.CREDITO):
+        data.metodo_pago = MetodoPago.EFECTIVO if getattr(billetera, "es_efectivo", False) else MetodoPago.TRANSFERENCIA
 
     # Tarea 1.4: La validación de moneda contra la billetera sigue vigente para todo lo que
     # NO sea un consumo con tarjeta de crédito (en crédito la plata no sale de la billetera en el momento).
@@ -492,6 +516,14 @@ def actualizar_transaccion(
                     f"Solo podés editar la descripción y la categoría."
                 )
             )
+
+    tipo_final = data.tipo if data.tipo is not None else transaccion.tipo
+    if tipo_final == TipoTransaccion.INGRESO:
+        metodo_final = data.metodo_pago if data.metodo_pago is not None else transaccion.metodo_pago
+        if metodo_final in (MetodoPago.DEBITO, MetodoPago.CREDITO):
+            b_id = data.billetera_id or transaccion.billetera_id
+            b_obj = db.get(Billetera, b_id) if b_id else None
+            data.metodo_pago = MetodoPago.EFECTIVO if (b_obj and getattr(b_obj, "es_efectivo", False)) else MetodoPago.TRANSFERENCIA
 
     impacto_saldo_cambia = any([
         data.monto is not None,

@@ -73,6 +73,12 @@ class TransaccionCreate(TransaccionBase):
     def validar_descripcion(cls, v: str | None) -> str:
         return v.strip() if v else ""
 
+    @model_validator(mode="after")
+    def validar_coherencia_ingreso_metodo(self) -> TransaccionCreate:
+        if self.tipo == TipoTransaccion.INGRESO and self.metodo_pago in (MetodoPago.DEBITO, MetodoPago.CREDITO):
+            self.metodo_pago = MetodoPago.TRANSFERENCIA
+        return self
+
 
 class TransaccionUpdate(BaseModel):
     tipo: TipoTransaccion | None = None
@@ -98,6 +104,12 @@ class TransaccionUpdate(BaseModel):
         if v is not None:
             return v.strip()
         return v
+
+    @model_validator(mode="after")
+    def validar_coherencia_ingreso_metodo_update(self) -> TransaccionUpdate:
+        if self.tipo == TipoTransaccion.INGRESO and self.metodo_pago in (MetodoPago.DEBITO, MetodoPago.CREDITO):
+            self.metodo_pago = MetodoPago.TRANSFERENCIA
+        return self
 
 
 class TransaccionRead(TransaccionBase):

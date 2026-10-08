@@ -444,7 +444,7 @@ def importar_transacciones_resumen(
                             moneda=cruda.moneda,
                             fecha=cruda.fecha,
                             descripcion=cruda.descripcion,
-                            metodo_pago=MetodoPago.DEBITO,
+                            metodo_pago=MetodoPago.TRANSFERENCIA if tipo_tx == TipoTransaccion.INGRESO else MetodoPago.DEBITO,
                             billetera_id=billetera_actual_id,
                             tarjeta_id=None,
                             categoria_id=cruda.categoria_id,

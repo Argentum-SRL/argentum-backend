@@ -389,3 +389,67 @@ def test_editar_transaccion_descripcion_null_limpia_a_vacio(client, setup_data):
     assert res_patch.status_code == status.HTTP_200_OK
     assert res_patch.json()["descripcion"] == ""
 
+
+def test_ingreso_con_debito_o_credito_se_normaliza_a_transferencia(client, setup_data):
+    """Prueba que crear un ingreso con 'debito' o 'credito' se normalice automáticamente a 'transferencia'."""
+    billetera = setup_data["billetera"]
+    categoria = setup_data["categoria"]
+
+    # 1. Intento de crear ingreso con metodo_pago: 'debito'
+    res_debito = client.post("/transacciones", json={
+        "tipo": "ingreso",
+        "monto": 100000.00,
+        "moneda": "ARS",
+        "fecha": "2026-08-27",
+        "descripcion": "Cobro sueldo",
+        "billetera_id": str(billetera.id),
+        "categoria_id": str(categoria.id),
+        "metodo_pago": "debito",
+        "origen": "manual",
+    })
+    assert res_debito.status_code == status.HTTP_201_CREATED
+    assert res_debito.json()["metodo_pago"] == "transferencia"
+
+    # 2. Intento de crear ingreso con metodo_pago: 'credito'
+    res_credito = client.post("/transacciones", json={
+        "tipo": "ingreso",
+        "monto": 50000.00,
+        "moneda": "ARS",
+        "fecha": "2026-08-27",
+        "descripcion": "Honorarios",
+        "billetera_id": str(billetera.id),
+        "categoria_id": str(categoria.id),
+        "metodo_pago": "credito",
+        "origen": "manual",
+    })
+    assert res_credito.status_code == status.HTTP_201_CREATED
+    assert res_credito.json()["metodo_pago"] == "transferencia"
+
+
+def test_deducir_metodo_pago_segun_tipo_y_billetera():
+    """Prueba que deducir_metodo_pago devuelva transferencia para ingresos en bancos y nunca débito."""
+    from app.services.transaccion_service import deducir_metodo_pago
+    from unittest.mock import MagicMock
+
+    banco = MagicMock()
+    banco.es_efectivo = False
+
+    efectivo = MagicMock()
+    efectivo.es_efectivo = True
+
+    # Ingreso en banco -> TRANSFERENCIA
+    assert deducir_metodo_pago(banco, tipo="ingreso") == MetodoPago.TRANSFERENCIA
+    assert deducir_metodo_pago(banco, tipo=TipoTransaccion.INGRESO) == MetodoPago.TRANSFERENCIA
+
+    # Ingreso en efectivo -> EFECTIVO
+    assert deducir_metodo_pago(efectivo, tipo="ingreso") == MetodoPago.EFECTIVO
+    assert deducir_metodo_pago(efectivo, tipo=TipoTransaccion.INGRESO) == MetodoPago.EFECTIVO
+
+    # Egreso en banco -> DEBITO
+    assert deducir_metodo_pago(banco, tipo="egreso") == MetodoPago.DEBITO
+    assert deducir_metodo_pago(banco, tipo=TipoTransaccion.EGRESO) == MetodoPago.DEBITO
+
+    # Egreso en efectivo -> EFECTIVO
+    assert deducir_metodo_pago(efectivo, tipo="egreso") == MetodoPago.EFECTIVO
+
+
