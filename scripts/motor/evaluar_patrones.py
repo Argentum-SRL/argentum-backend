@@ -1,11 +1,14 @@
 """
-Evaluador del detector de gastos fijos (Fase 4d1).
+Evaluador del detector de gastos fijos y clasificador de costumbre y día a día (Fases 4d1 y 4d2).
 Ubicación: scripts/motor/evaluar_patrones.py
 
-Este script evalúa el detector puro de gastos fijos (app/utils/patrones.py) en tres ámbitos:
-E1. Personas sintéticas (P01 a P10) con verdad conocida, métricas globales y grilla de hiperparámetros.
-E2. Usuario testingadmin@argentum.com en base local de solo lectura.
-E3. Usuarios reales anonimizados (Usuario_NN ordenados por fecha_registro) informando únicamente cantidades.
+Este script evalúa el motor financiero en memoria sin modificar la base de datos:
+E1. Personas sintéticas (P01 a P10): detección de fijos con métricas y grilla de hiperparámetros.
+E1b. Personas sintéticas (P01 a P10): clasificador de costumbre y día a día (tabla, matriz de confusión y grilla).
+E2. Usuario testingadmin@argentum.com: detección de fijos en copia local.
+E2b. Usuario testingadmin@argentum.com: grupos de costumbre y día a día, y mapeo del catálogo.
+E3. Usuarios reales anonimizados: cantidades de fijos y descartados.
+E3b. Usuarios reales anonimizados: cantidades de grupos en costumbre y día a día.
 
 Red de seguridad:
 - Sesión de base de datos estrictamente de solo lectura.
@@ -14,6 +17,7 @@ Red de seguridad:
 """
 from __future__ import annotations
 
+import calendar
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal
@@ -29,19 +33,24 @@ if str(BACKEND_DIR) not in sys.path:
 from scripts.local.base_actual import imprimir_base_actual
 imprimir_base_actual()
 
+from dateutil.relativedelta import relativedelta
 from sqlalchemy import event, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import SessionLocal
+from app.models.subcategoria import Subcategoria
 from app.models.transaccion import TipoTransaccion
 from app.models.usuario import Usuario
 from app.services.datos_motor_service import cargar_datos_motor
 from app.services.definiciones_service import ContextoDefiniciones
 from app.utils.fecha import hoy_argentina
 from app.utils.patrones import (
+    _obtener_nombres_cat_subcat,
+    clasificar_cajas,
     clave_patron,
     detectar_fijos,
     movimientos_elegibles,
+    rubro_de,
 )
 from tests.motor.personas import generar_todas_las_personas
 from tests.motor.personas.catalogo import IPC_MAP
@@ -58,6 +67,19 @@ REGLA_1A = {
     ("P02", "cuidado_personal"),
 }
 
+# Regla B para clasificador de cajas (Fase 4d2):
+# Aplica la decisión del 08/10. Nafta, verdulería, carnicería y ropa son día a día.
+# Coworking y fotocopias no están en ninguna lista y van a día a día por defecto.
+REGLA_B = {
+    ("P02", "combustible"),
+    ("P10", "combustible_flete"),
+    ("P07", "verduleria"),
+    ("P07", "carniceria"),
+    ("P06", "ropa_gustos"),
+    ("P03", "coworking"),
+    ("P05", "fotocopias"),
+}
+
 
 def es_fijo_verdad(persona_id: str, grupo_nombre: str, tipo_verdadero: str) -> bool:
     """Determina si un grupo es gasto fijo según la verdad conocida y la decisión del 08/10."""
@@ -66,6 +88,36 @@ def es_fijo_verdad(persona_id: str, grupo_nombre: str, tipo_verdadero: str) -> b
     if (persona_id, grupo_nombre) in REGLA_1A:
         return True
     return False
+
+
+def verdad_caja(persona_id: str, grupo_nombre: str, tipo_verdadero: str) -> str:
+    """
+    Determina la verdad de caja para un grupo de egreso:
+    - fijo: si es gasto_fijo o está en REGLA_1A.
+    - dia_a_dia: si está en REGLA_B.
+    - Si no: costumbre -> costumbre, gasto_diario -> dia_a_dia, eventual -> sin_caja.
+    """
+    if es_fijo_verdad(persona_id, grupo_nombre, tipo_verdadero):
+        return "fijo"
+    if (persona_id, grupo_nombre) in REGLA_B:
+        return "dia_a_dia"
+    if tipo_verdadero == "costumbre":
+        return "costumbre"
+    elif tipo_verdadero == "gasto_diario":
+        return "dia_a_dia"
+    elif tipo_verdadero == "eventual":
+        return "sin_caja"
+    return "sin_caja"
+
+
+def _limites_ventana(fecha_destino: date, meses_ventana: int) -> tuple[date, date]:
+    """Calcula inicio y fin de los N meses completos calendario anteriores a fecha_destino."""
+    m_inicio = fecha_destino.replace(day=1) - relativedelta(months=meses_ventana)
+    m_fin = fecha_destino.replace(day=1) - relativedelta(months=1)
+    f_ini = date(m_inicio.year, m_inicio.month, 1)
+    ultimo_dia = calendar.monthrange(m_fin.year, m_fin.month)[1]
+    f_fin = date(m_fin.year, m_fin.month, ultimo_dia)
+    return f_ini, f_fin
 
 
 def sesion_solo_lectura() -> Session:
@@ -80,9 +132,9 @@ def sesion_solo_lectura() -> Session:
 
 
 def evaluar_personas_sinteticas() -> None:
-    """E1: Evaluación sobre las 10 personas sintéticas con verdad conocida."""
+    """E1 y E1b: Evaluación sobre las 10 personas sintéticas con verdad conocida."""
     print("=" * 80)
-    print("=== E1. EVALUACIÓN CON PERSONAS SINTÉTICAS ===")
+    print("=== E1. EVALUACIÓN CON PERSONAS SINTÉTICAS (DETECTOR DE FIJOS) ===")
     print("=" * 80)
 
     personas = generar_todas_las_personas()
@@ -250,11 +302,181 @@ def evaluar_personas_sinteticas() -> None:
                 f"{prec_g_f*100:>12.2f}% | {rec_g_f*100:>12.2f}% | {no_fijos_str}"
             )
 
+    # =========================================================================
+    # E1b. CLASIFICADOR DE COSTUMBRE Y DÍA A DÍA
+    # =========================================================================
+    evaluar_personas_cajas(personas, fecha_ref, ctx_base)
+
+
+def evaluar_personas_cajas(personas: list[Persona], fecha_ref: date, ctx_base: ContextoDefiniciones) -> None:
+    """E1b: Evaluación del clasificador de cajas en personas sintéticas."""
+    print("\n" + "=" * 80)
+    print("=== E1b. PERSONAS: CLASIFICADOR DE COSTUMBRE Y DÍA A DÍA ===")
+    print("=" * 80)
+
+    f_ini_3, f_fin_3 = _limites_ventana(fecha_ref, 3)
+
+    print("\n--- TABLA POR PERSONA Y GRUPO (VENTANA BASE 3 MESES) ---")
+    print(f"{'Persona':<6} | {'Grupo':<22} | {'Verdad':<10} | {'Resultado':<10} | {'Categoría':<22} | {'Subcategoría':<26} | {'Ocurr Ventana':<13}")
+    print("-" * 125)
+
+    registros_grupos: list[dict[str, Any]] = []
+
+    for p in personas:
+        res = clasificar_cajas(p.movimientos, IPC_MAP, fecha_ref, ctx=ctx_base)
+        ids_fijos = {tx_id for f in res.fijos for tx_id in f.transacciones_ids}
+        ids_costumbre = {tx_id for g in res.costumbre for tx_id in g.transacciones_ids}
+        ids_dia_a_dia = {tx_id for g in res.dia_a_dia for tx_id in g.transacciones_ids}
+
+        movs_egreso = [m for m in p.movimientos if m.tipo == TipoTransaccion.EGRESO]
+        por_grupo: dict[str, list[Any]] = defaultdict(list)
+        for m in movs_egreso:
+            por_grupo[m.grupo_verdadero].append(m)
+
+        for g_nom, g_txs in sorted(por_grupo.items()):
+            tipo_v = g_txs[0].tipo_verdadero
+            v_caja = verdad_caja(p.id, g_nom, tipo_v)
+
+            c_fijo = sum(1 for m in g_txs if m.id in ids_fijos)
+            c_cost = sum(1 for m in g_txs if m.id in ids_costumbre)
+            c_dia = sum(1 for m in g_txs if m.id in ids_dia_a_dia)
+
+            if c_fijo > 0 and c_fijo >= c_cost and c_fijo >= c_dia:
+                r_caja = "fijo"
+            elif c_cost > 0 and c_cost >= c_dia:
+                r_caja = "costumbre"
+            elif c_dia > 0:
+                r_caja = "dia_a_dia"
+            else:
+                r_caja = "sin_caja"
+
+            cat_nom, subcat_nom = _obtener_nombres_cat_subcat(g_txs[0])
+            cat_str = cat_nom or "None"
+            subcat_str = subcat_nom or "None"
+
+            ocurr_vent = sum(1 for m in g_txs if f_ini_3 <= m.fecha <= f_fin_3)
+
+            registros_grupos.append({
+                "persona_id": p.id,
+                "grupo": g_nom,
+                "verdad": v_caja,
+                "resultado": r_caja,
+                "categoria": cat_str,
+                "subcategoria": subcat_str,
+                "ocurr_ventana": ocurr_vent,
+            })
+
+            print(
+                f"{p.id:<6} | {g_nom:<22} | {v_caja:<10} | {r_caja:<10} | "
+                f"{cat_str:<22} | {subcat_str:<26} | {ocurr_vent:^13d}"
+            )
+
+    # Matriz de confusión
+    print("\n--- MATRIZ DE CONFUSIÓN POR GRUPO (VERDAD x RESULTADO) ---")
+    clases = ["fijo", "costumbre", "dia_a_dia", "sin_caja"]
+    matriz: dict[tuple[str, str], int] = defaultdict(int)
+    for reg in registros_grupos:
+        matriz[(reg["verdad"], reg["resultado"])] += 1
+
+    header = f"{'Verdad \\ Res':<14} | " + " | ".join(f"{c:<10}" for c in clases) + " | Total"
+    print(header)
+    print("-" * len(header))
+    for v in clases:
+        fila = [f"{v:<14}"]
+        total_v = 0
+        for r in clases:
+            cnt = matriz[(v, r)]
+            total_v += cnt
+            fila.append(f"{cnt:^10d}")
+        fila.append(f"{total_v:^5d}")
+        print(" | ".join(fila))
+
+    def _metricas_caja(nombre_caja: str):
+        tp = matriz[(nombre_caja, nombre_caja)]
+        fp = sum(matriz[(v, nombre_caja)] for v in clases if v != nombre_caja)
+        fn = sum(matriz[(nombre_caja, r)] for r in clases if r != nombre_caja)
+        prec = (tp / (tp + fp)) if (tp + fp) > 0 else 0.0
+        rec = (tp / (tp + fn)) if (tp + fn) > 0 else 0.0
+        return tp, fp, fn, prec, rec
+
+    tp_c, fp_c, fn_c, prec_c, rec_c = _metricas_caja("costumbre")
+    tp_d, fp_d, fn_d, prec_d, rec_d = _metricas_caja("dia_a_dia")
+
+    print("\n--- MÉTRICAS POR CAJA (NIVEL GRUPO) ---")
+    print(f"Costumbre:  TP={tp_c:2d}, FP={fp_c:2d}, FN={fn_c:2d} | Precisión={prec_c*100:6.2f}% | Exhaustividad={rec_c*100:6.2f}%")
+    print(f"Día a día:  TP={tp_d:2d}, FP={fp_d:2d}, FN={fn_d:2d} | Precisión={prec_d*100:6.2f}% | Exhaustividad={rec_d*100:6.2f}%")
+
+    # Grilla min_ocurrencias {2, 3, 4} x meses_ventana {3, 6}
+    print("\n--- GRILLA HIPERPARÁMETROS: min_ocurrencias x meses_ventana ---")
+    print(f"{'min_oc':<6} | {'meses_v':<7} | {'Prec Cost':<10} | {'Rec Cost':<10} | {'Prec Dia':<10} | {'Rec Dia':<10} | Grupos mal ubicados")
+    print("-" * 120)
+
+    for min_oc in [2, 3, 4]:
+        for m_vent in [3, 6]:
+            matriz_g: dict[tuple[str, str], int] = defaultdict(int)
+            mal_ubicados: list[str] = []
+
+            for p in personas:
+                res_g = clasificar_cajas(
+                    p.movimientos,
+                    IPC_MAP,
+                    fecha_ref,
+                    ctx=ctx_base,
+                    min_ocurrencias=min_oc,
+                    meses_ventana=m_vent,
+                )
+                ids_f_g = {tx_id for f in res_g.fijos for tx_id in f.transacciones_ids}
+                ids_c_g = {tx_id for g in res_g.costumbre for tx_id in g.transacciones_ids}
+                ids_d_g = {tx_id for g in res_g.dia_a_dia for tx_id in g.transacciones_ids}
+
+                movs_eg = [m for m in p.movimientos if m.tipo == TipoTransaccion.EGRESO]
+                por_grupo_g: dict[str, list[Any]] = defaultdict(list)
+                for m in movs_eg:
+                    por_grupo_g[m.grupo_verdadero].append(m)
+
+                for g_nom, g_txs in sorted(por_grupo_g.items()):
+                    v_caja = verdad_caja(p.id, g_nom, g_txs[0].tipo_verdadero)
+
+                    c_f = sum(1 for m in g_txs if m.id in ids_f_g)
+                    c_c = sum(1 for m in g_txs if m.id in ids_c_g)
+                    c_d = sum(1 for m in g_txs if m.id in ids_d_g)
+
+                    if c_f > 0 and c_f >= c_c and c_f >= c_d:
+                        r_caja = "fijo"
+                    elif c_c > 0 and c_c >= c_d:
+                        r_caja = "costumbre"
+                    elif c_d > 0:
+                        r_caja = "dia_a_dia"
+                    else:
+                        r_caja = "sin_caja"
+
+                    matriz_g[(v_caja, r_caja)] += 1
+                    if v_caja != r_caja:
+                        mal_ubicados.append(f"{p.id}:{g_nom}(V={v_caja},R={r_caja})")
+
+            tp_cg = matriz_g[("costumbre", "costumbre")]
+            fp_cg = sum(matriz_g[(v, "costumbre")] for v in clases if v != "costumbre")
+            fn_cg = sum(matriz_g[("costumbre", r)] for r in clases if r != "costumbre")
+            p_cg = (tp_cg / (tp_cg + fp_cg)) if (tp_cg + fp_cg) > 0 else 0.0
+            r_cg = (tp_cg / (tp_cg + fn_cg)) if (tp_cg + fn_cg) > 0 else 0.0
+
+            tp_dg = matriz_g[("dia_a_dia", "dia_a_dia")]
+            fp_dg = sum(matriz_g[(v, "dia_a_dia")] for v in clases if v != "dia_a_dia")
+            fn_dg = sum(matriz_g[("dia_a_dia", r)] for r in clases if r != "dia_a_dia")
+            p_dg = (tp_dg / (tp_dg + fp_dg)) if (tp_dg + fp_dg) > 0 else 0.0
+            r_dg = (tp_dg / (tp_dg + fn_dg)) if (tp_dg + fn_dg) > 0 else 0.0
+
+            mal_str = ", ".join(mal_ubicados) if mal_ubicados else "ninguno (100% exacto)"
+            print(
+                f"{min_oc:^6d} | {m_vent:^7d} | {p_cg*100:>8.2f}% | {r_cg*100:>8.2f}% | "
+                f"{p_dg*100:>8.2f}% | {r_dg*100:>8.2f}% | {mal_str}"
+            )
+
 
 def evaluar_testingadmin(db: Session) -> None:
     """E2: Evaluación detallada de testingadmin en copia local."""
     print("\n" + "=" * 80)
-    print("=== E2. TESTINGADMIN (BASE LOCAL) ===")
+    print("=== E2. TESTINGADMIN (DETECTOR DE FIJOS) ===")
     print("=" * 80)
 
     u = db.execute(select(Usuario).where(Usuario.email == "testingadmin@argentum.com")).scalar_one_or_none()
@@ -301,11 +523,72 @@ def evaluar_testingadmin(db: Session) -> None:
     for d in descartados_relevantes:
         print(f"  clave: {d.clave:<30} | moneda: {d.moneda} | ocurrencias: {d.ocurrencias:2d} | motivo: {d.motivo:<20} | dispersión: {d.dispersion_monto}")
 
+    # =========================================================================
+    # E2b. TESTINGADMIN: COSTUMBRE Y DÍA A DÍA + MAPEO DE CATÁLOGO
+    # =========================================================================
+    evaluar_testingadmin_cajas(db, u, datos, hoy)
+
+
+def evaluar_testingadmin_cajas(db: Session, u: Usuario, datos: dict[str, Any], hoy: date) -> None:
+    """E2b: Evaluación de costumbre y día a día en testingadmin y catálogo completo."""
+    print("\n" + "=" * 80)
+    print("=== E2b. TESTINGADMIN: COSTUMBRE Y DÍA A DÍA ===")
+    print("=" * 80)
+
+    res_cajas = clasificar_cajas(datos["txs"], datos["ipc"], hoy, ctx=datos["ctx"])
+
+    print("\n--- GRUPOS EN COSTUMBRE ---")
+    if not res_cajas.costumbre:
+        print("  Ningún grupo en costumbre.")
+    for idx, g in enumerate(res_cajas.costumbre, 1):
+        print(f"Grupo #{idx}: {g.nombre}")
+        print(f"  clave:                  {g.clave}")
+        print(f"  moneda:                 {g.moneda}")
+        print(f"  ocurrencias:            {g.ocurrencias}")
+        print(f"  meses_con_movimiento:   {g.meses_con_movimiento}")
+        print(f"  monto_mensual_mediano:  {g.monto_mensual_mediano}")
+
+    print("\n--- GRUPOS EN DÍA A DÍA ---")
+    if not res_cajas.dia_a_dia:
+        print("  Ningún grupo en día a día.")
+    for idx, g in enumerate(res_cajas.dia_a_dia, 1):
+        print(f"Grupo #{idx}: {g.nombre}")
+        print(f"  clave:                  {g.clave}")
+        print(f"  moneda:                 {g.moneda}")
+        print(f"  ocurrencias:            {g.ocurrencias}")
+        print(f"  meses_con_movimiento:   {g.meses_con_movimiento}")
+        print(f"  monto_mensual_mediano:  {g.monto_mensual_mediano}")
+
+    print("\n--- TABLA DE SUBCATEGORÍAS DEL CATÁLOGO Y SU rubro_de ---")
+    stmt = (
+        select(Subcategoria)
+        .options(joinedload(Subcategoria.categoria))
+        .order_by(Subcategoria.nombre)
+    )
+    subcats = db.execute(stmt).scalars().all()
+    print(f"{'Subcategoría':<35} | {'Categoría':<25} | {'Tipo Cat':<10} | {'rubro_de':<12}")
+    print("-" * 88)
+
+    class _ItemMock:
+        def __init__(self, nom: str):
+            self.nombre = nom
+
+    class _TxMock:
+        def __init__(self, c_nom: str, sc_nom: str):
+            self.categoria = _ItemMock(c_nom)
+            self.subcategoria = _ItemMock(sc_nom)
+
+    for sc in subcats:
+        c_nom = sc.categoria.nombre if sc.categoria else ""
+        c_tipo = sc.categoria.tipo.value if sc.categoria else ""
+        r_clasif = rubro_de(_TxMock(c_nom, sc.nombre))
+        print(f"{sc.nombre:<35} | {c_nom:<25} | {c_tipo:<10} | {r_clasif:<12}")
+
 
 def evaluar_usuarios_reales(db: Session) -> None:
-    """E3: Métricas puramente cuantitativas para usuarios reales anonimizados."""
+    """E3 y E3b: Métricas puramente cuantitativas para usuarios reales anonimizados."""
     print("\n" + "=" * 80)
-    print("=== E3. USUARIOS REALES (SOLO CANTIDADES) ===")
+    print("=== E3. USUARIOS REALES: FIJOS (SOLO CANTIDADES) ===")
     print("=" * 80)
 
     usuarios = db.execute(
@@ -341,9 +624,38 @@ def evaluar_usuarios_reales(db: Session) -> None:
         except Exception as exc:
             print(f"{anon_id}: ERROR {exc}")
 
+    # =========================================================================
+    # E3b. USUARIOS REALES: COSTUMBRE Y DÍA A DÍA
+    # =========================================================================
+    evaluar_usuarios_reales_cajas(db, usuarios, hoy)
+
+
+def evaluar_usuarios_reales_cajas(db: Session, usuarios: list[Usuario], hoy: date) -> None:
+    """E3b: Cantidades de grupos de costumbre y día a día en usuarios reales anonimizados."""
+    print("\n" + "=" * 80)
+    print("=== E3b. USUARIOS REALES: COSTUMBRE Y DÍA A DÍA (SOLO CANTIDADES) ===")
+    print("=" * 80)
+
+    conteo_anon = 1
+    for u in usuarios:
+        if u.email == "testingadmin@argentum.com":
+            continue
+
+        anon_id = f"Usuario_{conteo_anon:02d}"
+        conteo_anon += 1
+
+        try:
+            datos = cargar_datos_motor(db, u, hoy)
+            res_cajas = clasificar_cajas(datos["txs"], datos["ipc"], hoy, ctx=datos["ctx"])
+            print(
+                f"{anon_id}: grupos_costumbre={len(res_cajas.costumbre)} | grupos_dia_a_dia={len(res_cajas.dia_a_dia)}"
+            )
+        except Exception as exc:
+            print(f"{anon_id}: ERROR {exc}")
+
 
 def main() -> None:
-    """Punto de entrada principal para la ejecución de E1, E2 y E3."""
+    """Punto de entrada principal para la ejecución de E1, E1b, E2, E2b, E3 y E3b."""
     evaluar_personas_sinteticas()
 
     db = sesion_solo_lectura()

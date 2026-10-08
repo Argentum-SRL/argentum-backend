@@ -24,12 +24,14 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
+from dateutil.relativedelta import relativedelta
 import pytest
 
 from app.models.transaccion import EstadoVerificacionTransaccion, TipoTransaccion
 from app.models.usuario import Moneda
 from app.services.definiciones_service import ContextoDefiniciones
-from app.utils.patrones import detectar_fijos
+from app.utils.patrones import clasificar_cajas, detectar_fijos, rubro_de
+
 
 
 class MockCategoria:
@@ -64,6 +66,8 @@ class MockTransaccion:
         movimiento_meta_id: Any = None,
         pago_resumen_vencimiento: Any = None,
         id: str | None = None,
+        categoria: MockCategoria | None = None,
+        subcategoria: MockSubcategoria | None = None,
     ):
         self.id = id or str(uuid4())
         self.fecha = fecha
@@ -80,6 +84,9 @@ class MockTransaccion:
         self.es_padre_cuotas = es_padre_cuotas
         self.movimiento_meta_id = movimiento_meta_id
         self.pago_resumen_vencimiento = pago_resumen_vencimiento
+        self.categoria = categoria
+        self.subcategoria = subcategoria
+
 
 
 @pytest.fixture
@@ -318,3 +325,284 @@ def test_t13_anual_fuerte(ctx_vacio: ContextoDefiniciones, ipc_plano: dict[str, 
     assert fijo.frecuencia == "anual"
     assert fijo.fuerza == "fuerte"
     assert fijo.proxima_fecha == date(2027, 3, 2)
+
+
+def test_t14_alquiler_distancia_corta_febrero_marzo(ctx_vacio: ContextoDefiniciones, ipc_plano: dict[str, Decimal]):
+    """T14. Alquiler $400.000 el 10/02, 01/03, 08/04, 05/05 y 03/06/2026, destino 2026-06-20: 1 fijo mensual fuerte."""
+    txs = [
+        MockTransaccion(date(2026, 2, 10), 400000, descripcion="Alquiler"),
+        MockTransaccion(date(2026, 3, 1), 400000, descripcion="Alquiler"),
+        MockTransaccion(date(2026, 4, 8), 400000, descripcion="Alquiler"),
+        MockTransaccion(date(2026, 5, 5), 400000, descripcion="Alquiler"),
+        MockTransaccion(date(2026, 6, 3), 400000, descripcion="Alquiler"),
+    ]
+    res = detectar_fijos(txs, ipc_plano, date(2026, 6, 20), ctx=ctx_vacio)
+    assert len(res.fijos) == 1
+    fijo = res.fijos[0]
+    assert fijo.frecuencia == "mensual"
+    assert fijo.fuerza == "fuerte"
+
+
+def test_t15_clase_tenis_cada_14_dias_descartada(ctx_vacio: ContextoDefiniciones, ipc_plano: dict[str, Decimal]):
+    """T15. 'Clase de tenis' $20.000 cada 14 días desde 2026-06-01, 6 veces, destino 2026-08-20: 0 fijos."""
+    txs = [
+        MockTransaccion(date(2026, 6, 1) + relativedelta(days=14 * i), 20000, descripcion="Clase de tenis")
+        for i in range(6)
+    ]
+    res = detectar_fijos(txs, ipc_plano, date(2026, 8, 20), ctx=ctx_vacio)
+    assert len(res.fijos) == 0
+
+
+def test_t16_alquiler_proxima_fecha_dia_tipico(ctx_vacio: ContextoDefiniciones, ipc_plano: dict[str, Decimal]):
+    """T16. Alquiler $400.000 el 05/06, 05/07, 05/08 y 09/09/2026, destino 2026-09-20: dia_tipico 5 y próxima 2026-10-05."""
+    txs = [
+        MockTransaccion(date(2026, 6, 5), 400000, descripcion="Alquiler"),
+        MockTransaccion(date(2026, 7, 5), 400000, descripcion="Alquiler"),
+        MockTransaccion(date(2026, 8, 5), 400000, descripcion="Alquiler"),
+        MockTransaccion(date(2026, 9, 9), 400000, descripcion="Alquiler"),
+    ]
+    res = detectar_fijos(txs, ipc_plano, date(2026, 9, 20), ctx=ctx_vacio)
+    assert len(res.fijos) == 1
+    fijo = res.fijos[0]
+    assert fijo.dia_tipico == 5
+    assert fijo.proxima_fecha == date(2026, 10, 5)
+
+
+def test_t17_abono_fin_de_mes_febrero(ctx_vacio: ContextoDefiniciones, ipc_plano: dict[str, Decimal]):
+    """T17. $30.000 el 30/11/2025, 31/12/2025 y 31/01/2026, destino 2026-02-10: dia_tipico 31 y próxima 2026-02-28."""
+    txs = [
+        MockTransaccion(date(2025, 11, 30), 30000, descripcion="Abono"),
+        MockTransaccion(date(2025, 12, 31), 30000, descripcion="Abono"),
+        MockTransaccion(date(2026, 1, 31), 30000, descripcion="Abono"),
+    ]
+    res = detectar_fijos(txs, ipc_plano, date(2026, 2, 10), ctx=ctx_vacio)
+    assert len(res.fijos) == 1
+    fijo = res.fijos[0]
+    assert fijo.dia_tipico == 31
+    assert fijo.proxima_fecha == date(2026, 2, 28)
+
+
+def test_t18_rubro_de():
+    """T18. Clasificación con rubro_de para casos definidos."""
+    # Delivery en Gastronomía: costumbre
+    tx_del = MockTransaccion(
+        date(2026, 6, 1), 1000,
+        categoria=MockCategoria("c1", "Gastronomía"),
+        subcategoria=MockSubcategoria("s1", "Delivery"),
+    )
+    assert rubro_de(tx_del) == "costumbre"
+
+    # Taxi / Apps en Transporte: costumbre
+    tx_taxi = MockTransaccion(
+        date(2026, 6, 1), 1000,
+        categoria=MockCategoria("c2", "Transporte"),
+        subcategoria=MockSubcategoria("s2", "Taxi / Apps"),
+    )
+    assert rubro_de(tx_taxi) == "costumbre"
+
+    # Combustible en Transporte: dia_a_dia
+    tx_comb = MockTransaccion(
+        date(2026, 6, 1), 1000,
+        categoria=MockCategoria("c2", "Transporte"),
+        subcategoria=MockSubcategoria("s3", "Combustible"),
+    )
+    assert rubro_de(tx_comb) == "dia_a_dia"
+
+    # Verdulería en Alimentación: dia_a_dia
+    tx_verd = MockTransaccion(
+        date(2026, 6, 1), 1000,
+        categoria=MockCategoria("c3", "Alimentación"),
+        subcategoria=MockSubcategoria("s4", "Verdulería"),
+    )
+    assert rubro_de(tx_verd) == "dia_a_dia"
+
+    # Ferretería en Hogar: dia_a_dia
+    tx_ferr = MockTransaccion(
+        date(2026, 6, 1), 1000,
+        categoria=MockCategoria("c4", "Hogar"),
+        subcategoria=MockSubcategoria("s5", "Ferretería"),
+    )
+    assert rubro_de(tx_ferr) == "dia_a_dia"
+
+    # Sin subcategoría, en Indumentaria: dia_a_dia
+    tx_indum = MockTransaccion(
+        date(2026, 6, 1), 1000,
+        categoria=MockCategoria("c5", "Indumentaria"),
+        subcategoria=None,
+    )
+    assert rubro_de(tx_indum) == "dia_a_dia"
+
+    # Sin categoría ni subcategoría: dia_a_dia
+    tx_nada = MockTransaccion(
+        date(2026, 6, 1), 1000,
+        categoria=None,
+        subcategoria=None,
+    )
+    assert rubro_de(tx_nada) == "dia_a_dia"
+
+
+def test_t19_clasificar_cajas_costumbre_delivery(ctx_vacio: ContextoDefiniciones, ipc_plano: dict[str, Decimal]):
+    """T19. Delivery $10.000 el 03, 10, 17 y 24/06, el 08 y 22/07 y el 05, 15 y 25/08/2026. Destino 2026-09-05."""
+    fechas = [
+        date(2026, 6, 3), date(2026, 6, 10), date(2026, 6, 17), date(2026, 6, 24),
+        date(2026, 7, 8), date(2026, 7, 22),
+        date(2026, 8, 5), date(2026, 8, 15), date(2026, 8, 25),
+    ]
+    sub_del = MockSubcategoria("s-del", "Delivery")
+    cat_gast = MockCategoria("c-gast", "Gastronomía")
+    txs = [
+        MockTransaccion(
+            f, 10000,
+            descripcion="Delivery",
+            categoria=cat_gast,
+            subcategoria=sub_del,
+            categoria_id=cat_gast.id,
+            subcategoria_id=sub_del.id,
+        )
+        for f in fechas
+    ]
+    res = clasificar_cajas(txs, ipc_plano, date(2026, 9, 5), ctx=ctx_vacio)
+
+    assert len(res.costumbre) == 1
+    g = res.costumbre[0]
+    assert g.ocurrencias == 9
+    assert g.meses_con_movimiento == 3
+    assert g.monto_mensual_mediano == Decimal("30000.00")
+    assert len(res.dia_a_dia) == 0
+
+
+def test_t20_clasificar_cajas_dia_a_dia_supermercado(ctx_vacio: ContextoDefiniciones, ipc_plano: dict[str, Decimal]):
+    """T20. Supermercado $25.000 todos los sábados de junio a agosto de 2026, más un delivery de $12.000 el 15/07."""
+    sub_sup = MockSubcategoria("s-sup", "Supermercado")
+    cat_alim = MockCategoria("c-alim", "Alimentación")
+    sub_del = MockSubcategoria("s-del", "Delivery")
+    cat_gast = MockCategoria("c-gast", "Gastronomía")
+
+    # Sábados de junio, julio y agosto 2026
+    sabados = [
+        date(2026, 6, 6), date(2026, 6, 13), date(2026, 6, 20), date(2026, 6, 27),
+        date(2026, 7, 4), date(2026, 7, 11), date(2026, 7, 18), date(2026, 7, 25),
+        date(2026, 8, 1), date(2026, 8, 8), date(2026, 8, 15), date(2026, 8, 22), date(2026, 8, 29),
+    ]
+    txs = [
+        MockTransaccion(
+            f, 25000,
+            descripcion="Coto Supermercado",
+            categoria=cat_alim,
+            subcategoria=sub_sup,
+            categoria_id=cat_alim.id,
+            subcategoria_id=sub_sup.id,
+        )
+        for f in sabados
+    ]
+    txs.append(
+        MockTransaccion(
+            date(2026, 7, 15), 12000,
+            descripcion="Delivery Sushi",
+            categoria=cat_gast,
+            subcategoria=sub_del,
+            categoria_id=cat_gast.id,
+            subcategoria_id=sub_del.id,
+        )
+    )
+    res = clasificar_cajas(txs, ipc_plano, date(2026, 9, 5), ctx=ctx_vacio)
+
+    assert len(res.dia_a_dia) == 1
+    assert res.dia_a_dia[0].nombre == "Supermercado"
+    assert res.dia_a_dia[0].ocurrencias == 13
+    assert len(res.costumbre) == 0
+
+
+def test_t21_alquiler_fijo_y_delivery_costumbre(ctx_vacio: ContextoDefiniciones, ipc_plano: dict[str, Decimal]):
+    """T21. Alquiler $400.000 el 05/06, 05/07 y 05/08/2026, más el delivery de T19. Destino 2026-09-05."""
+    sub_alq = MockSubcategoria("s-alq", "Alquiler")
+    cat_viv = MockCategoria("c-viv", "Vivienda")
+    sub_del = MockSubcategoria("s-del", "Delivery")
+    cat_gast = MockCategoria("c-gast", "Gastronomía")
+
+    txs_alq = [
+        MockTransaccion(
+            f, 400000,
+            descripcion="Alquiler Depto",
+            categoria=cat_viv,
+            subcategoria=sub_alq,
+            categoria_id=cat_viv.id,
+            subcategoria_id=sub_alq.id,
+        )
+        for f in [date(2026, 6, 5), date(2026, 7, 5), date(2026, 8, 5)]
+    ]
+    fechas_del = [
+        date(2026, 6, 3), date(2026, 6, 10), date(2026, 6, 17), date(2026, 6, 24),
+        date(2026, 7, 8), date(2026, 7, 22),
+        date(2026, 8, 5), date(2026, 8, 15), date(2026, 8, 25),
+    ]
+    txs_del = [
+        MockTransaccion(
+            f, 10000,
+            descripcion="Delivery",
+            categoria=cat_gast,
+            subcategoria=sub_del,
+            categoria_id=cat_gast.id,
+            subcategoria_id=sub_del.id,
+        )
+        for f in fechas_del
+    ]
+    res = clasificar_cajas(txs_alq + txs_del, ipc_plano, date(2026, 9, 5), ctx=ctx_vacio)
+
+    assert len(res.fijos) == 1
+    assert len(res.costumbre) == 1
+    assert res.costumbre[0].nombre == "Delivery"
+    assert len(res.dia_a_dia) == 0
+
+
+def test_t22_movimientos_fuera_de_ventana_no_califican(ctx_vacio: ContextoDefiniciones, ipc_plano: dict[str, Decimal]):
+    """T22. Delivery $10.000 el 02, 09 y 16/02 y el 02 y 09/03/2026, destino 2026-09-05: costumbre vacía."""
+    sub_del = MockSubcategoria("s-del", "Delivery")
+    cat_gast = MockCategoria("c-gast", "Gastronomía")
+    fechas = [
+        date(2026, 2, 2), date(2026, 2, 9), date(2026, 2, 16),
+        date(2026, 3, 2), date(2026, 3, 9),
+    ]
+    txs = [
+        MockTransaccion(
+            f, 10000,
+            descripcion="Delivery",
+            categoria=cat_gast,
+            subcategoria=sub_del,
+            categoria_id=cat_gast.id,
+            subcategoria_id=sub_del.id,
+        )
+        for f in fechas
+    ]
+    res = clasificar_cajas(txs, ipc_plano, date(2026, 9, 5), ctx=ctx_vacio)
+
+    assert len(res.costumbre) == 0
+
+
+def test_t23_dos_ocurrencias_no_repite(ctx_vacio: ContextoDefiniciones, ipc_plano: dict[str, Decimal]):
+    """T23. Delivery $8.000 el 10/06 y $15.000 el 10/07/2026, destino 2026-09-05: 0 fijos y costumbre vacía."""
+    sub_del = MockSubcategoria("s-del", "Delivery")
+    cat_gast = MockCategoria("c-gast", "Gastronomía")
+    txs = [
+        MockTransaccion(
+            date(2026, 6, 10), 8000,
+            descripcion="Delivery Pizza",
+            categoria=cat_gast,
+            subcategoria=sub_del,
+            categoria_id=cat_gast.id,
+            subcategoria_id=sub_del.id,
+        ),
+        MockTransaccion(
+            date(2026, 7, 10), 15000,
+            descripcion="Delivery Sushi",
+            categoria=cat_gast,
+            subcategoria=sub_del,
+            categoria_id=cat_gast.id,
+            subcategoria_id=sub_del.id,
+        ),
+    ]
+    res = clasificar_cajas(txs, ipc_plano, date(2026, 9, 5), ctx=ctx_vacio)
+
+    assert len(res.fijos) == 0
+    assert len(res.costumbre) == 0
+
