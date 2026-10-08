@@ -298,17 +298,17 @@
     },
     {
       "id": "chatgpt",
-      "nombre": "ChatGPT Plus",
+      "nombre": "ChatGPT",
       "logo": "chatgpt.png",
       "categoria": "Recreativo",
       "subcategoria": null,
       "frecuenciaDefault": "mensual",
-      "color": "#10A37F",
+      "color": "#000000",
       "colorTexto": "white",
       "variantes": [
-        "chatgpt plus",
         "chatgpt",
         "chat gpt",
+        "chatgpt plus",
         "openai"
       ],
       "categoria_sugerida": "Recreativo",
@@ -482,6 +482,290 @@
         "super duolingo"
       ],
       "categoria_sugerida": "Educación",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "claude",
+      "nombre": "Claude Pro",
+      "logo": "claude.png",
+      "categoria": "Otros",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#D97757",
+      "colorTexto": "white",
+      "variantes": [
+        "claude",
+        "claude pro",
+        "anthropic",
+        "claude ai",
+        "anthropic claude"
+      ],
+      "categoria_sugerida": "Otros",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "copilot",
+      "nombre": "Microsoft Copilot",
+      "logo": "copilot.png",
+      "categoria": "Otros",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#0078D4",
+      "colorTexto": "white",
+      "variantes": [
+        "copilot",
+        "microsoft copilot",
+        "github copilot",
+        "copilot pro"
+      ],
+      "categoria_sugerida": "Otros",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "gemini",
+      "nombre": "Google Gemini",
+      "logo": "gemini.png",
+      "categoria": "Otros",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#1A73E8",
+      "colorTexto": "white",
+      "variantes": [
+        "gemini",
+        "google gemini",
+        "gemini advanced"
+      ],
+      "categoria_sugerida": "Otros",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "googleworkspace",
+      "nombre": "Google Workspace",
+      "logo": "googleworkspace.png",
+      "categoria": "Comunicación",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#4285F4",
+      "colorTexto": "white",
+      "variantes": [
+        "google workspace",
+        "workspace",
+        "gsuite",
+        "g suite"
+      ],
+      "categoria_sugerida": "Comunicación",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "github",
+      "nombre": "GitHub",
+      "logo": "github.png",
+      "categoria": "Otros",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#181717",
+      "colorTexto": "white",
+      "variantes": [
+        "github",
+        "github pro",
+        "github team",
+        "git hub"
+      ],
+      "categoria_sugerida": "Otros",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "linkedin",
+      "nombre": "LinkedIn Premium",
+      "logo": "linkedin.png",
+      "categoria": "Otros",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#0A66C2",
+      "colorTexto": "white",
+      "variantes": [
+        "linkedin",
+        "linkedin premium",
+        "linkedin learning",
+        "linked in"
+      ],
+      "categoria_sugerida": "Otros",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "onedrive",
+      "nombre": "OneDrive",
+      "logo": "onedrive.png",
+      "categoria": "Otros",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#0078D4",
+      "colorTexto": "white",
+      "variantes": [
+        "onedrive",
+        "one drive",
+        "microsoft onedrive"
+      ],
+      "categoria_sugerida": "Otros",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "capcut",
+      "nombre": "CapCut Pro",
+      "logo": "capcut.png",
+      "categoria": "Otros",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#000000",
+      "colorTexto": "white",
+      "variantes": [
+        "capcut",
+        "capcut pro",
+        "cap cut",
+        "cupcut",
+        "cup cut"
+      ],
+      "categoria_sugerida": "Otros",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "amazonmusic",
+      "nombre": "Amazon Music",
+      "logo": "amazonmusic.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#25D1DA",
+      "colorTexto": "#111",
+      "variantes": [
+        "amazon music",
+        "amazon music unlimited"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "youtubepremium",
+      "nombre": "YouTube Premium",
+      "logo": "youtubepremium.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#FF0000",
+      "colorTexto": "white",
+      "variantes": [
+        "youtube premium",
+        "yt premium",
+        "youtube red"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "rakutenviki",
+      "nombre": "Rakuten Viki",
+      "logo": "rakutenviki.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#0099FF",
+      "colorTexto": "white",
+      "variantes": [
+        "rakuten viki",
+        "viki",
+        "viki pass",
+        "rakuten"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "twitch",
+      "nombre": "Twitch",
+      "logo": "twitch.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#9146FF",
+      "colorTexto": "white",
+      "variantes": [
+        "twitch",
+        "twitch sub",
+        "twitch prime",
+        "twich"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "kick",
+      "nombre": "Kick",
+      "logo": "kick.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#53FC18",
+      "colorTexto": "#111",
+      "variantes": [
+        "kick",
+        "kick.com",
+        "kick sub"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "ubisoft",
+      "nombre": "Ubisoft+",
+      "logo": "ubisoft.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#0070FF",
+      "colorTexto": "white",
+      "variantes": [
+        "ubisoft",
+        "ubisoft+",
+        "ubisoft plus",
+        "uplay"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "discord",
+      "nombre": "Discord Nitro",
+      "logo": "discord.png",
+      "categoria": "Recreativo",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#5865F2",
+      "colorTexto": "white",
+      "variantes": [
+        "discord",
+        "discord nitro",
+        "nitro"
+      ],
+      "categoria_sugerida": "Recreativo",
+      "frecuencia_tipica": "mensual"
+    },
+    {
+      "id": "meli",
+      "nombre": "Meli+",
+      "logo": "meli.png",
+      "categoria": "Otros",
+      "subcategoria": null,
+      "frecuenciaDefault": "mensual",
+      "color": "#FFE600",
+      "colorTexto": "#111",
+      "variantes": [
+        "meli+",
+        "meli plus",
+        "meli",
+        "mercado libre nivel 6",
+        "mercadolibre nivel 6"
+      ],
+      "categoria_sugerida": "Otros",
       "frecuencia_tipica": "mensual"
     },
     {
