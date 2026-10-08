@@ -343,7 +343,7 @@ def _construir_prompt_sistema_extraccion(
         "- Montos: los montos en documentos argentinos usan punto de miles y coma decimal. Devolvé el número como número positivo sin separador de miles y con punto decimal (ejemplo: 18450.50).\n"
         "- Fechas: devolver fecha en formato YYYY-MM-DD si es legible; si no es visible o no se puede resolver, devolver null.\n"
         "- Sentido y verbos: verbos como 'Pagaste', 'Transferiste', 'Enviaste' indican 'egreso'. Verbos como 'Te transfirieron', 'Recibiste', 'Cobraste', 'Ingreso de dinero' o equivalentes indican 'ingreso'. Acreditaciones de intereses o rendimientos de una billetera o fondo (ej. 'Rendimientos', 'Acreditación de rendimiento'): 'sentido' es 'rendimiento'. Reintegros y devoluciones son 'ingreso'.\n"
-        "- Descripción: descripcion es SOLO el nombre del comercio o persona tal como aparece (sin 'Pagaste', 'Transferiste', 'Te transfirieron', 'Compra en', sin montos, sin CUIT, CBU ni teléfonos ajenos). En facturas de servicio, la descripción es el nombre corto de la empresa (ej: EPE, Litoral Gas, Personal), sin \"S.A.\" ni dirección.\n"
+        "- Descripción: descripcion es SOLO el nombre del comercio o persona tal como aparece (sin 'Pagaste', 'Transferiste', 'Te transfirieron', 'Compra en', sin montos, sin CUIT, CBU ni teléfonos ajenos). En facturas de servicio, la descripción es la marca que el cliente reconoce (la del logo o el servicio), no la razón social, y si tiene una sigla conocida va la sigla (ej: 'Empresa Provincial de la Energía de Santa Fe' → 'EPE'; Telecom Argentina con marca Personal → 'Personal'; 'Litoral Gas S.A.' → 'Litoral Gas'), sin 'S.A.' ni dirección.\n"
         "- Subtítulo y tipo de operación: 'tipo_operacion' es el subtítulo tal cual si existe (ej: 'Transferencia recibida', 'Transferencia enviada', 'Compra', 'Pago en tienda física', 'Pago automático', 'Pago'); en 'Ingreso de dinero' donde no hay subtítulo, devolver null.\n"
         "- Medio de pago: 'medio_pago' es el texto del medio de pago tal cual si figura en el renglón o columna (ej: 'Dinero disponible', 'Mastercard débito', 'Mastercard crédito', 'Con transferencia'); si no figura, devolver null.\n"
         "- Estado: 'estado' es el estado de la operación tal cual (ej: 'Aprobado', 'Rechazado', 'Cancelado'); si no figura, devolver null.\n"
@@ -428,7 +428,22 @@ def _procesar_y_validar_respuesta_extraccion(
             if norm_c in cat_map_norm:
                 cat_final = cat_map_norm[norm_c]
 
-        if sentido_raw == "rendimiento":
+        if doc_tipo == "factura_servicio":
+            movs_validos.append(
+                MovimientoExtraido(
+                    fecha=fecha_obj,
+                    monto=monto_dec,
+                    moneda=moneda_str,
+                    descripcion=desc_str or "Varios",
+                    sentido="egreso",
+                    categoria=cat_final,
+                    tipo_operacion=tipo_op,
+                    medio_pago=medio_p,
+                    estado=est,
+                    contraparte_es_usuario=es_usuario,
+                )
+            )
+        elif sentido_raw == "rendimiento":
             rendimientos_validos.append(
                 MovimientoExtraido(
                     fecha=fecha_obj,
@@ -477,9 +492,6 @@ def _procesar_y_validar_respuesta_extraccion(
     if not movs_validos and not rendimientos_validos and not omitidos:
         return None, "ILEGIBLE"
 
-    total_vistos = len(movs_validos)
-    movs_top10 = movs_validos[:10]
-
     venc_obj: date | None = None
     cuotas_validas: list[CuotaExtraida] = []
 
@@ -508,6 +520,13 @@ def _procesar_y_validar_respuesta_extraccion(
         if cuotas_invalida:
             cuotas_validas = []
             venc_obj = None
+        elif cuotas_validas and len(movs_validos) == 1:
+            cuota_temprana = min(cuotas_validas, key=lambda c: c.vencimiento)
+            movs_validos[0].monto = cuota_temprana.monto
+            venc_obj = cuota_temprana.vencimiento
+
+    total_vistos = len(movs_validos)
+    movs_top10 = movs_validos[:10]
 
     resultado = ResultadoExtraccion(
         documento_tipo=doc_tipo,

@@ -385,3 +385,253 @@ def test_descargar_documento_meta_cliente_falso():
         assert b3 is None
         assert err3 == "TAMANO_EXCEDIDO"
         assert mock_client3.get.call_count == 2
+
+
+# =============================================================================
+# C1. Validaciones de _procesar_y_validar_respuesta_extraccion (Fase 4c2b1_c)
+# =============================================================================
+
+def test_factura_servicio_contraparte_usuario_no_se_omite():
+    """C1.1: Factura de servicio con contraparte_es_usuario=True: el movimiento queda, sin omitidos."""
+    hoy = hoy_argentina()
+    data = {
+        "legible": True,
+        "documento_tipo": "factura_servicio",
+        "billetera_texto": None,
+        "vencimiento": hoy.isoformat(),
+        "movimientos": [
+            {
+                "fecha": hoy.isoformat(),
+                "monto": 101807.80,
+                "moneda": "ARS",
+                "descripcion": "Personal",
+                "sentido": "egreso",
+                "categoria": None,
+                "tipo_operacion": None,
+                "medio_pago": None,
+                "estado": None,
+                "contraparte_es_usuario": True,
+            }
+        ],
+        "cuotas": [],
+    }
+    res, err = _procesar_y_validar_respuesta_extraccion(data, None, hoy)
+    assert err is None
+    assert res is not None
+    assert len(res.movimientos) == 1
+    assert res.omitidos == []
+    assert res.movimientos[0].contraparte_es_usuario is True
+    assert res.movimientos[0].sentido == "egreso"
+
+
+def test_factura_servicio_medio_pago_credito_no_se_omite():
+    """C1.2: Factura de servicio con medio_pago='Visa crédito': el movimiento queda, sin omitidos."""
+    hoy = hoy_argentina()
+    data = {
+        "legible": True,
+        "documento_tipo": "factura_servicio",
+        "billetera_texto": None,
+        "vencimiento": hoy.isoformat(),
+        "movimientos": [
+            {
+                "fecha": hoy.isoformat(),
+                "monto": 101807.80,
+                "moneda": "ARS",
+                "descripcion": "Personal",
+                "sentido": "egreso",
+                "categoria": None,
+                "tipo_operacion": None,
+                "medio_pago": "Visa crédito",
+                "estado": None,
+                "contraparte_es_usuario": False,
+            }
+        ],
+        "cuotas": [],
+    }
+    res, err = _procesar_y_validar_respuesta_extraccion(data, None, hoy)
+    assert err is None
+    assert res is not None
+    assert len(res.movimientos) == 1
+    assert res.omitidos == []
+    assert res.movimientos[0].medio_pago == "Visa crédito"
+    assert res.movimientos[0].sentido == "egreso"
+
+
+def test_factura_servicio_estado_pendiente_no_se_omite():
+    """C1.3: Factura de servicio con estado='Pendiente': el movimiento queda, sin omitidos."""
+    hoy = hoy_argentina()
+    data = {
+        "legible": True,
+        "documento_tipo": "factura_servicio",
+        "billetera_texto": None,
+        "vencimiento": hoy.isoformat(),
+        "movimientos": [
+            {
+                "fecha": hoy.isoformat(),
+                "monto": 101807.80,
+                "moneda": "ARS",
+                "descripcion": "Personal",
+                "sentido": "egreso",
+                "categoria": None,
+                "tipo_operacion": None,
+                "medio_pago": None,
+                "estado": "Pendiente",
+                "contraparte_es_usuario": False,
+            }
+        ],
+        "cuotas": [],
+    }
+    res, err = _procesar_y_validar_respuesta_extraccion(data, None, hoy)
+    assert err is None
+    assert res is not None
+    assert len(res.movimientos) == 1
+    assert res.omitidos == []
+    assert res.movimientos[0].estado == "Pendiente"
+    assert res.movimientos[0].sentido == "egreso"
+
+
+def test_factura_servicio_sentido_ingreso_queda_egreso():
+    """C1.4: Factura de servicio con sentido='ingreso': queda como egreso."""
+    hoy = hoy_argentina()
+    data = {
+        "legible": True,
+        "documento_tipo": "factura_servicio",
+        "billetera_texto": None,
+        "vencimiento": hoy.isoformat(),
+        "movimientos": [
+            {
+                "fecha": hoy.isoformat(),
+                "monto": 101807.80,
+                "moneda": "ARS",
+                "descripcion": "Personal",
+                "sentido": "ingreso",
+                "categoria": None,
+                "tipo_operacion": None,
+                "medio_pago": None,
+                "estado": None,
+                "contraparte_es_usuario": False,
+            }
+        ],
+        "cuotas": [],
+    }
+    res, err = _procesar_y_validar_respuesta_extraccion(data, None, hoy)
+    assert err is None
+    assert res is not None
+    assert len(res.movimientos) == 1
+    assert res.omitidos == []
+    assert res.movimientos[0].sentido == "egreso"
+
+
+def test_captura_actividad_contraparte_usuario_sigue_omitida():
+    """C1.5: Captura de actividad con contraparte_es_usuario=True: sigue omitida como hoy."""
+    hoy = hoy_argentina()
+    data = {
+        "legible": True,
+        "documento_tipo": "captura_actividad",
+        "billetera_texto": "Mercado Pago",
+        "vencimiento": None,
+        "movimientos": [
+            {
+                "fecha": hoy.isoformat(),
+                "monto": 5000.0,
+                "moneda": "ARS",
+                "descripcion": "Sebastián Giordanino",
+                "sentido": "egreso",
+                "categoria": None,
+                "tipo_operacion": None,
+                "medio_pago": None,
+                "estado": None,
+                "contraparte_es_usuario": True,
+            }
+        ],
+        "cuotas": [],
+    }
+    res, err = _procesar_y_validar_respuesta_extraccion(data, None, hoy)
+    assert err is None
+    assert res is not None
+    assert res.movimientos == []
+    assert len(res.omitidos) == 1
+    assert res.omitidos[0]["motivo"] == "pase_propio"
+
+
+def test_factura_servicio_un_movimiento_con_cuotas_toma_primera():
+    """C1.6: Factura de servicio con 1 movimiento de 155194.88 y cuotas (hoy+36, hoy+6) toma hoy+6."""
+    hoy = hoy_argentina()
+    data = {
+        "legible": True,
+        "documento_tipo": "factura_servicio",
+        "billetera_texto": None,
+        "vencimiento": (hoy + timedelta(days=36)).isoformat(),
+        "movimientos": [
+            {
+                "fecha": hoy.isoformat(),
+                "monto": 155194.88,
+                "moneda": "ARS",
+                "descripcion": "EPE",
+                "sentido": "egreso",
+                "categoria": None,
+                "tipo_operacion": None,
+                "medio_pago": None,
+                "estado": None,
+                "contraparte_es_usuario": False,
+            }
+        ],
+        "cuotas": [
+            {"vencimiento": (hoy + timedelta(days=36)).isoformat(), "monto": 77597.44},
+            {"vencimiento": (hoy + timedelta(days=6)).isoformat(), "monto": 77597.44},
+        ],
+    }
+    res, err = _procesar_y_validar_respuesta_extraccion(data, None, hoy)
+    assert err is None
+    assert res is not None
+    assert len(res.movimientos) == 1
+    assert res.movimientos[0].monto == Decimal("77597.44")
+    assert res.vencimiento == hoy + timedelta(days=6)
+
+
+def test_factura_servicio_dos_movimientos_con_cuotas_no_cambian_montos():
+    """C1.7: Factura de servicio con 2 movimientos y cuotas: los montos no cambian."""
+    hoy = hoy_argentina()
+    data = {
+        "legible": True,
+        "documento_tipo": "factura_servicio",
+        "billetera_texto": None,
+        "vencimiento": (hoy + timedelta(days=36)).isoformat(),
+        "movimientos": [
+            {
+                "fecha": hoy.isoformat(),
+                "monto": 155194.88,
+                "moneda": "ARS",
+                "descripcion": "EPE 1",
+                "sentido": "egreso",
+                "categoria": None,
+                "tipo_operacion": None,
+                "medio_pago": None,
+                "estado": None,
+                "contraparte_es_usuario": False,
+            },
+            {
+                "fecha": hoy.isoformat(),
+                "monto": 20000.00,
+                "moneda": "ARS",
+                "descripcion": "EPE 2",
+                "sentido": "egreso",
+                "categoria": None,
+                "tipo_operacion": None,
+                "medio_pago": None,
+                "estado": None,
+                "contraparte_es_usuario": False,
+            },
+        ],
+        "cuotas": [
+            {"vencimiento": (hoy + timedelta(days=36)).isoformat(), "monto": 77597.44},
+            {"vencimiento": (hoy + timedelta(days=6)).isoformat(), "monto": 77597.44},
+        ],
+    }
+    res, err = _procesar_y_validar_respuesta_extraccion(data, None, hoy)
+    assert err is None
+    assert res is not None
+    assert len(res.movimientos) == 2
+    assert res.movimientos[0].monto == Decimal("155194.88")
+    assert res.movimientos[1].monto == Decimal("20000.00")
+

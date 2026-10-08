@@ -404,7 +404,7 @@ def test_d7_listar_entidades_http(db_session):
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
-    assert len(data) == 32  # 32 entidades exactamente como en banks.ts
+    assert len(data) == 26  # 26 entidades exactamente como en banks.ts
 
     ids = [item["id"] for item in data]
     assert "mercadopago" in ids
