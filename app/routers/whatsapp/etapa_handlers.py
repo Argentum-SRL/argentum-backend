@@ -113,6 +113,7 @@ def procesar_estados_y_handlers_deterministicos(ctx: ContextoMensaje) -> None:
 
                 entidades_nuevas = dict(propuesta_pendiente.entidades)
                 entidades_nuevas[clave_bill] = b_nueva.nombre
+                entidades_nuevas["billetera"] = b_nueva.nombre
                 entidades_nuevas.pop(clave_otra, None)
 
                 nuevo_msg = _construir_propuesta_transaccion(
@@ -145,6 +146,12 @@ def procesar_estados_y_handlers_deterministicos(ctx: ContextoMensaje) -> None:
 
     # Chequeo determinístico de cancelación para aporte a meta
     if manejar_cancelacion_aporte_meta(mensaje_texto, usuario, db, from_number, wamid=wamid):
+        ctx.terminado = True
+        return
+
+    # Factura con vencimiento no pagada (Fase 4c2b2b)
+    from app.routers.whatsapp.factura_wpp import manejar_factura_no_pagada
+    if manejar_factura_no_pagada(mensaje_texto, usuario, db, from_number, wamid=wamid):
         ctx.terminado = True
         return
 

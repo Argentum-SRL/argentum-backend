@@ -29,11 +29,13 @@ def obtener_conteos_base(db: Session, usuario_id: uuid.UUID | None = None):
     tr_cnt = db.execute(select(func.count(TransferenciaInterna.id)).where(TransferenciaInterna.usuario_id == usuario_id)).scalar()
     mm_cnt = db.execute(select(func.count(MovimientoMeta.id)).join(Meta, MovimientoMeta.meta_id == Meta.id).where(Meta.usuario_id == usuario_id)).scalar()
     msg_cnt = db.execute(select(text("count(*)")).select_from(text("mensajes_whatsapp_procesados")).where(text("wamid LIKE 'wamid_reg_%'"))).scalar()
+    from app.models.factura import Factura
+    fac_cnt = db.execute(select(func.count(Factura.id)).where(Factura.usuario_id == usuario_id)).scalar()
     saldos = {
         str(b.id): b.saldo_actual
         for b in db.execute(select(Billetera).where(Billetera.usuario_id == usuario_id).order_by(Billetera.id)).scalars().all()
     }
-    return {"tx": tx_cnt, "conv": conv_cnt, "tr": tr_cnt, "mm": mm_cnt, "msg": msg_cnt, "saldos": saldos}
+    return {"tx": tx_cnt, "conv": conv_cnt, "tr": tr_cnt, "mm": mm_cnt, "msg": msg_cnt, "facturas": fac_cnt, "saldos": saldos}
 
 
 def obtener_saldos_21(db: Session):

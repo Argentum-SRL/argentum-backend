@@ -758,6 +758,21 @@ def _confirmar_propuesta_transaccion(
 
     msg_resp += _anotar_rendimientos_confirmados(db, usuario, entidades)
 
+    factura_data = (conv_previa.entidades or {}).get("factura") if conv_previa else entidades.get("factura")
+    if factura_data and isinstance(factura_data, dict) and factura_data.get("vencimientos"):
+        from app.routers.whatsapp.factura_wpp import registrar_cuotas_restantes
+
+        aviso_cuotas = registrar_cuotas_restantes(
+            db=db,
+            usuario_id=usuario.id,
+            factura_data=factura_data,
+            categoria_id=categoria_id,
+            subcategoria_id=subcategoria_id,
+            moneda=transaccion.moneda,
+        )
+        if aviso_cuotas:
+            msg_resp += aviso_cuotas
+
     return transaccion, msg_resp, False
 
 

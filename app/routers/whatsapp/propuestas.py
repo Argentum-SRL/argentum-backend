@@ -146,6 +146,18 @@ def _construir_propuesta_transaccion(
     if b_nom_0 and not b_mon_0:
         b_mon_0 = Moneda.USD if "usd" in b_nom_0.lower() else Moneda.ARS
 
+    factura_data = entidades.get("factura")
+    if factura_data and isinstance(factura_data, dict) and factura_data.get("vencimientos"):
+        from app.routers.whatsapp.factura_wpp import texto_propuesta_factura
+
+        return texto_propuesta_factura(
+            entidades=entidades,
+            billetera_nombre=b_nom_0,
+            se_asumio_principal=se_asumio_principal,
+            billetera_moneda=b_mon_0,
+            billeteras_usuario=billeteras_usuario,
+        )
+
     # 1. Validar ítem principal
     item_ppal = {
         "monto": entidades.get("monto"),

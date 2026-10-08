@@ -531,6 +531,8 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                         camino="B",
                         solo_rendimientos=True,
                         omitidos=omitidos,
+                        es_pdf=ctx.es_pdf,
+                        extraccion=ctx.extraccion,
                     )
                 elif not tiene_movimientos_comunes and not tiene_rendimientos_extraidos:
                     ctx.resultado_ia = armar_resultado_ia_documento(
@@ -546,6 +548,8 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                         camino="B",
                         solo_rendimientos=False,
                         omitidos=omitidos,
+                        es_pdf=ctx.es_pdf,
+                        extraccion=ctx.extraccion,
                     )
                 else:
                     aplicar_marcas_y_memoria(db, usuario.id, entidades_raw)
@@ -566,6 +570,8 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                         camino="B",
                         solo_rendimientos=False,
                         omitidos=omitidos,
+                        es_pdf=ctx.es_pdf,
+                        extraccion=ctx.extraccion,
                     )
             else:
                 # Etapa 3: Estados pendientes y handlers determinísticos

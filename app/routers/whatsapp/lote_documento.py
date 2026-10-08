@@ -418,11 +418,13 @@ def armar_resultado_ia_documento(
     camino: str = "B",
     solo_rendimientos: bool = False,
     omitidos: list[dict[str, Any]] | None = None,
+    es_pdf: bool = False,
+    extraccion: Any = None,
 ) -> dict[str, Any]:
     """
     Construye el dict resultado_ia para un documento o imagen con extracción estructurada.
     Aplica las reglas de decisiones 3 (tope 10), 5 (avisos de duplicados y omitidos),
-    7 (factura de servicios) y rendimientos (decisiones 4, 7 y 9).
+    7 (factura de servicios), rendimientos y facturas con vencimiento (Fase 4c2b2b).
     """
     lineas_omitidos = formatear_lineas_omitidos(omitidos)
 
@@ -465,6 +467,37 @@ def armar_resultado_ia_documento(
             "respuesta_usuario": "Ya tenías cargado todo lo que veo en la imagen.",
         }
 
+    # Decisión 1 (Fase 4c2b2b): Factura con vencimiento
+    adicionales = entidades.get("transacciones_adicionales", []) if isinstance(entidades, dict) else []
+    es_1_movimiento = tiene_comunes and not adicionales
+    if documento_tipo == "factura_servicio" and es_1_movimiento:
+        cuotas = getattr(extraccion, "cuotas", []) or [] if extraccion is not None else []
+        venc = getattr(extraccion, "vencimiento", None) if extraccion is not None else None
+
+        vencimientos_list: list[dict[str, str]] = []
+        if cuotas:
+            for c in cuotas:
+                c_venc = getattr(c, "vencimiento", None) if not isinstance(c, dict) else c.get("vencimiento")
+                c_monto = getattr(c, "monto", None) if not isinstance(c, dict) else c.get("monto")
+                if c_venc is not None and c_monto is not None:
+                    f_iso = c_venc.isoformat() if hasattr(c_venc, "isoformat") else str(c_venc)
+                    vencimientos_list.append({"fecha": f_iso, "monto": str(c_monto)})
+        elif venc is not None:
+            f_iso = venc.isoformat() if hasattr(venc, "isoformat") else str(venc)
+            vencimientos_list.append({"fecha": f_iso, "monto": str(entidades.get("monto"))})
+
+        if vencimientos_list:
+            vencimientos_list = sorted(vencimientos_list, key=lambda x: x["fecha"])
+            empresa = entidades.get("descripcion") or "Servicio"
+            origen = "whatsapp_pdf" if es_pdf else "whatsapp_foto"
+            entidades["factura"] = {
+                "empresa": empresa,
+                "origen": origen,
+                "vencimientos": vencimientos_list,
+            }
+            entidades["monto"] = float(vencimientos_list[0]["monto"])
+            entidades["fecha"] = hoy_argentina().isoformat()
+
     texto_propuesta = _construir_propuesta_transaccion(
         entidades,
         billetera_nombre=billetera_nombre,
@@ -472,8 +505,8 @@ def armar_resultado_ia_documento(
         billeteras_usuario=billeteras_usuario,
     )
 
-    # Decisión 7: Factura de servicios
-    if documento_tipo == "factura_servicio":
+    # Decisión 7: Factura de servicios (solo si no tiene vencimientos)
+    if documento_tipo == "factura_servicio" and not entidades.get("factura"):
         texto_propuesta += "\nSi todavía no la pagaste, respondé no y no la cargo."
 
     # Decisión 5: Avisos de movimientos duplicados descartados

@@ -234,3 +234,51 @@ def fecha_solo_fiscal(fecha: date | str | None, texto: str) -> bool:
 
     return True
 
+
+def vencimiento_por_texto(texto: str) -> date | None:
+    """
+    Busca las fechas dd/mm/aaaa cuyo texto anterior (hasta 30 caracteres, sin los
+    espacios ni saltos del final) termina, sin importar mayúsculas ni tildes, en
+    "pagar hasta", "pagar hasta el", "vence el", "vence el dia", "vencimiento",
+    "vencimiento:" o "fecha de vencimiento:".
+    Descarta las que fecha_solo_fiscal marca.
+    Si queda exactamente una fecha distinta, la devuelve; si no, devuelve None.
+    """
+    if not texto:
+        return None
+
+    import unicodedata
+
+    terminaciones = (
+        "pagar hasta",
+        "pagar hasta el",
+        "vence el",
+        "vence el dia",
+        "vencimiento",
+        "vencimiento:",
+        "fecha de vencimiento:",
+    )
+
+    patron_fecha = re.compile(r"(?<!\d)(\d{1,2})/(\d{1,2})/(\d{4})(?!\d)")
+    fechas_candidatas: set[date] = set()
+
+    for m in patron_fecha.finditer(texto):
+        try:
+            d = date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+        except (ValueError, TypeError):
+            continue
+
+        start_idx = m.start()
+        ant = texto[max(0, start_idx - 30) : start_idx].rstrip(" \t\r\n")
+        ant_nfd = unicodedata.normalize("NFD", ant)
+        ant_sin_tildes = "".join(c for c in ant_nfd if unicodedata.category(c) != "Mn").lower()
+
+        if any(ant_sin_tildes.endswith(term) for term in terminaciones):
+            if not fecha_solo_fiscal(d, texto):
+                fechas_candidatas.add(d)
+
+    if len(fechas_candidatas) == 1:
+        return next(iter(fechas_candidatas))
+
+    return None
+
