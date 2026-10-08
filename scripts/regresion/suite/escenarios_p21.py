@@ -15,15 +15,12 @@ from __future__ import annotations
 
 from datetime import timedelta
 from decimal import Decimal
-import json
 import time
 from unittest.mock import patch
-import uuid
 
-from sqlalchemy import func, select, text
+from sqlalchemy import select, text
 
 from app.models.billetera import Billetera
-from app.models.categoria import Categoria
 from app.models.factura import Factura
 from app.models.subcategoria import Subcategoria
 from app.models.transaccion import Transaccion

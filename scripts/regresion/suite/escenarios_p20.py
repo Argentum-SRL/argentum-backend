@@ -145,13 +145,17 @@ def p20_caso_1(datos):
 
     def test(conn, Session, respuestas):
         _preparar_base_escenario(conn, u.id)
+        from app.models.factura import Factura
         tx_ids_antes = set(conn.execute(select(Transaccion.id).where(Transaccion.usuario_id == u.id)).scalars().all())
+        fac_ids_antes = set(conn.execute(select(Factura.id).where(Factura.usuario_id == u.id)).scalars().all())
         txs_antes = len(tx_ids_antes)
 
         venc1 = hoy + timedelta(days=6)
         venc2 = hoy + timedelta(days=36)
         f1_str = venc1.strftime("%d/%m/%Y")
         f2_str = venc2.strftime("%d/%m/%Y")
+        f1 = venc1.strftime("%d/%m")
+        f2 = venc2.strftime("%d/%m")
 
         lineas = [
             "Empresa Provincial de la Energia de Santa Fe EPE",
@@ -189,36 +193,55 @@ def p20_caso_1(datos):
 
         resp1 = respuestas[-1][1] if respuestas else ""
         esperado_resp1 = (
-            "Voy a anotar $77.597,44 en Luz desde Galicia. ¿Va?\n"
+            f"Factura de EPE en 2 cuotas de $77.597,44: vencen el {f1} y el {f2}.\n"
+            "¿Ya pagaste la primera? Si me decís que sí, la anoto como gasto de hoy en Luz desde Galicia y te anoto la segunda en la web.\n"
             "Si fue con otra, decime cuál.\n"
-            "Si todavía no la pagaste, respondé no y no la cargo."
+            "Si me decís que no, te anoto las dos en la web para que no se te pasen."
         )
         propuesta_ok = resp1 == esperado_resp1
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
-        esperado_resp2 = "Listo. $77.597,44 en Luz desde Galicia — registrado."
+        esperado_resp2 = (
+            f"Listo. $77.597,44 en Luz desde Galicia — registrado.\n"
+            f"Te anoté la segunda cuota ($77.597,44, vence el {f2}) en la web."
+        )
         registrado_ok = resp2 == esperado_resp2
 
         db = Session()
-        tx = db.execute(
+        nuevas_txs = db.execute(
             select(Transaccion).where(Transaccion.usuario_id == u.id, Transaccion.id.not_in(tx_ids_antes))
-        ).scalars().first()
+        ).scalars().all()
+        nuevas_facs = db.execute(
+            select(Factura).where(Factura.usuario_id == u.id, Factura.id.not_in(fac_ids_antes))
+        ).scalars().all()
+
+        tx = nuevas_txs[0] if nuevas_txs else None
         cat = db.get(Categoria, tx.categoria_id) if tx and tx.categoria_id else None
         subcat = db.get(Subcategoria, tx.subcategoria_id) if tx and tx.subcategoria_id else None
+
+        fac = nuevas_facs[0] if nuevas_facs else None
         db.close()
 
         txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         txs_creadas = txs_despues - txs_antes
 
-        tx_ok = (
+        mov_ok = (
             txs_creadas == 1
             and tx is not None
             and tx.monto == Decimal("77597.44")
             and cat is not None and cat.nombre == "Vivienda"
             and subcat is not None and subcat.nombre == "Luz"
         )
+        fac_ok = (
+            len(nuevas_facs) == 1
+            and fac is not None
+            and fac.monto == Decimal("77597.44")
+            and fac.fecha_vencimiento == venc2
+            and fac.estado == "pendiente"
+        )
+        tx_ok = mov_ok and fac_ok
 
         return f"Propuesta: {propuesta_ok} | Registrado tras sí: {registrado_ok} | Movimiento Luz: {tx_ok}"
 

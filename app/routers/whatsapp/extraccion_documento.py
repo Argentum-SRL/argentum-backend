@@ -712,12 +712,10 @@ def extraer_movimientos_de_texto_pdf(
             if resultado.vencimiento is not None and fecha_solo_fiscal(resultado.vencimiento, texto):
                 resultado.vencimiento = None
 
-            ia_dio_venc = bool(data.get("vencimiento"))
             if (
                 resultado.documento_tipo == "factura_servicio"
                 and not resultado.cuotas
                 and resultado.vencimiento is None
-                and not ia_dio_venc
             ):
                 from app.routers.whatsapp.pdf_documento import vencimiento_por_texto
 

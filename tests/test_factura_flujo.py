@@ -64,18 +64,18 @@ def test_texto_propuesta_un_vencimiento_fechas_y_asuncion():
     }
     txt_hoy_asum = texto_propuesta_factura(ent_hoy, billetera_nombre="Galicia", se_asumio_principal=True)
     esp_hoy_asum = (
-        f"Factura de Aguas Santafesinas por $12.345,67, vence hoy.\n"
-        f"¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy en Agua desde Galicia.\n"
-        f"Si fue con otra, decime cuál.\n"
-        f"Si me decís que no, te la anoto en la web para que no se te pase."
+        "Factura de Aguas Santafesinas por $12.345,67, vence hoy.\n"
+        "¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy en Agua desde Galicia.\n"
+        "Si fue con otra, decime cuál.\n"
+        "Si me decís que no, te la anoto en la web para que no se te pase."
     )
     assert txt_hoy_asum == esp_hoy_asum
 
     txt_hoy_no_asum = texto_propuesta_factura(ent_hoy, billetera_nombre="Galicia", se_asumio_principal=False)
     esp_hoy_no_asum = (
-        f"Factura de Aguas Santafesinas por $12.345,67, vence hoy.\n"
-        f"¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy en Agua desde Galicia.\n"
-        f"Si me decís que no, te la anoto en la web para que no se te pase."
+        "Factura de Aguas Santafesinas por $12.345,67, vence hoy.\n"
+        "¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy en Agua desde Galicia.\n"
+        "Si me decís que no, te la anoto en la web para que no se te pase."
     )
     assert txt_hoy_no_asum == esp_hoy_no_asum
 

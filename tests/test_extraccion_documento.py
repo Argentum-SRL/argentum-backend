@@ -1103,8 +1103,8 @@ def test_extraer_movimientos_de_texto_pdf_argumentos_y_vencimiento_fiscal():
         cat_enum = resp_fmt["json_schema"]["schema"]["properties"]["movimientos"]["items"]["properties"]["categoria"]["enum"]
         assert cat_enum == ["Luz", "Gas", None]
 
-        # si la respuesta trae vencimiento 2026-10-07 (fiscal en ese texto), el resultado tiene vencimiento None
-        assert res.vencimiento is None
+        # si la respuesta trae vencimiento 2026-10-07 (fiscal en ese texto), el extractor rescata 2026-10-13 del texto
+        assert res.vencimiento == date(2026, 10, 13)
 
     # Caso 2: respuesta con vencimiento 2026-10-13 (no fiscal)
     mock_payload_real = dict(mock_payload_fiscal)
@@ -1126,6 +1126,115 @@ def test_extraer_movimientos_de_texto_pdf_argumentos_y_vencimiento_fiscal():
 
         # si trae 2026-10-13, queda 2026-10-13
         assert res.vencimiento == date(2026, 10, 13)
+
+
+def test_extraer_movimientos_de_texto_pdf_vencimiento_texto_tres_casos():
+    """B1: Prueba los tres casos de vencimiento por texto con OpenAI falso y fechas relativas a hoy_argentina()."""
+    import json
+    from datetime import timedelta
+    from unittest.mock import MagicMock, patch
+    from app.routers.whatsapp.extraccion_documento import extraer_movimientos_de_texto_pdf
+    from app.utils.fecha import hoy_argentina
+
+    hoy = hoy_argentina()
+    # Fecha fiscal dentro de ventana pero marcada por C.E.S.P.
+    f_fisc = hoy - timedelta(days=1)
+    f_fisc_str = f_fisc.strftime("%d/%m/%Y")
+    f_fisc_iso = f_fisc.isoformat()
+
+    # Fecha real de pago dentro de la ventana (ej: hoy + 5 días)
+    f_real = hoy + timedelta(days=5)
+    f_real_str = f_real.strftime("%d/%m/%Y")
+
+    categorias = ["Gas", "Luz"]
+
+    def _make_payload(venc):
+        return {
+            "legible": True,
+            "documento_tipo": "factura_servicio",
+            "billetera_texto": None,
+            "vencimiento": venc,
+            "movimientos": [
+                {
+                    "fecha": hoy.isoformat(),
+                    "monto": 25015.01,
+                    "moneda": "ARS",
+                    "descripcion": "Litoral Gas",
+                    "sentido": "egreso",
+                    "categoria": "Gas",
+                    "tipo_operacion": None,
+                    "medio_pago": None,
+                    "estado": None,
+                    "contraparte_es_usuario": False,
+                }
+            ],
+            "cuotas": [],
+        }
+
+    # Caso 1: La IA da fecha fiscal y el texto tiene C.E.S.P. con fecha fiscal y TOTAL A PAGAR hasta el ... -> vencimiento real
+    texto_1 = (
+        "Factura de prueba Litoral Gas\n"
+        f"C.E.S.P. Nro.: 37390006516961\nF.Vto.: {f_fisc_str}\n"
+        f"TOTAL A PAGAR hasta el {f_real_str} $ 25.015,01\n"
+        "Texto de relleno para superar el umbral de caracteres requeridos por el extractor de pdf."
+    )
+    mock_resp1 = MagicMock()
+    mock_resp1.choices = [MagicMock(message=MagicMock(content=json.dumps(_make_payload(f_fisc_iso))))]
+    mock_resp1.usage.prompt_tokens = 100
+    mock_resp1.usage.completion_tokens = 50
+
+    with patch("app.routers.whatsapp.extraccion_documento.get_openai_client") as mock_client_factory:
+        mock_client = MagicMock()
+        mock_client_factory.return_value = mock_client
+        mock_client.chat.completions.create.return_value = mock_resp1
+
+        res1, err1 = extraer_movimientos_de_texto_pdf(texto_1, categorias_usuario=categorias)
+        assert err1 is None
+        assert res1 is not None
+        assert res1.vencimiento == f_real
+
+    # Caso 2: La IA da fecha fiscal y el texto no tiene ninguna fecha después de pagar hasta, vence el ni vencimiento -> None
+    texto_2 = (
+        "Factura de prueba Litoral Gas\n"
+        f"C.E.S.P. Nro.: 37390006516961\nF.Vto.: {f_fisc_str}\n"
+        "Importe total a abonar $ 25.015,01 sin mención de fecha posterior.\n"
+        "Texto de relleno para superar el umbral de caracteres requeridos por el extractor de pdf."
+    )
+    mock_resp2 = MagicMock()
+    mock_resp2.choices = [MagicMock(message=MagicMock(content=json.dumps(_make_payload(f_fisc_iso))))]
+    mock_resp2.usage.prompt_tokens = 100
+    mock_resp2.usage.completion_tokens = 50
+
+    with patch("app.routers.whatsapp.extraccion_documento.get_openai_client") as mock_client_factory:
+        mock_client = MagicMock()
+        mock_client_factory.return_value = mock_client
+        mock_client.chat.completions.create.return_value = mock_resp2
+
+        res2, err2 = extraer_movimientos_de_texto_pdf(texto_2, categorias_usuario=categorias)
+        assert err2 is None
+        assert res2 is not None
+        assert res2.vencimiento is None
+
+    # Caso 3: La IA da null y el texto tiene TOTAL A PAGAR hasta el ... -> vencimiento real
+    texto_3 = (
+        "Factura de prueba Litoral Gas\n"
+        f"TOTAL A PAGAR hasta el {f_real_str} $ 25.015,01\n"
+        "Texto de relleno para superar el umbral de caracteres requeridos por el extractor de pdf."
+    )
+    mock_resp3 = MagicMock()
+    mock_resp3.choices = [MagicMock(message=MagicMock(content=json.dumps(_make_payload(None))))]
+    mock_resp3.usage.prompt_tokens = 100
+    mock_resp3.usage.completion_tokens = 50
+
+    with patch("app.routers.whatsapp.extraccion_documento.get_openai_client") as mock_client_factory:
+        mock_client = MagicMock()
+        mock_client_factory.return_value = mock_client
+        mock_client.chat.completions.create.return_value = mock_resp3
+
+        res3, err3 = extraer_movimientos_de_texto_pdf(texto_3, categorias_usuario=categorias)
+        assert err3 is None
+        assert res3 is not None
+        assert res3.vencimiento == f_real
 
 
 def test_extraer_movimientos_de_imagen_argumentos():
@@ -1176,8 +1285,4 @@ def test_extraer_movimientos_de_imagen_argumentos():
         resp_fmt = kwargs.get("response_format", {})
         cat_enum = resp_fmt["json_schema"]["schema"]["properties"]["movimientos"]["items"]["properties"]["categoria"]["enum"]
         assert cat_enum == ["Supermercado", "Farmacia", None]
-
-
-
-
 

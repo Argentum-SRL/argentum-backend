@@ -418,7 +418,13 @@ def p19_caso_7(datos):
 
     def test(conn, Session, respuestas):
         _preparar_base_escenario(conn, u.id)
-        txs_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
+        from app.models.factura import Factura
+        tx_ids_antes = set(conn.execute(select(Transaccion.id).where(Transaccion.usuario_id == u.id)).scalars().all())
+        fac_ids_antes = set(conn.execute(select(Factura.id).where(Factura.usuario_id == u.id)).scalars().all())
+        txs_antes = len(tx_ids_antes)
+
+        venc = hoy + timedelta(days=10)
+        f_str = venc.strftime("%d/%m")
 
         ext = ResultadoExtraccion(
             documento_tipo="factura_servicio",
@@ -433,7 +439,7 @@ def p19_caso_7(datos):
                 )
             ],
             billetera_texto="Galicia",
-            vencimiento=hoy + timedelta(days=10),
+            vencimiento=venc,
             total_vistos=1,
         )
 
@@ -443,12 +449,23 @@ def p19_caso_7(datos):
             _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
 
         resp1 = respuestas[-1][1] if respuestas else ""
-        linea_factura_ok = "Si todavía no la pagaste, respondé no y no la cargo." in resp1 and "¿Va?" in resp1
+        esperado_resp1 = (
+            f"Factura de Edesur por $14.200, vence el {f_str}.\n"
+            "¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy en Servicios desde Galicia.\n"
+            "Si fue con otra, decime cuál.\n"
+            "Si me decís que no, te la anoto en la web para que no se te pase."
+        )
+        linea_factura_ok = resp1 == esperado_resp1
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
-        registrado_ok = "Listo" in resp2 and "Galicia" in resp2
+        esperado_resp2 = "Listo. $14.200 en Otros desde Galicia — registrado."
+
+        fac_ids_desp = set(conn.execute(select(Factura.id).where(Factura.usuario_id == u.id)).scalars().all())
+        facs_creadas = len(fac_ids_desp - fac_ids_antes)
+
+        registrado_ok = resp2 == esperado_resp2 and facs_creadas == 0
 
         txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         txs_creadas = txs_despues - txs_antes
