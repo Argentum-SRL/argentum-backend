@@ -18,6 +18,7 @@ from app.models.evento_actualizacion import EventoActualizacion
 from app.schemas.notificacion import NotificacionRead, NotificacionUpdate
 from app.schemas.configuracion_notificacion import ConfiguracionNotificacionRead, ConfiguracionNotificacionUpdate
 from app.services import notificacion_service
+from app.utils.texto import limpiar_mensaje_web
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +231,7 @@ async def sse_notificaciones(
                             "id": str(n.id),
                             "tipo": n.tipo.value,
                             "nivel": n.nivel.value,
-                            "mensaje": n.mensaje,
+                            "mensaje": limpiar_mensaje_web(n.mensaje),
                             "leida": n.leida,
                             "archivada": n.archivada,
                             "deep_link": n.deep_link,

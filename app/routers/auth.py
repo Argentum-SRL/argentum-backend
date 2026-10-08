@@ -351,6 +351,7 @@ def verificar_recuperacion(
             tipo=TipoNotificacion.CAMBIO_CONTRASENA,
             nivel=NivelNotificacion.CRITICA,
             mensaje=MENSAJE_CAMBIO_CONTRASENA,
+            deep_link="/app/perfil",
             canal_web=True,
             canal_whatsapp=True,
             canal_email=False,
@@ -362,10 +363,10 @@ def verificar_recuperacion(
         try:
             from app.services import whatsapp_service
             from app.services.whatsapp_service import enviar_whatsapp_template
-            from app.models.notificacion import TEMPLATE_CAMBIO_CONTRASENA, TEMPLATE_CAMBIO_CONTRASENA_LANG, MENSAJE_CAMBIO_CONTRASENA
+            from app.models.notificacion import TEMPLATE_CAMBIO_CONTRASENA, TEMPLATE_CAMBIO_CONTRASENA_LANG, MENSAJE_CAMBIO_CONTRASENA_WPP
             enviado = enviar_whatsapp_template(user.telefono, TEMPLATE_CAMBIO_CONTRASENA, TEMPLATE_CAMBIO_CONTRASENA_LANG)
             if not enviado:
-                enviado = whatsapp_service.enviar_whatsapp(user.telefono, MENSAJE_CAMBIO_CONTRASENA)
+                enviado = whatsapp_service.enviar_whatsapp(user.telefono, MENSAJE_CAMBIO_CONTRASENA_WPP)
             if enviado and notif:
                 notif.enviada_whatsapp = True
                 db.commit()
@@ -414,6 +415,7 @@ def confirmar_token(
             tipo=TipoNotificacion.CAMBIO_CONTRASENA,
             nivel=NivelNotificacion.CRITICA,
             mensaje=MENSAJE_CAMBIO_CONTRASENA,
+            deep_link="/app/perfil",
             canal_web=True,
             canal_whatsapp=True,
             canal_email=False,
@@ -425,10 +427,10 @@ def confirmar_token(
         try:
             from app.services import whatsapp_service
             from app.services.whatsapp_service import enviar_whatsapp_template
-            from app.models.notificacion import TEMPLATE_CAMBIO_CONTRASENA, TEMPLATE_CAMBIO_CONTRASENA_LANG, MENSAJE_CAMBIO_CONTRASENA
+            from app.models.notificacion import TEMPLATE_CAMBIO_CONTRASENA, TEMPLATE_CAMBIO_CONTRASENA_LANG, MENSAJE_CAMBIO_CONTRASENA_WPP
             enviado = enviar_whatsapp_template(usuario.telefono, TEMPLATE_CAMBIO_CONTRASENA, TEMPLATE_CAMBIO_CONTRASENA_LANG)
             if not enviado:
-                enviado = whatsapp_service.enviar_whatsapp(usuario.telefono, MENSAJE_CAMBIO_CONTRASENA)
+                enviado = whatsapp_service.enviar_whatsapp(usuario.telefono, MENSAJE_CAMBIO_CONTRASENA_WPP)
             if enviado and notif:
                 notif.enviada_whatsapp = True
                 db.commit()

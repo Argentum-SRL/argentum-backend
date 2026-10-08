@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.models.notificacion import Notificacion, TipoNotificacion, NivelNotificacion
 from app.models.configuracion_notificacion import ConfiguracionNotificacion
 from app.utils.fecha import hoy_argentina
+from app.utils.texto import limpiar_mensaje_web
 import logging
 
 logger = logging.getLogger(__name__)
@@ -53,11 +54,13 @@ def crear_notificacion(
     if existente:
         return None
 
+    mensaje_guardado = limpiar_mensaje_web(mensaje) if canal_web else mensaje
+
     notif = Notificacion(
         usuario_id=usuario_id,
         tipo=tipo,
         nivel=nivel,
-        mensaje=mensaje,
+        mensaje=mensaje_guardado,
         entidad_tipo=entidad_tipo,
         entidad_id=entidad_id,
         deep_link=deep_link,

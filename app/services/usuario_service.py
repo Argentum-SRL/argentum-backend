@@ -186,6 +186,7 @@ def actualizar_password(
             canal_web=True,
             canal_whatsapp=True,
             canal_email=False,
+            deep_link="/app/perfil",
         )
     except Exception:
         pass
@@ -193,10 +194,10 @@ def actualizar_password(
     if usuario.telefono:
         try:
             from app.services.whatsapp_service import enviar_whatsapp_template, enviar_whatsapp
-            from app.models.notificacion import TEMPLATE_CAMBIO_CONTRASENA, TEMPLATE_CAMBIO_CONTRASENA_LANG, MENSAJE_CAMBIO_CONTRASENA
+            from app.models.notificacion import TEMPLATE_CAMBIO_CONTRASENA, TEMPLATE_CAMBIO_CONTRASENA_LANG, MENSAJE_CAMBIO_CONTRASENA_WPP
             enviado = enviar_whatsapp_template(usuario.telefono, TEMPLATE_CAMBIO_CONTRASENA, TEMPLATE_CAMBIO_CONTRASENA_LANG)
             if not enviado:
-                enviado = enviar_whatsapp(usuario.telefono, MENSAJE_CAMBIO_CONTRASENA)
+                enviado = enviar_whatsapp(usuario.telefono, MENSAJE_CAMBIO_CONTRASENA_WPP)
             if enviado and notif:
                 notif.enviada_whatsapp = True
                 db.commit()

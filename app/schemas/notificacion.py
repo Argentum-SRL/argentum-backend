@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from app.models.notificacion import TipoNotificacion, NivelNotificacion
+from app.utils.texto import limpiar_mensaje_web
 
 
 class NotificacionBase(BaseModel):
@@ -22,6 +23,11 @@ class NotificacionBase(BaseModel):
     entidad_id: UUID | None = None
     deep_link: str | None = None
     silenciada_hasta: datetime | None = None
+
+    @field_validator("mensaje", mode="after")
+    @classmethod
+    def sanitizar_mensaje(cls, v: str) -> str:
+        return limpiar_mensaje_web(v)
 
 
 class NotificacionCreate(NotificacionBase):

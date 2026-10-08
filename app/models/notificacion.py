@@ -41,6 +41,10 @@ class TipoNotificacion(str, enum.Enum):
 
 MENSAJE_CAMBIO_CONTRASENA = (
     "Tu contraseña de Argentum fue actualizada. Si no fuiste vos, "
+    "cambiala de inmediato."
+)
+MENSAJE_CAMBIO_CONTRASENA_WPP = (
+    "Tu contraseña de Argentum fue actualizada. Si no fuiste vos, "
     "cambiala de inmediato desde https://miargentum.com/auth/recuperar-password"
 )
 TEMPLATE_CAMBIO_CONTRASENA = "alerta_cambio_contrasena"
