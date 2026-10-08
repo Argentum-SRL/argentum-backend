@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 import uuid
-from uuid import UUID, uuid4
-from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException
@@ -58,16 +57,17 @@ def setup_sqlite_compat(monkeypatch):
 
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria, EstadoCategoria, TipoCategoria
+from app.models.cuota import Cuota
 from app.models.factura import Factura
 from app.models.notificacion import NivelNotificacion, Notificacion, TipoNotificacion
 from app.models.subcategoria import EstadoSubcategoria, Subcategoria
-from app.models.transaccion import MetodoPago, OrigenTransaccion, TipoTransaccion, Transaccion
+from app.models.tarjeta_credito import TarjetaCredito
+from app.models.transaccion import MetodoPago, TipoTransaccion
 from app.models.usuario import AuthProvider, EstadoUsuario, Moneda, RolUsuario, Usuario
-from app.schemas.transaccion import TransaccionCreate
-from app.services import dashboard_service, factura_service, transaccion_service
+from app.schemas.transaccion import InfoCuotas, TransaccionCreate
+from app.services import factura_service, transaccion_service
 from app.services.factura_avisos_service import _job_notificaciones_facturas
 from app.utils.fecha import hoy_argentina
-from app.utils.formato import formatear_monto
 
 
 @pytest.fixture(name="db_session", scope="function")
@@ -283,7 +283,7 @@ def test_2_marcado_automatico(db_session: Session, fixtures_comunes):
         subcategoria_id=f["sub_luz"].id,
         commit=True,
     )
-    tx_b = transaccion_service.crear_transaccion(
+    transaccion_service.crear_transaccion(
         db=db_session,
         usuario_id=f["usuario"].id,
         data=TransaccionCreate(
@@ -350,7 +350,7 @@ def test_2_marcado_automatico(db_session: Session, fixtures_comunes):
         subcategoria_id=f["sub_luz"].id,
         commit=True,
     )
-    tx_d = transaccion_service.crear_transaccion(
+    transaccion_service.crear_transaccion(
         db=db_session,
         usuario_id=f["usuario"].id,
         data=TransaccionCreate(
@@ -414,7 +414,7 @@ def test_2_marcado_automatico(db_session: Session, fixtures_comunes):
         subcategoria_id=f["sub_luz"].id,
         commit=True,
     )
-    tx_e2 = transaccion_service.crear_transaccion(
+    transaccion_service.crear_transaccion(
         db=db_session,
         usuario_id=f["usuario"].id,
         data=TransaccionCreate(
@@ -446,7 +446,7 @@ def test_2_marcado_automatico(db_session: Session, fixtures_comunes):
         subcategoria_id=f["sub_luz"].id,
         commit=True,
     )
-    tx_f = transaccion_service.crear_transaccion(
+    transaccion_service.crear_transaccion(
         db=db_session,
         usuario_id=f["usuario"].id,
         data=TransaccionCreate(
@@ -490,7 +490,7 @@ def test_2_marcado_automatico(db_session: Session, fixtures_comunes):
         subcategoria_id=f["sub_luz"].id,
         commit=True,
     )
-    tx_g = transaccion_service.crear_transaccion(
+    transaccion_service.crear_transaccion(
         db=db_session,
         usuario_id=f["usuario"].id,
         data=TransaccionCreate(
@@ -524,7 +524,7 @@ def test_2_marcado_automatico(db_session: Session, fixtures_comunes):
         subcategoria_id=f["sub_luz"].id,
         commit=True,
     )
-    tx_h = transaccion_service.crear_transaccion(
+    transaccion_service.crear_transaccion(
         db=db_session,
         usuario_id=f["usuario"].id,
         data=TransaccionCreate(
@@ -556,7 +556,7 @@ def test_2_marcado_automatico(db_session: Session, fixtures_comunes):
         subcategoria_id=f["sub_luz"].id,
         commit=True,
     )
-    tx_i = transaccion_service.crear_transaccion(
+    transaccion_service.crear_transaccion(
         db=db_session,
         usuario_id=f["usuario"].id,
         data=TransaccionCreate(
@@ -588,7 +588,7 @@ def test_2_marcado_automatico(db_session: Session, fixtures_comunes):
         subcategoria_id=None,
         commit=True,
     )
-    tx_j = transaccion_service.crear_transaccion(
+    transaccion_service.crear_transaccion(
         db=db_session,
         usuario_id=f["usuario"].id,
         data=TransaccionCreate(
@@ -820,7 +820,7 @@ def test_6_atomicidad_operaciones(db_session: Session, fixtures_comunes):
     )
 
     # Crear transacción con commit=False simulando fallo posterior
-    tx = transaccion_service.crear_transaccion(
+    transaccion_service.crear_transaccion(
         db=db_session,
         usuario_id=f["usuario"].id,
         data=TransaccionCreate(
@@ -867,7 +867,7 @@ def test_7_avisos_job(db_session: Session, fixtures_comunes, monkeypatch):
     )
 
     # Factura 2: vence hoy
-    fac_hoy = factura_service.crear_factura_pendiente(
+    factura_service.crear_factura_pendiente(
         db=db_session,
         usuario_id=f["usuario"].id,
         descripcion="EPE Vence Hoy",
@@ -905,7 +905,7 @@ def test_7_avisos_job(db_session: Session, fixtures_comunes, monkeypatch):
     )
     factura_service.descartar(db_session, fac_descartada.id, f["usuario"].id, commit=True)
 
-    fac_2 = factura_service.crear_factura_pendiente(
+    factura_service.crear_factura_pendiente(
         db=db_session,
         usuario_id=f["usuario"].id,
         descripcion="EPE Vence 2",
@@ -937,9 +937,8 @@ def test_7_avisos_job(db_session: Session, fixtures_comunes, monkeypatch):
     ).all()
     assert len(notifs) == 2
 
-    monto_fmt = formatear_monto(Decimal("45678.90"), "ARS")
-    esperado_3 = f"La factura de EPE Vence 3 por {monto_fmt} vence en 3 días ({dd_mm})."
-    esperado_hoy = f"La factura de EPE Vence Hoy por {monto_fmt} vence hoy."
+    esperado_3 = f"La factura de EPE Vence 3 por $45.678,90 vence en 3 días ({dd_mm})."
+    esperado_hoy = "La factura de EPE Vence Hoy por $45.678,90 vence hoy."
 
     mensajes = [n.mensaje for n in notifs]
     assert esperado_3 in mensajes
@@ -1031,10 +1030,37 @@ def test_8_proximos_pagos_dashboard(db_session: Session, fixtures_comunes):
     )
     factura_service.descartar(db_session, fac_desc.id, f["usuario"].id, commit=True)
 
-    res = dashboard_service.get_dashboard_resumen(db_session, f["usuario"])
-    proximos_pagos = res["proximos_pagos"]
+    # 5. Pendiente que vence después de limite_pagos (no debe aparecer)
+    fac_despues_limite = factura_service.crear_factura_pendiente(
+        db=db_session,
+        usuario_id=f["usuario"].id,
+        descripcion="Luz Despues Limite",
+        monto=Decimal("20000.00"),
+        moneda="ARS",
+        fecha_vencimiento=hoy + timedelta(days=65),
+        origen="whatsapp_foto",
+        categoria_id=f["cat_vivienda"].id,
+        subcategoria_id=f["sub_luz"].id,
+        commit=True,
+    )
 
-    pagos_facturas = [p for p in proximos_pagos if p.get("tipo") == "factura"]
+    # 6. Vencida hace 31 días (no debe aparecer)
+    fac_vencida_31 = factura_service.crear_factura_pendiente(
+        db=db_session,
+        usuario_id=f["usuario"].id,
+        descripcion="Luz Vencida Hace 31 Dias",
+        monto=Decimal("25000.00"),
+        moneda="ARS",
+        fecha_vencimiento=hoy - timedelta(days=31),
+        origen="whatsapp_foto",
+        categoria_id=f["cat_vivienda"].id,
+        subcategoria_id=f["sub_luz"].id,
+        commit=True,
+    )
+
+    limite_pagos = hoy + timedelta(days=60)
+    pagos_facturas = factura_service.items_proximos_pagos(db_session, f["usuario"].id, hoy, limite_pagos)
+
     assert len(pagos_facturas) == 3
 
     # Pendiente
@@ -1056,4 +1082,121 @@ def test_8_proximos_pagos_dashboard(db_session: Session, fixtures_comunes):
     assert p_pagada["estado_factura"] == "pagada"
 
     # Descartada no aparece
-    assert not any(p["factura_id"] == str(fac_desc.id) for p in proximos_pagos)
+    assert not any(p["factura_id"] == str(fac_desc.id) for p in pagos_facturas)
+
+    # Pendiente que vence después de limite_pagos no aparece
+    assert not any(p["factura_id"] == str(fac_despues_limite.id) for p in pagos_facturas)
+
+    # Vencida hace 31 días no aparece
+    assert not any(p["factura_id"] == str(fac_vencida_31.id) for p in pagos_facturas)
+
+
+def test_9_credito_cuotas_facturas(db_session: Session, fixtures_comunes):
+    f = fixtures_comunes
+    hoy = hoy_argentina()
+
+    # Tarjeta armada igual que test_credito_cuotas_commit_true
+    t = TarjetaCredito(
+        id=uuid4(),
+        usuario_id=f["usuario"].id,
+        nombre="Visa Gold",
+        billetera_id=f["billetera_ars"].id,
+        dia_cierre=20,
+        dia_vencimiento=10,
+    )
+    db_session.add(t)
+    db_session.commit()
+
+    # 1. Compra con crédito en 1 pago por 45678.90 en Luz:
+    # La factura queda pagada, automática, con el transaccion_id del padre
+    fac1 = factura_service.crear_factura_pendiente(
+        db=db_session,
+        usuario_id=f["usuario"].id,
+        descripcion="EPE Luz 1 Pago",
+        monto=Decimal("45678.90"),
+        moneda="ARS",
+        fecha_vencimiento=hoy + timedelta(days=5),
+        origen="whatsapp_foto",
+        categoria_id=f["cat_vivienda"].id,
+        subcategoria_id=f["sub_luz"].id,
+        commit=True,
+    )
+
+    tx1 = transaccion_service.crear_transaccion(
+        db=db_session,
+        usuario_id=f["usuario"].id,
+        data=TransaccionCreate(
+            tipo=TipoTransaccion.EGRESO,
+            monto=Decimal("45678.90"),
+            moneda=Moneda.ARS,
+            fecha=hoy,
+            descripcion="Pago Luz EPE 1 Pago",
+            categoria_id=f["cat_vivienda"].id,
+            subcategoria_id=f["sub_luz"].id,
+            metodo_pago=MetodoPago.CREDITO,
+            billetera_id=f["billetera_ars"].id,
+            tarjeta_id=t.id,
+            info_cuotas=InfoCuotas(cantidad_cuotas=1, monto_total=Decimal("45678.90")),
+        ),
+        commit=True,
+    )
+
+    db_session.refresh(fac1)
+    assert fac1.estado == "pagada"
+    assert fac1.pagada_automaticamente is True
+    assert fac1.transaccion_id == tx1.id
+
+    # 2. Compra en 3 cuotas por un total de 45678.90: lo mismo
+    fac2 = factura_service.crear_factura_pendiente(
+        db=db_session,
+        usuario_id=f["usuario"].id,
+        descripcion="EPE Luz 3 Cuotas",
+        monto=Decimal("45678.90"),
+        moneda="ARS",
+        fecha_vencimiento=hoy + timedelta(days=5),
+        origen="whatsapp_foto",
+        categoria_id=f["cat_vivienda"].id,
+        subcategoria_id=f["sub_luz"].id,
+        commit=True,
+    )
+
+    tx2 = transaccion_service.crear_transaccion(
+        db=db_session,
+        usuario_id=f["usuario"].id,
+        data=TransaccionCreate(
+            tipo=TipoTransaccion.EGRESO,
+            monto=Decimal("45678.90"),
+            moneda=Moneda.ARS,
+            fecha=hoy,
+            descripcion="Pago Luz EPE 3 Cuotas",
+            categoria_id=f["cat_vivienda"].id,
+            subcategoria_id=f["sub_luz"].id,
+            metodo_pago=MetodoPago.CREDITO,
+            billetera_id=f["billetera_ars"].id,
+            tarjeta_id=t.id,
+            info_cuotas=InfoCuotas(cantidad_cuotas=3, monto_total=Decimal("45678.90")),
+        ),
+        commit=True,
+    )
+
+    db_session.refresh(fac2)
+    assert fac2.estado == "pagada"
+    assert fac2.pagada_automaticamente is True
+    assert fac2.transaccion_id == tx2.id
+
+    # 3. Ninguna hija queda como transaccion_id de una factura
+    cuotas1 = db_session.execute(select(Cuota).where(Cuota.grupo_id == tx1.grupo_cuotas_id)).scalars().all()
+    cuotas2 = db_session.execute(select(Cuota).where(Cuota.grupo_id == tx2.grupo_cuotas_id)).scalars().all()
+    assert len(cuotas1) == 1
+    assert len(cuotas2) == 3
+
+    hijas_ids = [c.transaccion_id for c in cuotas1 + cuotas2 if c.transaccion_id is not None]
+    assert len(hijas_ids) == 4
+    assert fac1.transaccion_id not in hijas_ids
+    assert fac2.transaccion_id not in hijas_ids
+
+    # Ninguna factura del usuario tiene como transaccion_id una cuota hija
+    for h_id in hijas_ids:
+        facturas_hija = db_session.execute(select(Factura).where(Factura.transaccion_id == h_id)).scalars().all()
+        assert len(facturas_hija) == 0
+

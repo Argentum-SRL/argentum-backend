@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID
 
@@ -8,9 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, joinedload
 
-from app.models.categoria import Categoria
 from app.models.factura import Factura
-from app.models.subcategoria import Subcategoria
 from app.models.transaccion import TipoTransaccion, Transaccion
 from app.models.usuario import Moneda
 from app.services.memoria_comercio_service import clave_comercio
@@ -263,8 +261,7 @@ def facturas_pagadas_por(
 ) -> list[Factura]:
     if not transaccion_ids:
         return []
-    ids_all = list(transaccion_ids) + [str(tid) for tid in transaccion_ids]
-    stmt = select(Factura).where(Factura.transaccion_id.in_(ids_all))
+    stmt = select(Factura).where(Factura.transaccion_id.in_(transaccion_ids))
     return list(db.execute(stmt).scalars().all())
 
 
@@ -273,12 +270,7 @@ def al_eliminar_transaccion(
     transaccion_id: UUID,
     commit: bool = False,
 ) -> list[Factura]:
-    stmt = select(Factura).where(
-        or_(
-            Factura.transaccion_id == transaccion_id,
-            Factura.transaccion_id == str(transaccion_id),
-        )
-    )
+    stmt = select(Factura).where(Factura.transaccion_id == transaccion_id)
     facturas = list(db.execute(stmt).scalars().all())
     for f in facturas:
         f.estado = "pendiente"
@@ -289,3 +281,50 @@ def al_eliminar_transaccion(
     else:
         db.flush()
     return facturas
+
+
+def items_proximos_pagos(
+    db: Session,
+    usuario_id: UUID,
+    hoy: date,
+    limite_pagos: date,
+) -> list[dict]:
+    facturas_query = db.query(Factura).filter(
+        Factura.usuario_id == usuario_id,
+        or_(
+            and_(
+                Factura.estado == "pendiente",
+                Factura.fecha_vencimiento >= hoy - timedelta(days=30),
+                Factura.fecha_vencimiento <= limite_pagos,
+            ),
+            and_(
+                Factura.estado == "pagada",
+                Factura.pagada_automaticamente == True,
+                Factura.fecha_vencimiento >= hoy,
+                Factura.fecha_vencimiento <= limite_pagos,
+            ),
+        ),
+    ).all()
+
+    items = []
+    for f in facturas_query:
+        dias_rest = (f.fecha_vencimiento - hoy).days
+        estado_fac = "vencida" if (f.estado == "pendiente" and f.fecha_vencimiento < hoy) else ("pagada" if f.estado == "pagada" else "pendiente")
+        items.append({
+            "id": str(f.id),
+            "nombre": f"Factura de {f.descripcion}",
+            "monto": float(f.monto),
+            "moneda": f.moneda.value if hasattr(f.moneda, "value") else str(f.moneda),
+            "fecha_cobro": f.fecha_vencimiento.isoformat(),
+            "dias_restantes": dias_rest,
+            "tipo": "factura",
+            "color": None,
+            "red": None,
+            "billetera_nombre": None,
+            "billetera_id": None,
+            "es_vencido": dias_rest < 0,
+            "factura_id": str(f.id),
+            "estado_factura": estado_fac,
+        })
+    return items
+

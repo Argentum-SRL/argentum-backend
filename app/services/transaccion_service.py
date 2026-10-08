@@ -347,6 +347,13 @@ def crear_transaccion(
                 pagada_automaticamente=False,
                 commit=False
             )
+        else:
+            from app.services import factura_service
+            factura_service.marcar_pagada_por_coincidencia(
+                db=db,
+                transaccion=nueva_transaccion,
+                commit=False
+            )
 
         if commit:
             db.commit()
