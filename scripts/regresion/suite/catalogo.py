@@ -34,6 +34,7 @@ from scripts.regresion.suite.escenarios_p19 import (
     p19_caso_9,
 )
 from scripts.regresion.suite.catalogo_p19b import entradas_p19b
+from scripts.regresion.suite.escenarios_p20 import entradas_p20
 
 
 def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
@@ -1213,5 +1214,6 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
         },
     ]
     catalogo.extend(entradas_p19b(datos))
+    catalogo.extend(entradas_p20(datos))
     return catalogo
 

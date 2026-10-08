@@ -133,3 +133,74 @@ def _transcribir_audio(
     except Exception:
         logger.exception("Error al transcribir audio de WhatsApp")
         return None, "ERROR_TRANSCRIPCION"
+
+
+def descargar_documento_meta(
+    media_id: str,
+    max_bytes: int = 10 * 1024 * 1024,
+) -> tuple[bytes | None, str | None, str | None]:
+    """
+    Descarga un documento desde Meta WhatsApp Cloud API con control de tamaño:
+    Paso 1: Consulta metadata (Graph API). Si file_size > max_bytes, devuelve (None, mime, 'TAMANO_EXCEDIDO')
+    sin realizar la segunda llamada.
+    Paso 2: Descarga el contenido binario. Si no vino file_size y el contenido supera max_bytes,
+    también devuelve (None, mime, 'TAMANO_EXCEDIDO').
+    Cualquier error de red u otro fallo: (None, None, 'ERROR_DESCARGA').
+    Retorna (bytes, mime_type, None) en caso exitoso.
+    """
+    if not settings.WHATSAPP_ACCESS_TOKEN or not media_id:
+        logger.warning("No se puede descargar documento de Meta: WHATSAPP_ACCESS_TOKEN o media_id no configurado")
+        return None, None, "ERROR_DESCARGA"
+
+    headers = {"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"}
+    try:
+        client = get_meta_http_client()
+        # Paso 1: Metadatos del medio
+        meta_url = f"https://graph.facebook.com/v21.0/{media_id}"
+        res_meta = client.get(meta_url, headers=headers, timeout=30, follow_redirects=True)
+        res_meta.raise_for_status()
+        data = res_meta.json()
+
+        download_url = data.get("url")
+        mime_type = data.get("mime_type")
+        file_size = data.get("file_size")
+
+        file_size_num: int | None = None
+        if file_size is not None:
+            try:
+                file_size_num = int(file_size)
+            except (ValueError, TypeError):
+                file_size_num = None
+
+        if file_size_num is not None and file_size_num > max_bytes:
+            logger.warning(
+                "whatsapp_documento_tamano_metadatos_excedido",
+                media_id=media_id,
+                file_size=file_size_num,
+                max_bytes=max_bytes,
+            )
+            return None, mime_type, "TAMANO_EXCEDIDO"
+
+        if not download_url:
+            logger.error("Meta Graph API no devolvió URL de descarga para media_id %s", media_id)
+            return None, None, "ERROR_DESCARGA"
+
+        # Paso 2: Descarga
+        res_media = client.get(download_url, headers=headers, timeout=30, follow_redirects=True)
+        res_media.raise_for_status()
+        content = res_media.content
+
+        if len(content) > max_bytes:
+            logger.warning(
+                "whatsapp_documento_tamano_descarga_excedido",
+                media_id=media_id,
+                descargados=len(content),
+                max_bytes=max_bytes,
+            )
+            return None, mime_type, "TAMANO_EXCEDIDO"
+
+        return content, mime_type, None
+    except Exception as e:
+        logger.exception("Error al descargar documento de Meta (media_id=%s): %s", media_id, e)
+        return None, None, "ERROR_DESCARGA"
+

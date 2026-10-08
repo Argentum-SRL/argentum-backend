@@ -270,6 +270,122 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
             ctx.terminado = True
             return
 
+    elif ctx.msg_type == "document":
+        from app.routers.whatsapp.extraccion_documento import extraer_movimientos_de_texto_pdf
+        from app.routers.whatsapp.media import descargar_documento_meta
+        from app.routers.whatsapp.pdf_documento import (
+            leer_texto_pdf,
+            verificar_extraccion_contra_texto,
+        )
+
+        doc_obj = ctx.msg.get("document", {})
+        caption = doc_obj.get("caption") or ""
+        ctx.caption_imagen = caption
+        media_id = doc_obj.get("id")
+        mime_type = doc_obj.get("mime_type") or ""
+        filename = doc_obj.get("filename") or ""
+
+        es_mime_pdf = (mime_type.lower() == "application/pdf") or (mime_type.lower().startswith("application/pdf;"))
+        es_nombre_pdf = filename.lower().endswith(".pdf")
+        if not (es_mime_pdf or es_nombre_pdf):
+            whatsapp_service.enviar_whatsapp(
+                ctx.from_number,
+                "Por ahora leo comprobantes en PDF o en foto. Mandame el PDF o una captura.",
+            )
+            ctx.terminado = True
+            return
+
+        if not media_id:
+            whatsapp_service.enviar_whatsapp(
+                ctx.from_number,
+                "No pude leer el PDF. Mandame una captura o los datos en texto.",
+            )
+            ctx.terminado = True
+            return
+
+        pdf_bytes, mime_desc, error_descarga = descargar_documento_meta(
+            media_id=media_id,
+            max_bytes=10 * 1024 * 1024,
+        )
+        if error_descarga == "TAMANO_EXCEDIDO":
+            whatsapp_service.enviar_whatsapp(
+                ctx.from_number,
+                "El PDF es muy pesado (máximo 10 MB). Mandame una captura de la factura.",
+            )
+            ctx.terminado = True
+            return
+        elif error_descarga or not pdf_bytes:
+            whatsapp_service.enviar_whatsapp(
+                ctx.from_number,
+                "No pude leer el PDF. Mandame una captura o los datos en texto.",
+            )
+            ctx.terminado = True
+            return
+
+        texto_pdf, error_pdf = leer_texto_pdf(pdf_bytes, max_paginas=6)
+        if error_pdf == "DEMASIADAS_PAGINAS":
+            whatsapp_service.enviar_whatsapp(
+                ctx.from_number,
+                "El PDF tiene más de 6 páginas. Mandame solo la página con el total o una captura.",
+            )
+            ctx.terminado = True
+            return
+        elif error_pdf == "SIN_TEXTO":
+            whatsapp_service.enviar_whatsapp(
+                ctx.from_number,
+                "Ese PDF es una imagen escaneada y no lo puedo leer. Mandame una captura de la factura.",
+            )
+            ctx.terminado = True
+            return
+        elif error_pdf == "PDF_CON_CLAVE":
+            whatsapp_service.enviar_whatsapp(
+                ctx.from_number,
+                "Ese PDF tiene contraseña y no lo puedo abrir. Mandame una captura.",
+            )
+            ctx.terminado = True
+            return
+        elif error_pdf or not texto_pdf:
+            whatsapp_service.enviar_whatsapp(
+                ctx.from_number,
+                "No pude leer el PDF. Mandame una captura o los datos en texto.",
+            )
+            ctx.terminado = True
+            return
+
+        nombre_usuario = f"{ctx.usuario.nombre or ''} {ctx.usuario.apellido or ''}".strip() if ctx.usuario else ""
+        categorias_usuario = obtener_categorias_permitidas(ctx.db)
+        resultado_extraccion, error_ext = extraer_movimientos_de_texto_pdf(
+            texto=texto_pdf,
+            nombre_usuario=nombre_usuario,
+            categorias_usuario=categorias_usuario,
+            usuario_id=ctx.usuario.id if ctx.usuario else None,
+        )
+
+        if not resultado_extraccion:
+            whatsapp_service.enviar_whatsapp(
+                ctx.from_number,
+                "No pude leer el PDF. Mandame una captura o los datos en texto.",
+            )
+            ctx.terminado = True
+            return
+
+        if not verificar_extraccion_contra_texto(resultado_extraccion, texto_pdf):
+            whatsapp_service.enviar_whatsapp(
+                ctx.from_number,
+                "No pude confirmar el importe o el vencimiento en el PDF. Mandame una captura de la factura.",
+            )
+            ctx.terminado = True
+            return
+
+        ctx.extraccion = resultado_extraccion
+        ctx.es_imagen = True
+        ctx.es_pdf = True
+        logger.info(
+            "whatsapp_pdf_extraido_exitosamente",
+            tipo=resultado_extraccion.documento_tipo,
+            movimientos=len(resultado_extraccion.movimientos),
+        )
+
     # Si hay extracción estructurada, no se aplican los chequeos de texto vacío o 1500 caracteres
     if ctx.extraccion is None:
         if not ctx.mensaje_texto:

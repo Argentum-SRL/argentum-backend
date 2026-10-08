@@ -29,6 +29,7 @@ class ContextoMensaje:
     mensaje_texto: str = ""
     transcripcion: str | None = None
     es_imagen: bool = False
+    es_pdf: bool = False
     es_credito: bool = False
     es_lote: bool = False
     caption_imagen: str = ""
@@ -51,5 +52,5 @@ class ContextoMensaje:
 
     @property
     def es_medio(self) -> bool:
-        """Indica si el tipo de mensaje corresponde a un medio multimedia (audio o imagen)."""
-        return self.msg_type in ("audio", "image")
+        """Indica si el tipo de mensaje corresponde a un medio multimedia (audio, imagen o documento)."""
+        return self.msg_type in ("audio", "image", "document")

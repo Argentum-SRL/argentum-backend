@@ -37,6 +37,23 @@ class MovimientoExtraido:
 
 
 @dataclass
+class CuotaExtraida:
+    """Representa una cuota individual de una factura de servicio."""
+    vencimiento: date
+    monto: Decimal
+
+    def __iter__(self):
+        return iter((self.vencimiento, self.monto))
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, CuotaExtraida):
+            return self.vencimiento == other.vencimiento and self.monto == other.monto
+        if isinstance(other, (tuple, list)) and len(other) == 2:
+            return self.vencimiento == other[0] and self.monto == other[1]
+        return False
+
+
+@dataclass
 class ResultadoExtraccion:
     """Resultado global de la extracción visual estructurada."""
     documento_tipo: str
@@ -46,6 +63,7 @@ class ResultadoExtraccion:
     total_vistos: int = 0
     rendimientos: list[MovimientoExtraido] = field(default_factory=list)
     omitidos: list[dict[str, Any]] = field(default_factory=list)
+    cuotas: list[CuotaExtraida] = field(default_factory=list)
 
 
 ESQUEMA_EXTRACCION: dict[str, Any] = {
@@ -140,6 +158,28 @@ ESQUEMA_EXTRACCION: dict[str, Any] = {
                         "additionalProperties": False,
                     },
                 },
+                "cuotas": {
+                    "type": "array",
+                    "description": "Solo en facturas de servicio que se pagan en cuotas con vencimientos distintos (ej: Cuota 1 y Cuota 2): una entrada por cuota con su vencimiento y su importe sin recargo. Si se paga en un solo vencimiento: [].",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "vencimiento": {
+                                "type": "string",
+                                "description": "Fecha de vencimiento en formato YYYY-MM-DD.",
+                            },
+                            "monto": {
+                                "type": "number",
+                                "description": "Monto numérico positivo de la cuota.",
+                            },
+                        },
+                        "required": [
+                            "vencimiento",
+                            "monto",
+                        ],
+                        "additionalProperties": False,
+                    },
+                },
             },
             "required": [
                 "legible",
@@ -147,6 +187,7 @@ ESQUEMA_EXTRACCION: dict[str, Any] = {
                 "billetera_texto",
                 "vencimiento",
                 "movimientos",
+                "cuotas",
             ],
             "additionalProperties": False,
         },
@@ -272,23 +313,11 @@ def motivo_omision(
     return None
 
 
-def extraer_movimientos_de_imagen(
-    image_bytes: bytes,
-    mime_type: str = "image/jpeg",
+def _construir_prompt_sistema_extraccion(
     nombre_usuario: str = "",
     categorias_usuario: list[str] | None = None,
-    usuario_id: Any | None = None,
-    max_bytes: int = 5 * 1024 * 1024,
-) -> tuple[ResultadoExtraccion | None, str | None]:
-    """
-    Analiza una imagen con GPT-4o Vision y Structured Outputs devolviendo un ResultadoExtraccion.
-    Aplica límite de 5 MB, anonimizado de usuario y prompt de seguridad.
-    Retorna (resultado, None) o (None, motivo_error).
-    """
-    if len(image_bytes) > max_bytes:
-        logger.warning("whatsapp_imagen_tamano_excedido", bytes=len(image_bytes), max_bytes=max_bytes)
-        return None, "TAMANO_EXCEDIDO"
-
+) -> str:
+    """Construye el prompt de sistema compartido para visión de imagen y texto de PDF."""
     nombre_anonimo = ""
     if nombre_usuario:
         partes = nombre_usuario.strip().split()
@@ -296,10 +325,6 @@ def extraer_movimientos_de_imagen(
             nombre_anonimo = " ".join(partes[:-1]) + f" {partes[-1][0]}."
         elif partes:
             nombre_anonimo = partes[0]
-
-    content_type = mime_type or "image/jpeg"
-    if ";" in content_type:
-        content_type = content_type.split(";")[0].strip()
 
     hoy = hoy_argentina()
     dias_semana = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
@@ -318,14 +343,14 @@ def extraer_movimientos_de_imagen(
         "- Montos: los montos en documentos argentinos usan punto de miles y coma decimal. Devolvé el número como número positivo sin separador de miles y con punto decimal (ejemplo: 18450.50).\n"
         "- Fechas: devolver fecha en formato YYYY-MM-DD si es legible; si no es visible o no se puede resolver, devolver null.\n"
         "- Sentido y verbos: verbos como 'Pagaste', 'Transferiste', 'Enviaste' indican 'egreso'. Verbos como 'Te transfirieron', 'Recibiste', 'Cobraste', 'Ingreso de dinero' o equivalentes indican 'ingreso'. Acreditaciones de intereses o rendimientos de una billetera o fondo (ej. 'Rendimientos', 'Acreditación de rendimiento'): 'sentido' es 'rendimiento'. Reintegros y devoluciones son 'ingreso'.\n"
-        "- Descripción: descripcion es SOLO el nombre del comercio o persona tal como aparece (sin 'Pagaste', 'Transferiste', 'Te transfirieron', 'Compra en', sin montos, sin CUIT, CBU ni teléfonos ajenos).\n"
+        "- Descripción: descripcion es SOLO el nombre del comercio o persona tal como aparece (sin 'Pagaste', 'Transferiste', 'Te transfirieron', 'Compra en', sin montos, sin CUIT, CBU ni teléfonos ajenos). En facturas de servicio, la descripción es el nombre corto de la empresa (ej: EPE, Litoral Gas, Personal), sin \"S.A.\" ni dirección.\n"
         "- Subtítulo y tipo de operación: 'tipo_operacion' es el subtítulo tal cual si existe (ej: 'Transferencia recibida', 'Transferencia enviada', 'Compra', 'Pago en tienda física', 'Pago automático', 'Pago'); en 'Ingreso de dinero' donde no hay subtítulo, devolver null.\n"
         "- Medio de pago: 'medio_pago' es el texto del medio de pago tal cual si figura en el renglón o columna (ej: 'Dinero disponible', 'Mastercard débito', 'Mastercard crédito', 'Con transferencia'); si no figura, devolver null.\n"
         "- Estado: 'estado' es el estado de la operación tal cual (ej: 'Aprobado', 'Rechazado', 'Cancelado'); si no figura, devolver null.\n"
         "- Contraparte es usuario: 'contraparte_es_usuario' es true SOLO si el nombre del renglón corresponde al usuario de la app (incluso si cambia el orden nombre-apellido, falten tildes o el apellido esté abreviado); false en cualquier otro caso.\n"
         "- Categoría: categoria solo si el nombre es una marca o comercio ampliamente conocido o el propio documento dice el rubro. Nombres de personas, apodos y comercios que no se reconozcan con certeza, y toda transferencia enviada o recibida de una persona deben tener categoria: null. En caso de duda, devolver null.\n"
         "- Capturas de actividad: devolver un movimiento por cada línea de movimiento visible en la captura, con el signo reflejado en 'sentido' ('egreso' o 'ingreso' o 'rendimiento').\n"
-        "- Tickets de compra y facturas: 'sentido' es 'egreso'. Si es factura de servicio con vencimiento visible, extraer 'vencimiento' en formato YYYY-MM-DD.\n"
+        "- Tickets de compra y facturas: 'sentido' es 'egreso'. Si es factura de servicio con vencimiento visible, extraer 'vencimiento' en formato YYYY-MM-DD. En facturas de servicio, 'vencimiento' es el primer vencimiento para pagar sin recargo. No es la fecha de emisión, ni el próximo vencimiento o la próxima factura, ni el vencimiento con recargo, ni el del CAE o CESP, ni la fecha de desconexión, ni las fechas de deuda anterior. El monto del movimiento es el total a pagar de esta factura, sin deuda anterior, recargos ni pagos anteriores. Si es en cuotas, es el importe de la primera cuota, y 'cuotas' lleva todas.\n"
         "- Comprobantes de transferencia:\n"
         "  * Si el usuario de la app es el DESTINATARIO (en 'Para', 'A', 'Destinatario'): 'sentido' es 'ingreso'.\n"
         "  * Si el usuario de la app es el ORIGEN (en 'De', 'Desde', 'Remitente'): 'sentido' es 'egreso'.\n"
@@ -343,6 +368,182 @@ def extraer_movimientos_de_imagen(
 
     if categorias_usuario:
         prompt_sistema += f"\nCATEGORÍAS PERMITIDAS DEL USUARIO:\n{', '.join(categorias_usuario)}\n"
+
+    return prompt_sistema
+
+
+def _procesar_y_validar_respuesta_extraccion(
+    data: dict[str, Any],
+    categorias_usuario: list[str] | None,
+    hoy: date,
+) -> tuple[ResultadoExtraccion | None, str | None]:
+    """
+    Procesa y valida la respuesta estructurada de OpenAI para imagen o PDF.
+    Aplica las reglas 4d:
+    - Categoría que no está en categorias_usuario queda en None. Si coincide, queda como figura en la lista.
+    - Si documento_tipo no es factura_servicio: vencimiento None y cuotas [].
+    - Vencimiento inválido o fuera de [hoy - 60, hoy + 120]: queda en None.
+    - Si alguna cuota tiene fecha inválida o fuera de esa ventana, o monto <= 0: cuotas [] y vencimiento None.
+    """
+    if not data.get("legible"):
+        return None, "ILEGIBLE"
+
+    doc_tipo = str(data.get("documento_tipo") or "otro")
+
+    cat_map_norm: dict[str, str] = {}
+    if categorias_usuario:
+        for cat in categorias_usuario:
+            cat_map_norm[normalizar_texto(cat)] = cat
+
+    raw_movs = data.get("movimientos") or []
+    movs_validos: list[MovimientoExtraido] = []
+    rendimientos_validos: list[MovimientoExtraido] = []
+    omitidos: list[dict[str, Any]] = []
+
+    for m in raw_movs:
+        monto_dec = parsear_monto_documento(m.get("monto"))
+        if monto_dec is None or monto_dec <= Decimal("0"):
+            continue
+        fecha_obj = parsear_fecha_documento(m.get("fecha"))
+        fecha_norm = normalizar_anio_documento(fecha_obj, hoy)
+        if fecha_obj is not None and fecha_norm != fecha_obj:
+            logger.info(
+                "fecha_documento_normalizada",
+                fecha_original=fecha_obj.isoformat(),
+                fecha_normalizada=fecha_norm.isoformat(),
+            )
+        fecha_obj = fecha_norm
+        sentido_raw = m.get("sentido")
+        moneda_str = str(m.get("moneda") or "ARS").upper()
+        desc_str = str(m.get("descripcion") or "").strip()
+        tipo_op = m.get("tipo_operacion")
+        medio_p = m.get("medio_pago")
+        est = m.get("estado")
+        es_usuario = bool(m.get("contraparte_es_usuario", False))
+
+        cat_raw = m.get("categoria")
+        cat_final: str | None = None
+        if cat_raw:
+            norm_c = normalizar_texto(cat_raw)
+            if norm_c in cat_map_norm:
+                cat_final = cat_map_norm[norm_c]
+
+        if sentido_raw == "rendimiento":
+            rendimientos_validos.append(
+                MovimientoExtraido(
+                    fecha=fecha_obj,
+                    monto=monto_dec,
+                    moneda=moneda_str,
+                    descripcion=desc_str or "Rendimientos",
+                    sentido="rendimiento",
+                    categoria=cat_final,
+                    tipo_operacion=tipo_op,
+                    medio_pago=medio_p,
+                    estado=est,
+                    contraparte_es_usuario=es_usuario,
+                )
+            )
+        else:
+            motivo = motivo_omision(
+                descripcion=desc_str,
+                tipo_operacion=tipo_op,
+                medio_pago=medio_p,
+                estado=est,
+                contraparte_es_usuario=es_usuario,
+            )
+            if motivo is not None:
+                omitidos.append({
+                    "motivo": motivo,
+                    "descripcion": desc_str or "Movimiento",
+                    "monto": monto_dec,
+                    "moneda": moneda_str,
+                })
+            else:
+                movs_validos.append(
+                    MovimientoExtraido(
+                        fecha=fecha_obj,
+                        monto=monto_dec,
+                        moneda=moneda_str,
+                        descripcion=desc_str or "Varios",
+                        sentido="ingreso" if sentido_raw == "ingreso" else "egreso",
+                        categoria=cat_final,
+                        tipo_operacion=tipo_op,
+                        medio_pago=medio_p,
+                        estado=est,
+                        contraparte_es_usuario=es_usuario,
+                    )
+                )
+
+    if not movs_validos and not rendimientos_validos and not omitidos:
+        return None, "ILEGIBLE"
+
+    total_vistos = len(movs_validos)
+    movs_top10 = movs_validos[:10]
+
+    venc_obj: date | None = None
+    cuotas_validas: list[CuotaExtraida] = []
+
+    if doc_tipo == "factura_servicio":
+        venc_parsed = parsear_fecha_documento(data.get("vencimiento"))
+        if venc_parsed is not None:
+            if (hoy - timedelta(days=60)) <= venc_parsed <= (hoy + timedelta(days=120)):
+                venc_obj = venc_parsed
+
+        raw_cuotas = data.get("cuotas") or []
+        cuotas_invalida = False
+        for c in raw_cuotas:
+            c_venc = parsear_fecha_documento(c.get("vencimiento"))
+            c_monto = parsear_monto_documento(c.get("monto"))
+            if (
+                c_venc is None
+                or c_venc < (hoy - timedelta(days=60))
+                or c_venc > (hoy + timedelta(days=120))
+                or c_monto is None
+                or c_monto <= Decimal("0")
+            ):
+                cuotas_invalida = True
+                break
+            cuotas_validas.append(CuotaExtraida(vencimiento=c_venc, monto=c_monto))
+
+        if cuotas_invalida:
+            cuotas_validas = []
+            venc_obj = None
+
+    resultado = ResultadoExtraccion(
+        documento_tipo=doc_tipo,
+        movimientos=movs_top10,
+        billetera_texto=data.get("billetera_texto"),
+        vencimiento=venc_obj,
+        total_vistos=total_vistos,
+        rendimientos=rendimientos_validos,
+        omitidos=omitidos,
+        cuotas=cuotas_validas,
+    )
+    return resultado, None
+
+
+def extraer_movimientos_de_imagen(
+    image_bytes: bytes,
+    mime_type: str = "image/jpeg",
+    nombre_usuario: str = "",
+    categorias_usuario: list[str] | None = None,
+    usuario_id: Any | None = None,
+    max_bytes: int = 5 * 1024 * 1024,
+) -> tuple[ResultadoExtraccion | None, str | None]:
+    """
+    Analiza una imagen con GPT-4o Vision y Structured Outputs devolviendo un ResultadoExtraccion.
+    Aplica límite de 5 MB, anonimizado de usuario y prompt de seguridad.
+    Retorna (resultado, None) o (None, motivo_error).
+    """
+    if len(image_bytes) > max_bytes:
+        logger.warning("whatsapp_imagen_tamano_excedido", bytes=len(image_bytes), max_bytes=max_bytes)
+        return None, "TAMANO_EXCEDIDO"
+
+    content_type = mime_type or "image/jpeg"
+    if ";" in content_type:
+        content_type = content_type.split(";")[0].strip()
+
+    prompt_sistema = _construir_prompt_sistema_extraccion(nombre_usuario, categorias_usuario)
 
     try:
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
@@ -392,102 +593,70 @@ def extraer_movimientos_de_imagen(
             return None, "ILEGIBLE"
 
         data = json.loads(content)
-        if not data.get("legible"):
-            return None, "ILEGIBLE"
-
-        raw_movs = data.get("movimientos") or []
-        movs_validos: list[MovimientoExtraido] = []
-        rendimientos_validos: list[MovimientoExtraido] = []
-        omitidos: list[dict[str, Any]] = []
-
-        for m in raw_movs:
-            monto_dec = parsear_monto_documento(m.get("monto"))
-            if monto_dec is None or monto_dec <= Decimal("0"):
-                continue
-            fecha_obj = parsear_fecha_documento(m.get("fecha"))
-            fecha_norm = normalizar_anio_documento(fecha_obj, hoy)
-            if fecha_obj is not None and fecha_norm != fecha_obj:
-                logger.info(
-                    "fecha_documento_normalizada",
-                    fecha_original=fecha_obj.isoformat(),
-                    fecha_normalizada=fecha_norm.isoformat(),
-                )
-            fecha_obj = fecha_norm
-            sentido_raw = m.get("sentido")
-            moneda_str = str(m.get("moneda") or "ARS").upper()
-            desc_str = str(m.get("descripcion") or "").strip()
-            tipo_op = m.get("tipo_operacion")
-            medio_p = m.get("medio_pago")
-            est = m.get("estado")
-            es_usuario = bool(m.get("contraparte_es_usuario", False))
-
-            if sentido_raw == "rendimiento":
-                rendimientos_validos.append(
-                    MovimientoExtraido(
-                        fecha=fecha_obj,
-                        monto=monto_dec,
-                        moneda=moneda_str,
-                        descripcion=desc_str or "Rendimientos",
-                        sentido="rendimiento",
-                        categoria=m.get("categoria"),
-                        tipo_operacion=tipo_op,
-                        medio_pago=medio_p,
-                        estado=est,
-                        contraparte_es_usuario=es_usuario,
-                    )
-                )
-            else:
-                motivo = motivo_omision(
-                    descripcion=desc_str,
-                    tipo_operacion=tipo_op,
-                    medio_pago=medio_p,
-                    estado=est,
-                    contraparte_es_usuario=es_usuario,
-                )
-                if motivo is not None:
-                    omitidos.append({
-                        "motivo": motivo,
-                        "descripcion": desc_str or "Movimiento",
-                        "monto": monto_dec,
-                        "moneda": moneda_str,
-                    })
-                else:
-                    movs_validos.append(
-                        MovimientoExtraido(
-                            fecha=fecha_obj,
-                            monto=monto_dec,
-                            moneda=moneda_str,
-                            descripcion=desc_str or "Varios",
-                            sentido="ingreso" if sentido_raw == "ingreso" else "egreso",
-                            categoria=m.get("categoria"),
-                            tipo_operacion=tipo_op,
-                            medio_pago=medio_p,
-                            estado=est,
-                            contraparte_es_usuario=es_usuario,
-                        )
-                    )
-
-        if not movs_validos and not rendimientos_validos and not omitidos:
-            return None, "ILEGIBLE"
-
-        total_vistos = len(movs_validos)
-        movs_top10 = movs_validos[:10]
-        venc_obj = parsear_fecha_documento(data.get("vencimiento"))
-
-        resultado = ResultadoExtraccion(
-            documento_tipo=data.get("documento_tipo") or "otro",
-            movimientos=movs_top10,
-            billetera_texto=data.get("billetera_texto"),
-            vencimiento=venc_obj,
-            total_vistos=total_vistos,
-            rendimientos=rendimientos_validos,
-            omitidos=omitidos,
-        )
-        return resultado, None
+        hoy = hoy_argentina()
+        return _procesar_y_validar_respuesta_extraccion(data, categorias_usuario, hoy)
 
     except Exception:
         logger.exception("Error al analizar imagen de WhatsApp con Structured Outputs")
         return None, "ERROR_VISION"
+
+
+def extraer_movimientos_de_texto_pdf(
+    texto: str,
+    nombre_usuario: str = "",
+    categorias_usuario: list[str] | None = None,
+    usuario_id: Any | None = None,
+) -> tuple[ResultadoExtraccion | None, str | None]:
+    """
+    Analiza el texto extraído de un PDF con OpenAI (gpt-4o) y Structured Outputs.
+    Registra uso_ia con funcion='extraccion_pdf'.
+    Retorna (resultado, None) o (None, motivo_error).
+    """
+    if not texto or len(texto.strip()) < 10:
+        return None, "SIN_TEXTO"
+
+    prompt_sistema = _construir_prompt_sistema_extraccion(nombre_usuario, categorias_usuario)
+
+    try:
+        client_oai = get_openai_client()
+        response = client_oai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": prompt_sistema,
+                },
+                {
+                    "role": "user",
+                    "content": f"Texto extraído de un PDF:\n<<<\n{texto}\n>>>",
+                },
+            ],
+            response_format=ESQUEMA_EXTRACCION,
+        )
+
+        usage = getattr(response, "usage", None)
+        prompt_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
+        completion_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
+        logger.info(
+            "uso_ia",
+            usuario_id=str(usuario_id) if usuario_id else None,
+            funcion="extraccion_pdf",
+            modelo="gpt-4o",
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
+
+        content = response.choices[0].message.content
+        if not content:
+            return None, "ILEGIBLE"
+
+        data = json.loads(content)
+        hoy = hoy_argentina()
+        return _procesar_y_validar_respuesta_extraccion(data, categorias_usuario, hoy)
+
+    except Exception:
+        logger.exception("Error al analizar texto de PDF con Structured Outputs")
+        return None, "ERROR_EXTRACCION_PDF"
 
 
 def a_entidades(resultado: ResultadoExtraccion, billetera_nombre: str | None = None) -> dict[str, Any]:

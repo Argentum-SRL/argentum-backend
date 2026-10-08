@@ -24,6 +24,7 @@ Esta sección manda: si otra parte de este archivo dice algo distinto, vale lo q
 - Manejadores: handlers_confirmaciones, handlers_transferencias, handlers_deshacer, handlers_suscripciones, handlers_menus, handlers_permitirse. Otros módulos: contexto, registro, propuestas, transferencias, metas, deshacer_corregir, confirmaciones, verificacion_texto_ia, marcas, parsers, detectors, db_lookups, enriquecedores, gastos, constantes.
 - Todo movimiento se graba con transaccion_service.crear_transaccion(commit=False). Los mensajes salen solo por whatsapp_service.enviar_whatsapp.
 - El texto que escribe la IA entra marcado como TextoIA y se verifica antes de mandarlo (verificar_texto_ia): si trae un número que no está en el mensaje del usuario, se reemplaza por un texto fijo.
+- Lectura de comprobantes en PDF (fase4c2b1): descarga con control de tamaño de metadatos (máximo 10 MB, sin segunda llamada si excede), extracción de texto con pypdf (máximo 6 páginas, mínimo 100 caracteres sin espacios, límite 20.000 caracteres, descifrado con clave vacía). Extracción de movimientos y cuotas con Structured Outputs de OpenAI y verificación determinística contra montos y fechas del texto antes de integrarse al flujo habitual de propuesta.
 - "¿Me lo puedo permitir?" usa tools_service.calcular_puede_permitirse, la misma función que la web.
 
 ### Suscripciones
