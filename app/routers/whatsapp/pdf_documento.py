@@ -152,8 +152,14 @@ def verificar_extraccion_contra_texto(resultado: Any, texto: str) -> bool:
             return False
 
     vencimiento = getattr(resultado, "vencimiento", None)
-    if vencimiento is None or vencimiento not in fechas:
-        return False
+    if vencimiento is not None:
+        if isinstance(vencimiento, str):
+            try:
+                vencimiento = date.fromisoformat(vencimiento)
+            except ValueError:
+                return False
+        if vencimiento not in fechas:
+            return False
 
     cuotas = getattr(resultado, "cuotas", None) or []
     for c in cuotas:

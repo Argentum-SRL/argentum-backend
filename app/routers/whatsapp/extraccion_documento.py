@@ -520,12 +520,14 @@ def _procesar_y_validar_respuesta_extraccion(
         if cuotas_invalida:
             cuotas_validas = []
             venc_obj = None
-        elif cuotas_validas and len(movs_validos) == 1:
+        elif cuotas_validas:
             cuota_temprana = min(cuotas_validas, key=lambda c: c.vencimiento)
-            movs_validos[0].monto = cuota_temprana.monto
+            if movs_validos:
+                movs_validos = [movs_validos[0]]
+                movs_validos[0].monto = cuota_temprana.monto
             venc_obj = cuota_temprana.vencimiento
 
-    total_vistos = len(movs_validos)
+    total_vistos = 1 if (doc_tipo == "factura_servicio" and cuotas_validas) else len(movs_validos)
     movs_top10 = movs_validos[:10]
 
     resultado = ResultadoExtraccion(

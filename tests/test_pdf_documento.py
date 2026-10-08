@@ -589,18 +589,18 @@ def test_factura_servicio_un_movimiento_con_cuotas_toma_primera():
     assert res.vencimiento == hoy + timedelta(days=6)
 
 
-def test_factura_servicio_dos_movimientos_con_cuotas_no_cambian_montos():
-    """C1.7: Factura de servicio con 2 movimientos y cuotas: los montos no cambian."""
+def test_factura_servicio_dos_movimientos_con_cuotas_queda_un_movimiento_vencimiento_temprano():
+    """C1: Factura de servicio con 2 movimientos de 77597.44, vencimiento null y cuotas (hoy+36, hoy+6)."""
     hoy = hoy_argentina()
     data = {
         "legible": True,
         "documento_tipo": "factura_servicio",
         "billetera_texto": None,
-        "vencimiento": (hoy + timedelta(days=36)).isoformat(),
+        "vencimiento": None,
         "movimientos": [
             {
                 "fecha": hoy.isoformat(),
-                "monto": 155194.88,
+                "monto": 77597.44,
                 "moneda": "ARS",
                 "descripcion": "EPE 1",
                 "sentido": "egreso",
@@ -612,7 +612,7 @@ def test_factura_servicio_dos_movimientos_con_cuotas_no_cambian_montos():
             },
             {
                 "fecha": hoy.isoformat(),
-                "monto": 20000.00,
+                "monto": 77597.44,
                 "moneda": "ARS",
                 "descripcion": "EPE 2",
                 "sentido": "egreso",
@@ -631,7 +631,145 @@ def test_factura_servicio_dos_movimientos_con_cuotas_no_cambian_montos():
     res, err = _procesar_y_validar_respuesta_extraccion(data, None, hoy)
     assert err is None
     assert res is not None
-    assert len(res.movimientos) == 2
-    assert res.movimientos[0].monto == Decimal("155194.88")
-    assert res.movimientos[1].monto == Decimal("20000.00")
+    assert len(res.movimientos) == 1
+    assert res.movimientos[0].monto == Decimal("77597.44")
+    assert res.vencimiento == hoy + timedelta(days=6)
+    assert res.total_vistos == 1
+
+
+# =============================================================================
+# C2. Tests nuevos (Fase 4c2b1_d)
+# =============================================================================
+
+def test_factura_servicio_un_movimiento_vencimiento_null_con_cuotas():
+    """C2.1: Factura de servicio con 1 movimiento de 155194.88, vencimiento null y cuotas (hoy+36, hoy+6)."""
+    hoy = hoy_argentina()
+    data = {
+        "legible": True,
+        "documento_tipo": "factura_servicio",
+        "billetera_texto": None,
+        "vencimiento": None,
+        "movimientos": [
+            {
+                "fecha": hoy.isoformat(),
+                "monto": 155194.88,
+                "moneda": "ARS",
+                "descripcion": "EPE",
+                "sentido": "egreso",
+                "categoria": None,
+                "tipo_operacion": None,
+                "medio_pago": None,
+                "estado": None,
+                "contraparte_es_usuario": False,
+            }
+        ],
+        "cuotas": [
+            {"vencimiento": (hoy + timedelta(days=36)).isoformat(), "monto": 77597.44},
+            {"vencimiento": (hoy + timedelta(days=6)).isoformat(), "monto": 77597.44},
+        ],
+    }
+    res, err = _procesar_y_validar_respuesta_extraccion(data, None, hoy)
+    assert err is None
+    assert res is not None
+    assert len(res.movimientos) == 1
+    assert res.movimientos[0].monto == Decimal("77597.44")
+    assert res.vencimiento == hoy + timedelta(days=6)
+    assert res.total_vistos == 1
+
+
+def test_verificar_comprobante_transferencia_vencimiento_none():
+    """C2.2: Verificar con comprobante_transferencia, monto en el texto y vencimiento None: True."""
+    texto = "Comprobante de transferencia\nImporte: $ 15.000,00\nDestinatario: Juan Perez\n"
+    res = ResultadoExtraccion(
+        documento_tipo="comprobante_transferencia",
+        movimientos=[
+            MovimientoExtraido(
+                fecha=date(2026, 10, 8),
+                monto=Decimal("15000.00"),
+                moneda="ARS",
+                descripcion="Juan Perez",
+                sentido="egreso",
+                categoria=None,
+            )
+        ],
+        billetera_texto=None,
+        vencimiento=None,
+        total_vistos=1,
+    )
+    assert verificar_extraccion_contra_texto(res, texto) is True
+
+
+def test_verificar_factura_servicio_vencimiento_none():
+    """C2.3: Verificar con factura_servicio, vencimiento None y montos en el texto: True."""
+    texto = "Factura de servicio\nTotal a pagar $ 25.015,01\n"
+    res = ResultadoExtraccion(
+        documento_tipo="factura_servicio",
+        movimientos=[
+            MovimientoExtraido(
+                fecha=date(2026, 10, 8),
+                monto=Decimal("25015.01"),
+                moneda="ARS",
+                descripcion="Litoral Gas",
+                sentido="egreso",
+                categoria=None,
+            )
+        ],
+        billetera_texto=None,
+        vencimiento=None,
+        total_vistos=1,
+    )
+    assert verificar_extraccion_contra_texto(res, texto) is True
+
+
+def test_verificar_vencimiento_no_en_texto():
+    """C2.4: Verificar con un vencimiento que no está en el texto: False."""
+    texto = "Factura de servicio\nTotal a pagar $ 25.015,01\nFecha de emision: 01/10/2026\n"
+    res = ResultadoExtraccion(
+        documento_tipo="factura_servicio",
+        movimientos=[
+            MovimientoExtraido(
+                fecha=date(2026, 10, 8),
+                monto=Decimal("25015.01"),
+                moneda="ARS",
+                descripcion="Litoral Gas",
+                sentido="egreso",
+                categoria=None,
+            )
+        ],
+        billetera_texto=None,
+        vencimiento=date(2026, 12, 15),
+        total_vistos=1,
+    )
+    assert verificar_extraccion_contra_texto(res, texto) is False
+
+
+def test_verificar_cuota_fecha_no_en_texto():
+    """C2.5: Verificar con una cuota cuya fecha no está en el texto: False."""
+    texto = (
+        "Factura EPE\n"
+        "Total $ 77.597,44\n"
+        "Vencimiento 13/10/2026\n"
+    )
+    res = ResultadoExtraccion(
+        documento_tipo="factura_servicio",
+        movimientos=[
+            MovimientoExtraido(
+                fecha=date(2026, 10, 13),
+                monto=Decimal("77597.44"),
+                moneda="ARS",
+                descripcion="EPE",
+                sentido="egreso",
+                categoria=None,
+            )
+        ],
+        billetera_texto=None,
+        vencimiento=date(2026, 10, 13),
+        total_vistos=1,
+        cuotas=[
+            CuotaExtraida(vencimiento=date(2026, 10, 13), monto=Decimal("77597.44")),
+            CuotaExtraida(vencimiento=date(2026, 11, 25), monto=Decimal("77597.44")),
+        ],
+    )
+    assert verificar_extraccion_contra_texto(res, texto) is False
+
 
