@@ -195,6 +195,34 @@ ESQUEMA_EXTRACCION: dict[str, Any] = {
 }
 
 
+def esquema_con_categorias(categorias: list[str] | None) -> dict[str, Any]:
+    """
+    Hace una copia profunda de ESQUEMA_EXTRACCION.
+    Si la lista de categorías no está vacía, limita movimientos[].categoria a esa lista o null:
+    "type": ["string", "null"] y "enum": lista + [None].
+    Con la lista vacía o None, devuelve una copia igual.
+    ESQUEMA_EXTRACCION no cambia.
+    """
+    import copy
+
+    esquema = copy.deepcopy(ESQUEMA_EXTRACCION)
+    if not categorias:
+        return esquema
+
+    schema_cat = (
+        esquema.get("json_schema", {})
+        .get("schema", {})
+        .get("properties", {})
+        .get("movimientos", {})
+        .get("items", {})
+        .get("properties", {})
+        .get("categoria", {})
+    )
+    schema_cat["type"] = ["string", "null"]
+    schema_cat["enum"] = list(categorias) + [None]
+    return esquema
+
+
 def parsear_monto_documento(val: Any) -> Decimal | None:
     """Convierte un valor de monto a Decimal de forma robusta."""
     if val is None:
@@ -569,6 +597,7 @@ def extraer_movimientos_de_imagen(
     try:
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
         client_oai = get_openai_client()
+        esquema = esquema_con_categorias(categorias_usuario)
 
         vision_response = client_oai.chat.completions.create(
             model="gpt-4o",
@@ -594,7 +623,8 @@ def extraer_movimientos_de_imagen(
                     ],
                 },
             ],
-            response_format=ESQUEMA_EXTRACCION,
+            response_format=esquema,
+            temperature=0,
         )
 
         usage = getattr(vision_response, "usage", None)
@@ -639,7 +669,10 @@ def extraer_movimientos_de_texto_pdf(
     prompt_sistema = _construir_prompt_sistema_extraccion(nombre_usuario, categorias_usuario)
 
     try:
+        from app.routers.whatsapp.pdf_documento import fecha_solo_fiscal
+
         client_oai = get_openai_client()
+        esquema = esquema_con_categorias(categorias_usuario)
         response = client_oai.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -652,7 +685,8 @@ def extraer_movimientos_de_texto_pdf(
                     "content": f"Texto extraído de un PDF:\n<<<\n{texto}\n>>>",
                 },
             ],
-            response_format=ESQUEMA_EXTRACCION,
+            response_format=esquema,
+            temperature=0,
         )
 
         usage = getattr(response, "usage", None)
@@ -673,7 +707,11 @@ def extraer_movimientos_de_texto_pdf(
 
         data = json.loads(content)
         hoy = hoy_argentina()
-        return _procesar_y_validar_respuesta_extraccion(data, categorias_usuario, hoy)
+        resultado, err = _procesar_y_validar_respuesta_extraccion(data, categorias_usuario, hoy)
+        if resultado is not None and resultado.vencimiento is not None:
+            if fecha_solo_fiscal(resultado.vencimiento, texto):
+                resultado.vencimiento = None
+        return resultado, err
 
     except Exception:
         logger.exception("Error al analizar texto de PDF con Structured Outputs")

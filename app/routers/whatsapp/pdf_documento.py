@@ -193,3 +193,44 @@ def verificar_extraccion_contra_texto(resultado: Any, texto: str) -> bool:
             return False
 
     return True
+
+
+def fecha_solo_fiscal(fecha: date | str | None, texto: str) -> bool:
+    """
+    Devuelve True si cada aparición de la fecha (dd/mm/aaaa) en el texto tiene,
+    en los 60 caracteres anteriores, una coincidencia de C.E.S.P. o C.A.E., sin importar mayúsculas.
+    Si la fecha no aparece en el texto: False.
+    """
+    if not fecha or not texto:
+        return False
+
+    if isinstance(fecha, date):
+        d_str = f"{fecha.day:02d}/{fecha.month:02d}/{fecha.year:04d}"
+    elif isinstance(fecha, str):
+        s = fecha.strip()
+        m_iso = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})$", s)
+        m_arg = re.match(r"^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$", s)
+        if m_iso:
+            d_str = f"{int(m_iso.group(3)):02d}/{int(m_iso.group(2)):02d}/{int(m_iso.group(1)):04d}"
+        elif m_arg:
+            d_str = f"{int(m_arg.group(1)):02d}/{int(m_arg.group(2)):02d}/{int(m_arg.group(3)):04d}"
+        else:
+            d_str = s
+    else:
+        return False
+
+    patron_fecha = re.compile(rf"(?<!\d){re.escape(d_str)}(?!\d)")
+    matches = list(patron_fecha.finditer(texto))
+    if not matches:
+        return False
+
+    patron_fiscal = re.compile(r"\bC\.?\s*E\.?\s*S\.?\s*P\b|\bC\.?\s*A\.?\s*E\b", re.IGNORECASE)
+
+    for m in matches:
+        start_idx = m.start()
+        ventana = texto[max(0, start_idx - 60) : start_idx]
+        if not patron_fiscal.search(ventana):
+            return False
+
+    return True
+

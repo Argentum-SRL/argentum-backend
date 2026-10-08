@@ -773,3 +773,41 @@ def test_verificar_cuota_fecha_no_en_texto():
     assert verificar_extraccion_contra_texto(res, texto) is False
 
 
+def test_fecha_solo_fiscal():
+    """C2: Pruebas de fecha_solo_fiscal con texto sintético."""
+    from app.routers.whatsapp.pdf_documento import fecha_solo_fiscal
+
+    texto_sintetico = (
+        "TOTAL A PAGAR hasta el 13/10/2026\n"
+        "C.E.S.P. Nro.: 37390006516961\n"
+        "F.Vto.: 07/10/2026\n"
+        "C.A.E. Nº 86373133575314 Fecha Vto. C.A.E. 24/09/2026"
+    )
+
+    # 07/10/2026: True
+    assert fecha_solo_fiscal("07/10/2026", texto_sintetico) is True
+    assert fecha_solo_fiscal(date(2026, 10, 7), texto_sintetico) is True
+
+    # 13/10/2026: False
+    assert fecha_solo_fiscal("13/10/2026", texto_sintetico) is False
+    assert fecha_solo_fiscal(date(2026, 10, 13), texto_sintetico) is False
+
+    # 24/09/2026: True
+    assert fecha_solo_fiscal("24/09/2026", texto_sintetico) is True
+    assert fecha_solo_fiscal(date(2026, 9, 24), texto_sintetico) is True
+
+    # una fecha ausente: False
+    assert fecha_solo_fiscal("01/01/2026", texto_sintetico) is False
+    assert fecha_solo_fiscal(date(2026, 1, 1), texto_sintetico) is False
+
+    # una fecha que aparece una vez junto a C.E.S.P. y otra después de "Vencimiento:": False
+    texto_mixto = (
+        "C.E.S.P. Nro.: 37390006516961\n"
+        "F.Vto.: 07/10/2026\n"
+        "Vencimiento: 07/10/2026\n"
+    )
+    assert fecha_solo_fiscal("07/10/2026", texto_mixto) is False
+    assert fecha_solo_fiscal(date(2026, 10, 7), texto_mixto) is False
+
+
+

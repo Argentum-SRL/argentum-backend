@@ -1021,5 +1021,163 @@ def test_extraer_movimientos_normalizacion_fechas_y_prompt():
         assert regla_esperada in system_content
 
 
+def test_esquema_con_categorias():
+    """C1: Pruebas de esquema_con_categorias."""
+    from app.routers.whatsapp.extraccion_documento import (
+        ESQUEMA_EXTRACCION,
+        esquema_con_categorias,
+    )
+
+    # con ["Luz", "Gas"], el enum de categoría es ["Luz", "Gas", None] y el type incluye "null"
+    esq = esquema_con_categorias(["Luz", "Gas"])
+    cat_prop = esq["json_schema"]["schema"]["properties"]["movimientos"]["items"]["properties"]["categoria"]
+    assert cat_prop["enum"] == ["Luz", "Gas", None]
+    assert "null" in cat_prop["type"]
+
+    # después de llamarla, ESQUEMA_EXTRACCION sigue sin enum
+    orig_cat = ESQUEMA_EXTRACCION["json_schema"]["schema"]["properties"]["movimientos"]["items"]["properties"]["categoria"]
+    assert "enum" not in orig_cat
+
+    # con [] o None, devuelve algo igual a ESQUEMA_EXTRACCION
+    assert esquema_con_categorias([]) == ESQUEMA_EXTRACCION
+    assert esquema_con_categorias(None) == ESQUEMA_EXTRACCION
+
+
+def test_extraer_movimientos_de_texto_pdf_argumentos_y_vencimiento_fiscal():
+    """C3: extraer_movimientos_de_texto_pdf valida temperature=0, enum de categorías y descarte de vencimiento fiscal."""
+    import json
+    from unittest.mock import MagicMock, patch
+    from app.routers.whatsapp.extraccion_documento import extraer_movimientos_de_texto_pdf
+
+    texto = (
+        "Factura de prueba\n"
+        "TOTAL A PAGAR hasta el 13/10/2026 $ 25.015,01\n"
+        "C.E.S.P. Nro.: 37390006516961\n"
+        "F.Vto.: 07/10/2026\n"
+        "Relleno de texto para superar la longitud minima requerida por el extractor de pdf."
+    )
+
+    categorias = ["Luz", "Gas"]
+
+    # Caso 1: respuesta con vencimiento 2026-10-07 (fiscal en ese texto)
+    mock_payload_fiscal = {
+        "legible": True,
+        "documento_tipo": "factura_servicio",
+        "billetera_texto": None,
+        "vencimiento": "2026-10-07",
+        "movimientos": [
+            {
+                "fecha": "2026-10-08",
+                "monto": 25015.01,
+                "moneda": "ARS",
+                "descripcion": "Litoral Gas",
+                "sentido": "egreso",
+                "categoria": "Gas",
+                "tipo_operacion": None,
+                "medio_pago": None,
+                "estado": None,
+                "contraparte_es_usuario": False,
+            }
+        ],
+        "cuotas": [],
+    }
+
+    mock_resp1 = MagicMock()
+    mock_resp1.choices = [MagicMock(message=MagicMock(content=json.dumps(mock_payload_fiscal)))]
+    mock_resp1.usage.prompt_tokens = 100
+    mock_resp1.usage.completion_tokens = 50
+
+    with patch("app.routers.whatsapp.extraccion_documento.get_openai_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.chat.completions.create.return_value = mock_resp1
+
+        res, err = extraer_movimientos_de_texto_pdf(texto, categorias_usuario=categorias)
+        assert err is None
+        assert res is not None
+
+        # la llamada lleva temperature=0 y el enum de categorías
+        _, kwargs = mock_client.chat.completions.create.call_args
+        assert kwargs.get("temperature") == 0
+        resp_fmt = kwargs.get("response_format", {})
+        cat_enum = resp_fmt["json_schema"]["schema"]["properties"]["movimientos"]["items"]["properties"]["categoria"]["enum"]
+        assert cat_enum == ["Luz", "Gas", None]
+
+        # si la respuesta trae vencimiento 2026-10-07 (fiscal en ese texto), el resultado tiene vencimiento None
+        assert res.vencimiento is None
+
+    # Caso 2: respuesta con vencimiento 2026-10-13 (no fiscal)
+    mock_payload_real = dict(mock_payload_fiscal)
+    mock_payload_real["vencimiento"] = "2026-10-13"
+
+    mock_resp2 = MagicMock()
+    mock_resp2.choices = [MagicMock(message=MagicMock(content=json.dumps(mock_payload_real)))]
+    mock_resp2.usage.prompt_tokens = 100
+    mock_resp2.usage.completion_tokens = 50
+
+    with patch("app.routers.whatsapp.extraccion_documento.get_openai_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.chat.completions.create.return_value = mock_resp2
+
+        res, err = extraer_movimientos_de_texto_pdf(texto, categorias_usuario=categorias)
+        assert err is None
+        assert res is not None
+
+        # si trae 2026-10-13, queda 2026-10-13
+        assert res.vencimiento == date(2026, 10, 13)
+
+
+def test_extraer_movimientos_de_imagen_argumentos():
+    """C4: extraer_movimientos_de_imagen lleva temperature=0 y enum de categorías."""
+    import json
+    from unittest.mock import MagicMock, patch
+    from app.routers.whatsapp.extraccion_documento import extraer_movimientos_de_imagen
+
+    categorias = ["Supermercado", "Farmacia"]
+    mock_payload = {
+        "legible": True,
+        "documento_tipo": "ticket_compra",
+        "billetera_texto": None,
+        "vencimiento": None,
+        "movimientos": [
+            {
+                "fecha": "2026-10-08",
+                "monto": 1500.0,
+                "moneda": "ARS",
+                "descripcion": "Coto",
+                "sentido": "egreso",
+                "categoria": "Supermercado",
+                "tipo_operacion": None,
+                "medio_pago": None,
+                "estado": None,
+                "contraparte_es_usuario": False,
+            }
+        ],
+        "cuotas": [],
+    }
+
+    mock_resp = MagicMock()
+    mock_resp.choices = [MagicMock(message=MagicMock(content=json.dumps(mock_payload)))]
+    mock_resp.usage.prompt_tokens = 100
+    mock_resp.usage.completion_tokens = 50
+
+    with patch("app.routers.whatsapp.extraccion_documento.get_openai_client") as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.chat.completions.create.return_value = mock_resp
+
+        res, err = extraer_movimientos_de_imagen(b"fake_image_bytes", categorias_usuario=categorias)
+        assert err is None
+        assert res is not None
+
+        _, kwargs = mock_client.chat.completions.create.call_args
+        assert kwargs.get("temperature") == 0
+        resp_fmt = kwargs.get("response_format", {})
+        cat_enum = resp_fmt["json_schema"]["schema"]["properties"]["movimientos"]["items"]["properties"]["categoria"]["enum"]
+        assert cat_enum == ["Supermercado", "Farmacia", None]
+
+
+
 
 
