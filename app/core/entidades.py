@@ -111,35 +111,9 @@ ENTIDADES: dict[str, dict[str, Any]] = {
         "nombre": "ARQ",
         "fuente": None,
     },
-    "ieb": {
-        "nombre": "IEB+",
-        "fuente": None,
-    },
-    "n1u": {
-        "nombre": "N1U",
-        "fuente": None,
-    },
     "astropay": {
         "nombre": "Astropay",
         "fuente": None,
-    },
-    "letsbit": {
-        "nombre": "LetsBit",
-        "fuente": None,
-    },
-    "fiwind": {
-        "nombre": "Fiwind",
-        "fuente": {
-            "base": "FIWIND",
-            "opciones": [
-                {
-                    "clave": "FIWIND",
-                    "fuente": "argentinadatos_cuentas",
-                    "etiqueta": "Cuenta remunerada",
-                    "tope": None,
-                },
-            ],
-        },
     },
     "brubank": {
         "nombre": "Brubank",
@@ -335,14 +309,6 @@ ENTIDADES: dict[str, dict[str, Any]] = {
     },
     "iol": {
         "nombre": "IOL (InvertirOnline)",
-        "fuente": None,
-    },
-    "ppi": {
-        "nombre": "Portfolio Personal Inversiones",
-        "fuente": None,
-    },
-    "cohen": {
-        "nombre": "Cohen",
         "fuente": None,
     },
 }
