@@ -28,6 +28,7 @@ from app.models.ajuste_saldo import AjusteSaldo
 from app.models.tasa_entidad import TasaEntidad
 from app.models.memoria_comercio import MemoriaComercio
 from app.models.factura import Factura
+from app.models.decision_patron import DecisionPatron
 from app.models.usuario import Usuario
 from app.models.tools import IPCCache
 from app.models.feriado import FeriadoAR
@@ -40,6 +41,7 @@ from app.models.rate_limit import RateLimit
 
 __all__ = [
     "Usuario",
+    "DecisionPatron",
     "Factura",
     "Billetera",
     "TarjetaCredito",

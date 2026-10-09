@@ -78,6 +78,13 @@ PISO_UN_PERIODO = {
     "anual": 180,
 }
 
+# Medio período de margen, igual que el piso: del 1 de enero al 10 de febrero hay 40 días.
+TECHO_UN_PERIODO = {
+    "mensual": 45,
+    "bimestral": 90,
+    "anual": 380,
+}
+
 # Cortes de presencia mínima y dispersión máxima de monto: finanzas.py (líneas 522-523); mediana y MAD por robustez (Leys y otros 2013).
 PRESENCIA_MIN_FUERTE = Decimal("0.80")
 DISPERSION_MAX_MONTO = Decimal("0.10")
@@ -352,7 +359,9 @@ def detectar_fijos(
             cadencia_valida = True
             for d in deltas:
                 if not any(
-                    (PISO_UN_PERIODO[frecuencia] if k == 1 else k * v_min) <= d <= k * v_max
+                    (PISO_UN_PERIODO[frecuencia] if k == 1 else k * v_min)
+                    <= d
+                    <= (TECHO_UN_PERIODO[frecuencia] if k == 1 else k * v_max)
                     for k in range(1, k_max + 1)
                 ):
                     cadencia_valida = False
@@ -628,15 +637,27 @@ def clasificar_cajas(
     ctx: Any,
     min_ocurrencias: int = MIN_OCURRENCIAS_FRECUENTE,
     meses_ventana: int = MESES_VENTANA_FRECUENTE,
+    fijos_descartados: Iterable[tuple[str, str]] = (),
 ) -> ResultadoCajas:
     """
     Clasifica egresos recurrentes entre fijos (detectar_fijos) y, para los restantes
     que se repiten, los reparte en las cajas de 'costumbre' y 'dia_a_dia'.
     """
-    # a. Correr detectar_fijos. Sacar de movimientos_elegibles todos los que quedaron en algún fijo.
+    # a. Correr detectar_fijos. Sacar de movimientos_elegibles todos los que quedaron en algún fijo no descartado.
     res_fijos = detectar_fijos(transacciones, ipc_records, fecha_destino, ctx=ctx)
+
+    descartados_set = {
+        (c, str(getattr(m, "value", m)).replace("Moneda.", ""))
+        for c, m in fijos_descartados
+    }
+
+    fijos_conservados = []
     ids_fijos: set[Any] = set()
     for f in res_fijos.fijos:
+        f_moneda_str = str(getattr(f.moneda, "value", f.moneda)).replace("Moneda.", "")
+        if (f.clave, f_moneda_str) in descartados_set:
+            continue
+        fijos_conservados.append(f)
         ids_fijos.update(f.transacciones_ids)
 
     elegibles = movimientos_elegibles(transacciones, ctx)
@@ -777,7 +798,7 @@ def clasificar_cajas(
     dia_a_dia.sort(key=lambda g: g.monto_mensual_mediano, reverse=True)
 
     return ResultadoCajas(
-        fijos=res_fijos.fijos,
+        fijos=fijos_conservados,
         descartados_fijos=res_fijos.descartados,
         costumbre=costumbre,
         dia_a_dia=dia_a_dia,

@@ -41,6 +41,9 @@ Esta sección manda: si otra parte de este archivo dice algo distinto, vale lo q
 - Las facturas ingresadas por foto o PDF viven en la tabla `facturas` (app/services/factura_service.py). Al registrar un egreso (que no sea cuota hija), se busca una factura pendiente con mismo monto, moneda, en ventana de fechas (llegada a vencimiento + 10 días) y coincidencia de subcategoría, categoría (distinta de "Otros") o clave de comercio. Si hay exactamente una candidata, se marca pagada automáticamente vinculando transaccion_id. Al eliminar la transacción, la factura vuelve a pendiente.
 - Flujo WhatsApp para facturas con vencimiento (fase4c2b2b): Al recibir foto o PDF de factura con vencimiento, la propuesta pregunta '¿Ya la pagaste?'. Con 'sí' se anota el gasto del primer vencimiento y las cuotas restantes se guardan como facturas pendientes en la web. Con 'no' se anotan como facturas pendientes sin crear movimientos. Vencimientos en PDFs no provistos por la IA se extraen determinísticamente del texto si están en ventana válida.
 
+### Patrones repetidos y decisiones de usuario
+- La página "Lo que se repite" se apoya en app/services/patrones_service.py y la tabla `decisiones_patrones` (app/models/decision_patron.py). Agrupa gastos en fijos, costumbre y día a día (usando app/utils/patrones.py) e ingresos habituales (app/services/ingreso_habitual_service.py). El usuario puede confirmar, descartar o mover ítems entre cajas sin alterar las transacciones originales.
+
 ### Base de datos
 - Las migraciones se aplican a mano a producción antes del push; Railway corre "alembic upgrade head" al deployar.
 

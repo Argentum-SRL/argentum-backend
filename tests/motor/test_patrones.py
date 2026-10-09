@@ -606,3 +606,120 @@ def test_t23_dos_ocurrencias_no_repite(ctx_vacio: ContextoDefiniciones, ipc_plan
     assert len(res.fijos) == 0
     assert len(res.costumbre) == 0
 
+
+def test_t24_techo_un_periodo_mensual(ctx_vacio: ContextoDefiniciones, ipc_plano: dict[str, Decimal]):
+    """T24. Alquiler $400.000 el 01/01, 10/02, 01/03, 10/04, 01/05/2026, destino 2026-05-20: 1 fijo mensual fuerte, dia_tipico 1, prox 2026-06-01."""
+    sub_alq = MockSubcategoria("s-alq", "Alquiler")
+    cat_viv = MockCategoria("c-viv", "Vivienda")
+    fechas = [
+        date(2026, 1, 1),
+        date(2026, 2, 10),
+        date(2026, 3, 1),
+        date(2026, 4, 10),
+        date(2026, 5, 1),
+    ]
+    txs = [
+        MockTransaccion(
+            f, 400000,
+            descripcion="Alquiler Depto",
+            categoria=cat_viv,
+            subcategoria=sub_alq,
+            categoria_id=cat_viv.id,
+            subcategoria_id=sub_alq.id,
+        )
+        for f in fechas
+    ]
+    res = clasificar_cajas(txs, ipc_plano, date(2026, 5, 20), ctx=ctx_vacio)
+
+    assert len(res.fijos) == 1
+    fijo = res.fijos[0]
+    assert fijo.frecuencia == "mensual"
+    assert fijo.fuerza == "fuerte"
+    assert fijo.dia_tipico == 1
+    assert fijo.proxima_fecha == date(2026, 6, 1)
+
+
+def test_t25_techo_un_periodo_bimestral(ctx_vacio: ContextoDefiniciones, ipc_plano: dict[str, Decimal]):
+    """T25. Luz $20.000 el 10/01, 10/03, 05/05, 25/07/2026, destino 2026-08-10: 1 fijo bimestral fuerte."""
+    sub_luz = MockSubcategoria("s-luz", "Electricidad")
+    cat_viv = MockCategoria("c-viv", "Vivienda")
+    fechas = [
+        date(2026, 1, 10),
+        date(2026, 3, 10),
+        date(2026, 5, 5),
+        date(2026, 7, 25),
+    ]
+    txs = [
+        MockTransaccion(
+            f, 20000,
+            descripcion="Edenor Luz",
+            categoria=cat_viv,
+            subcategoria=sub_luz,
+            categoria_id=cat_viv.id,
+            subcategoria_id=sub_luz.id,
+        )
+        for f in fechas
+    ]
+    res = clasificar_cajas(txs, ipc_plano, date(2026, 8, 10), ctx=ctx_vacio)
+
+    assert len(res.fijos) == 1
+    fijo = res.fijos[0]
+    assert fijo.frecuencia == "bimestral"
+    assert fijo.fuerza == "fuerte"
+
+
+def test_t26_fijos_descartados_pasan_a_frecuentes(ctx_vacio: ContextoDefiniciones, ipc_plano: dict[str, Decimal]):
+    """T26. Movimientos de T21 con fijos_descartados=[(clave_fijo_T21, 'ARS')]: 0 fijos, costumbre: 1 grupo delivery, día a día: 1 grupo 'Alquiler' con 3 ocurrencias."""
+    sub_alq = MockSubcategoria("s-alq", "Alquiler")
+    cat_viv = MockCategoria("c-viv", "Vivienda")
+    sub_del = MockSubcategoria("s-del", "Delivery")
+    cat_gast = MockCategoria("c-gast", "Gastronomía")
+
+    txs_alq = [
+        MockTransaccion(
+            f, 400000,
+            descripcion="Alquiler Depto",
+            categoria=cat_viv,
+            subcategoria=sub_alq,
+            categoria_id=cat_viv.id,
+            subcategoria_id=sub_alq.id,
+        )
+        for f in [date(2026, 6, 5), date(2026, 7, 5), date(2026, 8, 5)]
+    ]
+    fechas_del = [
+        date(2026, 6, 3), date(2026, 6, 10), date(2026, 6, 17), date(2026, 6, 24),
+        date(2026, 7, 8), date(2026, 7, 22),
+        date(2026, 8, 5), date(2026, 8, 15), date(2026, 8, 25),
+    ]
+    txs_del = [
+        MockTransaccion(
+            f, 10000,
+            descripcion="Delivery",
+            categoria=cat_gast,
+            subcategoria=sub_del,
+            categoria_id=cat_gast.id,
+            subcategoria_id=sub_del.id,
+        )
+        for f in fechas_del
+    ]
+
+    res_inicial = clasificar_cajas(txs_alq + txs_del, ipc_plano, date(2026, 9, 5), ctx=ctx_vacio)
+    assert len(res_inicial.fijos) == 1
+    clave_fijo = res_inicial.fijos[0].clave
+
+    res = clasificar_cajas(
+        txs_alq + txs_del,
+        ipc_plano,
+        date(2026, 9, 5),
+        ctx=ctx_vacio,
+        fijos_descartados=[(clave_fijo, "ARS")],
+    )
+
+    assert len(res.fijos) == 0
+    assert len(res.costumbre) == 1
+    assert res.costumbre[0].nombre == "Delivery"
+    assert len(res.dia_a_dia) == 1
+    assert res.dia_a_dia[0].nombre == "Alquiler"
+    assert res.dia_a_dia[0].ocurrencias == 3
+
+

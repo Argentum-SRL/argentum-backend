@@ -24,7 +24,7 @@ def upgrade() -> None:
     engine_name = bind.engine.name if hasattr(bind, 'engine') else bind.dialect.name
 
     # 1. Caso específico de cambio de contraseña
-    op.execute(sa.text("""
+    op.execute(sa.text(r"""
         UPDATE notificaciones
         SET mensaje = 'Tu contraseña de Argentum fue actualizada. Si no fuiste vos, cambiala de inmediato.'
         WHERE tipo = 'CAMBIO_CONTRASENA' AND mensaje LIKE '%http%';
@@ -32,17 +32,17 @@ def upgrade() -> None:
 
     # 2. Caso genérico si hay otras notificaciones con URLs (en PostgreSQL)
     if engine_name == 'postgresql':
-        op.execute(sa.text("""
+        op.execute(sa.text(r"""
             UPDATE notificaciones
             SET mensaje = REGEXP_REPLACE(
                 REGEXP_REPLACE(
                     mensaje,
-                    '\\s*(?:,\\s*)?(?:desde|en|ingresando a|a través de)?\\s*https?://\\S+',
+                    '\s*(?\:,\s*)?(?\:desde|en|ingresando a|a través de)?\s*https?://\S+',
                     '',
                     'gi'
                 ),
                 '([^.!?])$',
-                '\\1.'
+                '\1.'
             )
             WHERE mensaje ~* 'https?://';
         """))
