@@ -1,5 +1,6 @@
 from datetime import datetime, date
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
 from app.models.tarjeta_credito import RedTarjeta, EstadoTarjeta
@@ -186,6 +187,7 @@ class ResultadoPagoTarjeta(BaseModel):
     moneda_original: str | None = None
     cotizacion_aplicada: DecimalJSON | None = None
     tipo_dolar_usado: str | None = None
+    monto_diferencia: DecimalJSON | None = None
 
     class Config:
         from_attributes = True
@@ -213,6 +215,9 @@ class PagarTarjetaBody(BaseModel):
     cotizacion_personalizada: DecimalJSON | None = Field(default=None, gt=0, max_digits=15, decimal_places=4)
     monto_pesos_personalizado: DecimalJSON | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
     monto_percepcion_personalizado: DecimalJSON | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
+    diferencia_tipo: Literal["cargos_banco", "compras_no_cargadas"] = "cargos_banco"
+    diferencia_categoria_id: UUID | None = None
+    diferencia_subcategoria_id: UUID | None = None
 
 
 class SimularPesificacionResponse(BaseModel):

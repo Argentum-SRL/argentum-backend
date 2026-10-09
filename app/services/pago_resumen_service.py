@@ -6,12 +6,14 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.billetera import Billetera
+from app.models.categoria import Categoria
 from app.models.cuota import Cuota
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.saldo_arrastrado import (
@@ -19,6 +21,7 @@ from app.models.saldo_arrastrado import (
     PagoSaldoArrastrado,
     SaldoArrastradoTarjeta,
 )
+from app.models.subcategoria import Subcategoria
 from app.models.tarjeta_credito import EstadoTarjeta, TarjetaCredito
 from app.models.transaccion import Transaccion
 from app.models.usuario import Moneda
@@ -42,6 +45,29 @@ from app.utils.formato import formatear_monto
 logger = logging.getLogger(__name__)
 
 
+def _subcategoria_impuestos_banco(db: Session, categoria_banco: Categoria | None) -> Subcategoria | None:
+    """
+    Busca o crea la subcategoría 'Impuestos' dentro de la categoría Banco recibida.
+    """
+    if not categoria_banco:
+        return None
+    subcat_impuestos = db.query(Subcategoria).filter(
+        Subcategoria.categoria_id == categoria_banco.id,
+        Subcategoria.nombre.ilike("Impuestos")
+    ).first()
+
+    if not subcat_impuestos:
+        subcat_impuestos = Subcategoria(
+            categoria_id=categoria_banco.id,
+            nombre="Impuestos",
+            orden=10
+        )
+        db.add(subcat_impuestos)
+        db.flush()
+
+    return subcat_impuestos
+
+
 def pagar_resumen_tarjeta(
     db: Session,
     usuario_id: UUID,
@@ -55,6 +81,9 @@ def pagar_resumen_tarjeta(
     cotizacion_personalizada: Decimal | None = None,
     monto_pesos_personalizado: Decimal | None = None,
     monto_percepcion_personalizado: Decimal | None = None,
+    diferencia_tipo: Literal["cargos_banco", "compras_no_cargadas"] = "cargos_banco",
+    diferencia_categoria_id: UUID | None = None,
+    diferencia_subcategoria_id: UUID | None = None,
     commit: bool = True,  # commit=False: la operación de afuera hace el único commit
 ) -> Transaccion:
     # 1. Obtener la tarjeta
@@ -145,15 +174,25 @@ def pagar_resumen_tarjeta(
         raise HTTPException(status_code=400, detail="Este resumen ya está completamente saldado.")
 
     # 4. Validar monto si se proporcionó
+    excedente = None
     if monto is not None:
         if monto <= Decimal("0"):
             raise HTTPException(status_code=400, detail="El monto a pagar tiene que ser mayor a cero.")
         if monto > total_a_pagar:
-            raise HTTPException(
-                status_code=400,
-                detail=f"El monto a pagar ({formatear_monto(monto, moneda_a_pagar)}) no puede superar el total a pagar del resumen ({formatear_monto(total_a_pagar, moneda_a_pagar)})."
-            )
-        monto_pago = monto
+            if pesificar:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El monto a pagar ({formatear_monto(monto, moneda_a_pagar)}) no puede superar el total a pagar del resumen ({formatear_monto(total_a_pagar, moneda_a_pagar)})."
+                )
+            if diferencia_tipo == "compras_no_cargadas" and not diferencia_categoria_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Elegí la categoría de las compras que no cargaste."
+                )
+            monto_pago = total_a_pagar
+            excedente = monto - total_a_pagar
+        else:
+            monto_pago = monto
     else:
         monto_pago = total_a_pagar
 
@@ -344,19 +383,7 @@ def pagar_resumen_tarjeta(
         # Tarea 4: Registrar percepción impositiva como gasto propio si hubo pesificación
         tx_percepcion = None
         if es_pesificacion and monto_percepcion is not None and monto_percepcion > Decimal("0"):
-            subcat_impuestos = db.query(Subcategoria).filter(
-                Subcategoria.categoria_id == categoria.id,
-                Subcategoria.nombre.ilike("Impuestos")
-            ).first() if categoria else None
-
-            if not subcat_impuestos and categoria:
-                subcat_impuestos = Subcategoria(
-                    categoria_id=categoria.id,
-                    nombre="Impuestos",
-                    orden=10
-                )
-                db.add(subcat_impuestos)
-                db.flush()
+            subcat_impuestos = _subcategoria_impuestos_banco(db, categoria)
 
             tx_percepcion_data = TransaccionCreate(
                 tipo=TipoTransaccion.EGRESO,
@@ -376,6 +403,38 @@ def pagar_resumen_tarjeta(
                 pago_origen_id=tx.id
             )
             tx_percepcion = transaccion_service.crear_transaccion(db, usuario_id, tx_percepcion_data, commit=False)
+
+        # Registrar egreso por excedente/diferencia vinculada al pago si hubo monto mayor al total
+        if excedente is not None and excedente > Decimal("0"):
+            if diferencia_tipo == "cargos_banco":
+                subcat_cargos = _subcategoria_impuestos_banco(db, categoria)
+                cat_excedente_id = categoria.id if categoria else None
+                subcat_excedente_id = subcat_cargos.id if subcat_cargos else None
+                desc_excedente = f"Cargos del resumen {ultimos_4}"
+            else:
+                cat_excedente_id = diferencia_categoria_id
+                subcat_excedente_id = diferencia_subcategoria_id
+                desc_excedente = f"Compras no cargadas - Resumen {ultimos_4}"
+
+            tx_excedente_data = TransaccionCreate(
+                tipo=TipoTransaccion.EGRESO,
+                monto=excedente,
+                moneda=moneda_debito,
+                fecha=fecha_transaccion,
+                descripcion=desc_excedente,
+                categoria_id=cat_excedente_id,
+                subcategoria_id=subcat_excedente_id,
+                metodo_pago=MetodoPago.DEBITO,
+                billetera_id=billetera_pago_id,
+                tarjeta_id=tarjeta.id,
+                es_cuota_hija=False,
+                es_padre_cuotas=False,
+                origen=OrigenTransaccion.MANUAL,
+                estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+                pago_origen_id=tx.id,
+                pago_resumen_vencimiento=None
+            )
+            transaccion_service.crear_transaccion(db, usuario_id, tx_excedente_data, commit=False)
 
         # 8. Aplicación del pago sobre cuotas y saldos de la moneda pagada (en monto_pago original)
         monto_disponible = monto_pago
@@ -473,6 +532,7 @@ def pagar_resumen_tarjeta(
         setattr(tx, "saldo_arrastrado_restante", saldo_restante_final)
         setattr(tx, "cuotas_pendientes_otra_moneda", pendientes)
         setattr(tx, "mensaje_advertencia", mensaje_adv)
+        setattr(tx, "monto_diferencia", excedente)
 
         if es_pesificacion:
             setattr(tx, "transaccion_percepcion_id", tx_percepcion.id if tx_percepcion else None)

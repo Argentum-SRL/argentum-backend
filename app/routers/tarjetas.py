@@ -127,6 +127,9 @@ def pagar_tarjeta(
     cotizacion_personalizada = body.cotizacion_personalizada if body else None
     monto_pesos_personalizado = body.monto_pesos_personalizado if body else None
     monto_percepcion_personalizado = body.monto_percepcion_personalizado if body else None
+    diferencia_tipo = body.diferencia_tipo if body else "cargos_banco"
+    diferencia_categoria_id = body.diferencia_categoria_id if body else None
+    diferencia_subcategoria_id = body.diferencia_subcategoria_id if body else None
 
     return pago_resumen_service.pagar_resumen_tarjeta(
         db,
@@ -140,7 +143,10 @@ def pagar_tarjeta(
         pesificar=pesificar,
         cotizacion_personalizada=cotizacion_personalizada,
         monto_pesos_personalizado=monto_pesos_personalizado,
-        monto_percepcion_personalizado=monto_percepcion_personalizado
+        monto_percepcion_personalizado=monto_percepcion_personalizado,
+        diferencia_tipo=diferencia_tipo,
+        diferencia_categoria_id=diferencia_categoria_id,
+        diferencia_subcategoria_id=diferencia_subcategoria_id,
     )
 
 
