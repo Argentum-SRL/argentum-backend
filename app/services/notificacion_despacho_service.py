@@ -132,10 +132,13 @@ def _job_reintentar_inmediatas(db_session_factory: Callable[[], Session] | None 
 
         pendientes = (
             db.query(Notificacion)
+            .join(Usuario, Notificacion.usuario_id == Usuario.id)
             .filter(
                 Notificacion.canal_whatsapp == True,
                 Notificacion.enviada_whatsapp == False,
                 Notificacion.tipo.in_(tipos_inmediatos),
+                Usuario.telefono != None,
+                Usuario.telefono != "",
             )
             .all()
         )

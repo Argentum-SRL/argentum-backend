@@ -17,6 +17,7 @@ from app.models.subcategoria import Subcategoria
 from app.models.notificacion import TipoNotificacion, NivelNotificacion
 from app.models.usuario import Usuario, Moneda
 from app.schemas.presupuesto import PresupuestoCreate, PresupuestoUpdate
+from app.core.politica_notificaciones import puede_salir_por_whatsapp
 from app.services.definiciones_service import condicion_gasto
 from app.services.whatsapp_service import enviar_whatsapp_template, enviar_whatsapp
 from app.utils.fecha import hoy_argentina
@@ -708,7 +709,7 @@ def verificar_alertas_presupuesto(
     )
     
     # 5. Enviar mensaje de WhatsApp inmediato si corresponde
-    if notif and canal_whatsapp:
+    if notif and canal_whatsapp and puede_salir_por_whatsapp(notif):
         usuario = db.get(Usuario, presupuesto.usuario_id)
         if usuario and usuario.telefono:
             try:

@@ -512,3 +512,201 @@ def test_11_timeout_reintentos_enviar_whatsapp_template(monkeypatch):
     res3 = enviar_whatsapp_template("+5491112345678", "template_test", "es", [])
     assert res3 is False
     assert mock_client.post.call_count == 3
+
+
+# =============================================================================
+# CASOS DE PRUEBA ADICIONALES (FASE_E1_NOTIF2: TESTS 12 A 15)
+# =============================================================================
+
+from decimal import Decimal
+from types import SimpleNamespace
+from app.services.presupuesto_service import verificar_alertas_presupuesto
+
+
+def test_12_usuario_sin_telefono_no_reintenta_ni_alerta(session_factory, mock_wpp, monkeypatch):
+    """12. Usuario creado con _crear_usuario_test y después telefono=None (commit).
+    actualizar_password -> 0 llamadas a la plantilla.
+    _job_reintentar_inmediatas con ahora = creación + 3 minutos -> 0 llamadas a la plantilla.
+    Con ahora = creación + 16 minutos -> app.services.notificacion_despacho_service.enviar_alerta_admin con 0 llamadas."""
+    mock_alerta = MagicMock()
+    monkeypatch.setattr("app.services.notificacion_despacho_service.enviar_alerta_admin", mock_alerta)
+    mock_wpp["template"].reset_mock()
+
+    with session_factory() as s:
+        usuario = _crear_usuario_test(s)
+        usuario.telefono = None
+        s.commit()
+        usuario_id = usuario.id
+
+        datos = EditarPassword(
+            password_actual="Password123!",
+            password_nueva="NuevaPassword123!",
+            password_nueva_confirmacion="NuevaPassword123!",
+        )
+        actualizar_password(s, usuario, datos)
+
+        # 0 llamadas a la plantilla al actualizar password
+        assert mock_wpp["template"].call_count == 0
+
+        notif = s.query(Notificacion).filter(
+            Notificacion.usuario_id == usuario_id,
+            Notificacion.tipo == TipoNotificacion.CAMBIO_CONTRASENA,
+        ).first()
+        assert notif is not None
+        assert notif.canal_whatsapp is True
+        assert notif.enviada_whatsapp is False
+        created_at = notif.created_at
+
+    # _job_reintentar_inmediatas con ahora = creación + 3 minutos -> 0 llamadas a la plantilla
+    ahora_3m = created_at + timedelta(minutes=3)
+    if ahora_3m.tzinfo is None:
+        ahora_3m = ahora_3m.replace(tzinfo=timezone.utc)
+    monkeypatch.setattr("app.services.notificacion_despacho_service.ahora_argentina", lambda: ahora_3m)
+
+    _job_reintentar_inmediatas(session_factory)
+    assert mock_wpp["template"].call_count == 0
+
+    # Con ahora = creación + 16 minutos -> app.services.notificacion_despacho_service.enviar_alerta_admin con 0 llamadas
+    ahora_16m = created_at + timedelta(minutes=16)
+    if ahora_16m.tzinfo is None:
+        ahora_16m = ahora_16m.replace(tzinfo=timezone.utc)
+    monkeypatch.setattr("app.services.notificacion_despacho_service.ahora_argentina", lambda: ahora_16m)
+
+    _job_reintentar_inmediatas(session_factory)
+    assert mock_alerta.call_count == 0
+
+
+def test_13_reintento_alerta_admin_con_telefono(session_factory, mock_wpp, monkeypatch):
+    """13. Usuario con teléfono y la plantilla devolviendo siempre False.
+    actualizar_email -> notificación pendiente.
+    _job_reintentar_inmediatas con ahora = creación + 16 minutos -> enviar_alerta_admin con 1 llamada y clave='whatsapp_seguridad_fallida'."""
+    mock_wpp["template"].return_value = False
+    mock_alerta = MagicMock()
+    monkeypatch.setattr("app.services.notificacion_despacho_service.enviar_alerta_admin", mock_alerta)
+
+    with session_factory() as s:
+        usuario = _crear_usuario_test(s)
+        usuario_id = usuario.id
+        assert usuario.telefono is not None and usuario.telefono != ""
+
+        datos = EditarEmail(email_nuevo="nuevo@example.com", password_actual="Password123!")
+        actualizar_email(s, usuario, datos)
+
+        notif = s.query(Notificacion).filter(
+            Notificacion.usuario_id == usuario_id,
+            Notificacion.tipo == TipoNotificacion.CAMBIO_EMAIL,
+        ).first()
+        assert notif is not None
+        assert notif.canal_whatsapp is True
+        assert notif.enviada_whatsapp is False
+        created_at = notif.created_at
+
+    # Con ahora = creación + 16 minutos -> enviar_alerta_admin con 1 llamada y clave="whatsapp_seguridad_fallida"
+    ahora_16m = created_at + timedelta(minutes=16)
+    if ahora_16m.tzinfo is None:
+        ahora_16m = ahora_16m.replace(tzinfo=timezone.utc)
+    monkeypatch.setattr("app.services.notificacion_despacho_service.ahora_argentina", lambda: ahora_16m)
+
+    _job_reintentar_inmediatas(session_factory)
+    assert mock_alerta.call_count == 1
+    _, kwargs = mock_alerta.call_args
+    assert kwargs.get("clave") == "whatsapp_seguridad_fallida"
+
+
+def test_14_presupuesto_plantilla_por_defecto_no_despacha(db_session, monkeypatch):
+    """14. Variable WHATSAPP_PLANTILLAS_ACTIVAS por defecto.
+    Usuario con teléfono y presupuesto_umbral_2_whatsapp=True.
+    verificar_alertas_presupuesto con monto_usado=120 y monto_limite=100 ->
+    1 notificación PRESUPUESTO_AGOTADO con canal_whatsapp=True y enviada_whatsapp=False;
+    0 llamadas a app.services.presupuesto_service.enviar_whatsapp_template y 0 a app.services.presupuesto_service.enviar_whatsapp."""
+    monkeypatch.setattr(
+        settings,
+        "WHATSAPP_PLANTILLAS_ACTIVAS",
+        "resumen_ciclo,alerta_cambio_email,alerta_cambio_contrasena",
+    )
+
+    mock_presu_tpl = MagicMock(return_value=True)
+    mock_presu_raw = MagicMock(return_value=True)
+    monkeypatch.setattr("app.services.presupuesto_service.enviar_whatsapp_template", mock_presu_tpl)
+    monkeypatch.setattr("app.services.presupuesto_service.enviar_whatsapp", mock_presu_raw)
+
+    usuario = _crear_usuario_test(db_session)
+    cfg = db_session.query(ConfiguracionNotificacion).filter_by(usuario_id=usuario.id).first()
+    cfg.presupuesto_umbral_2_whatsapp = True
+    db_session.commit()
+
+    presupuesto = SimpleNamespace(
+        id=uuid.uuid4(),
+        usuario_id=usuario.id,
+        nombre="Comida",
+        moneda=Moneda.ARS,
+        categorias=[],
+    )
+    periodo = SimpleNamespace(
+        id=uuid.uuid4(),
+        monto_usado=Decimal("120"),
+        monto_limite=Decimal("100"),
+    )
+
+    verificar_alertas_presupuesto(db_session, presupuesto, periodo)
+
+    # 1 notificación PRESUPUESTO_AGOTADO con canal_whatsapp=True y enviada_whatsapp=False
+    notifs = db_session.query(Notificacion).filter(
+        Notificacion.usuario_id == usuario.id,
+        Notificacion.tipo == TipoNotificacion.PRESUPUESTO_AGOTADO,
+    ).all()
+    assert len(notifs) == 1
+    assert notifs[0].canal_whatsapp is True
+    assert notifs[0].enviada_whatsapp is False
+
+    # 0 llamadas a enviar_whatsapp_template y 0 a enviar_whatsapp en presupuesto_service
+    assert mock_presu_tpl.call_count == 0
+    assert mock_presu_raw.call_count == 0
+
+
+def test_15_presupuesto_plantilla_activa_despacha(db_session, monkeypatch):
+    """15. Igual al 14, con WHATSAPP_PLANTILLAS_ACTIVAS = 'resumen_ciclo,alerta_cambio_email,alerta_cambio_contrasena,alerta_presupuesto_agotado' ->
+    1 llamada a la plantilla con 'alerta_presupuesto_agotado' y la notificación queda enviada_whatsapp=True."""
+    monkeypatch.setattr(
+        settings,
+        "WHATSAPP_PLANTILLAS_ACTIVAS",
+        "resumen_ciclo,alerta_cambio_email,alerta_cambio_contrasena,alerta_presupuesto_agotado",
+    )
+
+    mock_presu_tpl = MagicMock(return_value=True)
+    mock_presu_raw = MagicMock(return_value=True)
+    monkeypatch.setattr("app.services.presupuesto_service.enviar_whatsapp_template", mock_presu_tpl)
+    monkeypatch.setattr("app.services.presupuesto_service.enviar_whatsapp", mock_presu_raw)
+
+    usuario = _crear_usuario_test(db_session)
+    cfg = db_session.query(ConfiguracionNotificacion).filter_by(usuario_id=usuario.id).first()
+    cfg.presupuesto_umbral_2_whatsapp = True
+    db_session.commit()
+
+    presupuesto = SimpleNamespace(
+        id=uuid.uuid4(),
+        usuario_id=usuario.id,
+        nombre="Comida",
+        moneda=Moneda.ARS,
+        categorias=[],
+    )
+    periodo = SimpleNamespace(
+        id=uuid.uuid4(),
+        monto_usado=Decimal("120"),
+        monto_limite=Decimal("100"),
+    )
+
+    verificar_alertas_presupuesto(db_session, presupuesto, periodo)
+
+    # 1 llamada a la plantilla con 'alerta_presupuesto_agotado'
+    assert mock_presu_tpl.call_count == 1
+    args, _ = mock_presu_tpl.call_args
+    assert args[1] == "alerta_presupuesto_agotado"
+
+    # La notificación queda enviada_whatsapp=True
+    notif = db_session.query(Notificacion).filter(
+        Notificacion.usuario_id == usuario.id,
+        Notificacion.tipo == TipoNotificacion.PRESUPUESTO_AGOTADO,
+    ).first()
+    assert notif is not None
+    assert notif.enviada_whatsapp is True
