@@ -4,8 +4,6 @@ from decimal import Decimal
 from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
-from app.schemas.billetera import BilleteraRead
-
 
 class PeriodoDashboard(BaseModel):
     fecha_inicio: str = Field(..., description="Fecha de inicio del ciclo en formato YYYY-MM-DD")
@@ -37,11 +35,21 @@ class DisponibleRealDashboard(BaseModel):
     usd: DisponibleRealMoneda
 
 
+class CompromisoDisponibleItem(BaseModel):
+    id: str
+    tipo: str
+    nombre: str
+    monto: Decimal
+    fecha_cobro: str
+
+
 class SaldoDisponibleMoneda(BaseModel):
     saldo_total: Decimal = Field(..., description="Suma de saldo actual de billeteras activas incluidas en el filtro")
     cuotas_pendientes: Decimal = Field(..., ge=0, description="Cuotas con pagada=False y vencimiento <= fin del ciclo actual, excluyendo cubiertas por pago de resumen")
     suscripciones_pendientes: Decimal = Field(..., ge=0, description="Suscripciones activas con próximo cobro <= fin del ciclo actual")
-    saldo_disponible: Decimal = Field(..., description="Saldo disponible para gastar (saldo_total - cuotas - suscripciones)")
+    facturas_pendientes: Decimal = Field(default=Decimal("0.00"), ge=0, description="Facturas pendientes de pago en el ciclo actual")
+    saldo_disponible: Decimal = Field(..., description="Saldo disponible para gastar (saldo_total - cuotas - suscripciones - facturas)")
+    compromisos: List[CompromisoDisponibleItem] = Field(default_factory=list, description="Lista detallada de compromisos descontados del disponible")
 
 
 class SaldoDisponibleDashboard(BaseModel):

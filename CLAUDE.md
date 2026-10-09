@@ -44,6 +44,9 @@ Esta sección manda: si otra parte de este archivo dice algo distinto, vale lo q
 ### Patrones repetidos y decisiones de usuario
 - La página "Lo que se repite" se apoya en app/services/patrones_service.py y la tabla `decisiones_patrones` (app/models/decision_patron.py). Agrupa gastos en fijos, costumbre y día a día (usando app/utils/patrones.py) e ingresos habituales (app/services/ingreso_habitual_service.py). El usuario puede confirmar, descartar o mover ítems entre cajas sin alterar las transacciones originales.
 
+### Dashboard y Disponible libre (fase_dash_ciclo)
+- Las cards del dashboard web muestran lo que pasa en el ciclo actual del usuario (del inicio al fin del ciclo). "Disponible libre" resta exactamente los compromisos impagos de "Próximos pagos" sin recortar (app/services/pagos_proximos_service.py). WhatsApp y "¿Me lo puedo permitir?" todavía usan _calcular_saldo_disponible_sync (migran en la Fase 5).
+
 ### Base de datos
 - Las migraciones se aplican a mano a producción antes del push; Railway corre "alembic upgrade head" al deployar.
 

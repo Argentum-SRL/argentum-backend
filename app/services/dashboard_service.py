@@ -6,26 +6,23 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-import httpx
 from fastapi import HTTPException
 from dateutil.relativedelta import relativedelta
-from sqlalchemy import and_, func, select, desc, or_, case, literal, null, String, cast, union_all
+from sqlalchemy import and_, func, select, desc, or_, literal, String, cast
 from sqlalchemy.orm import Session, joinedload
 
-from app.core.config import settings
 from app.utils.fecha import hoy_argentina
 from app.models.usuario import Usuario, CicloTipo, Moneda
 from app.models.billetera import Billetera, EstadoBilletera
-from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion, MetodoPago
+from app.models.transaccion import Transaccion, TipoTransaccion, MetodoPago
 from app.models.categoria import Categoria
 from app.models.subcategoria import Subcategoria, EstadoSubcategoria
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion
 from app.models.cuota import Cuota
 from app.models.grupo_cuotas import GrupoCuotas
-from app.models.historial_suscripcion import HistorialSuscripcion
-from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
-from app.services.resumen_tarjeta_service import calcular_resumen_actual
+from app.models.tarjeta_credito import TarjetaCredito
 from app.services.definiciones_service import condicion_gasto, condicion_ingreso
+from app.services import pagos_proximos_service
 
 def get_date_by_rule(rule: str, month: int, year: int) -> date:
     """Calcula la fecha exacta segun una regla (ej: ultimo_viernes, ultimo_dia_habil, dia_habil_4)."""
@@ -336,23 +333,12 @@ def get_dashboard_resumen(
     fecha_inicio, fecha_fin = (fecha_desde_override, fecha_hasta_override) if (fecha_desde_override and fecha_hasta_override) else get_ciclo_fechas(usuario, hoy)
     fecha_inicio_ant, fecha_fin_ant = get_ciclo_fechas(usuario, fecha_inicio - timedelta(days=1))
     fecha_inicio_prox, fecha_fin_prox = get_ciclo_fechas(usuario, fecha_fin + timedelta(days=1))
-    limite_pagos = hoy + timedelta(days=30)
-    moneda_p = usuario.moneda_principal.value if usuario.moneda_principal else "ARS"
 
     # --- QUERY 1: Balances, Totales y Estadísticas Globales ---
     primera_tx = db.execute(select(func.min(Transaccion.fecha)).where(Transaccion.usuario_id == usuario.id)).scalar()
     balance_res = calcular_balance_ciclo(db, usuario, fecha_desde_override=fecha_inicio, fecha_hasta_override=fecha_fin, billetera_ids=billetera_ids)
 
-    # --- QUERY 2: Actividad Unificada (Movimientos + Pagos) ---
-    latest_monto_sq = (
-        select(HistorialSuscripcion.monto).where(HistorialSuscripcion.suscripcion_id == Suscripcion.id)
-        .order_by(desc(HistorialSuscripcion.vigente_desde)).limit(1).scalar_subquery()
-    )
-    latest_moneda_sq = (
-        select(cast(HistorialSuscripcion.moneda, String)).where(HistorialSuscripcion.suscripcion_id == Suscripcion.id)
-        .order_by(desc(HistorialSuscripcion.vigente_desde)).limit(1).scalar_subquery()
-    )
-
+    # --- QUERY 2: Últimos movimientos del ciclo/período ---
     m_stmt_where = and_(
         Transaccion.usuario_id == usuario.id,
         Transaccion.fecha >= fecha_inicio,
@@ -381,198 +367,53 @@ def get_dashboard_resumen(
      .join(Subcategoria, Transaccion.subcategoria_id == Subcategoria.id, isouter=True).where(m_stmt_where)\
      .order_by(desc(Transaccion.fecha), desc(Transaccion.fecha_creacion)).limit(6)
 
-    s_stmt_where = and_(
-        Suscripcion.usuario_id == usuario.id,
-        Suscripcion.estado == EstadoSuscripcion.ACTIVA,
-        Suscripcion.proximo_cobro <= limite_pagos
-    )
-    if billetera_ids:
-        tarjeta_ids_stmt = select(TarjetaCredito.id).where(TarjetaCredito.billetera_id.in_(billetera_ids))
-        s_stmt_where = and_(
-            s_stmt_where,
-            or_(
-                Suscripcion.billetera_id.in_(billetera_ids),
-                Suscripcion.tarjeta_id.in_(tarjeta_ids_stmt)
-            )
-        )
-
-    s_stmt = select(
-        literal("suscripcion").label("item_tipo"),
-        cast(Suscripcion.id, String).label("id"),
-        Suscripcion.nombre.label("nombre"),
-        latest_monto_sq.label("monto"),
-        func.coalesce(latest_moneda_sq, cast(literal(moneda_p), String)).label("moneda"),
-        Suscripcion.proximo_cobro.label("fecha"),
-        cast(null(), String).label("extra_1"),
-        cast(null(), String).label("extra_2"),
-        cast(null(), String).label("extra_3"),
-        cast(null(), String).label("extra_4"),
-        cast(null(), String).label("extra_5"),
-        cast(null(), String).label("extra_6")
-    ).where(s_stmt_where)
-
-    c_stmt_where = and_(
-        GrupoCuotas.usuario_id == usuario.id,
-        Cuota.pagada == False,
-        Cuota.fecha_vencimiento <= limite_pagos
-    )
-    if billetera_ids:
-        tarjeta_ids_stmt = select(TarjetaCredito.id).where(TarjetaCredito.billetera_id.in_(billetera_ids))
-        parent_tx_stmt = select(Transaccion.id).where(
-            Transaccion.usuario_id == usuario.id,
-            Transaccion.billetera_id.in_(billetera_ids)
-        )
-        c_stmt_where = and_(
-            c_stmt_where,
-            or_(
-                GrupoCuotas.tarjeta_id.in_(tarjeta_ids_stmt),
-                and_(
-                    GrupoCuotas.tarjeta_id == None,
-                    GrupoCuotas.transaccion_padre_id.in_(parent_tx_stmt)
-                )
-            )
-        )
-
-    c_stmt = select(
-        literal("cuota").label("item_tipo"),
-        cast(Cuota.id, String).label("id"),
-        func.coalesce(
-            GrupoCuotas.descripcion, 
-            Subcategoria.nombre,
-            Categoria.nombre,
-            literal("Cuota")
-        ).label("nombre"),
-        Cuota.monto_proyectado.label("monto"),
-        cast(GrupoCuotas.moneda, String).label("moneda"),
-        Cuota.fecha_vencimiento.label("fecha"),
-        cast(null(), String).label("extra_1"),
-        cast(GrupoCuotas.tarjeta_id, String).label("extra_2"),
-        cast(null(), String).label("extra_3"),
-        cast(null(), String).label("extra_4"),
-        cast(null(), String).label("extra_5"),
-        cast(null(), String).label("extra_6")
-    ).join(GrupoCuotas)\
-     .join(Transaccion, GrupoCuotas.transaccion_padre_id == Transaccion.id)\
-     .join(Categoria, Transaccion.categoria_id == Categoria.id, isouter=True)\
-     .join(Subcategoria, Transaccion.subcategoria_id == Subcategoria.id, isouter=True)\
-     .where(c_stmt_where)
-    actividad = db.execute(m_stmt.union_all(s_stmt, c_stmt)).all()
-
-    # --- Procesamiento de Resultados ---
-    # Balance ya calculado por calcular_balance_ciclo con reglas canónicas
-
+    movimientos_rows = db.execute(m_stmt).all()
     movimientos_data = [{
         "id": r.id, "descripcion": r.nombre, "fecha": r.fecha.isoformat(), "monto": float(r.monto),
         "tipo": r.extra_4, "moneda": r.moneda, "billetera_nombre": r.extra_2 or "Billetera",
         "categoria_nombre": r.extra_1, "estado_verificacion": r.extra_3,
         "subcategoria_nombre": r.extra_5,
         "movimiento_meta_id": r.extra_6 if hasattr(r, "extra_6") else None
-    } for r in actividad if r.item_tipo == "movimiento"]
+    } for r in movimientos_rows]
 
-    proximos_pagos = [{
-        "id": r.id, "nombre": r.nombre, "monto": float(r.monto or 0), "moneda": r.moneda,
-        "fecha_cobro": r.fecha.isoformat(), "dias_restantes": (r.fecha - hoy).days, "tipo": r.item_tipo,
-        "es_vencido": (r.fecha - hoy).days < 0
-    } for r in actividad if r.item_tipo in ("suscripcion", "cuota") and not (r.item_tipo == "cuota" and r.extra_2)]
+    # --- Próximos Pagos y Disponible Libre (Ciclo actual canónico del usuario) ---
+    fecha_inicio_ciclo_act, fecha_fin_ciclo_act = get_ciclo_fechas(usuario, hoy)
 
-    # --- AGREGAR VENCIMIENTOS DE TARJETAS ---
-    tarjetas_query = db.query(TarjetaCredito).options(
-        joinedload(TarjetaCredito.billetera)
-    ).filter(
-        TarjetaCredito.usuario_id == usuario.id,
-        TarjetaCredito.estado == EstadoTarjeta.ACTIVA
-    )
-    if billetera_ids:
-        tarjetas_query = tarjetas_query.filter(TarjetaCredito.billetera_id.in_(billetera_ids))
-    tarjetas = tarjetas_query.all()
-
-    limite_futuro = hoy + timedelta(days=365)
-
-    # Optimizacion N+1: Pre-cargar todas las cuotas futuras de todas las tarjetas activas
-    tarjetas_ids = [t.id for t in tarjetas]
-    all_cuotas = (
-        db.query(Cuota)
-        .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
-        .options(
-            joinedload(Cuota.transaccion).joinedload(Transaccion.subcategoria),
-            joinedload(Cuota.grupo)
-        )
-        .filter(
-            GrupoCuotas.usuario_id == usuario.id,
-            GrupoCuotas.tarjeta_id.in_(tarjetas_ids) if tarjetas_ids else False,
-            Cuota.pagada == False,
-            Cuota.fecha_vencimiento <= limite_futuro
-        )
-        .order_by(Cuota.fecha_vencimiento)
-        .all()
+    proximos_pagos_completos = pagos_proximos_service.listar_pagos_proximos(
+        db=db,
+        usuario=usuario,
+        fecha_fin_ciclo=fecha_fin_ciclo_act,
+        hoy=hoy,
+        billetera_ids=billetera_ids,
     )
 
-    cuotas_por_tarjeta = {}
-    for c in all_cuotas:
-        tid = c.grupo.tarjeta_id
-        if tid not in cuotas_por_tarjeta:
-            cuotas_por_tarjeta[tid] = []
-        cuotas_por_tarjeta[tid].append(c)
+    saldo_disp_actual = pagos_proximos_service.calcular_disponible_libre(
+        db=db,
+        usuario=usuario,
+        fecha_fin_ciclo=fecha_fin_ciclo_act,
+        hoy=hoy,
+        billetera_ids=billetera_ids,
+        total_billeteras_override=total_billeteras_override,
+        pagos=proximos_pagos_completos,
+    )
 
-    for tarjeta in tarjetas:
-        resumen_t = calcular_resumen_actual(db, tarjeta, cuotas_preloaded=cuotas_por_tarjeta.get(tarjeta.id, []))
-        total_t = getattr(resumen_t, 'total_a_pagar_resumen_actual', resumen_t.total_comprometido_resumen_actual)
-        total_siguiente = resumen_t.total_comprometido_resumen_siguiente if hasattr(resumen_t, 'total_comprometido_resumen_siguiente') else 0
-
-        d_venc = resumen_t.fecha_vencimiento_proximo
-        if not d_venc:
-            continue
-
-        # Si el resumen actual es 0 pero hay deuda en el siguiente período,
-        # mostrar el próximo resumen con deuda real
-        if total_t <= 0:
-            if total_siguiente and total_siguiente > 0:
-                # Calcular fecha del siguiente vencimiento ajustada a día hábil
-                proximo_mes = d_venc + relativedelta(months=1)
-                from calendar import monthrange
-                from app.services.dias_habiles_service import ajustar_fecha_habil_sync
-                ultimo_dia = monthrange(proximo_mes.year, proximo_mes.month)[1]
-                dia_venc_sig = min(tarjeta.dia_vencimiento, ultimo_dia)
-                d_venc_sig = ajustar_fecha_habil_sync(date(proximo_mes.year, proximo_mes.month, dia_venc_sig), direccion="posterior")
-                dias_restantes_sig = (d_venc_sig - hoy).days
-                if 0 <= dias_restantes_sig <= 60:
-                    proximos_pagos.append({
-                        "id": str(tarjeta.id),
-                        "nombre": f"Resumen {tarjeta.nombre}",
-                        "monto": float(total_siguiente),
-                        "moneda": tarjeta.moneda.value,
-                        "fecha_cobro": d_venc_sig.isoformat(),
-                        "dias_restantes": dias_restantes_sig,
-                        "tipo": "resumen_tarjeta",
-                        "color": tarjeta.color,
-                        "red": tarjeta.red.value,
-                        "billetera_nombre": tarjeta.billetera.nombre,
-                        "billetera_id": str(tarjeta.billetera_id),
-                        "es_vencido": dias_restantes_sig < 0
-                    })
-            continue
-
-        dias_restantes = (d_venc - hoy).days
-
-        # Incluir si está vencido o si vence dentro de los próximos 45 días
-        if dias_restantes <= 45:
-            proximos_pagos.append({
-                "id": str(tarjeta.id),
-                "nombre": f"Resumen {tarjeta.nombre}",
-                "monto": float(total_t),
-                "moneda": tarjeta.moneda.value,
-                "fecha_cobro": d_venc.isoformat(),
-                "dias_restantes": dias_restantes,
-                "tipo": "resumen_tarjeta",
-                "color": tarjeta.color,
-                "red": tarjeta.red.value,
-                "billetera_nombre": tarjeta.billetera.nombre,
-                "billetera_id": str(tarjeta.billetera_id),
-                "es_vencido": dias_restantes < 0
-            })
-
-    from app.services import factura_service
-    proximos_pagos.extend(factura_service.items_proximos_pagos(db, usuario.id, hoy, limite_pagos))
+    # Recortar a 5 ítems por moneda para la card de Próximos pagos
+    pagos_ars = sorted(
+        [p for p in proximos_pagos_completos if p.get("moneda") == "ARS"],
+        key=lambda x: (0 if x["dias_restantes"] < 0 else 1, x["fecha_cobro"])
+    )[:5]
+    pagos_usd = sorted(
+        [p for p in proximos_pagos_completos if p.get("moneda") == "USD"],
+        key=lambda x: (0 if x["dias_restantes"] < 0 else 1, x["fecha_cobro"])
+    )[:5]
+    pagos_otros = sorted(
+        [p for p in proximos_pagos_completos if p.get("moneda") not in ("ARS", "USD")],
+        key=lambda x: (0 if x["dias_restantes"] < 0 else 1, x["fecha_cobro"])
+    )[:5]
+    proximos_pagos = sorted(
+        pagos_ars + pagos_usd + pagos_otros,
+        key=lambda x: (0 if x["dias_restantes"] < 0 else 1, x["fecha_cobro"])
+    )
 
     from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
     disp_ctx = _calcular_saldo_disponible_sync(db, usuario.id, billetera_ids)
@@ -581,23 +422,6 @@ def get_dashboard_resumen(
         disp_ctx["usd"]["total_billeteras"] = total_billeteras_override.get("usd", Decimal("0"))
         disp_ctx["ars"]["saldo_disponible"] = disp_ctx["ars"]["total_billeteras"] - disp_ctx["ars"]["cuotas_comprometidas"] - disp_ctx["ars"]["suscripciones_mensuales"]
         disp_ctx["usd"]["saldo_disponible"] = disp_ctx["usd"]["total_billeteras"] - disp_ctx["usd"]["cuotas_comprometidas"] - disp_ctx["usd"]["suscripciones_mensuales"]
-    
-    pagos_ars = sorted(
-        [p for p in proximos_pagos if p.get("moneda") == "ARS"],
-        key=lambda x: (0 if x["dias_restantes"] < 0 else 1, x["fecha_cobro"])
-    )[:5]
-    pagos_usd = sorted(
-        [p for p in proximos_pagos if p.get("moneda") == "USD"],
-        key=lambda x: (0 if x["dias_restantes"] < 0 else 1, x["fecha_cobro"])
-    )[:5]
-    pagos_otros = sorted(
-        [p for p in proximos_pagos if p.get("moneda") not in ("ARS", "USD")],
-        key=lambda x: (0 if x["dias_restantes"] < 0 else 1, x["fecha_cobro"])
-    )[:5]
-    proximos_pagos = sorted(
-        pagos_ars + pagos_usd + pagos_otros,
-        key=lambda x: (0 if x["dias_restantes"] < 0 else 1, x["fecha_cobro"])
-    )
 
     # --- QUERY: Gastos Reales por Categoría en el Ciclo Actual ---
     cat_where = condicion_gasto(
@@ -640,15 +464,6 @@ def get_dashboard_resumen(
 
     gastos_cat_ars.sort(key=lambda x: -x["monto"])
     gastos_cat_usd.sort(key=lambda x: -x["monto"])
-
-    saldo_disp_actual = calcular_saldo_disponible_ciclo_actual(
-        db=db,
-        usuario=usuario,
-        fecha_fin_ciclo=fecha_fin,
-        fecha_inicio_ciclo=fecha_inicio,
-        total_billeteras_override=total_billeteras_override,
-        billetera_ids=billetera_ids
-    )
 
     return {
         "periodo": {

@@ -293,8 +293,8 @@ def _poblar_usuario_base(db: Session, usuario: Usuario) -> dict[str, Any]:
     b = _crear_billetera(db, usuario.id)
     cats = _crear_categorias(db)
 
-    # 1. Alquiler: Fijo fuerte mensual ($400.000)
-    for f in [date(2026, 6, 5), date(2026, 7, 5), date(2026, 8, 5)]:
+    # 1. "Alquiler depto": $400.000 el día 5 de mayo, junio, julio y agosto de 2026, en Vivienda > Alquiler
+    for f in [date(2026, 5, 5), date(2026, 6, 5), date(2026, 7, 5), date(2026, 8, 5)]:
         _crear_tx(
             db,
             usuario.id,
@@ -304,14 +304,14 @@ def _poblar_usuario_base(db: Session, usuario: Usuario) -> dict[str, Any]:
             TipoTransaccion.EGRESO,
             cats["cat_viv"].id,
             cats["sub_alq"].id,
-            "Alquiler Depto",
+            "Alquiler depto",
         )
 
-    # 2. Delivery: Costumbre (9 movimientos)
+    # 2. "PedidosYa": $10.000 los días 3, 13 y 23 de junio, julio y agosto, en Delivery
     fechas_del = [
-        date(2026, 6, 3), date(2026, 6, 10), date(2026, 6, 17), date(2026, 6, 24),
-        date(2026, 7, 8), date(2026, 7, 22),
-        date(2026, 8, 5), date(2026, 8, 15), date(2026, 8, 25),
+        date(2026, 6, 3), date(2026, 6, 13), date(2026, 6, 23),
+        date(2026, 7, 3), date(2026, 7, 13), date(2026, 7, 23),
+        date(2026, 8, 3), date(2026, 8, 13), date(2026, 8, 23),
     ]
     for f in fechas_del:
         _crear_tx(
@@ -323,15 +323,14 @@ def _poblar_usuario_base(db: Session, usuario: Usuario) -> dict[str, Any]:
             TipoTransaccion.EGRESO,
             cats["cat_gast"].id,
             cats["sub_del"].id,
-            "Delivery",
+            "PedidosYa",
         )
 
-    # 3. Supermercado: Día a día (13 movimientos)
+    # 3. "Coto": $25.000 los días 2, 9, 16 y 23 de junio, julio y agosto, en Supermercado
     fechas_sup = [
         date(2026, 6, 2), date(2026, 6, 9), date(2026, 6, 16), date(2026, 6, 23),
         date(2026, 7, 2), date(2026, 7, 9), date(2026, 7, 16), date(2026, 7, 23),
         date(2026, 8, 2), date(2026, 8, 9), date(2026, 8, 16), date(2026, 8, 23),
-        date(2026, 8, 30),
     ]
     for f in fechas_sup:
         _crear_tx(
@@ -339,28 +338,28 @@ def _poblar_usuario_base(db: Session, usuario: Usuario) -> dict[str, Any]:
             usuario.id,
             b.id,
             f,
-            Decimal("30000.00"),
+            Decimal("25000.00"),
             TipoTransaccion.EGRESO,
             cats["cat_alim"].id,
             cats["sub_super"].id,
-            "Supermercado Coto",
+            "Coto",
         )
 
-    # 4. Sueldo: Ingreso habitual ($1.500.000 mensual, 6 ciclos completos)
+    # 4. "Sueldo": $1.000.000 (ingreso) el día 1 de marzo a agosto, en Sueldo
     for f in [
-        date(2026, 3, 2), date(2026, 4, 2), date(2026, 5, 2),
-        date(2026, 6, 2), date(2026, 7, 2), date(2026, 8, 2)
+        date(2026, 3, 1), date(2026, 4, 1), date(2026, 5, 1),
+        date(2026, 6, 1), date(2026, 7, 1), date(2026, 8, 1)
     ]:
         _crear_tx(
             db,
             usuario.id,
             b.id,
             f,
-            Decimal("1500000.00"),
+            Decimal("1000000.00"),
             TipoTransaccion.INGRESO,
             cats["cat_ing"].id,
             cats["sub_sueldo"].id,
-            "Cobro Sueldo Empresa",
+            "Sueldo",
         )
 
     db.commit()
@@ -386,37 +385,40 @@ def test_caso_01_usuario_sin_movimientos(db_session: Session):
 def test_caso_02_datos_base_usuario_a(db_session: Session):
     """Caso 2: Usuario con datos base clasifica correctamente en fijos, costumbre, día a día e ingresos en sugerido."""
     u = _crear_usuario(db_session, "user_a@argentum.com")
-    _poblar_usuario_base(db_session, u)
+    data_base = _poblar_usuario_base(db_session, u)
+    cats = data_base["categorias"]
 
     resumen = patrones_service.armar_lo_que_se_repite(db_session, u, hoy=date(2026, 9, 5))
+    resumen2 = patrones_service.armar_lo_que_se_repite(db_session, u, hoy=date(2026, 9, 5))
 
-    # Fijos
+    # Fijos con un solo ítem
     assert len(resumen.fijos) == 1
     fijo = resumen.fijos[0]
-    assert "Alquiler" in fijo.nombre
-    assert fijo.caja == "fijo"
-    assert fijo.caja_detectada == "fijo"
-    assert fijo.estado == "sugerido"
+    assert fijo.clave_item.startswith("fijo|ARS|")
+    assert fijo.clave_item == resumen2.fijos[0].clave_item
+    assert fijo.frecuencia == "mensual"
     assert fijo.fuerza == "fuerte"
+    assert fijo.dia_tipico == 5
+    assert fijo.estado == "sugerido"
     assert fijo.cuenta_en_numeros is True
+    assert fijo.monto_mensual == Decimal("400000.00")
+    assert fijo.rubro == "Alquiler"
 
-    # Costumbre
+    # Costumbre con un solo ítem: "Delivery", clave_item f"rubro|ARS|sub:{id de Delivery}", 9 ocurrencias y monto_mensual 30000.00
     assert len(resumen.costumbre) == 1
     cost = resumen.costumbre[0]
     assert cost.nombre == "Delivery"
-    assert cost.caja == "costumbre"
-    assert cost.caja_detectada == "costumbre"
-    assert cost.estado == "sugerido"
-    assert cost.cuenta_en_numeros is True
+    assert cost.clave_item == f"rubro|ARS|sub:{cats['sub_del'].id}"
+    assert cost.ocurrencias == 9
+    assert cost.monto_mensual == Decimal("30000.00")
 
-    # Día a día
+    # Día a día con un solo ítem: "Supermercado", clave_item f"rubro|ARS|sub:{id de Supermercado}", 12 ocurrencias y monto_mensual 100000.00
     assert len(resumen.dia_a_dia) == 1
     dia = resumen.dia_a_dia[0]
     assert dia.nombre == "Supermercado"
-    assert dia.caja == "dia_a_dia"
-    assert dia.caja_detectada == "dia_a_dia"
-    assert dia.estado == "sugerido"
-    assert dia.cuenta_en_numeros is True
+    assert dia.clave_item == f"rubro|ARS|sub:{cats['sub_super'].id}"
+    assert dia.ocurrencias == 12
+    assert dia.monto_mensual == Decimal("100000.00")
 
     # Ingresos
     assert len(resumen.ingresos) >= 1
@@ -427,23 +429,23 @@ def test_caso_02_datos_base_usuario_a(db_session: Session):
 
 
 def test_caso_03_patron_debil_cuenta_en_numeros(db_session: Session):
-    """Caso 3: Patrón débil tiene cuenta_en_numeros=False en sugerido, y True al confirmarse."""
+    """Caso 3: otro usuario con solo el alquiler de julio y agosto: fuerza 'debil' y cuenta_en_numeros False; después de confirmar, 'confirmado' y True."""
     u = _crear_usuario(db_session, "debil@argentum.com")
     b = _crear_billetera(db_session, u.id)
     cats = _crear_categorias(db_session)
 
-    # Solo 2 ocurrencias (frecuencia mensual débil)
+    # Solo el alquiler de julio y agosto
     for f in [date(2026, 7, 5), date(2026, 8, 5)]:
         _crear_tx(
             db_session,
             u.id,
             b.id,
             f,
-            Decimal("50000.00"),
+            Decimal("400000.00"),
             TipoTransaccion.EGRESO,
             cats["cat_viv"].id,
             cats["sub_alq"].id,
-            "Gimnasio Pase Libre",
+            "Alquiler depto",
         )
     db_session.commit()
 
@@ -469,7 +471,10 @@ def test_caso_03_patron_debil_cuenta_en_numeros(db_session: Session):
 
 
 def test_caso_04_descarte_fijo_pasa_a_frecuentes(db_session: Session):
-    """Caso 4: Descartar un fijo lo excluye de fijos y sus movimientos pasan a frecuentes."""
+    """Caso 4: después de descartar el alquiler:
+    - fijos queda vacío;
+    - día a día tiene 'Alquiler' con 3 ocurrencias;
+    - una segunda llamada da las mismas cuatro listas (clave_item, caja, estado, ocurrencias y monto_mensual)."""
     u = _crear_usuario(db_session, "descarte@argentum.com")
     _poblar_usuario_base(db_session, u)
 
@@ -486,12 +491,29 @@ def test_caso_04_descarte_fijo_pasa_a_frecuentes(db_session: Session):
         hoy=date(2026, 9, 5),
     )
 
-    # Ya no está en fijos
+    # fijos queda vacío
     assert len(res_post.fijos) == 0
 
-    # Ahora Alquiler pasa a día a día (porque rubro_de(Vivienda) cae en día a día)
-    nombres_dia = [it.nombre for it in res_post.dia_a_dia]
-    assert "Alquiler" in nombres_dia
+    # día a día tiene "Alquiler" con 3 ocurrencias
+    alquiler_items = [it for it in res_post.dia_a_dia if "Alquiler" in it.nombre]
+    assert len(alquiler_items) == 1
+    assert alquiler_items[0].ocurrencias == 3
+
+    # una segunda llamada da las mismas cuatro listas (clave_item, caja, estado, ocurrencias y monto_mensual)
+    res_segunda = patrones_service.armar_lo_que_se_repite(db_session, u, hoy=date(2026, 9, 5))
+    for lista_a, lista_b in [
+        (res_post.fijos, res_segunda.fijos),
+        (res_post.costumbre, res_segunda.costumbre),
+        (res_post.dia_a_dia, res_segunda.dia_a_dia),
+        (res_post.ingresos, res_segunda.ingresos),
+    ]:
+        assert len(lista_a) == len(lista_b)
+        for it_a, it_b in zip(lista_a, lista_b):
+            assert it_a.clave_item == it_b.clave_item
+            assert getattr(it_a, "caja", None) == getattr(it_b, "caja", None)
+            assert it_a.estado == it_b.estado
+            assert getattr(it_a, "ocurrencias", None) == getattr(it_b, "ocurrencias", None)
+            assert it_a.monto_mensual == it_b.monto_mensual
 
 
 def test_caso_05_mover_costumbre_a_dia_a_dia(db_session: Session):
@@ -519,8 +541,45 @@ def test_caso_05_mover_costumbre_a_dia_a_dia(db_session: Session):
     assert item_movido.estado == "movido"
 
 
-def test_caso_06_mover_dia_a_dia_a_costumbre(db_session: Session):
-    """Caso 6: Mover un ítem de día a día a costumbre actualiza estado a 'movido'."""
+def test_caso_06_mover_alquiler_fijo_a_costumbre(db_session: Session):
+    """Caso 6 nuevo: mover el alquiler (fijo) a costumbre.
+    - fijos queda vacío;
+    - en costumbre está el alquiler con estado 'movido', caja_detectada 'fijo', frecuencia 'mensual' y dia_tipico 5;
+    - día a día sigue con un solo ítem (Supermercado)."""
+    u = _crear_usuario(db_session, "mover_alq_cost@argentum.com")
+    _poblar_usuario_base(db_session, u)
+
+    res_inicial = patrones_service.armar_lo_que_se_repite(db_session, u, hoy=date(2026, 9, 5))
+    item_fijo = res_inicial.fijos[0]
+    assert item_fijo.caja == "fijo"
+
+    res_post = patrones_service.registrar_decision(
+        db_session,
+        u,
+        clave_item=item_fijo.clave_item,
+        decision="mover",
+        caja_destino="costumbre",
+        hoy=date(2026, 9, 5),
+    )
+
+    # fijos queda vacío
+    assert len(res_post.fijos) == 0
+
+    # en costumbre está el alquiler con estado "movido", caja_detectada "fijo", frecuencia "mensual" y dia_tipico 5
+    alquiler_cost = [it for it in res_post.costumbre if it.clave_item == item_fijo.clave_item]
+    assert len(alquiler_cost) == 1
+    assert alquiler_cost[0].estado == "movido"
+    assert alquiler_cost[0].caja_detectada == "fijo"
+    assert alquiler_cost[0].frecuencia == "mensual"
+    assert alquiler_cost[0].dia_tipico == 5
+
+    # día a día sigue con un solo ítem (Supermercado)
+    assert len(res_post.dia_a_dia) == 1
+    assert res_post.dia_a_dia[0].nombre == "Supermercado"
+
+
+def test_caso_06b_mover_dia_a_dia_a_costumbre(db_session: Session):
+    """Caso 6b: Mover un ítem de día a día a costumbre actualiza estado a 'movido'."""
     u = _crear_usuario(db_session, "mover_cost@argentum.com")
     _poblar_usuario_base(db_session, u)
 
@@ -622,7 +681,12 @@ def test_caso_08_deshacer_descarte(db_session: Session):
 
 
 def test_caso_09_validaciones_error(db_session: Session):
-    """Caso 9: Validaciones de error HTTP 400 y 404."""
+    """Caso 9: código y detail exactos:
+    - mover sin caja_destino: 400 'Elegí a qué caja moverlo.';
+    - mover a la caja en la que ya está: 400 'Ya está en esa caja.';
+    - clave_item inexistente: 404 'No encontré ese ítem.';
+    - deshacer sin decisión: 404 'No hay nada para deshacer en ese ítem.';
+    - mover el ingreso: 400 'Los ingresos no se pueden mover.'."""
     u = _crear_usuario(db_session, "errores@argentum.com")
     _poblar_usuario_base(db_session, u)
 
@@ -630,45 +694,44 @@ def test_caso_09_validaciones_error(db_session: Session):
     clave_deliv = res.costumbre[0].clave_item
     clave_ingreso = res.ingresos[0].clave_item
 
-    # 1. Ítem inexistente -> 404
+    # 1. mover sin caja_destino: 400 "Elegí a qué caja moverlo."
     with pytest.raises(HTTPException) as exc1:
-        patrones_service.registrar_decision(
-            db_session, u, clave_item="inexistente|ARS|foo", decision="confirmar", hoy=date(2026, 9, 5)
-        )
-    assert exc1.value.status_code == 404
-
-    # 2. Deshacer ítem sin decisión -> 404
-    with pytest.raises(HTTPException) as exc2:
-        patrones_service.deshacer_decision(db_session, u, clave_item=clave_deliv, hoy=date(2026, 9, 5))
-    assert exc2.value.status_code == 404
-
-    # 3. Mover sin caja_destino -> 400
-    with pytest.raises(HTTPException) as exc3:
         patrones_service.registrar_decision(
             db_session, u, clave_item=clave_deliv, decision="mover", caja_destino=None, hoy=date(2026, 9, 5)
         )
-    assert exc3.value.status_code == 400
+    assert exc1.value.status_code == 400
+    assert exc1.value.detail == "Elegí a qué caja moverlo."
 
-    # 4. Mover un ingreso -> 400
-    with pytest.raises(HTTPException) as exc4:
-        patrones_service.registrar_decision(
-            db_session, u, clave_item=clave_ingreso, decision="mover", caja_destino="dia_a_dia", hoy=date(2026, 9, 5)
-        )
-    assert exc4.value.status_code == 400
-
-    # 5. Mover a la caja en la que ya está -> 400
-    with pytest.raises(HTTPException) as exc5:
+    # 2. mover a la caja en la que ya está: 400 "Ya está en esa caja."
+    with pytest.raises(HTTPException) as exc2:
         patrones_service.registrar_decision(
             db_session, u, clave_item=clave_deliv, decision="mover", caja_destino="costumbre", hoy=date(2026, 9, 5)
         )
-    assert exc5.value.status_code == 400
+    assert exc2.value.status_code == 400
+    assert exc2.value.detail == "Ya está en esa caja."
 
-    # 6. Decisión inválida -> 400
-    with pytest.raises(HTTPException) as exc6:
+    # 3. clave_item inexistente: 404 "No encontré ese ítem."
+    with pytest.raises(HTTPException) as exc3:
         patrones_service.registrar_decision(
-            db_session, u, clave_item=clave_deliv, decision="inventada", hoy=date(2026, 9, 5)
+            db_session, u, clave_item="inexistente|ARS|foo", decision="confirmar", hoy=date(2026, 9, 5)
         )
-    assert exc6.value.status_code == 400
+    assert exc3.value.status_code == 404
+    assert exc3.value.detail == "No encontré ese ítem."
+
+    # 4. deshacer sin decisión: 404 "No hay nada para deshacer en ese ítem."
+    with pytest.raises(HTTPException) as exc4:
+        patrones_service.deshacer_decision(db_session, u, clave_item=clave_deliv, hoy=date(2026, 9, 5))
+    assert exc4.value.status_code == 404
+    assert exc4.value.detail == "No hay nada para deshacer en ese ítem."
+
+    # 5. mover el ingreso: 400 "Los ingresos no se pueden mover."
+    with pytest.raises(HTTPException) as exc5:
+        patrones_service.registrar_decision(
+            db_session, u, clave_item=clave_ingreso, decision="mover", caja_destino="dia_a_dia", hoy=date(2026, 9, 5)
+        )
+    assert exc5.value.status_code == 400
+    assert exc5.value.detail == "Los ingresos no se pueden mover."
+
 
 
 def test_caso_10_aislamiento_entre_usuarios(db_session: Session):
@@ -776,8 +839,19 @@ def test_caso_13_decisiones_ingresos_habituales(db_session: Session):
     _poblar_usuario_base(db_session, u)
 
     res_ini = patrones_service.armar_lo_que_se_repite(db_session, u, hoy=date(2026, 9, 5))
-    clave_ing = res_ini.ingresos[0].clave_item
-    assert res_ini.ingresos[0].estado == "sugerido"
+
+    # Antes del flujo actual, ingresos tiene un solo ítem con moneda "ARS", tipo "regular",
+    # monto_mensual 1000000.00, estado "sugerido", cuenta_en_numeros True y editable True
+    assert len(res_ini.ingresos) == 1
+    ing0 = res_ini.ingresos[0]
+    assert ing0.moneda == "ARS"
+    assert ing0.tipo == "regular"
+    assert ing0.monto_mensual == Decimal("1000000.00") or ing0.monto_mensual == 1000000.00
+    assert ing0.estado == "sugerido"
+    assert ing0.cuenta_en_numeros is True
+    assert ing0.editable is True
+
+    clave_ing = ing0.clave_item
 
     # Confirmar
     res_conf = patrones_service.registrar_decision(db_session, u, clave_ing, "confirmar", hoy=date(2026, 9, 5))
