@@ -5,7 +5,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import select, desc
 from fastapi import HTTPException
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 from dateutil.relativedelta import relativedelta
 
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion, FrecuenciaSuscripcion
@@ -129,7 +129,9 @@ def crear_suscripcion(db: Session, usuario_id: UUID, data: SuscripcionCreate) ->
 
 def obtener_suscripciones(db: Session, usuario_id: UUID, estado: str | None = None) -> List[SuscripcionResponse]:
     query = db.query(Suscripcion).options(
-        selectinload(Suscripcion.historial)
+        selectinload(Suscripcion.historial),
+        joinedload(Suscripcion.categoria),
+        joinedload(Suscripcion.subcategoria),
     ).filter(Suscripcion.usuario_id == usuario_id)
     if estado:
         query = query.filter(Suscripcion.estado == EstadoSuscripcion(estado))
@@ -158,7 +160,9 @@ def obtener_suscripciones(db: Session, usuario_id: UUID, estado: str | None = No
 
 def obtener_suscripcion_detalle(db: Session, usuario_id: UUID, suscripcion_id: UUID) -> SuscripcionResponse:
     suscripcion = db.query(Suscripcion).options(
-        selectinload(Suscripcion.historial)
+        selectinload(Suscripcion.historial),
+        joinedload(Suscripcion.categoria),
+        joinedload(Suscripcion.subcategoria),
     ).filter(Suscripcion.id == suscripcion_id, Suscripcion.usuario_id == usuario_id).first()
     if not suscripcion:
         raise HTTPException(status_code=404, detail="No encontramos esa suscripción.")

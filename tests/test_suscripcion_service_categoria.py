@@ -132,3 +132,39 @@ def test_validacion_subcategoria_no_pertenece_error_400(db_session):
     with pytest.raises(HTTPException) as exc_info:
         suscripcion_service.actualizar_suscripcion(db_session, u.id, sub.id, SuscripcionUpdate(subcategoria_id=sub_b.id))
     assert exc_info.value.status_code == 400 and "no pertenece a la categoría" in exc_info.value.detail
+
+
+def test_obtener_suscripciones_incluye_relaciones_categoria(db_session):
+    u, b = _crear_usuario_billetera(db_session, "test_relaciones@argentum.com")
+    cat = Categoria(id=uuid4(), nombre="Salud", tipo=TipoCategoria.EGRESO)
+    db_session.add(cat)
+    db_session.flush()
+
+    subcat = Subcategoria(id=uuid4(), categoria_id=cat.id, nombre="Deportes y gimnasio")
+    db_session.add(subcat)
+    db_session.commit()
+
+    sub_data = SuscripcionCreate(
+        nombre="Gimnasio",
+        monto=Decimal("22.00"),
+        frecuencia="mensual",
+        proximo_cobro=date(2026, 10, 9),
+        billetera_id=b.id,
+        categoria_id=cat.id,
+        subcategoria_id=subcat.id,
+    )
+    suscripcion = suscripcion_service.crear_suscripcion(db_session, u.id, sub_data)
+
+    suscripciones = suscripcion_service.obtener_suscripciones(db_session, u.id)
+    assert len(suscripciones) == 1
+    assert suscripciones[0].subcategoria is not None
+    assert suscripciones[0].subcategoria.nombre == "Deportes y gimnasio"
+    assert suscripciones[0].categoria is not None
+    assert suscripciones[0].categoria.nombre == "Salud"
+
+    detalle = suscripcion_service.obtener_suscripcion_detalle(db_session, u.id, suscripcion.id)
+    assert detalle.subcategoria is not None
+    assert detalle.subcategoria.nombre == "Deportes y gimnasio"
+    assert detalle.categoria is not None
+    assert detalle.categoria.nombre == "Salud"
+
