@@ -121,5 +121,6 @@ class ConfiguracionNotificacionUpdate(BaseModel):
 class ConfiguracionNotificacionRead(ConfiguracionNotificacionBase):
     id: UUID
     updated_at: datetime | None = None
+    whatsapp_tipos_activos: list[str] = []
 
     model_config = ConfigDict(from_attributes=True)

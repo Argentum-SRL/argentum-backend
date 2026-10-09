@@ -68,6 +68,7 @@ from app.services.notificacion_scheduler_service import (
     _job_proyeccion_negativa,
 )
 from app.services.factura_avisos_service import _job_notificaciones_facturas
+from app.services.notificacion_despacho_service import _job_reintentar_inmediatas
 
 # ---------------------------------------------------------------------------
 # Inicialización automática de Base de Datos
@@ -684,6 +685,15 @@ async def lifespan(app: FastAPI):
             minute="*",
             id="entrega_whatsapp_batched",
             misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            _job_reintentar_inmediatas,
+            "interval",
+            minutes=2,
+            id="reintentar_avisos_inmediatos",
+            misfire_grace_time=60,
             max_instances=1,
             replace_existing=True,
         )

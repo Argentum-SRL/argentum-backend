@@ -24,7 +24,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, BackgroundTasks, Cookie
 from sqlalchemy import select, func
@@ -355,23 +355,14 @@ def verificar_recuperacion(
             canal_web=True,
             canal_whatsapp=True,
             canal_email=False,
+            grupo_agrupacion_override=f"{TipoNotificacion.CAMBIO_CONTRASENA.value}_{uuid4()}",
         )
     except Exception:
         pass
 
-    if user.telefono:
-        try:
-            from app.services import whatsapp_service
-            from app.services.whatsapp_service import enviar_whatsapp_template
-            from app.models.notificacion import TEMPLATE_CAMBIO_CONTRASENA, TEMPLATE_CAMBIO_CONTRASENA_LANG, MENSAJE_CAMBIO_CONTRASENA_WPP
-            enviado = enviar_whatsapp_template(user.telefono, TEMPLATE_CAMBIO_CONTRASENA, TEMPLATE_CAMBIO_CONTRASENA_LANG)
-            if not enviado:
-                enviado = whatsapp_service.enviar_whatsapp(user.telefono, MENSAJE_CAMBIO_CONTRASENA_WPP)
-            if enviado and notif:
-                notif.enviada_whatsapp = True
-                db.commit()
-        except Exception as e:
-            logger.error("Error al enviar WhatsApp de cambio de contraseña en recuperación: %s", e)
+    if notif:
+        from app.services.notificacion_despacho_service import despachar_inmediata
+        despachar_inmediata(db, notif.id)
 
     # Enviar email de notificación de cambio de contraseña
     try:
@@ -419,23 +410,14 @@ def confirmar_token(
             canal_web=True,
             canal_whatsapp=True,
             canal_email=False,
+            grupo_agrupacion_override=f"{TipoNotificacion.CAMBIO_CONTRASENA.value}_{uuid4()}",
         )
     except Exception:
         pass
 
-    if usuario.telefono:
-        try:
-            from app.services import whatsapp_service
-            from app.services.whatsapp_service import enviar_whatsapp_template
-            from app.models.notificacion import TEMPLATE_CAMBIO_CONTRASENA, TEMPLATE_CAMBIO_CONTRASENA_LANG, MENSAJE_CAMBIO_CONTRASENA_WPP
-            enviado = enviar_whatsapp_template(usuario.telefono, TEMPLATE_CAMBIO_CONTRASENA, TEMPLATE_CAMBIO_CONTRASENA_LANG)
-            if not enviado:
-                enviado = whatsapp_service.enviar_whatsapp(usuario.telefono, MENSAJE_CAMBIO_CONTRASENA_WPP)
-            if enviado and notif:
-                notif.enviada_whatsapp = True
-                db.commit()
-        except Exception as e:
-            logger.error("Error al enviar WhatsApp de cambio de contraseña en reset: %s", e)
+    if notif:
+        from app.services.notificacion_despacho_service import despachar_inmediata
+        despachar_inmediata(db, notif.id)
 
     return {
         "success": True,

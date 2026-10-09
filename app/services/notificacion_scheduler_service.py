@@ -8,10 +8,22 @@ from app.models.configuracion_notificacion import ConfiguracionNotificacion
 from app.models.usuario import Usuario, Moneda
 from app.services.notificacion_service import crear_notificacion
 from app.services import notificacion_whatsapp_service as wpp_svc
+from app.services.whatsapp_service import enviar_whatsapp_template
 from app.utils.fecha import ahora_argentina, hoy_argentina
 from app.utils.formato import formatear_monto
 from app.core.job_lock import intentar_tomar_lock_job, liberar_lock_job
 from app.services.definiciones_service import condicion_gasto, condicion_ingreso
+from typing import Any
+from app.core.politica_notificaciones import (
+    POLITICA_WHATSAPP,
+    MAX_EDAD_PROGRAMADA,
+    plantilla_y_valores,
+    puede_salir_por_whatsapp,
+    componentes,
+)
+
+# Registro en memoria de último intento de despacho para evitar reintentos continuos
+_ultimo_intento_whatsapp: dict[Any, datetime] = {}
 
 logger = logging.getLogger(__name__)
 struct_logger = structlog.get_logger(__name__)
@@ -437,40 +449,50 @@ def _job_entrega_whatsapp_batched(db_session_factory):
         lock_adquirido = True
         # Calcular hora y minuto local actual en Argentina (UTC-3)
         tiempo_local = ahora_argentina()
-        hora_local = tiempo_local.hour
-        minuto_local = tiempo_local.minute
+        minutos_actuales = tiempo_local.hour * 60 + tiempo_local.minute
         ahora_utc = datetime.now(timezone.utc)
 
-        # Obtener todos los usuarios que tengan configurado el envío para esta hora y minuto local
-        usuarios = (
-            db.query(Usuario)
+        # Obtener todos los usuarios con teléfono y configuración de horario
+        usuarios_configs = (
+            db.query(Usuario, ConfiguracionNotificacion)
             .join(ConfiguracionNotificacion, Usuario.id == ConfiguracionNotificacion.usuario_id)
             .filter(
-                ConfiguracionNotificacion.whatsapp_hora_envio == hora_local,
-                ConfiguracionNotificacion.whatsapp_minuto_envio == minuto_local,
                 Usuario.telefono != None,
-                Usuario.telefono != ""
+                Usuario.telefono != "",
             )
             .all()
         )
 
-        from app.services.whatsapp_service import enviar_whatsapp_template
+        # Usuario elegible si hora configurada (hora*60+minuto) <= hora actual y diferencia < 30 minutos
+        usuarios = []
+        for u, cfg in usuarios_configs:
+            h = cfg.whatsapp_hora_envio if cfg.whatsapp_hora_envio is not None else 9
+            m = cfg.whatsapp_minuto_envio if cfg.whatsapp_minuto_envio is not None else 0
+            minutos_cfg = h * 60 + m
+            diff = minutos_actuales - minutos_cfg
+            if 0 <= diff < 30:
+                usuarios.append(u)
 
         total_usuarios_evaluados = len(usuarios)
         total_notifs_pendientes = 0
-        total_enviadas_template = 0
-        total_enviadas_fallback = 0
+        total_enviadas = 0
         total_fallidas = 0
 
+        tipos_programados = [
+            tipo for tipo, politica in POLITICA_WHATSAPP.items()
+            if politica == "programada"
+        ]
+
         for u in usuarios:
-            # Obtener todas las notificaciones pendientes de WhatsApp para el usuario
+            # Solo notificaciones de tipo "programada", pendientes, no silenciadas
             notifs = (
                 db.query(Notificacion)
                 .filter(
                     Notificacion.usuario_id == u.id,
                     Notificacion.canal_whatsapp == True,
                     Notificacion.enviada_whatsapp == False,
-                    (Notificacion.silenciada_hasta == None) | (Notificacion.silenciada_hasta < ahora_utc)
+                    Notificacion.tipo.in_(tipos_programados),
+                    (Notificacion.silenciada_hasta == None) | (Notificacion.silenciada_hasta < ahora_utc),
                 )
                 .all()
             )
@@ -482,87 +504,53 @@ def _job_entrega_whatsapp_batched(db_session_factory):
 
             for notif in notifs:
                 try:
-                    dt = notif.datos_template
-                    template_name = None
-                    valores = None
-
-                    if dt is not None and isinstance(dt, dict):
-                        tipo = notif.tipo
-                        if tipo == TipoNotificacion.SALDO_CERO and "billetera_nombre" in dt:
-                            template_name = "alerta_saldo_cero"
-                            valores = [dt.get("billetera_nombre")]
-                        elif tipo == TipoNotificacion.PRESUPUESTO_LIMITE and all(k in dt for k in ("gastado_fmt", "limite_fmt", "nombre_pres")):
-                            template_name = "alerta_presupuesto_limite"
-                            valores = [dt.get("gastado_fmt"), dt.get("limite_fmt"), dt.get("nombre_pres")]
-                        elif tipo == TipoNotificacion.PRESUPUESTO_AGOTADO and all(k in dt for k in ("nombre_pres", "gastado_fmt", "limite_fmt")):
-                            template_name = "alerta_presupuesto_agotado"
-                            valores = [dt.get("nombre_pres"), dt.get("gastado_fmt"), dt.get("limite_fmt")]
-                        elif tipo == TipoNotificacion.CUOTA_VENCE:
-                            if "cuota_progreso" in dt and all(k in dt for k in ("cuota_progreso", "descripcion", "fecha", "monto_fmt")):
-                                template_name = "alerta_cuota_vence"
-                                valores = [dt.get("cuota_progreso"), dt.get("descripcion"), dt.get("fecha"), dt.get("monto_fmt")]
-                            elif "tarjeta_nombre" in dt and all(k in dt for k in ("tarjeta_nombre", "fecha_cierre", "fecha_vencimiento")):
-                                template_name = "alerta_resumen_tarjeta"
-                                valores = [dt.get("tarjeta_nombre"), dt.get("fecha_cierre"), dt.get("fecha_vencimiento")]
-                        elif tipo in (TipoNotificacion.SUSCRIPCION_HOY, TipoNotificacion.SUSCRIPCION_PROXIMA) and all(k in dt for k in ("nombre", "cuando", "monto_fmt")):
-                            template_name = "alerta_suscripcion_cobro"
-                            valores = [dt.get("nombre"), dt.get("cuando"), dt.get("monto_fmt")]
-                        elif tipo == TipoNotificacion.INACTIVIDAD and "dias" in dt:
-                            template_name = "alerta_inactividad"
-                            valores = [str(dt.get("dias"))]
-                        elif tipo == TipoNotificacion.RESUMEN_SEMANAL and all(k in dt for k in ("ingresos", "egresos", "balance", "top_categoria")):
-                            template_name = "resumen_semanal"
-                            valores = [dt.get("ingresos"), dt.get("egresos"), dt.get("balance"), dt.get("top_categoria")]
-                        elif tipo == TipoNotificacion.RESUMEN_CICLO and all(k in dt for k in ("ingresos", "egresos", "balance", "top_categoria")):
-                            template_name = "resumen_ciclo"
-                            valores = [dt.get("ingresos"), dt.get("egresos"), dt.get("balance"), dt.get("top_categoria")]
-                        elif tipo == TipoNotificacion.CAMBIO_CONTRASENA:
-                            template_name = "alerta_cambio_contrasena"
-                            valores = []
-                        elif tipo == TipoNotificacion.CAMBIO_EMAIL and "email" in dt:
-                            template_name = "alerta_cambio_email"
-                            valores = [dt.get("email")]
-                    elif notif.tipo == TipoNotificacion.CAMBIO_CONTRASENA:
-                        template_name = "alerta_cambio_contrasena"
-                        valores = []
-
-                    enviado = False
-                    enviado_template = False
-                    enviado_fallback = False
-
-                    if template_name is not None and valores is not None:
-                        componentes = [
-                            {
-                                "type": "body",
-                                "parameters": [{"type": "text", "text": str(v)} for v in valores],
-                            }
-                        ] if valores else []
-                        enviado = enviar_whatsapp_template(u.telefono, template_name, "es", componentes)
-                        if enviado:
-                            enviado_template = True
-                        else:
-                            enviado = wpp_svc.enviar_whatsapp_notificacion(u.telefono, notif.mensaje)
-                            if enviado:
-                                enviado_fallback = True
+                    # Antigüedad: created_at dentro de las últimas 72 horas
+                    if notif.created_at.tzinfo is not None:
+                        edad = tiempo_local - notif.created_at
                     else:
-                        enviado = wpp_svc.enviar_whatsapp_notificacion(u.telefono, notif.mensaje)
-                        if enviado:
-                            enviado_fallback = True
+                        tiempo_naive = tiempo_local.replace(tzinfo=None)
+                        edad = tiempo_naive - notif.created_at
+
+                    if edad > MAX_EDAD_PROGRAMADA or edad < timedelta(0):
+                        continue
+
+                    # Si no puede salir por WhatsApp, se saltea, sigue pendiente, no cuenta como fallida
+                    if not puede_salir_por_whatsapp(notif):
+                        continue
+
+                    # Para no reintentar cada minuto: dict en memoria notif_id -> último intento (mínimo 10 min)
+                    ultimo_intento = _ultimo_intento_whatsapp.get(notif.id)
+                    if ultimo_intento is not None:
+                        diff_intento = tiempo_local - ultimo_intento
+                        if diff_intento < timedelta(minutes=10):
+                            continue
+
+                    pv = plantilla_y_valores(notif)
+                    if not pv:
+                        continue
+                    template_name, valores = pv
+
+                    enviado = enviar_whatsapp_template(
+                        u.telefono,
+                        template_name,
+                        "es",
+                        componentes(valores),
+                        max_intentos=1,
+                    )
 
                     if enviado:
-                        if enviado_template:
-                            total_enviadas_template += 1
-                        elif enviado_fallback:
-                            total_enviadas_fallback += 1
+                        total_enviadas += 1
                         notif.enviada_whatsapp = True
                         db.commit()
+                        _ultimo_intento_whatsapp.pop(notif.id, None)
                     else:
                         total_fallidas += 1
+                        _ultimo_intento_whatsapp[notif.id] = tiempo_local
                         logger.warning(
                             "Fallo en entrega de notificación WhatsApp %s para usuario %s (template: %s)",
                             notif.id,
                             u.id,
-                            template_name or "sin_template",
+                            template_name,
                         )
                 except Exception as notif_err:
                     total_fallidas += 1
@@ -573,15 +561,12 @@ def _job_entrega_whatsapp_batched(db_session_factory):
                         notif_err,
                     )
 
-        total_enviadas = total_enviadas_template + total_enviadas_fallback
         logger.info(
             "Job entrega_whatsapp_batched completado: usuarios_evaluados=%d, "
-            "notificaciones_pendientes=%d, enviadas=%d (template=%d, fallback=%d), fallidas=%d",
+            "notificaciones_pendientes=%d, enviadas=%d, fallidas=%d",
             total_usuarios_evaluados,
             total_notifs_pendientes,
             total_enviadas,
-            total_enviadas_template,
-            total_enviadas_fallback,
             total_fallidas,
         )
 

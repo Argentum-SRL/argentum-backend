@@ -360,10 +360,11 @@ def enviar_whatsapp_template(
     template_name: str,
     language_code: str,
     componentes: list | None = None,
+    max_intentos: int = 3,
 ) -> bool:
     """
     Envía un mensaje de plantilla por WhatsApp usando Meta WhatsApp Cloud API (Graph API).
-    Incluye 3 reintentos con backoff exponencial ante timeouts o errores 5xx de Meta.
+    Incluye reintentos con backoff exponencial ante timeouts o errores 5xx de Meta.
     """
     to_whatsapp = formatear_numero_whatsapp(numero)
 
@@ -397,7 +398,6 @@ def enviar_whatsapp_template(
         },
     }
 
-    max_intentos = 3
     backoff = 0.5
 
     for intento in range(1, max_intentos + 1):

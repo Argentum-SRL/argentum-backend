@@ -117,7 +117,11 @@ def obtener_configuracion(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
-    return notificacion_service.obtener_configuracion(db, usuario.id)
+    from app.core.politica_notificaciones import calcular_whatsapp_tipos_activos
+    cfg = notificacion_service.obtener_configuracion(db, usuario.id)
+    cfg_read = ConfiguracionNotificacionRead.model_validate(cfg)
+    cfg_read.whatsapp_tipos_activos = calcular_whatsapp_tipos_activos()
+    return cfg_read
 
 
 @router.put("/configuracion", response_model=ConfiguracionNotificacionRead)
@@ -126,8 +130,12 @@ def actualizar_configuracion(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user),
 ):
+    from app.core.politica_notificaciones import calcular_whatsapp_tipos_activos
     update_data = data.model_dump(exclude_unset=True)
-    return notificacion_service.actualizar_configuracion(db, usuario.id, update_data)
+    cfg = notificacion_service.actualizar_configuracion(db, usuario.id, update_data)
+    cfg_read = ConfiguracionNotificacionRead.model_validate(cfg)
+    cfg_read.whatsapp_tipos_activos = calcular_whatsapp_tipos_activos()
+    return cfg_read
 
 
 @router.get("/sse")

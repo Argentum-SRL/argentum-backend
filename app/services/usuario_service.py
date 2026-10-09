@@ -2,7 +2,7 @@ import logging
 import os
 import shutil
 import time
-from uuid import UUID
+from uuid import UUID, uuid4
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import delete, select, update, func
 from sqlalchemy.orm import Session
@@ -121,28 +121,14 @@ def actualizar_email(
             canal_whatsapp=True,
             canal_email=False,
             datos_template={"email": email_limpio},
+            grupo_agrupacion_override=f"{TipoNotificacion.CAMBIO_EMAIL.value}_{uuid4()}",
         )
     except Exception:
         pass
 
-    if usuario.telefono:
-        try:
-            from app.services.whatsapp_service import enviar_whatsapp_template
-            from app.models.notificacion import TEMPLATE_CAMBIO_EMAIL, TEMPLATE_CAMBIO_EMAIL_LANG
-            componentes = [
-                {
-                    "type": "body",
-                    "parameters": [
-                        {"type": "text", "text": email_limpio}
-                    ],
-                }
-            ]
-            if enviar_whatsapp_template(usuario.telefono, TEMPLATE_CAMBIO_EMAIL, TEMPLATE_CAMBIO_EMAIL_LANG, componentes):
-                if notif:
-                    notif.enviada_whatsapp = True
-                    db.commit()
-        except Exception as e:
-            logger.error("Error al enviar WhatsApp de cambio de email: %s", e)
+    if notif:
+        from app.services.notificacion_despacho_service import despachar_inmediata
+        despachar_inmediata(db, notif.id)
     
     email_service.generar_y_enviar_verificacion_email(email_limpio)
     
@@ -187,22 +173,14 @@ def actualizar_password(
             canal_whatsapp=True,
             canal_email=False,
             deep_link="/app/perfil",
+            grupo_agrupacion_override=f"{TipoNotificacion.CAMBIO_CONTRASENA.value}_{uuid4()}",
         )
     except Exception:
         pass
 
-    if usuario.telefono:
-        try:
-            from app.services.whatsapp_service import enviar_whatsapp_template, enviar_whatsapp
-            from app.models.notificacion import TEMPLATE_CAMBIO_CONTRASENA, TEMPLATE_CAMBIO_CONTRASENA_LANG, MENSAJE_CAMBIO_CONTRASENA_WPP
-            enviado = enviar_whatsapp_template(usuario.telefono, TEMPLATE_CAMBIO_CONTRASENA, TEMPLATE_CAMBIO_CONTRASENA_LANG)
-            if not enviado:
-                enviado = enviar_whatsapp(usuario.telefono, MENSAJE_CAMBIO_CONTRASENA_WPP)
-            if enviado and notif:
-                notif.enviada_whatsapp = True
-                db.commit()
-        except Exception as e:
-            logger.error("Error al enviar WhatsApp de cambio de contraseña: %s", e)
+    if notif:
+        from app.services.notificacion_despacho_service import despachar_inmediata
+        despachar_inmediata(db, notif.id)
     
     try:
         from app.services.notificacion_email_service import (
