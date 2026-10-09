@@ -1,7 +1,7 @@
 """
-tests/test_patrones_service.py — Tests del servicio y endpoints de 'Lo que se repite' (Fase 4d3).
+tests/test_patrones_service.py — Tests del servicio y endpoints de 'Lo que se repite' (Fase 4d3 / 4d4b).
 
-Cubre los 14 casos de prueba requeridos:
+Cubre los 15 casos de prueba requeridos:
 1. Usuario sin movimientos: listas vacías.
 2. Datos base usuario A: fijos, costumbre, día a día e ingresos en sugerido.
 3. Patrón débil y cuenta_en_numeros (False hasta que se confirma).
@@ -16,6 +16,7 @@ Cubre los 14 casos de prueba requeridos:
 12. Invariancia total de la tabla de transacciones.
 13. Decisiones sobre ingresos habituales (confirmar, descartar, deshacer).
 14. Endpoints HTTP vía FastAPI TestClient (GET, POST decisiones, POST deshacer, errores).
+15. Endpoints HTTP para usuario no admin (403 Forbidden y cero filas en decisiones_patrones).
 """
 from __future__ import annotations
 
@@ -124,18 +125,20 @@ def _crear_usuario(
     email: str = "usuario_a@argentum.com",
     ciclo_tipo: CicloTipo = CicloTipo.DIA_FIJO,
     ciclo_valor: str = "1",
+    is_admin: bool = False,
 ) -> Usuario:
     u = Usuario(
         id=uuid4(),
         email=email,
         auth_provider=AuthProvider.EMAIL,
-        rol=RolUsuario.USUARIO,
+        rol=RolUsuario.ADMIN if is_admin else RolUsuario.USUARIO,
         estado=EstadoUsuario.ACTIVO,
         moneda_principal=Moneda.ARS,
         nombre="Test",
         apellido="User",
         ciclo_tipo=ciclo_tipo,
         ciclo_valor=ciclo_valor,
+        is_admin=is_admin,
     )
     db.add(u)
     db.commit()
@@ -870,7 +873,7 @@ def test_caso_13_decisiones_ingresos_habituales(db_session: Session):
 
 def test_caso_14_endpoints_http(db_session: Session):
     """Caso 14: Endpoints HTTP de patrones vía TestClient (GET, POST decisiones, POST deshacer, errores)."""
-    u = _crear_usuario(db_session, "test_http@argentum.com")
+    u = _crear_usuario(db_session, "test_http@argentum.com", is_admin=True)
     _poblar_usuario_base(db_session, u)
 
     app.dependency_overrides[get_db] = lambda: db_session
@@ -926,6 +929,60 @@ def test_caso_14_endpoints_http(db_session: Session):
             json={"clave_item": "inexistente|ARS|foo", "decision": "confirmar"},
         )
         assert resp_err404.status_code == 404
+
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_caso_15_endpoints_usuario_no_admin(db_session: Session):
+    """Caso 15: Un usuario no admin recibe 403 en GET /patrones, POST /patrones/decisiones y POST /patrones/decisiones/deshacer, y no se crea ninguna fila en decisiones_patrones."""
+    u_no_admin = _crear_usuario(db_session, "no_admin@argentum.com", is_admin=False)
+    _poblar_usuario_base(db_session, u_no_admin)
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_current_user] = lambda: u_no_admin
+
+    client = TestClient(app)
+    try:
+        # 1. GET /patrones -> 403 con detail estándar de admin
+        resp_get = client.get("/patrones")
+        assert resp_get.status_code == 403
+        data_get = resp_get.json()
+        assert (
+            data_get.get("detail") == "No tenés permiso para hacer eso."
+            or data_get.get("error", {}).get("message") == "No tenés permiso para hacer eso."
+        )
+
+        # 2. POST /patrones/decisiones -> 403 con detail estándar de admin
+        resp_post = client.post(
+            "/patrones/decisiones",
+            json={
+                "clave_item": "fijo|ARS|test",
+                "decision": "confirmar",
+            },
+        )
+        assert resp_post.status_code == 403
+        data_post = resp_post.json()
+        assert (
+            data_post.get("detail") == "No tenés permiso para hacer eso."
+            or data_post.get("error", {}).get("message") == "No tenés permiso para hacer eso."
+        )
+
+        # 3. POST /patrones/decisiones/deshacer -> 403 con detail estándar de admin
+        resp_desh = client.post(
+            "/patrones/decisiones/deshacer",
+            json={"clave_item": "fijo|ARS|test"},
+        )
+        assert resp_desh.status_code == 403
+        data_desh = resp_desh.json()
+        assert (
+            data_desh.get("detail") == "No tenés permiso para hacer eso."
+            or data_desh.get("error", {}).get("message") == "No tenés permiso para hacer eso."
+        )
+
+        # 4. No se crea ninguna fila en decisiones_patrones
+        cant_decisiones = db_session.execute(select(func.count(DecisionPatron.id))).scalar()
+        assert cant_decisiones == 0
 
     finally:
         app.dependency_overrides.clear()

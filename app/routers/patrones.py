@@ -6,7 +6,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_user
+from app.core.auth import get_current_admin_user
 from app.core.database import get_db
 from app.models.usuario import Usuario
 from app.schemas.patrones import (
@@ -16,13 +16,17 @@ from app.schemas.patrones import (
 )
 from app.services import patrones_service
 
-router = APIRouter(prefix="/patrones", tags=["patrones"])
+router = APIRouter(
+    prefix="/patrones",
+    tags=["patrones"],
+    dependencies=[Depends(get_current_admin_user)],
+)
 
 
 @router.get("", response_model=PatronesResumenResponse)
 def listar_patrones(
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user),
+    current_user: Usuario = Depends(get_current_admin_user),
 ):
     """
     Retorna la lista de las cuatro cajas de patrones repetidos:
@@ -35,7 +39,7 @@ def listar_patrones(
 def registrar_decision(
     data: DecisionPatronCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user),
+    current_user: Usuario = Depends(get_current_admin_user),
 ):
     """
     Registra o actualiza la decisión del usuario sobre un ítem (confirmar, descartar o mover).
@@ -54,7 +58,7 @@ def registrar_decision(
 def deshacer_decision(
     data: DeshacerDecisionRequest,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user),
+    current_user: Usuario = Depends(get_current_admin_user),
 ):
     """
     Deshace la decisión tomada sobre un ítem.
