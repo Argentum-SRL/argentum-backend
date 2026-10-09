@@ -110,6 +110,9 @@ class ActualizarPrecioRequest(BaseModel):
             raise ValueError("El monto no puede tener más de 2 decimales.")
         return v
 
+from app.schemas.categoria import CategoriaRead
+from app.schemas.subcategoria import SubcategoriaRead
+
 class SuscripcionResponse(SuscripcionBase):
     id: UUID
     usuario_id: UUID
@@ -118,6 +121,8 @@ class SuscripcionResponse(SuscripcionBase):
     precio_actual: Optional[HistorialSuscripcionResponse] = None
     historial_precios: List[HistorialSuscripcionResponse] = []
     costo_mensual_equivalente: Optional[DecimalJSON] = None
+    categoria: Optional[CategoriaRead] = None
+    subcategoria: Optional[SubcategoriaRead] = None
 
     model_config = ConfigDict(from_attributes=True)
 
