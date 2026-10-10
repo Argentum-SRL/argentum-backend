@@ -278,8 +278,31 @@ def obtener_presupuestos(db: Session, usuario_id: UUID, estado: Optional[str] = 
         query = query.where(Presupuesto.estado == estado)
         
     presupuestos = db.execute(query).scalars().all()
+    hubo_cambios = False
+    hoy = hoy_argentina()
     for presu in presupuestos:
+        if presu.estado != EstadoPresupuesto.ACTIVO:
+            continue
         periodo_activo = obtener_periodo_activo(db, presu)
+        if not periodo_activo and presu.renovacion == RenovacionPresupuesto.AUTOMATICA:
+            nueva_inicio, nueva_fin = calcular_fechas_periodo(presu.periodo, hoy, usuario=presu.usuario)
+            ya_existe = any(p.fecha_inicio == nueva_inicio for p in presu.periodos)
+            if not ya_existe:
+                gasto = calcular_gasto_en_periodo(
+                    db, usuario_id, presu.categorias, nueva_inicio, nueva_fin, moneda=presu.moneda, usuario=presu.usuario
+                )
+                periodo_activo = PeriodoPresupuesto(
+                    presupuesto_id=presu.id,
+                    fecha_inicio=nueva_inicio,
+                    fecha_fin=nueva_fin,
+                    monto_limite=presu.monto,
+                    monto_usado=gasto,
+                    superado=gasto > presu.monto
+                )
+                db.add(periodo_activo)
+                presu.periodos.append(periodo_activo)
+                hubo_cambios = True
+
         if periodo_activo:
             gasto = calcular_gasto_en_periodo(
                 db, usuario_id, presu.categorias,
@@ -288,6 +311,9 @@ def obtener_presupuestos(db: Session, usuario_id: UUID, estado: Optional[str] = 
             )
             periodo_activo.monto_usado = gasto
             periodo_activo.superado = gasto > periodo_activo.monto_limite
+
+    if hubo_cambios:
+        db.commit()
 
     return presupuestos
 
@@ -391,6 +417,26 @@ def obtener_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto:
     if not presupuesto:
         raise HTTPException(status_code=404, detail="No encontramos ese presupuesto.")
     pa = obtener_periodo_activo(db, presupuesto)
+    if not pa and presupuesto.estado == EstadoPresupuesto.ACTIVO and presupuesto.renovacion == RenovacionPresupuesto.AUTOMATICA:
+        hoy = hoy_argentina()
+        nueva_inicio, nueva_fin = calcular_fechas_periodo(presupuesto.periodo, hoy, usuario=presupuesto.usuario)
+        ya_existe = any(p.fecha_inicio == nueva_inicio for p in presupuesto.periodos)
+        if not ya_existe:
+            gasto = calcular_gasto_en_periodo(
+                db, usuario_id, presupuesto.categorias, nueva_inicio, nueva_fin, moneda=presupuesto.moneda, usuario=presupuesto.usuario
+            )
+            pa = PeriodoPresupuesto(
+                presupuesto_id=presupuesto.id,
+                fecha_inicio=nueva_inicio,
+                fecha_fin=nueva_fin,
+                monto_limite=presupuesto.monto,
+                monto_usado=gasto,
+                superado=gasto > presupuesto.monto
+            )
+            db.add(pa)
+            presupuesto.periodos.append(pa)
+            db.commit()
+
     if pa:
         gasto = calcular_gasto_en_periodo(
             db, usuario_id, presupuesto.categorias,
@@ -473,6 +519,22 @@ def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: Presup
             db, usuario_id, presupuesto.categorias, periodo_actual.fecha_inicio, periodo_actual.fecha_fin, moneda=presupuesto.moneda
         )
         periodo_actual.superado = periodo_actual.monto_usado > periodo_actual.monto_limite
+
+    if not periodo_actual and presupuesto.estado == EstadoPresupuesto.ACTIVO and presupuesto.renovacion == RenovacionPresupuesto.AUTOMATICA:
+        fecha_inicio, fecha_fin = calcular_fechas_periodo(presupuesto.periodo, hoy_argentina(), usuario=presupuesto.usuario)
+        monto_usado = calcular_gasto_en_periodo(
+            db, usuario_id, presupuesto.categorias, fecha_inicio, fecha_fin, moneda=presupuesto.moneda, usuario=presupuesto.usuario
+        )
+        periodo_actual = PeriodoPresupuesto(
+            presupuesto_id=presupuesto.id,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+            monto_limite=presupuesto.monto,
+            monto_usado=monto_usado,
+            superado=monto_usado > presupuesto.monto
+        )
+        db.add(periodo_actual)
+        presupuesto.periodos.append(periodo_actual)
 
     db.commit()
     
@@ -584,6 +646,29 @@ def registrar_impacto_presupuesto(
             continue
             
         periodo_activo = obtener_periodo_activo(db, presu)
+        if not periodo_activo and presu.renovacion == RenovacionPresupuesto.AUTOMATICA:
+            hoy = hoy_argentina()
+            nueva_inicio, nueva_fin = calcular_fechas_periodo(presu.periodo, hoy, usuario=presu.usuario)
+            if nueva_inicio <= transaccion.fecha <= nueva_fin:
+                # Calculamos el gasto previo en este ciclo (excluyendo la transacción actual si aún no se guardó o considerándola)
+                # Al recalcular el gasto completo con calcular_gasto_en_periodo, ya refleja todas las tx
+                gasto = calcular_gasto_en_periodo(
+                    db, transaccion.usuario_id, presu.categorias, nueva_inicio, nueva_fin, moneda=presu.moneda, usuario=presu.usuario
+                )
+                periodo_activo = PeriodoPresupuesto(
+                    presupuesto_id=presu.id,
+                    fecha_inicio=nueva_inicio,
+                    fecha_fin=nueva_fin,
+                    monto_limite=presu.monto,
+                    monto_usado=gasto,
+                    superado=gasto > presu.monto
+                )
+                db.add(periodo_activo)
+                db.flush()
+                presu.periodos.append(periodo_activo)
+                # Como ya se calculó el gasto total con la transacción incluida, saltamos el incremento manual
+                continue
+
         if not periodo_activo:
             continue
             
@@ -803,3 +888,30 @@ def renovar_presupuestos(db: Session):
                     presu.periodos.append(nuevo_periodo)
     
     db.commit()
+
+
+def renovar_presupuesto_manual(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto:
+    presupuesto = obtener_presupuesto(db, usuario_id, id)
+    if presupuesto.estado != EstadoPresupuesto.ACTIVO:
+        raise HTTPException(status_code=400, detail="Solo se pueden renovar presupuestos activos")
+
+    hoy = hoy_argentina()
+    periodo_actual = obtener_periodo_activo(db, presupuesto)
+    if periodo_actual:
+        raise HTTPException(status_code=400, detail="El presupuesto ya tiene un período activo vigente")
+
+    fecha_inicio, fecha_fin = calcular_fechas_periodo(presupuesto.periodo, hoy, usuario=presupuesto.usuario)
+    monto_usado = calcular_gasto_en_periodo(
+        db, usuario_id, presupuesto.categorias, fecha_inicio, fecha_fin, moneda=presupuesto.moneda, usuario=presupuesto.usuario
+    )
+    nuevo_periodo = PeriodoPresupuesto(
+        presupuesto_id=presupuesto.id,
+        fecha_inicio=fecha_inicio,
+        fecha_fin=fecha_fin,
+        monto_limite=presupuesto.monto,
+        monto_usado=monto_usado,
+        superado=monto_usado > presupuesto.monto
+    )
+    db.add(nuevo_periodo)
+    db.commit()
+    return obtener_presupuesto(db, usuario_id, id)

@@ -128,6 +128,15 @@ def reanudar_presupuesto(
     p = presupuesto_service.reanudar_presupuesto(db, usuario.id, id)
     return _map_presupuesto_response(p)
 
+@router.post("/{id}/renovar", response_model=PresupuestoResponse)
+def renovar_presupuesto(
+    id: UUID,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user)
+):
+    p = presupuesto_service.renovar_presupuesto_manual(db, usuario.id, id)
+    return _map_presupuesto_response(p)
+
 @router.delete("/{id}")
 def eliminar_presupuesto(
     id: UUID,

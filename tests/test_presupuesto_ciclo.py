@@ -26,6 +26,8 @@ from app.services.presupuesto_service import (
     actualizar_presupuesto,
     reanudar_presupuesto,
     renovar_presupuestos,
+    obtener_presupuestos,
+    renovar_presupuesto_manual,
 )
 from app.services.dias_habiles_service import _feriados_cache
 from app.services.dashboard_service import get_ciclo_fechas
@@ -289,3 +291,93 @@ def test_renovar_presupuestos_mensual_con_ciclo_custom(db_session):
     inicio_esperado, fin_esperado = get_ciclo_fechas(usuario, date.today())
     assert nuevo_periodo.fecha_inicio == inicio_esperado
     assert nuevo_periodo.fecha_fin == fin_esperado
+
+def test_renovar_presupuesto_manual_crea_periodo_actual(db_session):
+    """renovar_presupuesto_manual debe crear el periodo actual para un presupuesto manual vencido."""
+    usuario = Usuario(
+        id=uuid4(),
+        email="user_manual_renovar@argentum.com",
+        auth_provider=AuthProvider.EMAIL,
+        rol=RolUsuario.USUARIO,
+        estado=EstadoUsuario.ACTIVO,
+    )
+    db_session.add(usuario)
+
+    cat = Categoria(id=uuid4(), nombre="Comida", tipo=TipoCategoria.EGRESO)
+    db_session.add(cat)
+    db_session.commit()
+
+    presu = Presupuesto(
+        usuario_id=usuario.id,
+        nombre="Comida Manual",
+        monto=Decimal("100000"),
+        moneda=Moneda.ARS,
+        periodo=PeriodoPresupuestoTipo.MENSUAL,
+        renovacion=RenovacionPresupuesto.MANUAL,
+        estado=EstadoPresupuesto.ACTIVO,
+    )
+    db_session.add(presu)
+    db_session.flush()
+
+    periodo_vencido = PeriodoPresupuesto(
+        presupuesto_id=presu.id,
+        fecha_inicio=date.today() - timedelta(days=60),
+        fecha_fin=date.today() - timedelta(days=31),
+        monto_limite=Decimal("100000"),
+        monto_usado=Decimal("45000"),
+        superado=False,
+    )
+    db_session.add(periodo_vencido)
+    db_session.commit()
+
+    # Renovar manualmente
+    presu_renovado = renovar_presupuesto_manual(db_session, usuario.id, presu.id)
+    assert len(presu_renovado.periodos) == 2
+    periodo_activo = max(presu_renovado.periodos, key=lambda p: p.fecha_inicio)
+    assert periodo_activo.fecha_inicio <= date.today() <= periodo_activo.fecha_fin
+
+def test_self_healing_obtener_presupuestos_automatica(db_session):
+    """obtener_presupuestos debe generar bajo demanda el periodo activo si el presupuesto es automatico."""
+    usuario = Usuario(
+        id=uuid4(),
+        email="user_self_heal@argentum.com",
+        auth_provider=AuthProvider.EMAIL,
+        rol=RolUsuario.USUARIO,
+        estado=EstadoUsuario.ACTIVO,
+    )
+    db_session.add(usuario)
+
+    cat = Categoria(id=uuid4(), nombre="Servicios", tipo=TipoCategoria.EGRESO)
+    db_session.add(cat)
+    db_session.commit()
+
+    presu = Presupuesto(
+        usuario_id=usuario.id,
+        nombre="Servicios Automatico",
+        monto=Decimal("200000"),
+        moneda=Moneda.ARS,
+        periodo=PeriodoPresupuestoTipo.MENSUAL,
+        renovacion=RenovacionPresupuesto.AUTOMATICA,
+        estado=EstadoPresupuesto.ACTIVO,
+    )
+    db_session.add(presu)
+    db_session.flush()
+
+    periodo_vencido = PeriodoPresupuesto(
+        presupuesto_id=presu.id,
+        fecha_inicio=date.today() - timedelta(days=60),
+        fecha_fin=date.today() - timedelta(days=31),
+        monto_limite=Decimal("200000"),
+        monto_usado=Decimal("80000"),
+        superado=False,
+    )
+    db_session.add(periodo_vencido)
+    db_session.commit()
+
+    # Al llamar a obtener_presupuestos, debe autorepararse y crear el ciclo activo
+    presupuestos = obtener_presupuestos(db_session, usuario.id)
+    assert len(presupuestos) == 1
+    p = presupuestos[0]
+    periodo_activo = max(p.periodos, key=lambda x: x.fecha_inicio)
+    assert periodo_activo.fecha_inicio <= date.today() <= periodo_activo.fecha_fin
+
