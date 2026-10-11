@@ -202,3 +202,90 @@ def test_admin_no_puede_autoeliminarse_desde_admin(client, admin_user, db_sessio
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     data = response.json()
     assert data["error"]["code"] == "ADMIN_CANNOT_DELETE_SELF"
+
+
+def test_diseno_decisiones_admin_flow(client, admin_user, regular_user):
+    global current_test_admin
+
+    # 1. Sin autenticación -> 401
+    current_test_admin = None
+    res_unauth = client.get("/v1/admin/diseno/decisiones")
+    assert res_unauth.status_code == status.HTTP_401_UNAUTHORIZED
+
+    # 2. Usuario no admin -> 403
+    current_test_admin = regular_user
+    res_forbidden = client.get("/v1/admin/diseno/decisiones")
+    assert res_forbidden.status_code == status.HTTP_403_FORBIDDEN
+
+    # 3. Admin consulta y guarda decisión -> 200
+    current_test_admin = admin_user
+    res_get = client.get("/v1/admin/diseno/decisiones")
+    assert res_get.status_code == status.HTTP_200_OK
+    assert res_get.json()["success"] is True
+
+    payload = {
+        "categoryId": "selectores_segmentados",
+        "preferredVariantId": "src/components/ui/SegmentedControl.tsx#L25_SegmentedControl",
+        "preferredVariantName": "SegmentedControl (Shared UI)",
+        "decisionState": "aprobada",
+        "notes": "Unificar con border-radius 12px y elevación sutil",
+        "equivalentComponents": ["TransaccionModal.segmentedBar", "PagarResumenModal.segmentedBar"],
+        "customTokens": {"borderRadius": "12px", "padding": "4px"}
+    }
+    res_post = client.post("/v1/admin/diseno/decisiones", json=payload)
+    assert res_post.status_code == status.HTTP_200_OK
+    assert res_post.json()["data"]["decisionState"] == "aprobada"
+
+    # 4. Guardar y consultar especificación -> 200
+    spec_payload = {
+        "familyId": "selectores_segmentados",
+        "familyName": "Selectores Segmentados",
+        "targetTokens": {"borderRadius": "12px", "height": "40px"},
+        "stateGuidelines": {"hover": "translateY(-0.5px)", "active": "elevation-sm"},
+        "accessibilityRules": ["role=radiogroup", "aria-checked"],
+        "status": "aprobada",
+        "notes": "Especificación oficial para todos los modales"
+    }
+    res_spec_post = client.post("/v1/admin/diseno/especificaciones", json=spec_payload)
+    assert res_spec_post.status_code == status.HTTP_200_OK
+    assert res_spec_post.json()["data"]["status"] == "aprobada"
+
+    res_spec_get = client.get("/v1/admin/diseno/especificaciones")
+    assert res_spec_get.status_code == status.HTTP_200_OK
+    assert "selectores_segmentados" in res_spec_get.json()["data"]
+
+    # 5. Control de concurrencia optimista y detección de conflicto 409
+    first_save = client.post("/v1/admin/diseno/decisiones", json={
+        "categoryId": "botones_accion",
+        "preferredVariantName": "Button (Primary)",
+        "decisionState": "revisada",
+        "notes": "Admin A edita primero"
+    })
+    assert first_save.status_code == status.HTTP_200_OK
+    saved_v1 = first_save.json()["data"]
+    assert saved_v1["version"] >= 1
+
+    # Admin B también guardó encima, incrementando la versión
+    second_save = client.post("/v1/admin/diseno/decisiones", json={
+        "categoryId": "botones_accion",
+        "preferredVariantName": "Button (Primary V2)",
+        "decisionState": "aprobada",
+        "notes": "Admin B edita y avanza versión",
+        "version": saved_v1["version"]
+    })
+    assert second_save.status_code == status.HTTP_200_OK
+    saved_v2 = second_save.json()["data"]
+    assert saved_v2["version"] == saved_v1["version"] + 1
+
+    # Admin A intenta enviar cambios con la versión desactualizada original -> 409 Conflict
+    conflict_save = client.post("/v1/admin/diseno/decisiones", json={
+        "categoryId": "botones_accion",
+        "preferredVariantName": "Button (Old State)",
+        "decisionState": "pendiente",
+        "notes": "Admin A intenta sobreescribir sin recargar",
+        "version": saved_v1["version"]  # Versión anterior menor a saved_v2["version"]
+    })
+    assert conflict_save.status_code == status.HTTP_409_CONFLICT
+    assert conflict_save.json()["error"]["code"] == "CONCURRENCY_CONFLICT"
+
+
