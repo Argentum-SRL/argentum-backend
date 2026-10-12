@@ -161,13 +161,21 @@ def get_periodo_actual(
     current_user: Usuario = Depends(get_current_user)
 ) -> Any:
     """
-    Retorna el rango de fechas (fecha_inicio, fecha_fin) del ciclo financiero actual del usuario autenticado.
+    Retorna el rango de fechas (fecha_inicio, fecha_fin) del ciclo financiero actual
+    y del ciclo anterior del usuario autenticado.
     """
+    from datetime import timedelta
     from app.utils.fecha import hoy_argentina
     fecha_inicio, fecha_fin = dashboard_service.get_ciclo_fechas(current_user, hoy_argentina())
+    # Ciclo anterior: calculado a partir de fecha_inicio - 1 día
+    ciclo_ant_inicio, ciclo_ant_fin = dashboard_service.get_ciclo_fechas(
+        current_user, fecha_inicio - timedelta(days=1)
+    )
     return {
         "fecha_inicio": fecha_inicio.isoformat(),
-        "fecha_fin": fecha_fin.isoformat()
+        "fecha_fin": fecha_fin.isoformat(),
+        "ciclo_anterior_inicio": ciclo_ant_inicio.isoformat(),
+        "ciclo_anterior_fin": ciclo_ant_fin.isoformat(),
     }
 
 

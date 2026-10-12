@@ -226,3 +226,5 @@ class ProyeccionesResponse(BaseModel):
 class PeriodoActualResponse(BaseModel):
     fecha_inicio: str
     fecha_fin: str
+    ciclo_anterior_inicio: str
+    ciclo_anterior_fin: str
