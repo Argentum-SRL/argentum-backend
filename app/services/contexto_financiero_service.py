@@ -1,31 +1,30 @@
 from decimal import Decimal
 from uuid import UUID
-from typing import List, Optional
-from datetime import date, timedelta
-from sqlalchemy import select, or_, and_
-from sqlalchemy.orm import Session, joinedload
+from typing import Dict, List, Optional
+from sqlalchemy.orm import Session
 
 from app.models.usuario import Usuario, Moneda
 from app.models.billetera import Billetera, EstadoBilletera
-from app.models.cuota import Cuota
-from app.models.grupo_cuotas import GrupoCuotas
-from app.models.tarjeta_credito import TarjetaCredito
-from app.models.transaccion import Transaccion
-from app.services.suscripcion_service import obtener_suscripciones
 from app.services.dashboard_service import get_ciclo_fechas
+from app.services.pagos_proximos_service import calcular_disponible_libre
 from app.utils.fecha import hoy_argentina
+
 
 def _calcular_saldo_disponible_sync(
     db: Session,
     usuario_id: UUID,
     billetera_ids: Optional[List[UUID]] = None,
-    wallets_override: Optional[List[Billetera]] = None
+    wallets_override: Optional[List[Billetera]] = None,
+    total_billeteras_override: Optional[Dict[str, Decimal]] = None,
 ) -> dict:
     usuario = db.get(Usuario, usuario_id)
     if not usuario:
         raise ValueError(f"Usuario {usuario_id} no encontrado")
 
-    # 1. Saldo de Billeteras activas
+    hoy = hoy_argentina()
+    _fecha_inicio_curr, fecha_fin_curr = get_ciclo_fechas(usuario, hoy)
+
+    # Si se pasa wallets_override, convertirlo a total_billeteras_override sumando solo activas no de inversión
     if wallets_override is not None:
         wallets = [
             w for w in wallets_override
@@ -34,110 +33,49 @@ def _calcular_saldo_disponible_sync(
         ]
         if billetera_ids:
             wallets = [w for w in wallets if w.id in billetera_ids]
-    else:
-        query_b = db.query(Billetera).filter(
-            Billetera.usuario_id == usuario_id,
-            Billetera.estado == EstadoBilletera.ACTIVA,
-            Billetera.es_inversion == False,
-        )
-        if billetera_ids:
-            query_b = query_b.filter(Billetera.id.in_(billetera_ids))
-        wallets = query_b.all()
 
-    total_billeteras_ars = Decimal("0")
-    total_billeteras_usd = Decimal("0")
-    for w in wallets:
-        if w.moneda == Moneda.ARS:
-            total_billeteras_ars += w.saldo_actual
-        elif w.moneda == Moneda.USD:
-            total_billeteras_usd += w.saldo_actual
+        override_ars = Decimal("0.00")
+        override_usd = Decimal("0.00")
+        for w in wallets:
+            moneda_val = w.moneda.value if hasattr(w.moneda, "value") else str(w.moneda)
+            saldo = Decimal(str(w.saldo_actual or 0))
+            if moneda_val == Moneda.ARS.value:
+                override_ars += saldo
+            elif moneda_val == Moneda.USD.value:
+                override_usd += saldo
 
-    # 2. Ciclo financiero y fechas
-    hoy = hoy_argentina()
-    fecha_inicio_curr, fecha_fin_curr = get_ciclo_fechas(usuario, hoy)
-    fecha_inicio_prox, fecha_fin_prox = get_ciclo_fechas(usuario, fecha_fin_curr + timedelta(days=1))
+        total_billeteras_override = {
+            "ars": override_ars,
+            "usd": override_usd,
+        }
 
-    # 3. Cuotas comprometidas del próximo ciclo (unpaid)
-    query_c = (
-        db.query(Cuota)
-        .options(joinedload(Cuota.grupo))
-        .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
-        .filter(
-            GrupoCuotas.usuario_id == usuario_id,
-            Cuota.pagada == False,
-            Cuota.fecha_vencimiento >= fecha_inicio_prox,
-            Cuota.fecha_vencimiento <= fecha_fin_prox,
-        )
+    disp_libre = calcular_disponible_libre(
+        db=db,
+        usuario=usuario,
+        fecha_fin_ciclo=fecha_fin_curr,
+        hoy=hoy,
+        billetera_ids=billetera_ids,
+        total_billeteras_override=total_billeteras_override,
     )
-
-    if billetera_ids:
-        tarjeta_ids_stmt = select(TarjetaCredito.id).where(TarjetaCredito.billetera_id.in_(billetera_ids))
-        parent_tx_stmt = select(Transaccion.id).where(
-            Transaccion.usuario_id == usuario_id,
-            Transaccion.billetera_id.in_(billetera_ids)
-        )
-        query_c = query_c.filter(
-            or_(
-                GrupoCuotas.tarjeta_id.in_(tarjeta_ids_stmt),
-                and_(
-                    GrupoCuotas.tarjeta_id == None,
-                    GrupoCuotas.transaccion_padre_id.in_(parent_tx_stmt)
-                )
-            )
-        )
-
-    cuotas = query_c.all()
-
-    total_cuotas_ars = Decimal("0")
-    total_cuotas_usd = Decimal("0")
-    for c in cuotas:
-        monto = c.monto_real if c.monto_real is not None else c.monto_proyectado or Decimal("0")
-        if c.grupo.moneda == Moneda.ARS:
-            total_cuotas_ars += monto
-        elif c.grupo.moneda == Moneda.USD:
-            total_cuotas_usd += monto
-
-    # 4. Suscripciones activas
-    suscripciones_activas = obtener_suscripciones(db, usuario_id, estado='activa')
-    if billetera_ids:
-        tarjeta_ids = [
-            t_id for (t_id,) in db.query(TarjetaCredito.id).filter(
-                TarjetaCredito.billetera_id.in_(billetera_ids)
-            ).all()
-        ]
-        suscripciones_activas = [
-            s for s in suscripciones_activas
-            if (s.billetera_id in billetera_ids) or (s.tarjeta_id in tarjeta_ids)
-        ]
-
-    total_suscripciones_ars = Decimal("0")
-    total_suscripciones_usd = Decimal("0")
-    for s in suscripciones_activas:
-        if s.precio_actual and s.costo_mensual_equivalente:
-            monto = s.costo_mensual_equivalente
-            if s.precio_actual.moneda == Moneda.ARS:
-                total_suscripciones_ars += monto
-            elif s.precio_actual.moneda == Moneda.USD:
-                total_suscripciones_usd += monto
-
-    # Disponible = Billeteras - Cuotas - Suscripciones
-    saldo_disponible_ars = total_billeteras_ars - total_cuotas_ars - total_suscripciones_ars
-    saldo_disponible_usd = total_billeteras_usd - total_cuotas_usd - total_suscripciones_usd
 
     return {
         "ars": {
-            "total_billeteras": total_billeteras_ars,
-            "cuotas_comprometidas": total_cuotas_ars,
-            "suscripciones_mensuales": total_suscripciones_ars,
-            "saldo_disponible": saldo_disponible_ars,
+            "total_billeteras": disp_libre["ars"]["saldo_total"],
+            "cuotas_comprometidas": disp_libre["ars"]["cuotas_pendientes"],
+            "suscripciones_mensuales": disp_libre["ars"]["suscripciones_pendientes"],
+            "facturas_pendientes": disp_libre["ars"]["facturas_pendientes"],
+            "saldo_disponible": disp_libre["ars"]["saldo_disponible"],
         },
         "usd": {
-            "total_billeteras": total_billeteras_usd,
-            "cuotas_comprometidas": total_cuotas_usd,
-            "suscripciones_mensuales": total_suscripciones_usd,
-            "saldo_disponible": saldo_disponible_usd,
-        }
+            "total_billeteras": disp_libre["usd"]["saldo_total"],
+            "cuotas_comprometidas": disp_libre["usd"]["cuotas_pendientes"],
+            "suscripciones_mensuales": disp_libre["usd"]["suscripciones_pendientes"],
+            "facturas_pendientes": disp_libre["usd"]["facturas_pendientes"],
+            "saldo_disponible": disp_libre["usd"]["saldo_disponible"],
+        },
+        "fecha_fin_ciclo": fecha_fin_curr,
     }
+
 
 def _resumen_metas_activas_sync(db: Session, usuario_id: UUID) -> list[dict]:
     from sqlalchemy import select

@@ -261,3 +261,8 @@ class PresionFuturaResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
+class ResumenDeCompraResponse(BaseModel):
+    fecha_cierre: date
+    fecha_vencimiento: date
+

@@ -15,7 +15,8 @@ from app.schemas.tarjeta_credito import (
     PagarTarjetaBody,
     PresionFuturaResponse,
     ResultadoPagoTarjeta,
-    SimularPesificacionResponse
+    SimularPesificacionResponse,
+    ResumenDeCompraResponse
 )
 from app.schemas.transaccion import TransaccionRead
 from app.services import pago_resumen_service, resumen_tarjeta_service, tarjeta_service
@@ -109,6 +110,40 @@ def get_resumen_tarjeta(
         raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
 
     return resumen_tarjeta_service.calcular_resumen_actual(db, tarjeta)
+
+
+@router.get("/{tarjeta_id}/resumen-de-compra", response_model=ResumenDeCompraResponse)
+def resumen_de_compra(
+    tarjeta_id: UUID,
+    fecha: date = Query(...),
+    proximo_resumen: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    tarjeta = db.query(tarjeta_service.TarjetaCredito).filter(
+        tarjeta_service.TarjetaCredito.id == tarjeta_id,
+        tarjeta_service.TarjetaCredito.usuario_id == current_user.id
+    ).first()
+
+    if not tarjeta:
+        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
+
+    fecha_cierre = tarjeta_service.calcular_cierre_de_compra(
+        fecha_compra=fecha,
+        dia_cierre=tarjeta.dia_cierre,
+        proximo_resumen=proximo_resumen
+    )
+    fecha_vencimiento = tarjeta_service.calcular_primer_vencimiento(
+        fecha_compra=fecha,
+        dia_cierre=tarjeta.dia_cierre,
+        dia_vencimiento=tarjeta.dia_vencimiento,
+        proximo_resumen=proximo_resumen
+    )
+
+    return ResumenDeCompraResponse(
+        fecha_cierre=fecha_cierre,
+        fecha_vencimiento=fecha_vencimiento
+    )
 
 
 @router.post("/{tarjeta_id}/pagar", response_model=ResultadoPagoTarjeta)

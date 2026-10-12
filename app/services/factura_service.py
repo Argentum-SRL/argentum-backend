@@ -294,7 +294,6 @@ def items_proximos_pagos(
         or_(
             and_(
                 Factura.estado == "pendiente",
-                Factura.fecha_vencimiento >= hoy - timedelta(days=30),
                 Factura.fecha_vencimiento <= limite_pagos,
             ),
             and_(

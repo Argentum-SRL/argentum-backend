@@ -686,3 +686,106 @@ def test_caso_12_cards_decision_6_filtro_ciclo(db_session: Session, fixtures_cas
 
     # balance.ars.egresos debe reflejar solo tx_dentro (222.00)
     assert resumen["balance"]["ars"]["egresos"] == 222.0
+
+
+def test_caso_13_calcular_saldo_disponible_sync_nuevo_ciclo(db_session: Session, fixtures_caso_real, monkeypatch):
+    """Caso 13: Hoy 2026-10-28, _calcular_saldo_disponible_sync coincide con disponible libre del dashboard."""
+    d = date(2026, 10, 28)
+    monkeypatch.setattr("app.utils.fecha.hoy_argentina", lambda: d)
+    monkeypatch.setattr("app.services.dashboard_service.hoy_argentina", lambda: d)
+    monkeypatch.setattr("app.services.pagos_proximos_service.hoy_argentina", lambda: d)
+    monkeypatch.setattr("app.services.contexto_financiero_service.hoy_argentina", lambda: d)
+
+    usuario = fixtures_caso_real["usuario"]
+    from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
+
+    disp = _calcular_saldo_disponible_sync(db_session, usuario.id)
+    assert disp["ars"]["total_billeteras"] == Decimal("1778545.80")
+    assert disp["ars"]["cuotas_comprometidas"] == Decimal("833.33")
+    assert disp["ars"]["saldo_disponible"] == Decimal("1777712.47")
+    assert disp["fecha_fin_ciclo"] == date(2026, 11, 27)
+
+    resumen = dashboard_service.get_dashboard_resumen(db_session, usuario)
+    assert disp["ars"]["saldo_disponible"] == resumen["saldo_disponible"]["ars"]["saldo_disponible"]
+
+
+def test_caso_14_factura_vencida_mas_30_dias(db_session: Session, fixtures_caso_real, monkeypatch):
+    """Caso 14: Hoy 2026-10-08, factura vencida el 2026-08-20 sigue restando en disponible libre."""
+    d = date(2026, 10, 8)
+    monkeypatch.setattr("app.utils.fecha.hoy_argentina", lambda: d)
+    monkeypatch.setattr("app.services.dashboard_service.hoy_argentina", lambda: d)
+    monkeypatch.setattr("app.services.pagos_proximos_service.hoy_argentina", lambda: d)
+    monkeypatch.setattr("app.services.contexto_financiero_service.hoy_argentina", lambda: d)
+
+    usuario = fixtures_caso_real["usuario"]
+    factura = Factura(
+        id=uuid4(),
+        usuario_id=usuario.id,
+        descripcion="Gas Antigua",
+        monto=Decimal("20000.00"),
+        moneda=Moneda.ARS,
+        fecha_vencimiento=date(2026, 8, 20),
+        estado="pendiente",
+        origen="whatsapp_foto",
+    )
+    db_session.add(factura)
+    db_session.commit()
+
+    from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
+    resumen = dashboard_service.get_dashboard_resumen(db_session, usuario)
+    proximos = resumen["proximos_pagos"]
+    fac_items = [p for p in proximos if p.get("tipo") == "factura" and p.get("id") == str(factura.id)]
+    assert len(fac_items) == 1
+    assert fac_items[0]["estado_factura"] == "vencida"
+
+    disp = _calcular_saldo_disponible_sync(db_session, usuario.id)
+    assert resumen["saldo_disponible"]["ars"]["saldo_disponible"] == Decimal("1758545.80")
+    assert disp["ars"]["saldo_disponible"] == Decimal("1758545.80")
+    assert disp["ars"]["facturas_pendientes"] == Decimal("20000.00")
+
+
+def test_caso_15_wallets_override_mismo_resultado(db_session: Session, fixtures_caso_real, monkeypatch):
+    """Caso 15: Hoy 2026-10-08, _calcular_saldo_disponible_sync con wallets_override da el mismo resultado."""
+    d = date(2026, 10, 8)
+    monkeypatch.setattr("app.utils.fecha.hoy_argentina", lambda: d)
+    monkeypatch.setattr("app.services.dashboard_service.hoy_argentina", lambda: d)
+    monkeypatch.setattr("app.services.pagos_proximos_service.hoy_argentina", lambda: d)
+    monkeypatch.setattr("app.services.contexto_financiero_service.hoy_argentina", lambda: d)
+
+    usuario = fixtures_caso_real["usuario"]
+    billeteras = [
+        fixtures_caso_real["b_efectivo"],
+        fixtures_caso_real["b_mp"],
+        fixtures_caso_real["b_nacion"],
+    ]
+
+    from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
+    disp_sin = _calcular_saldo_disponible_sync(db_session, usuario.id)
+    disp_con = _calcular_saldo_disponible_sync(db_session, usuario.id, wallets_override=billeteras)
+
+    assert disp_con["ars"]["saldo_disponible"] == Decimal("1778545.80")
+    assert disp_sin["ars"]["saldo_disponible"] == disp_con["ars"]["saldo_disponible"]
+    assert disp_sin["ars"]["total_billeteras"] == disp_con["ars"]["total_billeteras"]
+
+
+def test_caso_16_enriquecer_consultar_saldo_texto(db_session: Session, fixtures_caso_real, monkeypatch):
+    """Caso 16: Hoy 2026-10-08, enriquecer_respuesta_por_intent con consultar_saldo genera texto exacto."""
+    d = date(2026, 10, 8)
+    monkeypatch.setattr("app.utils.fecha.hoy_argentina", lambda: d)
+    monkeypatch.setattr("app.services.dashboard_service.hoy_argentina", lambda: d)
+    monkeypatch.setattr("app.services.pagos_proximos_service.hoy_argentina", lambda: d)
+    monkeypatch.setattr("app.services.contexto_financiero_service.hoy_argentina", lambda: d)
+
+    usuario = fixtures_caso_real["usuario"]
+    from app.routers.whatsapp.enriquecedores import enriquecer_respuesta_por_intent
+
+    resultado_ia = {}
+    enriquecer_respuesta_por_intent("consultar_saldo", resultado_ia, "cuánto tengo", usuario, db_session)
+
+    esperado = (
+        "Tus saldos en pesos:\n"
+        "- Total en billeteras: $1.778.545,80\n"
+        "- Disponible libre: $1.778.545,80 (ya descontado lo que vence hasta el 27/10)"
+    )
+    assert resultado_ia["respuesta_usuario"] == esperado
+

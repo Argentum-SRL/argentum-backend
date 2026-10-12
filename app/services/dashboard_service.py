@@ -416,12 +416,12 @@ def get_dashboard_resumen(
     )
 
     from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
-    disp_ctx = _calcular_saldo_disponible_sync(db, usuario.id, billetera_ids)
-    if total_billeteras_override:
-        disp_ctx["ars"]["total_billeteras"] = total_billeteras_override.get("ars", Decimal("0"))
-        disp_ctx["usd"]["total_billeteras"] = total_billeteras_override.get("usd", Decimal("0"))
-        disp_ctx["ars"]["saldo_disponible"] = disp_ctx["ars"]["total_billeteras"] - disp_ctx["ars"]["cuotas_comprometidas"] - disp_ctx["ars"]["suscripciones_mensuales"]
-        disp_ctx["usd"]["saldo_disponible"] = disp_ctx["usd"]["total_billeteras"] - disp_ctx["usd"]["cuotas_comprometidas"] - disp_ctx["usd"]["suscripciones_mensuales"]
+    disp_ctx = _calcular_saldo_disponible_sync(
+        db,
+        usuario.id,
+        billetera_ids,
+        total_billeteras_override=total_billeteras_override,
+    )
 
     # --- QUERY: Gastos Reales por Categoría en el Ciclo Actual ---
     cat_where = condicion_gasto(

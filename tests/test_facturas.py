@@ -1044,7 +1044,7 @@ def test_8_proximos_pagos_dashboard(db_session: Session, fixtures_comunes):
         commit=True,
     )
 
-    # 6. Vencida hace 31 días (no debe aparecer)
+    # 6. Vencida hace 31 días (aparece: las vencidas sin pagar siguen restando)
     fac_vencida_31 = factura_service.crear_factura_pendiente(
         db=db_session,
         usuario_id=f["usuario"].id,
@@ -1061,7 +1061,7 @@ def test_8_proximos_pagos_dashboard(db_session: Session, fixtures_comunes):
     limite_pagos = hoy + timedelta(days=60)
     pagos_facturas = factura_service.items_proximos_pagos(db_session, f["usuario"].id, hoy, limite_pagos)
 
-    assert len(pagos_facturas) == 3
+    assert len(pagos_facturas) == 4
 
     # Pendiente
     p_pend = next(p for p in pagos_facturas if p["factura_id"] == str(fac_pend.id))
@@ -1087,8 +1087,11 @@ def test_8_proximos_pagos_dashboard(db_session: Session, fixtures_comunes):
     # Pendiente que vence después de limite_pagos no aparece
     assert not any(p["factura_id"] == str(fac_despues_limite.id) for p in pagos_facturas)
 
-    # Vencida hace 31 días no aparece
-    assert not any(p["factura_id"] == str(fac_vencida_31.id) for p in pagos_facturas)
+    # Vencida hace 31 días (aparece)
+    p_venc_31 = next(p for p in pagos_facturas if p["factura_id"] == str(fac_vencida_31.id))
+    assert p_venc_31["estado_factura"] == "vencida"
+    assert p_venc_31["es_vencido"] is True
+    assert p_venc_31["monto"] == 25000.00
 
 
 def test_9_credito_cuotas_facturas(db_session: Session, fixtures_comunes):

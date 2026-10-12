@@ -81,6 +81,31 @@ def calcular_primer_vencimiento(
     return ajustar_fecha_habil_sync(fecha_nominal, direccion="posterior")
 
 
+def calcular_cierre_de_compra(
+    fecha_compra: date,
+    dia_cierre: int,
+    proximo_resumen: bool = False
+) -> date:
+    """
+    Calcula la fecha de cierre del resumen en el que entra una compra con tarjeta.
+    El mes de cierre es el de la compra si el día es menor o igual al día de cierre,
+    si no el siguiente; con proximo_resumen se suma un mes.
+    El día es min(dia_cierre, último día del mes).
+    Sin ajuste por día hábil.
+    """
+    if fecha_compra.day <= dia_cierre:
+        mes_cierre = fecha_compra
+    else:
+        mes_cierre = fecha_compra + relativedelta(months=1)
+
+    if proximo_resumen:
+        mes_cierre = mes_cierre + relativedelta(months=1)
+
+    ultimo_dia = monthrange(mes_cierre.year, mes_cierre.month)[1]
+    dia_real = min(dia_cierre, ultimo_dia)
+    return mes_cierre.replace(day=dia_real)
+
+
 def calcular_fecha_vencimiento_proximo(tarjeta: TarjetaCredito, hoy: date | None = None) -> date:
     """Devuelve la fecha del próximo vencimiento de la tarjeta a partir de hoy (ajustada a día hábil posterior)."""
     if hoy is None:

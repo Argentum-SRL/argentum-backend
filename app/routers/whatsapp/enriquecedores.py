@@ -121,10 +121,12 @@ def enriquecer_respuesta_por_intent(
             ars_disp = float(disp_ctx["ars"]["saldo_disponible"])
             usd_total = float(disp_ctx["usd"]["total_billeteras"])
             usd_disp = float(disp_ctx["usd"]["saldo_disponible"])
+            fecha_fin = disp_ctx.get("fecha_fin_ciclo")
+            fecha_fin_str = fecha_fin.strftime("%d/%m") if fecha_fin else ""
 
-            msg = f"Tus saldos en pesos:\n- Total en billeteras: {_fmt(ars_total)}\n- Disponible real: {_fmt(ars_disp)} (descontando cuotas)"
+            msg = f"Tus saldos en pesos:\n- Total en billeteras: {_fmt(ars_total)}\n- Disponible libre: {_fmt(ars_disp)} (ya descontado lo que vence hasta el {fecha_fin_str})"
             if usd_total > 0 or usd_disp > 0:
-                msg += f"\n\nEn dólares:\n- Total en billeteras: {_fmt(usd_total, Moneda.USD)}\n- Disponible real: {_fmt(usd_disp, Moneda.USD)}"
+                msg += f"\n\nEn dólares:\n- Total en billeteras: {_fmt(usd_total, Moneda.USD)}\n- Disponible libre: {_fmt(usd_disp, Moneda.USD)}"
             resultado_ia["respuesta_usuario"] = msg
         except Exception:
             logger.exception("Error al calcular saldo para WhatsApp")
