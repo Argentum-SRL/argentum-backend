@@ -16,13 +16,12 @@ RESPUESTA ESTÁNDAR (AuthResponse) para todos los endpoints de auth:
 
 FLUJOS:
   1. Google → tokens inmediatos + requiere_telefono si no tiene teléfono verificado
-  2. Teléfono → WhatsApp → si es usuario nuevo: requiere_datos → completar-perfil → verificar-email
   3. Email/password → registro → verificar-email → verificar-teléfono → tokens
 """
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -43,6 +42,7 @@ from app.core.auth import (
     revocar_todos_los_tokens,
     setear_cookies_auth,
     limpiar_cookies_auth,
+    MENSAJE_CUENTA_SUSPENDIDA,
 )
 from app.core.database import get_db
 from app.core.security import get_password_hash, verify_password, normalizar_email
@@ -52,7 +52,6 @@ from urllib.parse import quote
 from app.schemas.auth import (
     AuthResponse,
     CodigoVinculacionResponse,
-    CompletarPerfilRequest,
     EnviarCodigoEmailRequest,
     GoogleLoginRequest,
     LoginRequest,
@@ -202,6 +201,11 @@ def register(request: Request, user_in: RegisterRequest, background_tasks: Backg
     )
 
 
+MAX_INTENTOS_FALLIDOS_CUENTA = 10
+VENTANA_BLOQUEO_CUENTA_MINUTOS = 60
+MENSAJE_BLOQUEO_CUENTA = "Hubo demasiados intentos fallidos con esta cuenta. Esperá una hora o recuperá tu contraseña."
+
+
 @router.post("/login", response_model=AuthResponse)
 @limiter.limit("5/minute")
 def login(
@@ -236,9 +240,26 @@ def login(
             detail="Tu cuenta no tiene contraseña configurada. Ingresá con tu teléfono o configurá una contraseña desde tu perfil.",
         )
 
+    # Control de límite de intentos fallidos por cuenta
+    ahora_utc = datetime.now(timezone.utc)
+    ultimo_fallo = user.ultimo_intento_fallido_at
+    if ultimo_fallo and ultimo_fallo.tzinfo is None:
+        ultimo_fallo = ultimo_fallo.replace(tzinfo=timezone.utc)
+
+    if (user.intentos_fallidos_login or 0) >= MAX_INTENTOS_FALLIDOS_CUENTA and ultimo_fallo:
+        if ahora_utc - ultimo_fallo <= timedelta(minutes=VENTANA_BLOQUEO_CUENTA_MINUTOS):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=MENSAJE_BLOQUEO_CUENTA,
+            )
+
     if not verify_password(user_in.password, user.password_hash):
-        user.intentos_fallidos_login = (user.intentos_fallidos_login or 0) + 1
-        user.ultimo_intento_fallido_at = datetime.now(timezone.utc)
+        ahora_fallo = datetime.now(timezone.utc)
+        if ultimo_fallo is None or (ahora_fallo - ultimo_fallo > timedelta(minutes=VENTANA_BLOQUEO_CUENTA_MINUTOS)):
+            user.intentos_fallidos_login = 1
+        else:
+            user.intentos_fallidos_login = (user.intentos_fallidos_login or 0) + 1
+        user.ultimo_intento_fallido_at = ahora_fallo
         db.commit()
 
         if user.intentos_fallidos_login == 3 and user.email:
@@ -256,11 +277,18 @@ def login(
                     fecha_hora_argentina=fecha_str,
                     link_recupero=link_recupero,
                 )
-                background_tasks.add_task(enviar_email_notificacion, user.email, asunto, html, texto)
+                enviar_email_notificacion(user.email, asunto, html, texto)
             except Exception as e:
                 logger.error("Error al disparar alerta de intentos fallidos de login: %s", e)
 
         raise HTTPException(status_code=401, detail="El email o la contraseña no son correctos. Revisalos e intentá de nuevo.")
+
+    # Cuenta suspendida: recién después de validar la contraseña
+    if user.estado == EstadoUsuario.INACTIVO:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=MENSAJE_CUENTA_SUSPENDIDA,
+        )
 
     user.intentos_fallidos_login = 0
     user.ultimo_acceso = datetime.now(timezone.utc)
@@ -331,6 +359,8 @@ def verificar_recuperacion(
     user.password_hash = get_password_hash(pw)
     user.password_configurada = True
     user.tokens_revocados_at = now
+    user.intentos_fallidos_login = 0
+    user.ultimo_intento_fallido_at = None
 
     from app.models.refresh_token import RefreshToken
     from sqlalchemy import update
@@ -503,6 +533,15 @@ def verificar_email_link(email: str, codigo: str, request: Request, db: Session 
             url=f"{settings.FRONTEND_URL}/auth/verificar-email?" + query_params
         )
 
+    if user.estado == EstadoUsuario.INACTIVO:
+        query_params = urllib.parse.urlencode({
+            "email": email_clean,
+            "error": MENSAJE_CUENTA_SUSPENDIDA,
+        })
+        return RedirectResponse(
+            url=f"{settings.FRONTEND_URL}/auth/verificar-email?" + query_params
+        )
+
     user.email_verificado = True
     user.estado = EstadoUsuario.ACTIVO
     user.ultimo_acceso = datetime.now(timezone.utc)
@@ -545,6 +584,9 @@ def verificar_email(
     if not user:
         raise HTTPException(status_code=404, detail="No encontramos una cuenta con esos datos.")
 
+    if user.estado == EstadoUsuario.INACTIVO:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=MENSAJE_CUENTA_SUSPENDIDA)
+
     user.email_verificado = True
     user.estado = EstadoUsuario.ACTIVO
     user.ultimo_acceso = datetime.now(timezone.utc)
@@ -566,6 +608,7 @@ def verificar_email(
 # ---------------------------------------------------------------------------
 
 @router.post("/google", response_model=AuthResponse)
+@limiter.limit("10/minute")
 def login_google(
     body: GoogleLoginRequest,
     request: Request,
@@ -574,12 +617,11 @@ def login_google(
 ):
     """Login / registro con Google ID token."""
     logger.debug(
-        '[Auth][Google][Backend] /auth/google recibido origin=%s userAgent=%s tokenPresent=%s tokenLength=%s tokenPrefix=%s',
+        '[Auth][Google][Backend] /auth/google recibido origin=%s userAgent=%s tokenPresent=%s tokenLength=%s',
         request.headers.get('origin'),
         request.headers.get('user-agent'),
         bool(body.token),
-        len(body.token),
-        body.token[:12] + '...' if body.token else None,
+        len(body.token) if body.token else 0,
     )
 
     token_info = verify_google_token(body.token)
@@ -598,13 +640,18 @@ def login_google(
     user = db.execute(select(Usuario).where(func.lower(Usuario.email) == email_clean)).scalar_one_or_none()
 
     logger.debug(
-        '[Auth][Google][Backend] Usuario buscado email=%s exists=%s authProvider=%s',
-        email_clean,
+        '[Auth][Google][Backend] Usuario buscado exists=%s authProvider=%s',
         bool(user),
         getattr(user.auth_provider, 'value', None) if user else None,
     )
 
     if user:
+        if user.estado == EstadoUsuario.INACTIVO:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=MENSAJE_CUENTA_SUSPENDIDA,
+            )
+
         if not user.email_verificado:
             raise HTTPException(
                 status_code=401,
@@ -625,10 +672,7 @@ def login_google(
             apellido = partes[1] if len(partes) > 1 else ""
 
         logger.info(
-            '[Auth][Google][Backend] Creando usuario nuevo email=%s nombre=%s apellido=%s picture=%s',
-            email_clean,
-            nombre,
-            apellido,
+            '[Auth][Google][Backend] Creando usuario nuevo picture=%s',
             bool(token_info.get('picture')),
         )
 
@@ -657,9 +701,8 @@ def login_google(
     db.commit()
 
     logger.info(
-        '[Auth][Google][Backend] Tokens emitidos userId=%s email=%s requiereTelefono=%s requiereOnboarding=%s',
+        '[Auth][Google][Backend] Tokens emitidos userId=%s requiereTelefono=%s requiereOnboarding=%s',
         user.id,
-        user.email,
         not user.telefono_verificado,
         _requiere_onboarding(user) if user.telefono_verificado else False,
     )
@@ -727,42 +770,7 @@ def solicitar_codigo_vinculacion(
 
 
 
-# ---------------------------------------------------------------------------
-# Completar perfil (para usuarios que se registraron solo con teléfono)
-# ---------------------------------------------------------------------------
 
-@router.post("/completar-perfil", response_model=AuthResponse)
-def completar_perfil(
-    body: CompletarPerfilRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user),
-):
-    """
-    Completa los datos del perfil (nombre, email, password) para usuarios que
-    registraron solo con teléfono. Al terminar, requiere verificar email.
-    """
-    # Verificar que el email no esté tomado
-    email_clean = normalizar_email(body.email)
-    email_existente = db.execute(select(Usuario).where(func.lower(Usuario.email) == email_clean)).scalar_one_or_none()
-    if email_existente and email_existente.id != current_user.id:
-        raise HTTPException(status_code=400, detail="Ya existe una cuenta con ese email.")
-
-    current_user.nombre = body.nombre.strip()
-    current_user.apellido = body.apellido.strip()
-    current_user.email = email_clean
-    current_user.password_hash = get_password_hash(body.password)
-    current_user.password_configurada = True
-    current_user.email_verificado = False
-    db.commit()
-
-    # Enviar email en segundo plano
-    background_tasks.add_task(generar_y_enviar_verificacion_email, current_user.email, nombre=current_user.nombre)
-
-    return AuthResponse(
-        usuario=UsuarioRead.model_validate(current_user),
-        requiere_verificacion_email=True,
-    )
 
 
 # ---------------------------------------------------------------------------

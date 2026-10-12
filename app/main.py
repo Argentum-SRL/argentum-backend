@@ -20,6 +20,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from slowapi.errors import RateLimitExceeded
 
 from app.core.limiter import limiter
+from app.core.origen import OrigenPermitidoMiddleware
 
 logging.basicConfig(
     level=logging.INFO,
@@ -844,6 +845,9 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestTimingMiddleware)
 app.add_middleware(TimeoutMiddleware, timeout=30.0)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+# OrigenPermitidoMiddleware se agrega antes de CORSMiddleware; al ejecutarse en orden inverso de la pila ASGI,
+# CORSMiddleware es el primero en ejecutar para atender preflights OPTIONS y cabeceras CORS.
+app.add_middleware(OrigenPermitidoMiddleware, origenes_permitidos=_origins)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
@@ -933,19 +937,21 @@ async def global_exception_handler(request: Request, exc: Exception):
         import traceback
         from app.services.alerta_service import enviar_alerta_admin
 
+        route_obj = request.scope.get("route")
+        ruta = getattr(route_obj, "path", None) or request.url.path
         tipo_exc = type(exc).__name__
         tb_lines = traceback.format_exception(type(exc), exc, exc.__traceback__)
         tb_resumen = "".join(tb_lines[:15]) if len(tb_lines) > 15 else "".join(tb_lines)
 
-        asunto = f"[Argentum] Error 500 en {request.url.path}"
+        asunto = f"[Argentum] Error 500 en {ruta}"
         cuerpo = (
             f"Error 500 no manejado:\n\n"
-            f"Ruta: {request.method} {request.url.path}\n"
+            f"Ruta: {request.method} {ruta}\n"
             f"Tipo de excepción: {tipo_exc}\n"
             f"Detalle: {str(exc)}\n\n"
             f"Traceback:\n{tb_resumen}"
         )
-        clave = f"500:{request.url.path}"
+        clave = f"500:{tipo_exc}:{ruta}"
         enviar_alerta_admin(asunto=asunto, cuerpo=cuerpo, clave=clave)
     except Exception as alerta_err:
         logger.error("Error al procesar alerta para excepción 500: %s", alerta_err)

@@ -15,17 +15,13 @@ from uuid import UUID
 
 import anyio
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse
-from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, joinedload
-
-from app.core.auth import get_current_admin_user
 from app.core.config import settings
 from app.core.constants import MAX_MONTO_INTEGRIDAD
-from app.core.database import SessionLocal, get_db
+from app.core.database import SessionLocal
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria, EstadoCategoria, TipoCategoria
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
@@ -45,7 +41,7 @@ from app.models.transaccion import (
     Transaccion,
 )
 from app.models.transferencia_interna import TransferenciaInterna
-from app.models.usuario import EstadoUsuario, Moneda, Usuario
+from app.models.usuario import EstadoUsuario, Moneda
 from app.routers.whatsapp.confirmaciones import _ejecutar_intent
 from app.routers.whatsapp.contexto import ContextoMensaje
 from app.routers.whatsapp.etapa_entrada import (
@@ -202,7 +198,6 @@ from app.schemas.suscripcion import ActualizarPrecioRequest, SuscripcionCreate
 from app.schemas.transaccion import InfoCuotas, TransaccionCreate, TransaccionUpdate
 from app.schemas.transferencia_interna import TransferenciaInternaCreate
 from app.services import (
-    ai_service,
     meta_service,
     presupuesto_service,
     suscripcion_service,
@@ -683,27 +678,3 @@ async def whatsapp_webhook(
     if datos_mensaje:
         background_tasks.add_task(_procesar_mensaje_whatsapp_background, datos_mensaje)
     return resp
-
-
-class TestIAMessageRequest(BaseModel):
-    mensaje: str
-
-
-
-@router.post("/test")
-def test_ia(
-    body: TestIAMessageRequest | None = None,
-    mensaje: str | None = None,
-    db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_admin_user),
-) -> dict:
-    texto = (body.mensaje if body else None) or mensaje
-    if not texto:
-        raise HTTPException(status_code=400, detail="Debe ingresar un mensaje para probar la IA.")
-    return ai_service.procesar_mensaje(
-        mensaje=texto,
-        usuario=current_user,
-        db=db,
-        historial=None,
-        estado_previo=None,
-    )

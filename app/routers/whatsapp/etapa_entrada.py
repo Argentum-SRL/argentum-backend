@@ -133,7 +133,7 @@ def procesar_vinculacion_o_desconocido(ctx: ContextoMensaje) -> None:
             except Exception as e:
                 logger.error("Error al enviar email de confirmación de vinculación: %s", e)
 
-            logger.info("whatsapp_vinculacion_exitosa", usuario_id=str(usuario_dueno.id), telefono=ctx.from_number)
+            logger.info("whatsapp_vinculacion_exitosa", usuario_id=str(usuario_dueno.id), telefono=whatsapp_service._enmascarar_telefono(ctx.from_number))
             ctx.usuario = usuario_dueno
             ctx.terminado = True
             return

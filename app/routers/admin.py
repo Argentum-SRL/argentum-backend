@@ -1,5 +1,5 @@
 from typing import Literal
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 from sqlalchemy.orm import Session
 from uuid import UUID
 import logging
@@ -54,7 +54,7 @@ def get_usuarios(
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Lista paginada y filtrada de usuarios. Excluye datos financieros."""
-    logger.info("[ADMIN] Admin %s (%s) listó usuarios. page=%s limit=%s", admin.id, admin.email, page, limit)
+    logger.info("[ADMIN] Admin %s listó usuarios. page=%s limit=%s", admin.id, page, limit)
     res = admin_service.listar_usuarios(
         db, page=page, limit=limit, search=search, estado=estado, onboarding=onboarding, wpp=wpp
     )
@@ -82,7 +82,7 @@ def get_usuario_detalle(
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Detalle operativo de un usuario específico."""
-    logger.info("[ADMIN] Admin %s (%s) solicitó detalle de usuario %s", admin.id, admin.email, usuario_id)
+    logger.info("[ADMIN] Admin %s solicitó detalle de usuario %s", admin.id, usuario_id)
     user = admin_service.obtener_usuario(db, usuario_id)
     
     user_data = UsuarioAdminResponse.model_validate(user)
@@ -103,7 +103,7 @@ def cambiar_estado(
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Activar o desactivar cuenta de usuario."""
-    logger.info("[ADMIN] Admin %s (%s) cambió estado de usuario %s a %s", admin.id, admin.email, usuario_id, body.is_active)
+    logger.info("[ADMIN] Admin %s cambió estado de usuario %s a %s", admin.id, usuario_id, body.is_active)
     user = admin_service.cambiar_estado_usuario(db, usuario_id, is_active=body.is_active, admin_id=admin.id)
     
     user_data = UsuarioAdminResponse.model_validate(user)
@@ -123,7 +123,7 @@ def reset_password(
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Envía email de recuperación de contraseña."""
-    logger.info("[ADMIN] Admin %s (%s) solicitó reset de contraseña para usuario %s", admin.id, admin.email, usuario_id)
+    logger.info("[ADMIN] Admin %s solicitó reset de contraseña para usuario %s", admin.id, usuario_id)
     admin_service.enviar_reset_password(db, usuario_id, settings.FRONTEND_URL)
     return {
         "success": True,
@@ -138,7 +138,7 @@ def revocar_sesiones_usuario(
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Fuerza cierre de todas las sesiones de un usuario."""
-    logger.info("[ADMIN] Admin %s (%s) revocó sesiones del usuario %s", admin.id, admin.email, usuario_id)
+    logger.info("[ADMIN] Admin %s revocó sesiones del usuario %s", admin.id, usuario_id)
     admin_service.revocar_sesiones(db, usuario_id, admin_id=admin.id)
     return {
         "success": True,
@@ -153,7 +153,7 @@ def desconectar_whatsapp(
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Desconecta WhatsApp de un usuario."""
-    logger.info("[ADMIN] Admin %s (%s) desconectó WhatsApp para usuario %s", admin.id, admin.email, usuario_id)
+    logger.info("[ADMIN] Admin %s desconectó WhatsApp para usuario %s", admin.id, usuario_id)
     user = admin_service.desconectar_wpp(db, usuario_id)
     
     user_data = UsuarioAdminResponse.model_validate(user)
@@ -174,7 +174,7 @@ def resetear_onboarding_usuario(
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Resetea estado de onboarding del usuario."""
-    logger.info("[ADMIN] Admin %s (%s) reseteó onboarding para usuario %s", admin.id, admin.email, usuario_id)
+    logger.info("[ADMIN] Admin %s reseteó onboarding para usuario %s", admin.id, usuario_id)
     
     if not body.confirmar:
         raise HTTPException(
@@ -208,7 +208,7 @@ def cambiar_rol_admin(
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Promueve o revoca permisos de administrador a un usuario."""
-    logger.info("[ADMIN] Admin %s (%s) cambió rol admin de usuario %s a %s", admin.id, admin.email, usuario_id, body.is_admin)
+    logger.info("[ADMIN] Admin %s cambió rol admin de usuario %s a %s", admin.id, usuario_id, body.is_admin)
     user = admin_service.cambiar_rol_admin(db, usuario_id, is_admin=body.is_admin, admin_id=admin.id)
     
     user_data = UsuarioAdminResponse.model_validate(user)
@@ -229,7 +229,7 @@ def eliminar_usuario_admin(
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Elimina permanentemente una cuenta de usuario y todos sus datos."""
-    logger.info("[ADMIN] Admin %s (%s) solicitó eliminación de usuario %s", admin.id, admin.email, usuario_id)
+    logger.info("[ADMIN] Admin %s solicitó eliminación de usuario %s", admin.id, usuario_id)
     res = admin_service.eliminar_usuario_admin(
         db, usuario_id, email_confirmacion=body.email_confirmacion, admin_id=admin.id
     )
@@ -246,7 +246,7 @@ def get_stats(
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Obtiene estadísticas generales para el panel de administración."""
-    logger.info("[ADMIN] Admin %s (%s) solicitó estadísticas generales.", admin.id, admin.email)
+    logger.info("[ADMIN] Admin %s solicitó estadísticas generales.", admin.id)
     stats = admin_service.obtener_estadisticas(db)
     stats_data = AdminStatsResponse.model_validate(stats)
     return {
@@ -266,7 +266,7 @@ async def refresh_feriados_admin(
     from app.utils.fecha import hoy_argentina
 
     target_anio = anio or hoy_argentina().year
-    logger.info("[ADMIN] Admin %s (%s) solicitó refresh de feriados para año %s", admin.id, admin.email, target_anio)
+    logger.info("[ADMIN] Admin %s solicitó refresh de feriados para año %s", admin.id, target_anio)
 
     res = await recargar_feriados_anio(target_anio)
     return {
@@ -340,7 +340,7 @@ def get_diseno_decisiones(
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Retorna todas las decisiones y preferencias de diseño registradas por administradores."""
-    logger.info("[ADMIN DISENO] Admin %s (%s) consultó decisiones de diseño.", admin.id, admin.email)
+    logger.info("[ADMIN DISENO] Admin %s consultó decisiones de diseño.", admin.id)
     decisiones = _read_json_file(DECISIONES_FILE, default_val={})
     return {
         "success": True,
@@ -355,7 +355,7 @@ def save_diseno_decision(
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Guarda o actualiza una decisión de diseño para una categoría con control de concurrencia optimista."""
-    logger.info("[ADMIN DISENO] Admin %s (%s) guardó decisión para categoría %s", admin.id, admin.email, payload.categoryId)
+    logger.info("[ADMIN DISENO] Admin %s guardó decisión para categoría %s", admin.id, payload.categoryId)
     decisiones = _read_json_file(DECISIONES_FILE, default_val={})
     
     current_entry = decisiones.get(payload.categoryId)
@@ -401,7 +401,7 @@ def save_diseno_decisiones_bulk(
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Guarda en lote múltiples decisiones de diseño con incremento de versión."""
-    logger.info("[ADMIN DISENO] Admin %s (%s) guardó decisiones en lote (%s categorías)", admin.id, admin.email, len(payload.decisiones))
+    logger.info("[ADMIN DISENO] Admin %s guardó decisiones en lote (%s categorías)", admin.id, len(payload.decisiones))
     decisiones = _read_json_file(DECISIONES_FILE, default_val={})
     
     from datetime import datetime, timezone
@@ -430,7 +430,7 @@ def get_diseno_especificaciones(
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Obtiene las especificaciones de diseño aprobadas y en borrador."""
-    logger.info("[ADMIN DISENO] Admin %s (%s) consultó especificaciones de diseño.", admin.id, admin.email)
+    logger.info("[ADMIN DISENO] Admin %s consultó especificaciones de diseño.", admin.id)
     specs = _read_json_file(ESPECIFICACIONES_FILE, default_val={})
     return {
         "success": True,
@@ -445,7 +445,7 @@ def save_diseno_especificacion(
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Guarda o actualiza la especificación de diseño para una familia de componentes con control de concurrencia."""
-    logger.info("[ADMIN DISENO] Admin %s (%s) guardó especificación para familia %s", admin.id, admin.email, payload.familyId)
+    logger.info("[ADMIN DISENO] Admin %s guardó especificación para familia %s", admin.id, payload.familyId)
     specs = _read_json_file(ESPECIFICACIONES_FILE, default_val={})
     
     current_entry = specs.get(payload.familyId)

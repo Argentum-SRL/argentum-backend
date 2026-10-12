@@ -9,6 +9,7 @@ from app.services.email_templates import (
     template_nuevo_dispositivo,
     template_intentos_login,
 )
+from app.utils.privacidad import enmascarar_email
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +25,8 @@ def enviar_email_notificacion(
     SIEMPRE usa timeout=10 para evitar bloqueos del worker.
     """
     if not settings.RESEND_API_KEY:
-        logger.warning("⚠️ RESEND_API_KEY no configurada — email de notificación para %s: %s", destinatario_email, cuerpo_texto)
-        logger.info("EMAIL NOTIFICACIÓN (modo desarrollo) para=%s asunto=%s cuerpo=%s", destinatario_email, asunto, cuerpo_texto)
+        logger.warning("⚠️ RESEND_API_KEY no configurada — email de notificación para %s: %s", enmascarar_email(destinatario_email), cuerpo_texto)
+        logger.info("EMAIL NOTIFICACIÓN (modo desarrollo) para=%s asunto=%s cuerpo=%s", enmascarar_email(destinatario_email), asunto, cuerpo_texto)
         return True
 
     payload = {
@@ -50,19 +51,19 @@ def enviar_email_notificacion(
         if response.status_code >= 400:
             logger.error(
                 "Error en API de Resend al enviar email de notificación a %s (status %s): %s",
-                destinatario_email,
+                enmascarar_email(destinatario_email),
                 response.status_code,
                 response.text,
             )
             return False
 
-        logger.info("Email de notificación enviado exitosamente a %s vía Resend", destinatario_email)
+        logger.info("Email de notificación enviado exitosamente a %s vía Resend", enmascarar_email(destinatario_email))
         return True
     except httpx.TimeoutException:
-        logger.error("Timeout enviando email de notificación a %s vía Resend", destinatario_email)
+        logger.error("Timeout enviando email de notificación a %s vía Resend", enmascarar_email(destinatario_email))
         return False
     except Exception as e:
-        logger.error("Error inesperado enviando email de notificación a %s vía Resend: %s", destinatario_email, e)
+        logger.error("Error inesperado enviando email de notificación a %s vía Resend: %s", enmascarar_email(destinatario_email), e)
         return False
 
 

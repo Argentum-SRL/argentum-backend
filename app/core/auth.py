@@ -32,7 +32,9 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.refresh_token import RefreshToken
-from app.models.usuario import Usuario
+from app.models.usuario import EstadoUsuario, Usuario
+
+MENSAJE_CUENTA_SUSPENDIDA = "Tu cuenta está suspendida. Escribinos a srlargentum@gmail.com si creés que es un error."
 
 # ---------------------------------------------------------------------------
 # Configuración
@@ -178,11 +180,20 @@ def renovar_tokens(
 ) -> dict:
     rt = _buscar_refresh_token(refresh_token_plain, db)
 
+    usuario_id = rt.usuario_id
+    usuario = db.execute(select(Usuario).where(Usuario.id == usuario_id)).scalar_one_or_none()
+    if usuario is None or usuario.estado == EstadoUsuario.INACTIVO:
+        rt.revocado = True
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=MENSAJE_CUENTA_SUSPENDIDA,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     rt.revocado = True
     db.flush()
 
-    usuario_id = rt.usuario_id
-    usuario = db.execute(select(Usuario).where(Usuario.id == usuario_id)).scalar_one_or_none()
     is_admin = usuario.is_admin if usuario else False
 
     nuevo_access = crear_access_token(usuario_id, is_admin=is_admin)
@@ -286,6 +297,13 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    if usuario.estado == EstadoUsuario.INACTIVO:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=MENSAJE_CUENTA_SUSPENDIDA,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     if usuario.tokens_revocados_at:
         try:
             payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
@@ -351,9 +369,10 @@ def get_optional_user(
         return None
 
 
-def setear_cookies_auth(response: Response, access_token: str, refresh_token: str, settings) -> None:
-    is_production = getattr(settings, 'ENVIRONMENT', 'development') == 'production'
-    samesite_val = "none" if is_production else "lax"
+def setear_cookies_auth(response: Response, access_token: str, refresh_token: str, settings_override=None) -> None:
+    s = settings_override or settings
+    is_production = getattr(s, 'ENVIRONMENT', 'development') == 'production'
+    samesite_val = "lax"
     
     response.set_cookie(
         key="access_token",
@@ -361,7 +380,7 @@ def setear_cookies_auth(response: Response, access_token: str, refresh_token: st
         httponly=True,
         secure=is_production,
         samesite=samesite_val,
-        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        max_age=s.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
     )
     response.set_cookie(
@@ -370,8 +389,14 @@ def setear_cookies_auth(response: Response, access_token: str, refresh_token: st
         httponly=True,
         secure=is_production,
         samesite=samesite_val,
-        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        max_age=s.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/auth",
+    )
+    response.delete_cookie(
+        key="refresh_token",
         path="/",
+        secure=is_production,
+        samesite=samesite_val,
     )
     response.set_cookie(
         key="argentum_has_session",
@@ -379,33 +404,40 @@ def setear_cookies_auth(response: Response, access_token: str, refresh_token: st
         httponly=False,
         secure=is_production,
         samesite=samesite_val,
-        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        max_age=s.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
         path="/",
     )
 
 
-def limpiar_cookies_auth(response: Response) -> None:
+def limpiar_cookies_auth(response: Response, settings_override=None) -> None:
     """
     Elimina las cookies de autenticación.
     """
-    is_production = getattr(settings, 'ENVIRONMENT', 'development') == 'production'
-    samesite_val = "none" if is_production else "lax"
+    s = settings_override or settings
+    is_production = getattr(s, 'ENVIRONMENT', 'development') == 'production'
+    samesite_val = "lax"
     
     response.delete_cookie(
         key="access_token",
         path="/",
         secure=is_production,
-        samesite=samesite_val
+        samesite=samesite_val,
+    )
+    response.delete_cookie(
+        key="refresh_token",
+        path="/auth",
+        secure=is_production,
+        samesite=samesite_val,
     )
     response.delete_cookie(
         key="refresh_token",
         path="/",
         secure=is_production,
-        samesite=samesite_val
+        samesite=samesite_val,
     )
     response.delete_cookie(
         key="argentum_has_session",
         path="/",
         secure=is_production,
-        samesite=samesite_val
+        samesite=samesite_val,
     )

@@ -153,33 +153,6 @@ class VerificarCodigoEmailRequest(BaseModel):
         return _validar_codigo_otp(v)
 
 
-class CompletarPerfilRequest(BaseModel):
-    nombre: str
-    apellido: str
-    email: str
-    password: str
-
-    @field_validator("nombre")
-    @classmethod
-    def validate_nombre(cls, v: str) -> str:
-        return _validar_texto_nombre(v, "nombre")
-
-    @field_validator("apellido")
-    @classmethod
-    def validate_apellido(cls, v: str) -> str:
-        return _validar_texto_nombre(v, "apellido")
-
-    @field_validator("email")
-    @classmethod
-    def normalize_email(cls, v: str) -> str:
-        return _validar_email(v)
-
-    @field_validator("password")
-    @classmethod
-    def validate_password(cls, v: str) -> str:
-        return _validar_password(v)
-
-
 class RecuperarPasswordRequest(BaseModel):
     email: str
 

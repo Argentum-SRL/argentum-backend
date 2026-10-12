@@ -6,9 +6,11 @@ Dos caches independientes:
   - _recuperacion_cache: códigos para recuperar contraseña (15 min, uso único)
 """
 
+import hashlib
+import hmac
 import httpx
 import logging
-import random
+import secrets
 import smtplib
 import time
 from dataclasses import dataclass, field
@@ -22,6 +24,7 @@ from app.services.email_templates import (
     template_reset_password_email,
     template_bienvenida,
 )
+from app.utils.privacidad import enmascarar_email
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +48,13 @@ class EntradaCodigo:
 
 
 def _generar_codigo() -> str:
-    return f"{random.randint(0, 999999):06d}"
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def _hash_codigo(tipo: str, identificador: str, codigo: str) -> str:
+    msg = f"{tipo}:{identificador}:{codigo}".encode("utf-8")
+    key = settings.SECRET_KEY.encode("utf-8")
+    return hmac.new(key, msg, hashlib.sha256).hexdigest()
 
 
 def _obtener_nombre_usuario(email: str) -> str:
@@ -64,8 +73,8 @@ def _obtener_nombre_usuario(email: str) -> str:
 
 def _enviar_email(destinatario: str, asunto: str, cuerpo: str, cuerpo_html: str = None) -> bool:
     if not settings.RESEND_API_KEY:
-        logger.warning("⚠️ RESEND_API_KEY no configurada — email simulado para %s con asunto: '%s'", destinatario, asunto)
-        logger.debug("EMAIL (modo desarrollo) para=%s asunto=%s", destinatario, asunto)
+        logger.warning("⚠️ RESEND_API_KEY no configurada — email simulado para %s con asunto: '%s'", enmascarar_email(destinatario), asunto)
+        logger.debug("EMAIL (modo desarrollo) para=%s asunto=%s", enmascarar_email(destinatario), asunto)
         return True
 
     payload = {
@@ -91,19 +100,19 @@ def _enviar_email(destinatario: str, asunto: str, cuerpo: str, cuerpo_html: str 
         if response.status_code >= 400:
             logger.error(
                 "Error en API de Resend al enviar email a %s (status %s): %s",
-                destinatario,
+                enmascarar_email(destinatario),
                 response.status_code,
                 response.text,
             )
             return False
 
-        logger.info("Email enviado exitosamente a %s vía Resend", destinatario)
+        logger.info("Email enviado exitosamente a %s vía Resend", enmascarar_email(destinatario))
         return True
     except httpx.TimeoutException:
-        logger.error("Timeout enviando email a %s vía Resend", destinatario)
+        logger.error("Timeout enviando email a %s vía Resend", enmascarar_email(destinatario))
         return False
     except Exception as e:
-        logger.exception("Error crítico al enviar email a %s vía Resend: %s", destinatario, e)
+        logger.exception("Error crítico al enviar email a %s vía Resend: %s", enmascarar_email(destinatario), e)
         return False
 
 
@@ -113,6 +122,7 @@ def _enviar_email(destinatario: str, asunto: str, cuerpo: str, cuerpo_html: str 
 
 def guardar_codigo_verificacion_email(email: str, codigo: str) -> None:
     identificador = email.strip().lower()
+    codigo_hash = _hash_codigo("verificacion_email", identificador, codigo)
     ahora = datetime.now(timezone.utc)
     expiracion = ahora + timedelta(seconds=CODIGO_EXPIRACION_SEGUNDOS)
     with SessionLocal() as db:
@@ -129,7 +139,7 @@ def guardar_codigo_verificacion_email(email: str, codigo: str) -> None:
             id=uuid4(),
             tipo="verificacion_email",
             identificador=identificador,
-            codigo=codigo,
+            codigo=codigo_hash,
             expiracion=expiracion,
             intentos_fallidos=0,
             max_intentos=MAX_INTENTOS,
@@ -146,6 +156,7 @@ def verificar_codigo_email(email: str, codigo: str) -> tuple[bool, str | None]:
     Si ok=True el código se invalida (uso único).
     """
     identificador = email.strip().lower()
+    codigo_hash = _hash_codigo("verificacion_email", identificador, codigo)
     ahora = datetime.now(timezone.utc)
     with SessionLocal() as db:
         entrada = db.execute(
@@ -161,13 +172,14 @@ def verificar_codigo_email(email: str, codigo: str) -> tuple[bool, str | None]:
         if not entrada:
             return False, "El código ya expiró. Pedí uno nuevo."
 
-        if ahora > entrada.expiracion:
+        expiracion = entrada.expiracion.replace(tzinfo=timezone.utc) if entrada.expiracion.tzinfo is None else entrada.expiracion
+        if ahora > expiracion:
             entrada.consumido = True
             entrada.consumido_en = ahora
             db.commit()
             return False, "El código ya expiró. Pedí uno nuevo."
 
-        if entrada.codigo != codigo:
+        if not hmac.compare_digest(entrada.codigo, codigo_hash):
             entrada.intentos_fallidos += 1
             restantes = entrada.max_intentos - entrada.intentos_fallidos
             if restantes <= 0:
@@ -221,7 +233,7 @@ def generar_y_enviar_verificacion_email(destinatario: str, nombre: str | None = 
     if not enviado:
         logger.warning(
             "Email de verificación no enviado a %s. La cuenta se creó igual y el código quedó guardado en memoria.",
-            destinatario,
+            enmascarar_email(destinatario),
         )
     return codigo
 
@@ -237,6 +249,7 @@ def generar_codigo_recuperacion() -> str:
 
 def guardar_codigo_recuperacion(email: str, codigo: str) -> None:
     identificador = email.strip().lower()
+    codigo_hash = _hash_codigo("recuperacion_password", identificador, codigo)
     ahora = datetime.now(timezone.utc)
     expiracion = ahora + timedelta(seconds=CODIGO_EXPIRACION_SEGUNDOS)
     with SessionLocal() as db:
@@ -253,7 +266,7 @@ def guardar_codigo_recuperacion(email: str, codigo: str) -> None:
             id=uuid4(),
             tipo="recuperacion_password",
             identificador=identificador,
-            codigo=codigo,
+            codigo=codigo_hash,
             expiracion=expiracion,
             intentos_fallidos=0,
             max_intentos=MAX_INTENTOS,
@@ -272,6 +285,7 @@ def verificar_codigo_recuperacion(email: str, codigo: str) -> bool:
     from fastapi import HTTPException
 
     identificador = email.strip().lower()
+    codigo_hash = _hash_codigo("recuperacion_password", identificador, codigo)
     ahora = datetime.now(timezone.utc)
     with SessionLocal() as db:
         entrada = db.execute(
@@ -287,13 +301,14 @@ def verificar_codigo_recuperacion(email: str, codigo: str) -> bool:
         if not entrada:
             return False
 
-        if ahora > entrada.expiracion:
+        expiracion = entrada.expiracion.replace(tzinfo=timezone.utc) if entrada.expiracion.tzinfo is None else entrada.expiracion
+        if ahora > expiracion:
             entrada.consumido = True
             entrada.consumido_en = ahora
             db.commit()
             return False
 
-        if entrada.codigo != codigo:
+        if not hmac.compare_digest(entrada.codigo, codigo_hash):
             entrada.intentos_fallidos += 1
             if entrada.intentos_fallidos >= entrada.max_intentos:
                 entrada.consumido = True

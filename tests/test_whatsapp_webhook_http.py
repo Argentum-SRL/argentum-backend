@@ -98,12 +98,8 @@ def test_routes_registered_in_fastapi_app():
     assert "GET" in metodos_webhook, "GET no está registrado en /api/whatsapp/webhook"
     assert "POST" in metodos_webhook, "POST no está registrado en /api/whatsapp/webhook"
 
-    # 3. /api/whatsapp/test debe existir con POST
-    assert len(test_routes) >= 1, "La ruta /api/whatsapp/test no está registrada en app.routes"
-    metodos_test = set()
-    for _, methods in test_routes:
-        metodos_test.update(methods)
-    assert "POST" in metodos_test, "POST no está registrado en /api/whatsapp/test"
+    # 3. /api/whatsapp/test no debe estar registrada
+    assert len(test_routes) == 0, "La ruta /api/whatsapp/test no debería existir"
 
 
 def test_get_webhook_verify_handshake_success(db_session):

@@ -3,11 +3,15 @@ import os
 import threading
 import time
 from dataclasses import dataclass
+from datetime import date
 from typing import Optional
+
+from app.utils.fecha import hoy_argentina
 
 logger = logging.getLogger(__name__)
 
 VENTANA_RATE_LIMIT_SEGUNDOS = 15 * 60  # 15 minutos
+MAX_ALERTAS_ADMIN_POR_DIA = 20
 
 
 @dataclass
@@ -17,13 +21,16 @@ class EntradaAlerta:
 
 
 _alerta_cache: dict[str, EntradaAlerta] = {}
+_alertas_enviadas_hoy: int = 0
+_fecha_contador_alertas: Optional[date] = None
 _alerta_lock = threading.Lock()
 
 
 def enviar_alerta_admin(asunto: str, cuerpo: str, clave: Optional[str] = None) -> bool:
     """
     Envía un correo de alerta al administrador definido en ADMIN_ALERT_EMAIL.
-    Aplica rate limit en memoria: máximo 1 correo por tipo de error cada 15 minutos.
+    Aplica rate limit en memoria: máximo 1 correo por tipo de error cada 15 minutos,
+    y un tope diario de MAX_ALERTAS_ADMIN_POR_DIA (20) correos por día de Argentina.
     Si se producen más errores durante el período de silencio, se agrupan y se
     informa la cantidad agrupada en el siguiente correo.
     Esta función nunca lanza excepciones: ante cualquier fallo, lo registra y retorna False.
@@ -41,6 +48,12 @@ def enviar_alerta_admin(asunto: str, cuerpo: str, clave: Optional[str] = None) -
         ahora = time.time()
 
         with _alerta_lock:
+            hoy = hoy_argentina()
+            global _alertas_enviadas_hoy, _fecha_contador_alertas
+            if _fecha_contador_alertas != hoy:
+                _fecha_contador_alertas = hoy
+                _alertas_enviadas_hoy = 0
+
             entrada = _alerta_cache.get(clave_efectiva)
             if entrada is not None:
                 tiempo_transcurrido = ahora - entrada.ultimo_envio
@@ -53,15 +66,33 @@ def enviar_alerta_admin(asunto: str, cuerpo: str, clave: Optional[str] = None) -
                     )
                     return False
                 else:
+                    if _alertas_enviadas_hoy >= MAX_ALERTAS_ADMIN_POR_DIA:
+                        logger.warning(
+                            "Tope de alertas diarias alcanzado (%d/%d). Alerta no enviada: %s",
+                            _alertas_enviadas_hoy,
+                            MAX_ALERTAS_ADMIN_POR_DIA,
+                            asunto,
+                        )
+                        return False
                     conteo_agrupados = entrada.agrupados
                     entrada.ultimo_envio = ahora
                     entrada.agrupados = 0
+                    _alertas_enviadas_hoy += 1
             else:
+                if _alertas_enviadas_hoy >= MAX_ALERTAS_ADMIN_POR_DIA:
+                    logger.warning(
+                        "Tope de alertas diarias alcanzado (%d/%d). Alerta no enviada: %s",
+                        _alertas_enviadas_hoy,
+                        MAX_ALERTAS_ADMIN_POR_DIA,
+                        asunto,
+                    )
+                    return False
                 conteo_agrupados = 0
                 _alerta_cache[clave_efectiva] = EntradaAlerta(
                     ultimo_envio=ahora,
                     agrupados=0,
                 )
+                _alertas_enviadas_hoy += 1
 
         if conteo_agrupados > 0:
             cuerpo_final = (

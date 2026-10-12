@@ -94,7 +94,7 @@ def verify_google_token(token: str) -> dict:
             issuer=["accounts.google.com", "https://accounts.google.com"]
         )
         
-        logger.debug('[Auth][Google][Backend] Verificación local exitosa para: %s', token_data.get('email'))
+        logger.debug('[Auth][Google][Backend] Verificación local exitosa')
         return token_data
         
     except Exception as e:
@@ -112,7 +112,7 @@ def verify_google_token(token: str) -> dict:
             if "aud" not in token_data or token_data["aud"] != settings.GOOGLE_CLIENT_ID:
                 raise HTTPException(status_code=400, detail="Audiencia del token no coincide")
                 
-            logger.debug('[Auth][Google][Backend] Fallback tokeninfo exitoso para: %s', token_data.get('email'))
+            logger.debug('[Auth][Google][Backend] Fallback tokeninfo exitoso')
             return token_data
         except Exception as exc:
             raise HTTPException(status_code=400, detail="No se pudo validar el token de Google") from exc
@@ -220,6 +220,8 @@ def confirmar_reset_password(db: Session, token_raw: str, nueva_password: str) -
         usuario.reset_token_hash = None
         usuario.reset_token_expira_at = None
         usuario.tokens_revocados_at = now
+        usuario.intentos_fallidos_login = 0
+        usuario.ultimo_intento_fallido_at = None
         
         # Marcar todos los RefreshToken del usuario como revocados
         db.execute(
@@ -230,7 +232,7 @@ def confirmar_reset_password(db: Session, token_raw: str, nueva_password: str) -
         
         db.commit()
         return usuario
-    except Exception as e:
+    except Exception:
         db.rollback()
         logger.exception("Error al confirmar el reset de contraseña del usuario %s", usuario.id)
         raise HTTPException(
