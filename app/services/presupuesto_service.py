@@ -915,3 +915,86 @@ def renovar_presupuesto_manual(db: Session, usuario_id: UUID, id: UUID) -> Presu
     db.add(nuevo_periodo)
     db.commit()
     return obtener_presupuesto(db, usuario_id, id)
+
+
+def reajustar_periodos_por_cambio_de_ciclo(
+    db: Session,
+    usuario: Usuario,
+    hoy: Optional[date] = None,
+    commit: bool = True
+) -> None:
+    """
+    Reajusta el período en curso de los presupuestos 'mensual' del usuario
+    cuando cambia su ciclo financiero (día de cobro o regla).
+    - nuevo fin: fecha_fin de get_ciclo_fechas(usuario con el nuevo ciclo, hoy).
+    - nuevo inicio: (fecha_fin del período anterior) + 1 día; si no tiene período anterior,
+      el fecha_inicio del nuevo ciclo que contiene hoy.
+    - Recalcula monto_usado y superado para el período activo.
+    - No crea notificaciones, no toca períodos cerrados ni presupuestos semanales/quincenales.
+    """
+    if hoy is None:
+        hoy = hoy_argentina()
+
+    from app.services.dashboard_service import get_ciclo_fechas
+    ciclo_inicio, ciclo_fin = get_ciclo_fechas(usuario, hoy)
+
+    presupuestos = db.execute(
+        select(Presupuesto)
+        .options(
+            selectinload(Presupuesto.periodos),
+            selectinload(Presupuesto.categorias),
+        )
+        .where(
+            Presupuesto.usuario_id == usuario.id,
+        )
+    ).scalars().all()
+
+    for presu in presupuestos:
+        if presu.estado == EstadoPresupuesto.FINALIZADO:
+            continue
+
+        p_periodo = presu.periodo.value if hasattr(presu.periodo, "value") else str(presu.periodo)
+        if p_periodo != PeriodoPresupuestoTipo.MENSUAL.value:
+            continue
+
+        # Período activo que contiene hoy
+        periodo_activo = next(
+            (p for p in presu.periodos if p.fecha_inicio <= hoy <= p.fecha_fin),
+            None
+        )
+        if not periodo_activo:
+            continue
+
+        # Períodos anteriores cerrados de este presupuesto
+        periodos_anteriores = [
+            p for p in presu.periodos
+            if p.id != periodo_activo.id and p.fecha_fin < periodo_activo.fecha_fin
+        ]
+
+        if periodos_anteriores:
+            periodo_anterior = max(periodos_anteriores, key=lambda p: p.fecha_fin)
+            nuevo_inicio = periodo_anterior.fecha_fin + timedelta(days=1)
+        else:
+            nuevo_inicio = ciclo_inicio
+
+        nuevo_fin = ciclo_fin
+
+        periodo_activo.fecha_inicio = nuevo_inicio
+        periodo_activo.fecha_fin = nuevo_fin
+
+        monto_usado = calcular_gasto_en_periodo(
+            db,
+            usuario.id,
+            presu.categorias,
+            nuevo_inicio,
+            nuevo_fin,
+            moneda=presu.moneda,
+            usuario=usuario,
+        )
+        periodo_activo.monto_usado = monto_usado
+        periodo_activo.superado = bool(monto_usado > periodo_activo.monto_limite)
+
+    if commit:
+        db.commit()
+    else:
+        db.flush()

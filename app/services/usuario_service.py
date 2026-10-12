@@ -223,7 +223,7 @@ def desvincular_telefono(db: Session, usuario: Usuario) -> Usuario:
 
 
 def actualizar_ciclo_financiero(
-    db: Session, usuario: Usuario, datos: EditarCicloFinanciero
+    db: Session, usuario: Usuario, datos: EditarCicloFinanciero, commit: bool = True
 ) -> Usuario:
     if datos.ciclo_tipo == CicloTipo.DIA_FIJO:
         try:
@@ -249,8 +249,16 @@ def actualizar_ciclo_financiero(
             usuario.ciclo_ajuste_direccion = datos.ciclo_ajuste_direccion or CicloAjusteDireccion.ANTERIOR
     else:
         usuario.ciclo_ajuste_direccion = datos.ciclo_ajuste_direccion
-    db.commit()
-    db.refresh(usuario)
+
+    # Reajustar períodos de presupuestos mensuales activos al nuevo ciclo financiero
+    from app.services import presupuesto_service
+    presupuesto_service.reajustar_periodos_por_cambio_de_ciclo(db, usuario, commit=False)
+
+    if commit:
+        db.commit()
+        db.refresh(usuario)
+    else:
+        db.flush()
     return usuario
 
 def actualizar_moneda(
