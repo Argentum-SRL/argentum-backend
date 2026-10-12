@@ -69,6 +69,7 @@ from app.services.notificacion_scheduler_service import (
 )
 from app.services.factura_avisos_service import _job_notificaciones_facturas
 from app.services.notificacion_despacho_service import _job_reintentar_inmediatas
+from app.services.saldo_programado_service import _job_aplicar_movimientos_con_fecha_llegada
 
 # ---------------------------------------------------------------------------
 # Inicialización automática de Base de Datos
@@ -736,6 +737,18 @@ async def lifespan(app: FastAPI):
             minute=0,
             timezone=TZ_ARGENTINA,
             id="actualizar_tasas_diarias",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        # Aplica movimientos con fecha llegada todos los días a las 00:05 ART
+        scheduler.add_job(
+            _job_aplicar_movimientos_con_fecha_llegada,
+            "cron",
+            hour=0,
+            minute=5,
+            timezone=TZ_ARGENTINA,
+            id="aplicar_movimientos_con_fecha_llegada",
             misfire_grace_time=300,
             max_instances=1,
             replace_existing=True,

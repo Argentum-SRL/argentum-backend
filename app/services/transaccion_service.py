@@ -130,6 +130,15 @@ def _afecta_saldo(transaccion) -> bool:
     )
 
 
+def _queda_pendiente_por_fecha(transaccion) -> bool:
+    """Decide si un movimiento no debe impactar saldo aún por tener fecha futura."""
+    return (
+        transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE
+        and transaccion.metodo_pago != MetodoPago.CREDITO
+        and transaccion.fecha > _hoy_argentina()
+    )
+
+
 def _validar_moneda_coincide(moneda_operacion, billetera: Billetera) -> None:
     """Valida que la moneda de la transacción coincida con la de la billetera."""
     op_val = moneda_operacion.value if hasattr(moneda_operacion, "value") else str(moneda_operacion)
@@ -285,6 +294,7 @@ def crear_transaccion(
             usuario_id=usuario_id,
             monto=data.info_cuotas.monto_total # Guardamos el total en el padre para registro
         )
+        nueva_transaccion.saldo_aplicado = not _queda_pendiente_por_fecha(nueva_transaccion)
         db.add(nueva_transaccion)
         db.flush()
 
@@ -394,6 +404,7 @@ def crear_transaccion(
         **data.model_dump(exclude={"usuario_id", "info_cuotas", "factura_id"}),
         usuario_id=usuario_id
     )
+    nueva_transaccion.saldo_aplicado = not _queda_pendiente_por_fecha(nueva_transaccion)
     
     # 4. Actualizar saldo solo si es confirmada, es hoy o pasada, y NO es crédito
     # (El crédito impacta vía el pago del resumen consolidado)
@@ -536,7 +547,7 @@ def actualizar_transaccion(
     
     if impacto_saldo_cambia:
         # Revertir impacto anterior si existia
-        if _afecta_saldo(transaccion):
+        if _afecta_saldo(transaccion) and transaccion.saldo_aplicado:
             billetera_vieja = db.get(Billetera, transaccion.billetera_id)
             if billetera_vieja:
                 try:
@@ -589,6 +600,9 @@ def actualizar_transaccion(
                             )
                     except Exception:
                         pass
+
+        # Actualizar estado de saldo_aplicado con los datos nuevos tras aplicar cambios de saldo
+        transaccion.saldo_aplicado = not _queda_pendiente_por_fecha(transaccion)
     else:
         update_data = data.model_dump(exclude_unset=True)
         if "descripcion" in update_data and update_data["descripcion"] is None:
@@ -791,7 +805,7 @@ def eliminar_transaccion(
         db.delete(p)
 
     # Transaccion normal
-    if _afecta_saldo(transaccion):
+    if _afecta_saldo(transaccion) and transaccion.saldo_aplicado:
         billetera = db.get(Billetera, transaccion.billetera_id)
         if billetera:
             try:
@@ -870,6 +884,8 @@ def confirmar_transaccion_ia(
                 except Exception:
                     pass
 
+    # Al confirmar, después de aplicar los cambios de saldo, lo mismo con los datos nuevos
+    transaccion.saldo_aplicado = not _queda_pendiente_por_fecha(transaccion)
 
     # Si esta transacción es un pago de resumen de tarjeta (creada por job o manual):
     # 1. Marcar como pagadas las cuotas de dicho resumen (incluye atrasadas que arrastre el resumen) y vincularlas

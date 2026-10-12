@@ -122,6 +122,9 @@ class Transaccion(Base):
         SAEnum(EstadoVerificacionTransaccion, values_callable=lambda obj: [e.value for e in obj], name="estado_verificacion_transaccion_enum"),
         nullable=True,
     )
+    saldo_aplicado: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
     import_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     importacion_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("importaciones_resumen.id"), nullable=True)
     titular_pdf: Mapped[str | None] = mapped_column(String(150), nullable=True)
