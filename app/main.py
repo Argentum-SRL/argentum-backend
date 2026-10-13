@@ -969,8 +969,9 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 
-from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin, perfil_financiero, importacion, reporte_error, memoria_comercios, facturas, patrones
+from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin, perfil_financiero, importacion, reporte_error, memoria_comercios, facturas, patrones, salud
 
+app.include_router(salud.router)
 app.include_router(auth.router)
 app.include_router(onboarding.router)
 app.include_router(usuarios.router)

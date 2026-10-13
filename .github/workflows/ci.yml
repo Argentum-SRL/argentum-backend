@@ -1,0 +1,79 @@
+# Workflow de integracion continua para el backend de Argentum
+# Ejecuta migraciones de base de datos y la suite de pruebas unitarias/integracion
+name: CI Backend
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Pruebas automatizadas del backend
+    runs-on: ubuntu-latest
+
+    # Servicio de base de datos PostgreSQL 18 para ejecucion de pruebas
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: argentum_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    # Variables de entorno para pruebas (aisladas de produccion, sin secretos)
+    env:
+      DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/argentum_ci
+      SECRET_KEY: ci-test-secret-key-para-ejecucion-automatizada-1234567890
+      ENVIRONMENT: development
+      ENABLE_SCHEDULER: "false"
+      FRONTEND_URL: http://localhost:5173
+      # Claves de integraciones externas vacias (no se usan en CI)
+      OPENAI_API_KEY: ""
+      RESEND_API_KEY: ""
+      WHATSAPP_ACCESS_TOKEN: ""
+      WHATSAPP_PHONE_NUMBER_ID: ""
+      WHATSAPP_BUSINESS_ACCOUNT_ID: ""
+      WHATSAPP_APP_SECRET: ""
+      WHATSAPP_VERIFY_TOKEN: ""
+      WHATSAPP_BOT_NUMBER: ""
+      GOOGLE_CLIENT_ID: ""
+
+    steps:
+      # Descarga del repositorio
+      - name: Descargar codigo fuente
+        uses: actions/checkout@v4
+
+      # Configuracion de Python con la misma version del venv local (3.14)
+      - name: Configurar Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      # Instalacion de dependencias requeridas y de desarrollo
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      # Crear el esquema completo de tablas a partir de los modelos SQLAlchemy
+      - name: Crear el esquema desde los modelos
+        run: python scripts/init_db.py
+
+      # Marcar la base de datos en la ultima revision de migraciones de Alembic
+      - name: Marcar la base en la ultima migracion
+        run: python -m alembic stamp head
+
+      # Ejecucion de pruebas con pytest
+      - name: Ejecutar pruebas con pytest
+        run: python -m pytest
