@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from uuid import uuid4
+from dateutil.relativedelta import relativedelta
 import pytest
 from sqlalchemy import create_engine, select, event
 from sqlalchemy.dialects.postgresql import JSONB
@@ -83,12 +84,16 @@ def test_cobros_suscripciones_aislados_error_db_no_afecta_demas(db_session):
 
     hoy = hoy_argentina()
 
+    # Desde fase_e6, una suscripción con fecha de hoy se cobra al crearla.
+    # Se crean con fecha futura para que no se cobren inmediatamente y luego se ajusta proximo_cobro a hoy.
+    fecha_futura = hoy + relativedelta(months=1)
+
     sub1_data = SuscripcionCreate(
         nombre="Sub1_ConFallo",
         monto=Decimal("1000.00"),
         moneda="ARS",
         frecuencia="mensual",
-        proximo_cobro=hoy,
+        proximo_cobro=fecha_futura,
         billetera_id=b.id,
         categoria_id=cat_egr.id,
     )
@@ -99,12 +104,14 @@ def test_cobros_suscripciones_aislados_error_db_no_afecta_demas(db_session):
         monto=Decimal("2000.00"),
         moneda="ARS",
         frecuencia="mensual",
-        proximo_cobro=hoy,
+        proximo_cobro=fecha_futura,
         billetera_id=b.id,
         categoria_id=cat_egr.id,
     )
     sub2 = suscripcion_service.crear_suscripcion(db_session, u.id, sub2_data)
 
+    sub1.proximo_cobro = hoy
+    sub2.proximo_cobro = hoy
     db_session.commit()
 
     # Interceptar antes de flush para forzar un error real de base (NOT NULL violado en monto)

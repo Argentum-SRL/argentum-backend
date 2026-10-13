@@ -99,7 +99,8 @@ def _confirmar_propuesta_suscripcion(
     mon_enum = Moneda.USD if moneda_val == "USD" else Moneda.ARS
     monto_fmt = formatear_monto(float(monto_val), mon_enum)
     medio_pago_txt = entidades.get("medio_pago_txt", "")
-    fecha_fmt = f"{proximo_cobro.day} de {MESES_ES_GEN[proximo_cobro.month - 1]}"
+    fecha_guardada = nueva_sub.proximo_cobro
+    fecha_fmt = f"{fecha_guardada.day} de {MESES_ES_GEN[fecha_guardada.month - 1]}"
 
     # Armado de la frase de categoría asignada
     from app.models.categoria import Categoria

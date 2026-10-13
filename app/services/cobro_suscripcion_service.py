@@ -1,8 +1,8 @@
-from datetime import date
+from datetime import date, timezone
 from decimal import Decimal
 import logging
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, func
+from sqlalchemy import or_
 
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion
 from app.models.transaccion import (
@@ -16,10 +16,14 @@ from app.models.grupo_cuotas import GrupoCuotas
 from app.models.tarjeta_credito import TarjetaCredito
 from app.models.billetera import Billetera
 from app.models.usuario import Moneda
-from app.services.suscripcion_service import obtener_precio_vigente, calcular_siguiente_cobro
+from app.services.suscripcion_service import (
+    obtener_precio_vigente,
+    calcular_siguiente_cobro,
+    normalizar_proximo_cobro,
+)
 from app.services.dolar_service import obtener_cotizacion_por_fecha
 from app.services import cuotas_service, tarjeta_service
-from app.utils.fecha import hoy_argentina
+from app.utils.fecha import hoy_argentina, TZ_ARGENTINA
 
 logger = logging.getLogger(__name__)
 
@@ -97,10 +101,14 @@ def _cobrar_suscripcion(db: Session, suscripcion: Suscripcion, hoy: date, primer
     """
     Crea la transacción (y cuota si es tarjeta) para un período de cobro.
     Avanza proximo_cobro al siguiente período exactamente desde la fecha que se está cobrando.
+    Usa la fecha real del período como fecha de la transacción, para cotización y para vencimiento.
+    Precio: el vigente en la fecha del período; si no hay, el vigente hoy.
     NO hace db.commit() — el llamador es responsable de commitear.
     """
     fecha_periodo_a_cobrar = suscripcion.proximo_cobro
-    precio = obtener_precio_vigente(db, suscripcion.id, hoy)
+    precio = obtener_precio_vigente(db, suscripcion.id, fecha_periodo_a_cobrar)
+    if not precio:
+        precio = obtener_precio_vigente(db, suscripcion.id, hoy)
     if not precio or precio.monto <= 0:
         return False
 
@@ -110,7 +118,7 @@ def _cobrar_suscripcion(db: Session, suscripcion: Suscripcion, hoy: date, primer
             return False
 
         datos_conversion = _resolver_monto_y_conversion(
-            db, precio.monto, precio.moneda, billetera.moneda, hoy
+            db, precio.monto, precio.moneda, billetera.moneda, fecha_periodo_a_cobrar
         )
         if datos_conversion is None:
             # Sin cotización disponible: no inventar valor, dejar pendiente
@@ -130,7 +138,7 @@ def _cobrar_suscripcion(db: Session, suscripcion: Suscripcion, hoy: date, primer
             tipo=TipoTransaccion.EGRESO,
             monto=monto_final,
             moneda=moneda_final,
-            fecha=hoy,
+            fecha=fecha_periodo_a_cobrar,
             descripcion=suscripcion.nombre,
             categoria_id=suscripcion.categoria_id,
             subcategoria_id=suscripcion.subcategoria_id,
@@ -161,7 +169,7 @@ def _cobrar_suscripcion(db: Session, suscripcion: Suscripcion, hoy: date, primer
 
         moneda_destino = billetera.moneda
         datos_conversion = _resolver_monto_y_conversion(
-            db, precio.monto, precio.moneda, moneda_destino, hoy
+            db, precio.monto, precio.moneda, moneda_destino, fecha_periodo_a_cobrar
         )
         if datos_conversion is None:
             # Sin cotización disponible: no inventar valor, dejar pendiente
@@ -176,10 +184,10 @@ def _cobrar_suscripcion(db: Session, suscripcion: Suscripcion, hoy: date, primer
             tipo_dolar_usado,
         ) = datos_conversion
 
-        # Si no se pasa primer_vencimiento explícito, calcularlo desde la fecha del cobro
+        # Si no se pasa primer_vencimiento explícito, calcularlo desde la fecha del período a cobrar
         if primer_vencimiento is None:
             primer_vencimiento = tarjeta_service.calcular_primer_vencimiento(
-                hoy, tarjeta.dia_cierre, tarjeta.dia_vencimiento, False
+                fecha_periodo_a_cobrar, tarjeta.dia_cierre, tarjeta.dia_vencimiento, False
             )
 
         tx = Transaccion(
@@ -187,7 +195,7 @@ def _cobrar_suscripcion(db: Session, suscripcion: Suscripcion, hoy: date, primer
             tipo=TipoTransaccion.EGRESO,
             monto=monto_final,
             moneda=moneda_final,
-            fecha=hoy,
+            fecha=fecha_periodo_a_cobrar,
             descripcion=suscripcion.nombre,
             categoria_id=suscripcion.categoria_id,
             subcategoria_id=suscripcion.subcategoria_id,
@@ -239,28 +247,8 @@ def _cobrar_suscripcion(db: Session, suscripcion: Suscripcion, hoy: date, primer
         return False
 
     # Avanzar la fecha exactamente un ciclo desde el período que se cobró
-    suscripcion.proximo_cobro = calcular_siguiente_cobro(fecha_periodo_a_cobrar, suscripcion.frecuencia.value)
-
-    # Detectar períodos atrasados pendientes y notificar al usuario
-    periodos_pendientes = contar_periodos_pendientes(suscripcion.proximo_cobro, suscripcion.frecuencia.value, hoy)
-    if periodos_pendientes > 0:
-        from app.services.notificacion_service import crear_notificacion
-        from app.models.notificacion import TipoNotificacion, NivelNotificacion
-
-        crear_notificacion(
-            db=db,
-            usuario_id=suscripcion.usuario_id,
-            tipo=TipoNotificacion.SUSCRIPCION_HOY,
-            nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-            mensaje=(
-                f"Se cobró un período atrasado de tu suscripción '{suscripcion.nombre}'. "
-                f"Quedan {periodos_pendientes} período(s) pendiente(s) de cobro."
-            ),
-            entidad_tipo="suscripcion",
-            entidad_id=suscripcion.id,
-            grupo_agrupacion_override=f"SUSCRIPCION_ATRASADA_{suscripcion.id}_{hoy.strftime('%Y%m%d')}",
-            commit=False,
-        )
+    frecuencia_str = suscripcion.frecuencia.value if hasattr(suscripcion.frecuencia, "value") else str(suscripcion.frecuencia)
+    suscripcion.proximo_cobro = calcular_siguiente_cobro(fecha_periodo_a_cobrar, frecuencia_str)
 
     return True
 
@@ -284,54 +272,142 @@ def procesar_cobros_suscripciones(
     detalles = []
 
     for suscripcion in suscripciones:
-        # Idempotencia: no duplicar si el job corrió dos veces el mismo día.
-        # Se busca cualquier transacción generada hoy para esta suscripción,
-        # sin importar el estado de verificación (confirmada o pendiente).
-        query_existe = db.query(Transaccion).filter(
-            Transaccion.suscripcion_id == suscripcion.id,
-            or_(
-                Transaccion.fecha == hoy,
-                func.date(Transaccion.fecha_creacion) == hoy,
-            ),
-        )
+        fc = suscripcion.fecha_creacion
+        if fc.tzinfo is None:
+            fc = fc.replace(tzinfo=timezone.utc)
+        fc_arg = fc.astimezone(TZ_ARGENTINA).date()
 
-        if query_existe.first():
+        tiene_tx = db.query(Transaccion).filter(Transaccion.suscripcion_id == suscripcion.id).first() is not None
+        frecuencia_str = suscripcion.frecuencia.value if hasattr(suscripcion.frecuencia, "value") else str(suscripcion.frecuencia)
+
+        # 5a. Si nunca se cobró y proximo_cobro es anterior al día de su fecha_creacion (en hora Argentina):
+        # no cobra nada y pasa proximo_cobro a normalizar_proximo_cobro(...). Si queda en hoy, lo cobra como en la decisión 3.
+        if (not tiene_tx) and (suscripcion.proximo_cobro < fc_arg):
+            suscripcion.proximo_cobro = normalizar_proximo_cobro(suscripcion.proximo_cobro, frecuencia_str, hoy)
+            if suscripcion.proximo_cobro == hoy:
+                try:
+                    with db.begin_nested():
+                        exito = _cobrar_suscripcion(db, suscripcion, hoy)
+                        if exito:
+                            db.flush()
+                            cobradas += 1
+                            detalles.append({
+                                "suscripcion_id": str(suscripcion.id),
+                                "nombre": suscripcion.nombre,
+                                "resultado": "cobrada",
+                                "periodos_cobrados": 1,
+                            })
+                        else:
+                            pendientes_cotizacion += 1
+                            detalles.append({
+                                "suscripcion_id": str(suscripcion.id),
+                                "nombre": suscripcion.nombre,
+                                "resultado": "pendiente_sin_cotizacion",
+                            })
+                except Exception as e:
+                    errores += 1
+                    logger.error(
+                        f"Error al cobrar suscripción {suscripcion.id} del usuario {suscripcion.usuario_id}: {e}"
+                    )
+                    detalles.append({
+                        "suscripcion_id": str(suscripcion.id),
+                        "nombre": suscripcion.nombre,
+                        "resultado": "error",
+                        "error": str(e),
+                    })
+            else:
+                detalles.append({
+                    "suscripcion_id": str(suscripcion.id),
+                    "nombre": suscripcion.nombre,
+                    "resultado": "normalizada_futura",
+                })
+            continue
+
+        # 5b. Si no: cobra todos los períodos pendientes en la misma corrida, cada uno con su fecha real, como mucho 12 por corrida.
+        periodos_cobrados = 0
+        periodos_procesados = 0
+        suscripcion_error = False
+        suscripcion_sin_cotiz = False
+        suscripcion_idempotente = False
+
+        while suscripcion.proximo_cobro <= hoy and periodos_procesados < 12:
+            fecha_periodo = suscripcion.proximo_cobro
+
+            # 5c. Idempotencia: si ya existe una transacción de esa suscripción con la fecha del período,
+            # no crea otra y solo avanza la fecha.
+            tx_existente = db.query(Transaccion).filter(
+                Transaccion.suscripcion_id == suscripcion.id,
+                Transaccion.fecha == fecha_periodo,
+            ).first()
+
+            if tx_existente:
+                suscripcion.proximo_cobro = calcular_siguiente_cobro(fecha_periodo, frecuencia_str)
+                suscripcion_idempotente = True
+                periodos_procesados += 1
+                continue
+
+            try:
+                with db.begin_nested():
+                    exito = _cobrar_suscripcion(db, suscripcion, hoy)
+                    if exito:
+                        db.flush()
+                        periodos_cobrados += 1
+                        periodos_procesados += 1
+                    else:
+                        suscripcion_sin_cotiz = True
+                        break
+            except Exception as e:
+                suscripcion_error = True
+                logger.error(
+                    f"Error al cobrar suscripción {suscripcion.id} del usuario {suscripcion.usuario_id}: {e}"
+                )
+                errores += 1
+                detalles.append({
+                    "suscripcion_id": str(suscripcion.id),
+                    "nombre": suscripcion.nombre,
+                    "resultado": "error",
+                    "error": str(e),
+                })
+                break
+
+        if periodos_cobrados > 0:
+            cobradas += 1
+            detalles.append({
+                "suscripcion_id": str(suscripcion.id),
+                "nombre": suscripcion.nombre,
+                "resultado": "cobrada",
+                "periodos_cobrados": periodos_cobrados,
+            })
+            # 5d. El aviso de "período atrasado" se manda solo si en la corrida se cobró más de un período,
+            # una sola vez, con el texto exacto: "Anotamos {n} cobros de '{nombre}' que estaban pendientes."
+            if periodos_cobrados > 1:
+                from app.services.notificacion_service import crear_notificacion
+                from app.models.notificacion import TipoNotificacion, NivelNotificacion
+
+                crear_notificacion(
+                    db=db,
+                    usuario_id=suscripcion.usuario_id,
+                    tipo=TipoNotificacion.SUSCRIPCION_HOY,
+                    nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                    mensaje=f"Anotamos {periodos_cobrados} cobros de '{suscripcion.nombre}' que estaban pendientes.",
+                    entidad_tipo="suscripcion",
+                    entidad_id=suscripcion.id,
+                    grupo_agrupacion_override=f"SUSCRIPCION_ATRASADA_{suscripcion.id}_{hoy.strftime('%Y%m%d')}",
+                    commit=False,
+                )
+        elif suscripcion_sin_cotiz:
+            pendientes_cotizacion += 1
+            detalles.append({
+                "suscripcion_id": str(suscripcion.id),
+                "nombre": suscripcion.nombre,
+                "resultado": "pendiente_sin_cotizacion",
+            })
+        elif suscripcion_idempotente and not suscripcion_error:
             omitidas_idempotencia += 1
             detalles.append({
                 "suscripcion_id": str(suscripcion.id),
                 "nombre": suscripcion.nombre,
                 "resultado": "omitida_idempotencia",
-            })
-            continue
-
-        try:
-            with db.begin_nested():
-                exito = _cobrar_suscripcion(db, suscripcion, hoy)
-                if exito:
-                    db.flush()
-                    cobradas += 1
-                    detalles.append({
-                        "suscripcion_id": str(suscripcion.id),
-                        "nombre": suscripcion.nombre,
-                        "resultado": "cobrada",
-                    })
-                else:
-                    pendientes_cotizacion += 1
-                    detalles.append({
-                        "suscripcion_id": str(suscripcion.id),
-                        "nombre": suscripcion.nombre,
-                        "resultado": "pendiente_sin_cotizacion",
-                    })
-        except Exception as e:
-            errores += 1
-            logger.error(
-                f"Error al cobrar suscripción {suscripcion.id} del usuario {suscripcion.usuario_id}: {e}"
-            )
-            detalles.append({
-                "suscripcion_id": str(suscripcion.id),
-                "nombre": suscripcion.nombre,
-                "resultado": "error",
-                "error": str(e),
             })
 
     if commit:

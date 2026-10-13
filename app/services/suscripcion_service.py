@@ -39,6 +39,17 @@ def calcular_siguiente_cobro(fecha_actual: date, frecuencia: str) -> date:
     meses = MESES_FRECUENCIA.get(frecuencia, 1)
     return fecha_actual + relativedelta(months=meses)
 
+def normalizar_proximo_cobro(fecha: date, frecuencia: str | FrecuenciaSuscripcion, hoy: date) -> date:
+    """
+    Si fecha < hoy, avanza con calcular_siguiente_cobro hasta la primera fecha >= hoy.
+    Si no, la deja igual.
+    """
+    frecuencia_str = frecuencia.value if hasattr(frecuencia, 'value') else str(frecuencia)
+    cur = fecha
+    while cur < hoy:
+        cur = calcular_siguiente_cobro(cur, frecuencia_str)
+    return cur
+
 def obtener_precio_vigente(
     db: Session,
     suscripcion_id: UUID,
@@ -100,14 +111,18 @@ def crear_suscripcion(db: Session, usuario_id: UUID, data: SuscripcionCreate) ->
         if not sub or (data.categoria_id and sub.categoria_id != data.categoria_id):
             raise HTTPException(status_code=400, detail="La subcategoría seleccionada no pertenece a la categoría.")
 
-    # 5. Crear suscripción
+    # 5. Normalizar próximo cobro
+    hoy = hoy_argentina()
+    proximo_cobro_norm = normalizar_proximo_cobro(data.proximo_cobro, frecuencia_enum, hoy)
+
+    # 6. Crear suscripción
     nueva_suscripcion = Suscripcion(
         usuario_id=usuario_id,
         nombre=data.nombre.strip(),
         categoria_id=data.categoria_id,
         subcategoria_id=data.subcategoria_id,
         frecuencia=frecuencia_enum,
-        proximo_cobro=data.proximo_cobro,
+        proximo_cobro=proximo_cobro_norm,
         billetera_id=data.billetera_id,
         tarjeta_id=data.tarjeta_id,
         estado=EstadoSuscripcion.ACTIVA
@@ -115,14 +130,27 @@ def crear_suscripcion(db: Session, usuario_id: UUID, data: SuscripcionCreate) ->
     db.add(nueva_suscripcion)
     db.flush() # Para tener el ID
 
-    # 6. Crear primer registro de historial
+    # 7. Crear primer registro de historial
     primer_precio = HistorialSuscripcion(
         suscripcion_id=nueva_suscripcion.id,
         monto=data.monto,
         moneda=data.moneda,
-        vigente_desde=data.vigente_desde or hoy_argentina()
+        vigente_desde=data.vigente_desde or hoy
     )
     db.add(primer_precio)
+    db.flush()
+
+    # Si después de normalizar el próximo cobro es hoy, anotar cobro en el momento (mismo commit)
+    if proximo_cobro_norm == hoy:
+        from app.services.cobro_suscripcion_service import _cobrar_suscripcion
+        from app.services.evento_service import emitir_evento_actualizacion
+        _cobrar_suscripcion(db, nueva_suscripcion, hoy)
+        emitir_evento_actualizacion(db, usuario_id, "transacciones")
+        if nueva_suscripcion.billetera_id:
+            emitir_evento_actualizacion(db, usuario_id, "billeteras")
+        if nueva_suscripcion.tarjeta_id:
+            emitir_evento_actualizacion(db, usuario_id, "tarjetas")
+
     db.commit()
     db.refresh(nueva_suscripcion)
     return nueva_suscripcion
@@ -248,9 +276,15 @@ def actualizar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID, 
         except ValueError:
             raise HTTPException(status_code=400, detail="Frecuencia de suscripción no válida.")
 
-    # 5. Validar fecha próximo cobro
+    # 5. Validar fecha próximo cobro y normalizar
+    cobro_inmediato = False
+    hoy = hoy_argentina()
     if 'proximo_cobro' in update_data and update_data['proximo_cobro'] is not None:
-        suscripcion.proximo_cobro = update_data['proximo_cobro']
+        frecuencia_val = suscripcion.frecuencia
+        proximo_norm = normalizar_proximo_cobro(update_data['proximo_cobro'], frecuencia_val, hoy)
+        suscripcion.proximo_cobro = proximo_norm
+        if proximo_norm == hoy:
+            cobro_inmediato = True
 
     # 6. Validar estado
     if 'estado' in update_data and update_data['estado'] is not None:
@@ -271,7 +305,7 @@ def actualizar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID, 
         precio_actual = obtener_precio_vigente(db, suscripcion.id)
         nueva_moneda = update_data.get('moneda') or (precio_actual.moneda if precio_actual else 'ARS')
 
-        vigencia = update_data.get('vigente_desde') or hoy_argentina()
+        vigencia = update_data.get('vigente_desde') or hoy
         if not precio_actual or precio_actual.monto != nuevo_monto or str(precio_actual.moneda) != str(nueva_moneda) or vigencia != precio_actual.vigente_desde:
             nuevo_precio = HistorialSuscripcion(
                 suscripcion_id=suscripcion.id,
@@ -280,6 +314,19 @@ def actualizar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID, 
                 vigente_desde=vigencia
             )
             db.add(nuevo_precio)
+
+    db.flush()
+
+    # Si después de normalizar el próximo cobro es hoy, anotar cobro en el momento (mismo commit)
+    if cobro_inmediato:
+        from app.services.cobro_suscripcion_service import _cobrar_suscripcion
+        from app.services.evento_service import emitir_evento_actualizacion
+        _cobrar_suscripcion(db, suscripcion, hoy)
+        emitir_evento_actualizacion(db, usuario_id, "transacciones")
+        if suscripcion.billetera_id:
+            emitir_evento_actualizacion(db, usuario_id, "billeteras")
+        if suscripcion.tarjeta_id:
+            emitir_evento_actualizacion(db, usuario_id, "tarjetas")
 
     db.commit()
     db.refresh(suscripcion)
