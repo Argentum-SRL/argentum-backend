@@ -277,11 +277,22 @@ def login(
                     fecha_hora_argentina=fecha_str,
                     link_recupero=link_recupero,
                 )
-                enviar_email_notificacion(user.email, asunto, html, texto)
+                background_tasks.add_task(enviar_email_notificacion, user.email, asunto, html, texto)
             except Exception as e:
                 logger.error("Error al disparar alerta de intentos fallidos de login: %s", e)
 
-        raise HTTPException(status_code=401, detail="El email o la contraseña no son correctos. Revisalos e intentá de nuevo.")
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={
+                "success": False,
+                "error": {
+                    "code": "UNAUTHORIZED",
+                    "message": "El email o la contraseña no son correctos. Revisalos e intentá de nuevo.",
+                }
+            },
+            background=background_tasks,
+        )
 
     # Cuenta suspendida: recién después de validar la contraseña
     if user.estado == EstadoUsuario.INACTIVO:

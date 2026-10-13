@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Optional
 from fastapi import HTTPException
-from sqlalchemy import select, desc, or_, delete, not_, and_
+from sqlalchemy import select, desc, or_, delete, not_, and_, func, cast, String
 from sqlalchemy.orm import Session, joinedload
 from dateutil.relativedelta import relativedelta
 
@@ -25,6 +25,15 @@ from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 
 logger = logging.getLogger(__name__)
+
+# Helper de normalización a nivel módulo para búsqueda insensible a mayúsculas/acentos y escape de LIKE
+_normalizar_texto_busqueda = lambda texto: (
+    texto.lower()
+    .translate(str.maketrans("áéíóúü", "aeiouu"))
+    .replace("\\", "\\\\")
+    .replace("%", "\\%")
+    .replace("_", "\\_")
+)
 
 
 def obtener_transacciones(
@@ -75,7 +84,8 @@ def obtener_transacciones(
         from app.models.subcategoria import Subcategoria
         from app.models.billetera import Billetera
         
-        term = busqueda.strip()
+        term = _normalizar_texto_busqueda(busqueda.strip())
+        patron = f"%{term}%"
         query = (
             query
             .outerjoin(Transaccion.categoria)
@@ -83,11 +93,11 @@ def obtener_transacciones(
             .outerjoin(Transaccion.billetera)
             .where(
                 or_(
-                    Transaccion.descripcion.ilike(f"%{term}%"),
-                    Categoria.nombre.ilike(f"%{term}%"),
-                    Subcategoria.nombre.ilike(f"%{term}%"),
-                    Billetera.nombre.ilike(f"%{term}%"),
-                    Transaccion.metodo_pago.ilike(f"%{term}%")
+                    func.translate(func.lower(Transaccion.descripcion), 'áéíóúü', 'aeiouu').like(patron, escape="\\"),
+                    func.translate(func.lower(Categoria.nombre), 'áéíóúü', 'aeiouu').like(patron, escape="\\"),
+                    func.translate(func.lower(Subcategoria.nombre), 'áéíóúü', 'aeiouu').like(patron, escape="\\"),
+                    func.translate(func.lower(Billetera.nombre), 'áéíóúü', 'aeiouu').like(patron, escape="\\"),
+                    func.translate(func.lower(cast(Transaccion.metodo_pago, String)), 'áéíóúü', 'aeiouu').like(patron, escape="\\"),
                 )
             )
         )

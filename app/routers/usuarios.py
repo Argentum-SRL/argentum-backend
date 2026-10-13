@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile, Request
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.database import get_db
+from app.core.limiter import limiter
 from app.models.usuario import Usuario, AuthProvider
 from app.schemas.usuario import (
     UsuarioResponse,
@@ -13,6 +14,7 @@ from app.schemas.usuario import (
     EditarTelefono,
     EditarCicloFinanciero,
     EditarMoneda,
+    EliminarCuentaRequest,
 )
 from app.services import usuario_service
 
@@ -121,12 +123,16 @@ def delete_foto(
     """Elimina la foto de perfil."""
     return usuario_service.eliminar_foto(db, current_user)
 
-@router.delete("/me")
-def delete_me(
+@router.post("/me/eliminar")
+@limiter.limit("5/minute")
+def eliminar_me(
+    request: Request,
+    body: EliminarCuentaRequest,
     current_user: Usuario = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Elimina el usuario y todos sus datos en cascada."""
+    """Elimina el usuario y todos sus datos en cascada previa verificación de identidad."""
+    usuario_service.verificar_identidad_para_eliminar(current_user, body)
     return usuario_service.eliminar_usuario(db, current_user)
 
 

@@ -33,6 +33,7 @@ from app.core.security import get_password_hash, verify_password, normalizar_ema
 from app.services import email_service, whatsapp_service
 from app.services.storage_service import storage_service
 from app.utils.telefono import normalizar_telefono_ar
+from app.services.auth_service import verify_google_token
 from app.schemas.usuario import (
     EditarDatosPersonales,
     EditarEmail,
@@ -40,6 +41,7 @@ from app.schemas.usuario import (
     EditarTelefono,
     EditarCicloFinanciero,
     EditarMoneda,
+    EliminarCuentaRequest,
 )
 
 FOTOS_DIR = "media/fotos"
@@ -371,6 +373,55 @@ def eliminar_foto(db: Session, usuario: Usuario) -> dict:
     db.commit()
     return {"confirmacion": "Foto eliminada correctamente"}
 
+def verificar_identidad_para_eliminar(usuario: Usuario, body: EliminarCuentaRequest) -> None:
+    """
+    Verifica la identidad del usuario antes de proceder con el borrado definitivo de su cuenta.
+    Si el usuario tiene contraseña configurada, valida la contraseña.
+    Si no tiene contraseña (cuenta Google pura), valida el token de Google y la coincidencia de email.
+    No realiza modificaciones ni consultas en la base de datos.
+    """
+    tiene_password = bool(usuario.password_configurada and usuario.password_hash)
+    if tiene_password:
+        if not body.password:
+            raise HTTPException(
+                status_code=400,
+                detail="Ingresá tu contraseña para eliminar la cuenta."
+            )
+        if not verify_password(body.password, usuario.password_hash):
+            raise HTTPException(
+                status_code=400,
+                detail="La contraseña no es correcta."
+            )
+    else:
+        if not body.google_token:
+            raise HTTPException(
+                status_code=400,
+                detail="Elegí tu cuenta de Google para eliminar la cuenta."
+            )
+        try:
+            google_data = verify_google_token(body.google_token)
+        except Exception:
+            raise HTTPException(
+                status_code=400,
+                detail="La cuenta de Google no coincide con la tuya."
+            )
+
+        if not google_data:
+            raise HTTPException(
+                status_code=400,
+                detail="La cuenta de Google no coincide con la tuya."
+            )
+
+        email = google_data.get("email")
+        email_verified = google_data.get("email_verified", False)
+
+        if not email or not email_verified or normalizar_email(email) != normalizar_email(usuario.email):
+            raise HTTPException(
+                status_code=400,
+                detail="La cuenta de Google no coincide con la tuya."
+            )
+
+
 def eliminar_usuario(db: Session, usuario: Usuario) -> dict:
     usuario_id = usuario.id
     
@@ -434,6 +485,12 @@ def eliminar_usuario(db: Session, usuario: Usuario) -> dict:
         from app.models.ajuste_saldo import AjusteSaldo
         db.execute(delete(AjusteSaldo).where(
             AjusteSaldo.billetera_id.in_(select(Billetera.id).where(Billetera.usuario_id == usuario_id))
+        ))
+
+        # Rendimientos de billetera (vía Billetera)
+        from app.models.rendimiento_billetera import RendimientoBilletera
+        db.execute(delete(RendimientoBilletera).where(
+            RendimientoBilletera.billetera_id.in_(select(Billetera.id).where(Billetera.usuario_id == usuario_id))
         ))
 
         # Memoria de comercios

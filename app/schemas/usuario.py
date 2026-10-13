@@ -194,3 +194,9 @@ class MetodosLoginResponse(BaseModel):
 class UsuarioResponse(UsuarioRead):
     fecha_nacimiento: date | None = None
     sexo: str | None = None
+
+
+class EliminarCuentaRequest(BaseModel):
+    password: str | None = None
+    google_token: str | None = None
+
