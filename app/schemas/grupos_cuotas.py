@@ -28,6 +28,7 @@ class GrupoCuotasResumen(BaseModel):
     estado: str = "activo"
     categoria_id: UUID | None = None
     subcategoria_id: UUID | None = None
+    suscripcion_id: UUID | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

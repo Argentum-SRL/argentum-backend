@@ -70,6 +70,20 @@ def mapear_grupo_resumen(db: Session, grupo: GrupoCuotas) -> dict:
             tea = tasas["tea"]
             cft_estimado = tasas["cft_estimado"]
 
+    suscripcion_id = None
+    if grupo.transaccion_padre and grupo.transaccion_padre.suscripcion_id:
+        suscripcion_id = grupo.transaccion_padre.suscripcion_id
+    elif pendientes:
+        for c in pendientes:
+            if c.transaccion and c.transaccion.suscripcion_id:
+                suscripcion_id = c.transaccion.suscripcion_id
+                break
+    elif pagadas:
+        for c in pagadas:
+            if c.transaccion and c.transaccion.suscripcion_id:
+                suscripcion_id = c.transaccion.suscripcion_id
+                break
+
     return {
         "id": grupo.id,
         "descripcion": grupo.descripcion,
@@ -93,7 +107,8 @@ def mapear_grupo_resumen(db: Session, grupo: GrupoCuotas) -> dict:
         "cft_estimado": cft_estimado,
         "estado": grupo.estado.value if hasattr(grupo.estado, "value") else str(grupo.estado),
         "categoria_id": categoria_id,
-        "subcategoria_id": subcategoria_id
+        "subcategoria_id": subcategoria_id,
+        "suscripcion_id": suscripcion_id
     }
 
 @router.get("", response_model=list[GrupoCuotasResumen])
