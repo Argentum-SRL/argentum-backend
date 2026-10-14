@@ -295,3 +295,23 @@ def verificar_cupo_ia(
     except Exception:
         logger.exception("Error al verificar cupo de IA")
         return True, None
+
+
+def purgar_uso_ia_antiguo(db: Session) -> int:
+    """
+    Elimina registros de uso_ia con más de 400 días de antigüedad.
+    Retorna la cantidad de filas eliminadas.
+    """
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import delete
+    limite = datetime.now(timezone.utc) - timedelta(days=400)
+    borrados = db.execute(
+        delete(UsoIA).where(UsoIA.fecha < limite).execution_options(synchronize_session=False)
+    ).rowcount
+    db.commit()
+    logger.info(
+        "Purga de uso_ia ejecutada: %d filas eliminadas (anteriores a %s).",
+        borrados,
+        limite.isoformat(),
+    )
+    return borrados

@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Index, JSON, Numeric, String, Text, text
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Index, Integer, JSON, Numeric, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,6 +23,7 @@ class ConversacionWpp(Base):
     __tablename__ = "conversaciones_wpp"
     __table_args__ = (
         Index("ix_conversaciones_wpp_usuario_fecha", "usuario_id", text("fecha DESC")),
+        Index("ix_conversaciones_wpp_fecha", "fecha"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -44,6 +45,8 @@ class ConversacionWpp(Base):
     confianza: Mapped[Decimal | None] = mapped_column(Numeric(4, 3), nullable=True)
     slot_filling_activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     slot_filling_estado: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    tiempo_respuesta_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_ia: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     fecha: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )

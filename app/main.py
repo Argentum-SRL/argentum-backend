@@ -50,6 +50,7 @@ from app.services.rate_limit_service import (
     purgar_conversaciones_wpp_antiguas,
     purgar_mensajes_whatsapp_procesados_antiguos,
 )
+from app.services.uso_ia_service import purgar_uso_ia_antiguo
 from app.core.job_lock import intentar_tomar_lock_job, liberar_lock_job
 import structlog
 
@@ -242,6 +243,10 @@ def _job_limpiar_tokens():
         wamid_eliminados = purgar_mensajes_whatsapp_procesados_antiguos(db)
         if wamid_eliminados:
             logger.info("Mensajes WhatsApp procesados antiguos eliminados: %s", wamid_eliminados)
+
+        uso_ia_eliminados = purgar_uso_ia_antiguo(db)
+        if uso_ia_eliminados:
+            logger.info("Registros de uso_ia antiguos eliminados: %s", uso_ia_eliminados)
     except Exception:
         logger.exception("Error en job limpiar_tokens")
     finally:

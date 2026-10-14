@@ -32,6 +32,13 @@ from app.utils.formato import formatear_monto
 logger = structlog.get_logger(__name__)
 
 
+def _metricas_respuesta(ctx: ContextoMensaje, resultado_ia: dict) -> tuple[int, bool]:
+    """
+    Devuelve (tiempo_respuesta_ms, error_ia) a partir del contexto y el resultado de la IA.
+    """
+    return (int((time.perf_counter() - ctx.t_inicio) * 1000), bool(resultado_ia.get("error")))
+
+
 def procesar_despacho_y_respuesta(ctx: ContextoMensaje) -> None:
     """
     Despacha la ejecución del intent, guarda la conversación, evalúa el registro directo y envía la respuesta final.
@@ -165,6 +172,7 @@ def procesar_despacho_y_respuesta(ctx: ContextoMensaje) -> None:
             intent=intent_detectado,
         )
 
+    tiempo_ms, hub_error = _metricas_respuesta(ctx, resultado_ia)
     nueva_conv = ConversacionWpp(
         usuario_id=usuario.id,
         wamid=wamid,
@@ -178,6 +186,8 @@ def procesar_despacho_y_respuesta(ctx: ContextoMensaje) -> None:
         confianza=confianza_dec,
         slot_filling_activo=slot_activo,
         slot_filling_estado=resultado_ia.get("entidades") if slot_activo else None,
+        tiempo_respuesta_ms=tiempo_ms,
+        error_ia=hub_error,
     )
     db.add(nueva_conv)
     db.flush()

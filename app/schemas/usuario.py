@@ -69,8 +69,13 @@ class UsuarioUpdate(BaseModel):
 class UsuarioRead(UsuarioBase):
     id: UUID
     fecha_registro: datetime
+    permiso_lectura_mensajes_en: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PermisoMensajesRequest(BaseModel):
+    permitido: bool
 
 
 class EditarDatosPersonales(BaseModel):

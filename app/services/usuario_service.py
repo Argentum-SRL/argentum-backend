@@ -575,3 +575,24 @@ def crear_billeteras_efectivo_default(db: Session, usuario_id: UUID) -> None:
         db.add(b_usd)
     
     db.commit()
+
+
+def actualizar_permiso_mensajes(
+    db: Session,
+    usuario: Usuario,
+    permitido: bool,
+    commit: bool = True,
+) -> Usuario:
+    """
+    Actualiza el permiso de lectura de mensajes del asistente de WhatsApp.
+    Si permitido es True, asigna la fecha y hora actual en UTC.
+    Si es False, lo setea en None.
+    """
+    from datetime import datetime, timezone
+    usuario.permiso_lectura_mensajes_en = datetime.now(timezone.utc) if permitido else None
+    if commit:
+        db.commit()
+        db.refresh(usuario)
+    else:
+        db.flush()
+    return usuario

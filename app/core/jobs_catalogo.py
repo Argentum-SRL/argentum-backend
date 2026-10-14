@@ -32,7 +32,7 @@ JOBS_CATALOGO: list[JobCatalogoItem] = [
     JobCatalogoItem(
         job_id="limpiar_refresh_tokens",
         nombre="Limpieza de sesiones y tokens",
-        que_hace="Elimina tokens vencidos, códigos de verificación y mensajes antiguos de WhatsApp.",
+        que_hace="Elimina tokens vencidos, códigos de verificación, mensajes antiguos de WhatsApp y registros de costo de la IA de más de 400 días.",
         periodo_esperado_minutos=360,
         puede_correr_ahora=True,
     ),

@@ -22,10 +22,12 @@ from app.schemas.admin import (
     JobSchedulerItem,
     SchedulerResponse,
     UltimaCorridaJob,
+    MonitorWppResumenResponse,
+    PaginatedConversacionesMonitorResponse,
 )
 from app.core.jobs_catalogo import JOBS_CATALOGO, JOBS_MANUALES_PERMITIDOS
 from app.core.registro_jobs import calcular_estado_job
-from app.services import admin_service
+from app.services import admin_service, monitor_wpp_service
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -615,6 +617,40 @@ def correr_job_scheduler(
     job_obj.modify(next_run_time=ahora)
 
     return {"mensaje": "Se va a correr en unos segundos."}
+
+
+@router.get("/monitor-wpp/resumen", response_model=MonitorWppResumenResponse)
+def monitor_wpp_resumen(
+    dias: int = Query(1, description="Ventana de días (1, 7 o 30)"),
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_current_admin_user),
+):
+    """Devuelve métricas agregadas de calidad, costos de IA, topes y salud para el monitor de WhatsApp."""
+    if dias not in (1, 7, 30):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="El parámetro dias debe ser 1, 7 o 30.",
+        )
+    return monitor_wpp_service.obtener_resumen_monitor(db, dias=dias)
+
+
+@router.get("/monitor-wpp/conversaciones", response_model=PaginatedConversacionesMonitorResponse)
+def monitor_wpp_conversaciones(
+    dias: int = Query(1, description="Ventana de días (1, 7 o 30)"),
+    categoria: str = Query("", description="Filtro opcional por categoría"),
+    pagina: int = Query(1, ge=1, description="Número de página"),
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_current_admin_user),
+):
+    """Lista conversaciones paginadas de a 50 con filtro opcional de categoría y protección de privacidad."""
+    if dias not in (1, 7, 30):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="El parámetro dias debe ser 1, 7 o 30.",
+        )
+    return monitor_wpp_service.obtener_conversaciones_monitor(
+        db, dias=dias, categoria=categoria, pagina=pagina
+    )
 
 
 

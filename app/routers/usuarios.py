@@ -15,6 +15,7 @@ from app.schemas.usuario import (
     EditarCicloFinanciero,
     EditarMoneda,
     EliminarCuentaRequest,
+    PermisoMensajesRequest,
 )
 from app.services import usuario_service
 
@@ -145,4 +146,14 @@ def marcar_modal_financiero_visto(
     current_user.modal_bienvenida_financiera_visto = True
     db.commit()
     return {"ok": True, "modal_bienvenida_financiera_visto": True}
+
+
+@router.put("/me/permiso-mensajes", response_model=UsuarioResponse)
+def actualizar_permiso_mensajes(
+    body: PermisoMensajesRequest,
+    current_user: Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Actualiza el permiso de lectura de mensajes del asistente para el equipo de soporte."""
+    return usuario_service.actualizar_permiso_mensajes(db, current_user, body.permitido, commit=True)
 

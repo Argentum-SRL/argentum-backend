@@ -132,6 +132,7 @@ class Usuario(Base):
     intentos_fallidos_login: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     ultimo_intento_fallido_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     modal_bienvenida_financiera_visto: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    permiso_lectura_mensajes_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     @property
     def is_active(self) -> bool:
