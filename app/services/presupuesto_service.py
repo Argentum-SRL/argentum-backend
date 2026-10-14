@@ -1,6 +1,6 @@
 import logging
 from uuid import UUID
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import calendar
 from typing import Optional, List
@@ -263,6 +263,9 @@ def obtener_periodo_activo(db: Optional[Session], presupuesto: Presupuesto) -> O
     )
 
 def obtener_presupuestos(db: Session, usuario_id: UUID, estado: Optional[str] = None) -> List[Presupuesto]:
+    if estado == "finalizado":
+        return []
+
     query = (
         select(Presupuesto)
         .options(
@@ -271,7 +274,10 @@ def obtener_presupuestos(db: Session, usuario_id: UUID, estado: Optional[str] = 
             selectinload(Presupuesto.periodos),
             joinedload(Presupuesto.usuario)
         )
-        .where(Presupuesto.usuario_id == usuario_id)
+        .where(
+            Presupuesto.usuario_id == usuario_id,
+            Presupuesto.eliminado_en.is_(None)
+        )
     )
     
     if estado:
@@ -411,7 +417,11 @@ def obtener_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto:
             selectinload(Presupuesto.categorias).joinedload(PresupuestoCategoria.subcategoria),
             selectinload(Presupuesto.periodos)
         )
-        .where(Presupuesto.id == id, Presupuesto.usuario_id == usuario_id)
+        .where(
+            Presupuesto.id == id,
+            Presupuesto.usuario_id == usuario_id,
+            Presupuesto.eliminado_en.is_(None)
+        )
     )
     presupuesto = db.execute(query).scalar_one_or_none()
     if not presupuesto:
@@ -577,11 +587,76 @@ def reanudar_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto
 
 def eliminar_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> None:
     presupuesto = obtener_presupuesto(db, usuario_id, id)
-    if presupuesto.estado == EstadoPresupuesto.FINALIZADO:
-        db.delete(presupuesto)
-    else:
-        presupuesto.estado = EstadoPresupuesto.FINALIZADO
+    presupuesto.estado = EstadoPresupuesto.FINALIZADO
+    presupuesto.eliminado_en = datetime.now(timezone.utc)
     db.commit()
+
+
+def restaurar_presupuesto(db: Session, usuario_id: UUID, id: UUID, estado: str) -> Presupuesto:
+    """
+    Restaura un presupuesto eliminado hace menos de 90 días devolviéndolo al estado pedido.
+    """
+    query = (
+        select(Presupuesto)
+        .options(
+            joinedload(Presupuesto.usuario),
+            selectinload(Presupuesto.categorias).joinedload(PresupuestoCategoria.categoria),
+            selectinload(Presupuesto.categorias).joinedload(PresupuestoCategoria.subcategoria),
+            selectinload(Presupuesto.periodos)
+        )
+        .where(Presupuesto.id == id, Presupuesto.usuario_id == usuario_id)
+    )
+    presupuesto = db.execute(query).scalar_one_or_none()
+    if not presupuesto:
+        raise HTTPException(status_code=404, detail="No encontramos ese presupuesto.")
+
+    if presupuesto.eliminado_en is None:
+        raise HTTPException(status_code=400, detail="Este presupuesto no está eliminado.")
+
+    ahora = datetime.now(timezone.utc)
+    limite = ahora - timedelta(days=90)
+    eliminado_en = presupuesto.eliminado_en
+    if eliminado_en.tzinfo is None:
+        eliminado_en = eliminado_en.replace(tzinfo=timezone.utc)
+
+    if eliminado_en < limite:
+        raise HTTPException(status_code=404, detail="No encontramos ese presupuesto.")
+
+    presupuesto.estado = EstadoPresupuesto(estado)
+    presupuesto.eliminado_en = None
+    db.commit()
+    return obtener_presupuesto(db, usuario_id, id)
+
+
+def purgar_presupuestos_eliminados(db: Session) -> int:
+    """
+    Borra definitivamente de la base los presupuestos con eliminado_en de más de 90 días,
+    junto con sus períodos y categorías asociadas.
+    """
+    ahora = datetime.now(timezone.utc)
+    limite = ahora - timedelta(days=90)
+    presupuestos = db.execute(
+        select(Presupuesto)
+        .options(
+            selectinload(Presupuesto.periodos),
+            selectinload(Presupuesto.categorias)
+        )
+        .where(
+            Presupuesto.eliminado_en.is_not(None),
+            Presupuesto.eliminado_en < limite
+        )
+    ).scalars().all()
+
+    total = len(presupuestos)
+    for presu in presupuestos:
+        for periodo in list(presu.periodos):
+            db.delete(periodo)
+        for cat in list(presu.categorias):
+            db.delete(cat)
+        db.delete(presu)
+
+    db.commit()
+    return total
 
 def obtener_historial(db: Session, usuario_id: UUID, presupuesto_id: UUID) -> List[PeriodoPresupuesto]:
     query = (
@@ -824,6 +899,12 @@ def verificar_alertas_presupuesto(
                 logger.warning("Error al enviar notificación de presupuesto por WhatsApp", exc_info=True)
 
 def renovar_presupuestos(db: Session):
+    try:
+        purgar_presupuestos_eliminados(db)
+    except Exception:
+        logger.warning("Error al purgar presupuestos eliminados", exc_info=True)
+        db.rollback()
+
     hoy = hoy_argentina()
     presupuestos = db.execute(
         select(Presupuesto)

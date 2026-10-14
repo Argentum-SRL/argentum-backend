@@ -38,6 +38,8 @@ jobs:
       ENVIRONMENT: development
       ENABLE_SCHEDULER: "false"
       FRONTEND_URL: http://localhost:5173
+      # Zona horaria: los tests usan la fecha local y la app la hora de Argentina
+      TZ: America/Argentina/Buenos_Aires
       # Claves de integraciones externas vacias (no se usan en CI)
       OPENAI_API_KEY: ""
       RESEND_API_KEY: ""

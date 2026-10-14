@@ -12,7 +12,8 @@ from app.schemas.presupuesto import (
     PresupuestoUpdate, 
     PresupuestoResponse, 
     PeriodoPresupuestoResponse,
-    PresupuestoCategoriaResponse
+    PresupuestoCategoriaResponse,
+    RestaurarPresupuestoRequest
 )
 from app.services import presupuesto_service
 from app.utils.fecha import hoy_argentina
@@ -144,7 +145,17 @@ def eliminar_presupuesto(
     usuario: Usuario = Depends(get_current_user)
 ):
     presupuesto_service.eliminar_presupuesto(db, usuario.id, id)
-    return {"detail": "Presupuesto finalizado correctamente"}
+    return {"detail": "Presupuesto eliminado."}
+
+@router.post("/{id}/restaurar", response_model=PresupuestoResponse)
+def restaurar_presupuesto(
+    id: UUID,
+    data: RestaurarPresupuestoRequest,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user)
+):
+    p = presupuesto_service.restaurar_presupuesto(db, usuario.id, id, data.estado)
+    return _map_presupuesto_response(p)
 
 @router.get("/{id}/historial", response_model=List[PeriodoPresupuestoResponse])
 def obtener_historial(

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.usuario import Moneda
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from app.models.periodo_presupuesto import PeriodoPresupuesto
@@ -63,6 +63,10 @@ class Presupuesto(Base):
     )
     fecha_creacion: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    # Fecha y hora en que se marcó como eliminado el presupuesto (soft delete)
+    eliminado_en: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     categorias: Mapped[list[PresupuestoCategoria]] = relationship(

@@ -1,7 +1,7 @@
 from uuid import UUID
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional, List
+from typing import Optional, List, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
@@ -169,3 +169,8 @@ class PresupuestoResponse(BaseModel):
     categorias: List[PresupuestoCategoriaResponse]
     periodo_actual: Optional[PeriodoPresupuestoResponse] = None
     proxima_renovacion: Optional[date] = None
+
+
+class RestaurarPresupuestoRequest(BaseModel):
+    """Esquema para la petición de restauración de un presupuesto eliminado."""
+    estado: Literal["activo", "pausado"]
