@@ -5,6 +5,8 @@ del backend para garantizar que cada job se ejecute en una sola instancia a la v
 """
 from __future__ import annotations
 
+import contextvars
+import threading
 import structlog
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
@@ -16,6 +18,10 @@ logger = structlog.get_logger(__name__)
 
 # Conexiones dedicadas retenidas para cada job con lock activo
 _conexiones_lock: dict[str, Connection] = {}
+
+# Mecanismo para detectar ejecuciones omitidas por lock no obtenido (por hilo y por tarea async)
+_lock_omitido_var: contextvars.ContextVar[bool] = contextvars.ContextVar("lock_omitido", default=False)
+_lock_thread_local = threading.local()
 
 
 def intentar_tomar_lock_job(db: Session, nombre_job: str) -> bool:
@@ -39,6 +45,8 @@ def intentar_tomar_lock_job(db: Session, nombre_job: str) -> bool:
             return True
         else:
             conn.close()
+            _lock_thread_local.omitido = True
+            _lock_omitido_var.set(True)
             return False
     except Exception as e:
         logger.error(
@@ -51,6 +59,8 @@ def intentar_tomar_lock_job(db: Session, nombre_job: str) -> bool:
                 conn.close()
             except Exception:
                 pass
+        _lock_thread_local.omitido = True
+        _lock_omitido_var.set(True)
         return False
 
 

@@ -56,3 +56,35 @@ class AdminStatsResponse(BaseModel):
     activos_7_dias: int = Field(ge=0, description="Usuarios activos en los últimos 7 días")
     admins_total: int = Field(ge=0, description="Total de administradores")
     por_proveedor: dict[str, int] = Field(default_factory=dict, description="Desglose por método de autenticación")
+
+
+class UltimaCorridaJob(BaseModel):
+    inicio: datetime
+    fin: datetime
+    resultado: str
+    duracion_ms: int
+    detalle: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class JobSchedulerItem(BaseModel):
+    job_id: str
+    nombre: str
+    que_hace: str
+    periodo_esperado_minutos: int
+    estado: str
+    puede_correr_ahora: bool
+    proxima_corrida: datetime | None = None
+    ultima_corrida: UltimaCorridaJob | None = None
+    errores_24h: int = 0
+    omitidas_24h: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SchedulerResponse(BaseModel):
+    scheduler_activo: bool
+    jobs: list[JobSchedulerItem]
+
+    model_config = ConfigDict(from_attributes=True)

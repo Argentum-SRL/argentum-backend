@@ -1,5 +1,7 @@
+from datetime import datetime, timezone, timedelta
 from typing import Literal
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Path, Request
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from uuid import UUID
 import logging
@@ -7,6 +9,7 @@ import logging
 from app.core.database import get_db
 from app.core.auth import get_current_admin_user
 from app.models.usuario import Usuario
+from app.models.ejecucion_job import EjecucionJob
 from app.schemas.admin import (
     UsuarioAdminResponse,
     UsuarioAdminListResponse,
@@ -16,7 +19,12 @@ from app.schemas.admin import (
     EliminarCuentaAdminRequest,
     ResetearOnboardingRequest,
     AdminStatsResponse,
+    JobSchedulerItem,
+    SchedulerResponse,
+    UltimaCorridaJob,
 )
+from app.core.jobs_catalogo import JOBS_CATALOGO, JOBS_MANUALES_PERMITIDOS
+from app.core.registro_jobs import calcular_estado_job
 from app.services import admin_service
 from app.core.config import settings
 
@@ -483,5 +491,130 @@ def save_diseno_especificacion(
         "data": spec_data,
         "message": f"Especificación para {payload.familyId} guardada correctamente (v{next_version})."
     }
+
+
+@router.get("/scheduler", response_model=SchedulerResponse)
+def listar_scheduler(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_current_admin_user),
+):
+    """Lista las tareas automáticas del catálogo con su última corrida, estado y próxima ejecución."""
+    logger.info("[ADMIN] Admin %s consultó el estado del scheduler", admin.id)
+
+    scheduler = getattr(request.app.state, "scheduler", None)
+    scheduler_activo = bool(scheduler and getattr(scheduler, "running", False))
+
+    ahora = datetime.now(timezone.utc)
+    hace_24h = ahora - timedelta(hours=24)
+
+    # Conteo de errores y omitidas en las últimas 24 horas agrupadas por job_id y resultado
+    conteo_rows = (
+        db.query(
+            EjecucionJob.job_id,
+            EjecucionJob.resultado,
+            func.count(EjecucionJob.id),
+        )
+        .filter(EjecucionJob.inicio >= hace_24h)
+        .group_by(EjecucionJob.job_id, EjecucionJob.resultado)
+        .all()
+    )
+    conteo_map: dict[str, dict[str, int]] = {}
+    for jid, res, cant in conteo_rows:
+        if jid not in conteo_map:
+            conteo_map[jid] = {}
+        conteo_map[jid][res] = int(cant)
+
+    jobs_res: list[JobSchedulerItem] = []
+
+    for item in JOBS_CATALOGO:
+        proxima_corrida = None
+        if scheduler_activo:
+            job_obj = scheduler.get_job(item.job_id)
+            if job_obj and getattr(job_obj, "next_run_time", None):
+                proxima_corrida = job_obj.next_run_time
+
+        ultima = (
+            db.query(EjecucionJob)
+            .filter(EjecucionJob.job_id == item.job_id)
+            .order_by(EjecucionJob.inicio.desc())
+            .first()
+        )
+        ultima_corrida_item = None
+        if ultima:
+            ultima_corrida_item = UltimaCorridaJob(
+                inicio=ultima.inicio,
+                fin=ultima.fin,
+                resultado=ultima.resultado,
+                duracion_ms=ultima.duracion_ms,
+                detalle=ultima.detalle,
+            )
+
+        estado = calcular_estado_job(
+            job_id=item.job_id,
+            periodo_esperado_minutos=item.periodo_esperado_minutos,
+            db=db,
+            ahora=ahora,
+        )
+
+        job_counts = conteo_map.get(item.job_id, {})
+        errores_24h = job_counts.get("error", 0)
+        omitidas_24h = job_counts.get("omitido", 0)
+
+        jobs_res.append(
+            JobSchedulerItem(
+                job_id=item.job_id,
+                nombre=item.nombre,
+                que_hace=item.que_hace,
+                periodo_esperado_minutos=item.periodo_esperado_minutos,
+                estado=estado,
+                puede_correr_ahora=item.puede_correr_ahora,
+                proxima_corrida=proxima_corrida,
+                ultima_corrida=ultima_corrida_item,
+                errores_24h=errores_24h,
+                omitidas_24h=omitidas_24h,
+            )
+        )
+
+    return SchedulerResponse(
+        scheduler_activo=scheduler_activo,
+        jobs=jobs_res,
+    )
+
+
+@router.post("/scheduler/{job_id}/correr", status_code=status.HTTP_202_ACCEPTED)
+def correr_job_scheduler(
+    job_id: str = Path(..., description="ID de la tarea a ejecutar"),
+    request: Request = ...,
+    admin: Usuario = Depends(get_current_admin_user),
+):
+    """Ejecuta una tarea automática de forma manual si está permitida."""
+    logger.info("[ADMIN] Admin %s ejecutó manualmente el job %s", admin.id, job_id)
+
+    if job_id not in JOBS_MANUALES_PERMITIDOS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Esta tarea no se puede correr a mano.",
+        )
+
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if not scheduler or not getattr(scheduler, "running", False):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Las tareas automáticas están apagadas en este servidor.",
+        )
+
+    job_obj = scheduler.get_job(job_id)
+    if not job_obj:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tarea no encontrada en el scheduler.",
+        )
+
+    ahora = datetime.now(timezone.utc)
+    job_obj.modify(next_run_time=ahora)
+
+    return {"mensaje": "Se va a correr en unos segundos."}
+
 
 

@@ -71,6 +71,7 @@ from app.services.notificacion_scheduler_service import (
 from app.services.factura_avisos_service import _job_notificaciones_facturas
 from app.services.notificacion_despacho_service import _job_reintentar_inmediatas
 from app.services.saldo_programado_service import _job_aplicar_movimientos_con_fecha_llegada
+from app.core.registro_jobs import registrar_ejecucion, vigilar_tareas
 
 # ---------------------------------------------------------------------------
 # Inicialización automática de Base de Datos
@@ -562,7 +563,7 @@ async def lifespan(app: FastAPI):
 
         scheduler = AsyncIOScheduler(timezone="UTC")
         scheduler.add_job(
-            _job_limpiar_tokens,
+            registrar_ejecucion("limpiar_refresh_tokens", _job_limpiar_tokens),
             "interval",
             hours=6,
             id="limpiar_refresh_tokens",
@@ -571,7 +572,7 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            _job_vencimientos_tarjetas,
+            registrar_ejecucion("vencimientos_tarjetas", _job_vencimientos_tarjetas),
             "cron",
             hour=6,
             minute=0,
@@ -581,7 +582,7 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            _job_renovar_presupuestos,
+            registrar_ejecucion("renovar_presupuestos", _job_renovar_presupuestos),
             "cron",
             hour=0,
             minute=15,
@@ -591,7 +592,7 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            _job_cobros_suscripciones,
+            registrar_ejecucion("cobros_suscripciones", _job_cobros_suscripciones),
             "cron",
             hour=0,
             minute=20,
@@ -601,7 +602,7 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            job_notificaciones_cuotas,
+            registrar_ejecucion("notificaciones_cuotas", job_notificaciones_cuotas),
             "cron",
             hour=7,
             minute=0,
@@ -611,7 +612,7 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            job_notificaciones_presupuestos,
+            registrar_ejecucion("notificaciones_presupuestos", job_notificaciones_presupuestos),
             "cron",
             hour=7,
             minute=5,
@@ -621,7 +622,7 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            job_notificaciones_suscripciones,
+            registrar_ejecucion("notificaciones_suscripciones", job_notificaciones_suscripciones),
             "cron",
             hour=7,
             minute=10,
@@ -631,7 +632,7 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            job_notificaciones_inactividad,
+            registrar_ejecucion("notificaciones_inactividad", job_notificaciones_inactividad),
             "cron",
             hour=7,
             minute=15,
@@ -641,7 +642,7 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            job_resumen_cierre_ciclo,
+            registrar_ejecucion("resumen_cierre_ciclo", job_resumen_cierre_ciclo),
             "cron",
             hour=7,
             minute=20,
@@ -651,7 +652,7 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            job_proyeccion_negativa,
+            registrar_ejecucion("proyeccion_negativa", job_proyeccion_negativa),
             "cron",
             hour=7,
             minute=25,
@@ -661,7 +662,7 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            job_notificaciones_facturas,
+            registrar_ejecucion("notificaciones_facturas", job_notificaciones_facturas),
             "cron",
             hour=7,
             minute=30,
@@ -671,7 +672,7 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            job_resumen_semanal,
+            registrar_ejecucion("resumen_semanal", job_resumen_semanal),
             "cron",
             day_of_week="mon",
             hour=8,
@@ -682,7 +683,7 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            job_entrega_whatsapp_batched,
+            registrar_ejecucion("entrega_whatsapp_batched", job_entrega_whatsapp_batched),
             "cron",
             minute="*",
             id="entrega_whatsapp_batched",
@@ -691,7 +692,7 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            _job_reintentar_inmediatas,
+            registrar_ejecucion("reintentar_avisos_inmediatos", _job_reintentar_inmediatas),
             "interval",
             minutes=2,
             id="reintentar_avisos_inmediatos",
@@ -700,7 +701,7 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            _job_actualizar_perfiles,
+            registrar_ejecucion("actualizar_perfiles_financieros", _job_actualizar_perfiles),
             "cron",
             hour=2,
             minute=0,
@@ -710,7 +711,7 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            _job_refresh_feriados,
+            registrar_ejecucion("refresh_feriados_argentina", _job_refresh_feriados),
             "cron",
             hour=3,
             minute=0,
@@ -720,7 +721,7 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            _job_recalcular_calibraciones,
+            registrar_ejecucion("recalcular_calibraciones_nocturno", _job_recalcular_calibraciones),
             "cron",
             hour=4,
             minute=0,
@@ -732,7 +733,7 @@ async def lifespan(app: FastAPI):
         )
         # Actualiza las tasas de entidades financieras públicas a las 10:00 y a las 19:00 ART
         scheduler.add_job(
-            _job_actualizar_tasas,
+            registrar_ejecucion("actualizar_tasas_diarias", _job_actualizar_tasas),
             "cron",
             hour="10,19",
             minute=0,
@@ -744,7 +745,7 @@ async def lifespan(app: FastAPI):
         )
         # Aplica movimientos con fecha llegada todos los días a las 00:05 ART
         scheduler.add_job(
-            _job_aplicar_movimientos_con_fecha_llegada,
+            registrar_ejecucion("aplicar_movimientos_con_fecha_llegada", _job_aplicar_movimientos_con_fecha_llegada),
             "cron",
             hour=0,
             minute=5,
@@ -756,7 +757,7 @@ async def lifespan(app: FastAPI):
         )
         # Persiste cotizaciones del dólar cada hora en el minuto 5
         scheduler.add_job(
-            _job_guardar_cotizaciones_diarias,
+            registrar_ejecucion("guardar_cotizaciones_diarias", _job_guardar_cotizaciones_diarias),
             "cron",
             minute=5,
             id="guardar_cotizaciones_diarias",
@@ -765,11 +766,20 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            _job_actualizar_ipc,
+            registrar_ejecucion("actualizar_ipc_diario", _job_actualizar_ipc),
             "cron",
             hour=20,
             minute=0,
             id="actualizar_ipc_diario",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            registrar_ejecucion("vigilar_tareas", vigilar_tareas),
+            "interval",
+            minutes=60,
+            id="vigilar_tareas",
             misfire_grace_time=300,
             max_instances=1,
             replace_existing=True,
@@ -795,6 +805,7 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Excepción al precargar feriados para el año {anio}: {e}")
 
+    app.state.scheduler = scheduler
     if scheduler:
         logger.info("Backend listo: servidor y tareas automáticas activas.")
     else:
@@ -804,6 +815,7 @@ async def lifespan(app: FastAPI):
     finally:
         if scheduler:
             scheduler.shutdown(wait=False)
+        app.state.scheduler = None
 
 
 # ---------------------------------------------------------------------------
@@ -819,6 +831,7 @@ app = FastAPI(
     openapi_url=None if settings.ENVIRONMENT == "production" else "/openapi.json",
 )
 app.state.limiter = limiter
+app.state.scheduler = None
 
 # Starlette apila middlewares en orden inverso: el último en add_middleware
 # es el outermost y ejecuta PRIMERO para cada request.

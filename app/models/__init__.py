@@ -38,8 +38,10 @@ from app.models.saldo_arrastrado import SaldoArrastradoTarjeta, PagoSaldoArrastr
 from app.models.calibracion_usuario import CalibracionUsuario
 from app.models.codigo_verificacion import CodigoVerificacion
 from app.models.rate_limit import RateLimit
+from app.models.ejecucion_job import EjecucionJob
 
 __all__ = [
+    "EjecucionJob",
     "Usuario",
     "DecisionPatron",
     "Factura",
