@@ -5,6 +5,7 @@ Etapa de entrada para WhatsApp:
 """
 from __future__ import annotations
 
+from decimal import Decimal
 import logging
 import time
 from uuid import UUID
@@ -166,8 +167,38 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
         mime_type = audio_obj.get("mime_type", "audio/ogg")
 
         if media_id:
+            from app.services.uso_ia_service import verificar_cupo_ia
+            permitido, texto_cupo = verificar_cupo_ia(ctx.db, ctx.usuario, "audio")
+            if not permitido:
+                whatsapp_service.enviar_whatsapp(ctx.from_number, texto_cupo)
+                if ctx.usuario:
+                    from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=ctx.usuario.id,
+                        wamid=ctx.wamid,
+                        mensaje_usuario="[Audio]",
+                        tipo_mensaje=TipoMensajeWpp.AUDIO,
+                        transcripcion=None,
+                        mensaje_bot=texto_cupo,
+                        intent_detectado="tope_superado",
+                        entidades={},
+                        accion_ejecutada=None,
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    ctx.db.add(nueva_conv)
+                    ctx.db.commit()
+                ctx.terminado = True
+                return
+
             t_media_start = time.perf_counter()
-            ctx.transcripcion, error_audio = _transcribir_audio(media_id, mime_type, duracion_maxima_segundos=120)
+            ctx.transcripcion, error_audio = _transcribir_audio(
+                media_id,
+                mime_type,
+                duracion_maxima_segundos=120,
+                usuario_id=ctx.usuario.id if ctx.usuario else None,
+            )
             t_media_end = time.perf_counter()
             logger.info(
                 "[LATENCIA][MEDIA-AUDIO] Transcripción Whisper: %.2fs",
@@ -223,6 +254,31 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
                 whatsapp_service.enviar_whatsapp(
                     ctx.from_number, "No pude leer el comprobante. Mandame los datos en texto."
                 )
+                ctx.terminado = True
+                return
+
+            from app.services.uso_ia_service import verificar_cupo_ia
+            permitido, texto_cupo = verificar_cupo_ia(ctx.db, ctx.usuario, "archivo")
+            if not permitido:
+                whatsapp_service.enviar_whatsapp(ctx.from_number, texto_cupo)
+                if ctx.usuario:
+                    from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=ctx.usuario.id,
+                        wamid=ctx.wamid,
+                        mensaje_usuario=caption or "[Imagen]",
+                        tipo_mensaje=TipoMensajeWpp.IMAGEN,
+                        transcripcion=None,
+                        mensaje_bot=texto_cupo,
+                        intent_detectado="tope_superado",
+                        entidades={},
+                        accion_ejecutada=None,
+                        confianza=Decimal("1.000"),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    ctx.db.add(nueva_conv)
+                    ctx.db.commit()
                 ctx.terminado = True
                 return
 
@@ -349,6 +405,31 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
                 ctx.from_number,
                 "No pude leer el PDF. Mandame una captura o los datos en texto.",
             )
+            ctx.terminado = True
+            return
+
+        from app.services.uso_ia_service import verificar_cupo_ia
+        permitido, texto_cupo = verificar_cupo_ia(ctx.db, ctx.usuario, "archivo")
+        if not permitido:
+            whatsapp_service.enviar_whatsapp(ctx.from_number, texto_cupo)
+            if ctx.usuario:
+                from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
+                nueva_conv = ConversacionWpp(
+                    usuario_id=ctx.usuario.id,
+                    wamid=ctx.wamid,
+                    mensaje_usuario=caption or "[Documento]",
+                    tipo_mensaje=TipoMensajeWpp.IMAGEN,
+                    transcripcion=None,
+                    mensaje_bot=texto_cupo,
+                    intent_detectado="tope_superado",
+                    entidades={},
+                    accion_ejecutada=None,
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=False,
+                    slot_filling_estado=None,
+                )
+                ctx.db.add(nueva_conv)
+                ctx.db.commit()
             ctx.terminado = True
             return
 

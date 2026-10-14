@@ -425,7 +425,8 @@ def run_isolated(fn):
         with patch("app.routers.whatsapp_ia.SessionLocal", BoundSession), \
              patch("app.routers.whatsapp_ia._buscar_usuario_por_telefono", side_effect=_mock_buscar_usuario_testingadmin), \
              patch("app.services.whatsapp_service.enviar_whatsapp", side_effect=_mock_envio), \
-             patch("app.routers.whatsapp_ia._verificar_rate_limit_registrado", return_value=(True, None)):
+             patch("app.routers.whatsapp_ia._verificar_rate_limit_registrado", return_value=(True, None)), \
+             patch("app.services.uso_ia_service.verificar_cupo_ia", return_value=(True, None)):
             res = fn(conn, BoundSession, respuestas)
 
             if _colector_salidas is not None and _colector_salidas.escenario_actual:

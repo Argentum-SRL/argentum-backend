@@ -116,6 +116,14 @@ def parsear_generico(pdf_bytes: bytes) -> ResultadoParseo:
             response_format={"type": "json_object"}
         )
 
+        from app.services.uso_ia_service import registrar_uso_ia
+        registrar_uso_ia(
+            usuario_id=None,
+            funcion="importacion_pdf",
+            modelo="gpt-4o-mini",
+            respuesta=response,
+        )
+
         content = response.choices[0].message.content
         if not content:
             logger.error("Respuesta vacía desde OpenAI para el parser genérico.")

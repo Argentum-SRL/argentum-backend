@@ -422,7 +422,7 @@ def verificar_identidad_para_eliminar(usuario: Usuario, body: EliminarCuentaRequ
             )
 
 
-def eliminar_usuario(db: Session, usuario: Usuario) -> dict:
+def eliminar_usuario(db: Session, usuario: Usuario, commit: bool = True) -> dict:
     usuario_id = usuario.id
     
     if usuario.foto_url:
@@ -514,12 +514,23 @@ def eliminar_usuario(db: Session, usuario: Usuario) -> dict:
             PerfilFinanciero, HistorialPerfilFinanciero, MemoriaComercio, Factura, DecisionPatron
         ]
         
+        # Desvincular filas de uso_ia conservando los costos sin datos personales
+        from app.models.uso_ia import UsoIA
+        db.execute(
+            update(UsoIA)
+            .where(UsoIA.usuario_id == usuario_id)
+            .values(usuario_id=None)
+        )
+
         for modelo in modelos_usuario:
             db.execute(delete(modelo).where(modelo.usuario_id == usuario_id))
         
         # 3. Finalmente el usuario
         db.delete(usuario)
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
     except Exception:
         db.rollback()
         logger.exception("Error al eliminar usuario %s", usuario_id)

@@ -39,9 +39,11 @@ from app.models.calibracion_usuario import CalibracionUsuario
 from app.models.codigo_verificacion import CodigoVerificacion
 from app.models.rate_limit import RateLimit
 from app.models.ejecucion_job import EjecucionJob
+from app.models.uso_ia import UsoIA
 
 __all__ = [
     "EjecucionJob",
+    "UsoIA",
     "Usuario",
     "DecisionPatron",
     "Factura",

@@ -446,7 +446,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                 )
                 whatsapp_service.enviar_whatsapp(
                     from_number,
-                    f"Enviaste muchos mensajes en poco tiempo. Esperá un minuto antes de mandar otro ({motivo_rate_limit}).",
+                    motivo_rate_limit,
                 )
                 return
 

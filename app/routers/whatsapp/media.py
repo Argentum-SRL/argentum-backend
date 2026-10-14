@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import io
 import struct
+from typing import Any
 import wave
 
 import structlog
@@ -78,6 +79,7 @@ def _transcribir_audio(
     media_content_type: str = "audio/ogg",
     duracion_maxima_segundos: int = 120,
     max_bytes: int = 8 * 1024 * 1024,
+    usuario_id: Any | None = None,
 ) -> tuple[str | None, str | None]:
     """
     Descarga un audio de Meta Cloud API en dos pasos y lo transcribe con Whisper.
@@ -100,6 +102,12 @@ def _transcribir_audio(
         if duracion_detectada is not None and duracion_detectada > duracion_maxima_segundos:
             logger.warning("whatsapp_audio_duracion_bytes_excedida", duracion=duracion_detectada)
             return None, "DURACION_EXCEDIDA"
+
+        import math
+        if duracion_detectada is not None:
+            segundos_audio = max(1, math.ceil(duracion_detectada))
+        else:
+            segundos_audio = 60
 
         # Determinar extensión según content type
         ext_map = {
@@ -124,6 +132,14 @@ def _transcribir_audio(
                 model="whisper-1",
                 file=(f"audio{ext}", audio_bytes, content_type),
                 language="es",
+            )
+            from app.services.uso_ia_service import registrar_uso_ia
+            registrar_uso_ia(
+                usuario_id=usuario_id,
+                funcion="audio_whatsapp",
+                modelo="whisper-1",
+                respuesta=transcripcion,
+                segundos_audio=segundos_audio,
             )
             return transcripcion.text, None
         except Exception:

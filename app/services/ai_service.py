@@ -918,6 +918,14 @@ def procesar_mensaje(
             logger.error("La respuesta de OpenAI fue vacía")
             return fallback_res
 
+        from app.services.uso_ia_service import registrar_uso_ia
+        registrar_uso_ia(
+            usuario_id=usuario.id if usuario else None,
+            funcion="texto_whatsapp",
+            modelo=model_name,
+            respuesta=response,
+        )
+
         parsed = json.loads(content)
 
         required_fields = ["intent", "entidades", "confianza", "slot_filling", "datos_faltantes", "respuesta_usuario"]

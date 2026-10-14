@@ -283,7 +283,7 @@ def cambiar_rol_admin(
 
 
 def eliminar_usuario_admin(
-    db: Session, usuario_id: UUID, email_confirmacion: str, admin_id: UUID
+    db: Session, usuario_id: UUID, email_confirmacion: str, admin_id: UUID, commit: bool = True
 ) -> dict:
     if usuario_id == admin_id:
         raise HTTPException(
@@ -313,8 +313,7 @@ def eliminar_usuario_admin(
                 },
             },
         )
-
-    return usuario_service.eliminar_usuario(db, user)
+    return usuario_service.eliminar_usuario(db, user, commit=commit)
 
 
 def obtener_estadisticas(db: Session) -> dict:

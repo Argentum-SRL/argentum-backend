@@ -627,16 +627,12 @@ def extraer_movimientos_de_imagen(
             temperature=0,
         )
 
-        usage = getattr(vision_response, "usage", None)
-        prompt_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
-        completion_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
-        logger.info(
-            "uso_ia",
-            usuario_id=str(usuario_id) if usuario_id else None,
-            funcion="vision_imagen",
+        from app.services.uso_ia_service import registrar_uso_ia
+        registrar_uso_ia(
+            usuario_id=usuario_id,
+            funcion="imagen_whatsapp",
             modelo="gpt-4o",
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
+            respuesta=vision_response,
         )
 
         content = vision_response.choices[0].message.content
@@ -689,16 +685,12 @@ def extraer_movimientos_de_texto_pdf(
             temperature=0,
         )
 
-        usage = getattr(response, "usage", None)
-        prompt_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
-        completion_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
-        logger.info(
-            "uso_ia",
-            usuario_id=str(usuario_id) if usuario_id else None,
-            funcion="extraccion_pdf",
+        from app.services.uso_ia_service import registrar_uso_ia
+        registrar_uso_ia(
+            usuario_id=usuario_id,
+            funcion="pdf_whatsapp",
             modelo="gpt-4o",
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
+            respuesta=response,
         )
 
         content = response.choices[0].message.content

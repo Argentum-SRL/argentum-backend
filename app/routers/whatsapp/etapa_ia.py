@@ -69,6 +69,33 @@ def procesar_llamada_ia_y_normalizacion(ctx: ContextoMensaje) -> None:
     estado_previo = ctx.estado_previo
     conv_activa = ctx.conv_activa
 
+    # Verificación de cupo y topes de IA antes de invocar el modelo
+    from app.services.uso_ia_service import verificar_cupo_ia
+    permitido, texto_cupo = verificar_cupo_ia(db, usuario, "mensaje")
+    if not permitido:
+        from app.services import whatsapp_service
+        from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
+        whatsapp_service.enviar_whatsapp(ctx.from_number, texto_cupo)
+        if usuario:
+            nueva_conv = ConversacionWpp(
+                usuario_id=usuario.id,
+                wamid=ctx.wamid,
+                mensaje_usuario=mensaje_texto,
+                tipo_mensaje=TipoMensajeWpp.TEXTO,
+                transcripcion=ctx.transcripcion,
+                mensaje_bot=texto_cupo,
+                intent_detectado="tope_superado",
+                entidades={},
+                accion_ejecutada=None,
+                confianza=Decimal("1.000"),
+                slot_filling_activo=False,
+                slot_filling_estado=None,
+            )
+            db.add(nueva_conv)
+            db.commit()
+        ctx.terminado = True
+        return
+
     # Invocación de servicio de IA
     t_ia_start = time.perf_counter()
     resultado_ia = ai_service.procesar_mensaje(

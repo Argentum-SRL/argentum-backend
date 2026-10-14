@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # OpenAI
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini-2024-07-18"
+    IA_PRESUPUESTO_DIARIO_USD: float = 1.0
+    IA_MAX_MENSAJES_DIA_USUARIO: int = 150
+    IA_MAX_ARCHIVOS_DIA_USUARIO: int = 20
 
     # Dolar API
     DOLAR_API_BASE_URL: str = "https://dolarapi.com"
