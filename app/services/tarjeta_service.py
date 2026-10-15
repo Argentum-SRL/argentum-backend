@@ -114,19 +114,110 @@ def calcular_fecha_vencimiento_proximo(tarjeta: TarjetaCredito, hoy: date | None
     return calendario_tarjeta_service.vencimiento_proximo(tarjeta, hoy)
 
 
+def obtener_resumen_impago(db: Session, tarjeta: TarjetaCredito) -> dict | None:
+    """
+    Si la tarjeta tiene un resumen vencido sin pago confirmado y con monto > 0,
+    y hay una notificación RESUMEN_IMPAGO sin archivar para ese resumen,
+    devuelve {vencimiento, monto, moneda, notificacion_id, mensaje}. En caso contrario, None.
+    """
+    from app.models.notificacion import Notificacion, TipoNotificacion
+    from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion
+    from sqlalchemy import or_
+
+    notif = (
+        db.query(Notificacion)
+        .filter(
+            Notificacion.usuario_id == tarjeta.usuario_id,
+            Notificacion.entidad_id == tarjeta.id,
+            Notificacion.tipo == TipoNotificacion.RESUMEN_IMPAGO,
+            Notificacion.archivada == False,
+        )
+        .order_by(Notificacion.created_at.desc())
+        .first()
+    )
+    if not notif:
+        return None
+
+    # Obtener fecha de vencimiento
+    vencimiento: date | None = None
+    if notif.datos_template and notif.datos_template.get("vencimiento"):
+        try:
+            vencimiento = date.fromisoformat(str(notif.datos_template["vencimiento"]))
+        except Exception:
+            pass
+
+    if not vencimiento and notif.grupo_agrupacion:
+        try:
+            partes = notif.grupo_agrupacion.split("_")
+            if len(partes) >= 4 and len(partes[3]) == 8:
+                vencimiento = datetime.strptime(partes[3], "%Y%m%d").date()
+        except Exception:
+            pass
+
+    if not vencimiento:
+        return None
+
+    # Pago confirmado o nulo para este vencimiento
+    pago_confirmado = (
+        db.query(Transaccion)
+        .filter(
+            Transaccion.tarjeta_id == tarjeta.id,
+            Transaccion.pago_resumen_vencimiento == vencimiento,
+            Transaccion.tipo == TipoTransaccion.EGRESO,
+            or_(
+                Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
+                Transaccion.estado_verificacion.is_(None),
+            ),
+        )
+        .first()
+    )
+    if pago_confirmado:
+        return None
+
+    detalle = obtener_detalle_resumen_vencimiento(db, tarjeta.id, vencimiento)
+    monto_sin_pagar = Decimal(str(detalle.get("monto_deuda_restante", Decimal("0"))))
+    if monto_sin_pagar <= Decimal("0"):
+        return None
+
+    moneda_str = tarjeta.moneda.value if hasattr(tarjeta.moneda, "value") else str(tarjeta.moneda)
+    return {
+        "vencimiento": vencimiento,
+        "monto": monto_sin_pagar,
+        "moneda": moneda_str,
+        "notificacion_id": notif.id,
+        "mensaje": notif.mensaje,
+    }
+
+
 def obtener_tarjetas(db: Session, usuario_id: UUID) -> list[TarjetaCredito]:
-    return db.query(TarjetaCredito).filter(
+    tarjetas = db.query(TarjetaCredito).filter(
         TarjetaCredito.usuario_id == usuario_id,
         TarjetaCredito.estado == EstadoTarjeta.ACTIVA
     ).all()
+    for t in tarjetas:
+        t.resumen_impago = obtener_resumen_impago(db, t)
+    return tarjetas
 
 
 def obtener_tarjetas_por_billetera(db: Session, usuario_id: UUID, billetera_id: UUID) -> list[TarjetaCredito]:
-    return db.query(TarjetaCredito).filter(
+    tarjetas = db.query(TarjetaCredito).filter(
         TarjetaCredito.usuario_id == usuario_id,
         TarjetaCredito.billetera_id == billetera_id,
         TarjetaCredito.estado == EstadoTarjeta.ACTIVA
     ).all()
+    for t in tarjetas:
+        t.resumen_impago = obtener_resumen_impago(db, t)
+    return tarjetas
+
+
+def obtener_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID) -> TarjetaCredito | None:
+    t = db.query(TarjetaCredito).filter(
+        TarjetaCredito.id == tarjeta_id,
+        TarjetaCredito.usuario_id == usuario_id,
+    ).first()
+    if t:
+        t.resumen_impago = obtener_resumen_impago(db, t)
+    return t
 
 
 def crear_tarjeta(db: Session, usuario_id: UUID, data: TarjetaCreditoCreate) -> TarjetaCredito:
@@ -202,6 +293,7 @@ def crear_tarjeta(db: Session, usuario_id: UUID, data: TarjetaCreditoCreate) -> 
 
     db.commit()
     db.refresh(nueva_tarjeta)
+    nueva_tarjeta.resumen_impago = obtener_resumen_impago(db, nueva_tarjeta)
     return nueva_tarjeta
 
 
@@ -318,6 +410,7 @@ def actualizar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID, data: Ta
     db.commit()
     db.refresh(tarjeta)
     setattr(tarjeta, "cuotas_recalculadas", cuotas_recalculadas)
+    tarjeta.resumen_impago = obtener_resumen_impago(db, tarjeta)
     return tarjeta
 
 
@@ -411,6 +504,7 @@ def archivar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID) -> Tarjeta
     tarjeta.estado = EstadoTarjeta.ARCHIVADA
     db.commit()
     db.refresh(tarjeta)
+    tarjeta.resumen_impago = obtener_resumen_impago(db, tarjeta)
     return tarjeta
 
 
@@ -426,6 +520,7 @@ def desarchivar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID) -> Tarj
     tarjeta.estado = EstadoTarjeta.ACTIVA
     db.commit()
     db.refresh(tarjeta)
+    tarjeta.resumen_impago = obtener_resumen_impago(db, tarjeta)
     return tarjeta
 
 
@@ -507,11 +602,16 @@ def obtener_detalle_resumen_vencimiento(
     if not tarjeta:
         raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
 
-    from app.models.transaccion import TipoTransaccion
+    from app.models.transaccion import TipoTransaccion, EstadoVerificacionTransaccion
+    from sqlalchemy import or_
     transacciones_pago = db.query(Transaccion).filter(
         Transaccion.tarjeta_id == tarjeta_id,
         Transaccion.pago_resumen_vencimiento == fecha_vencimiento,
-        Transaccion.tipo == TipoTransaccion.EGRESO
+        Transaccion.tipo == TipoTransaccion.EGRESO,
+        or_(
+            Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
+            Transaccion.estado_verificacion.is_(None),
+        ),
     ).all()
 
     monto_pagado = sum(t.monto for t in transacciones_pago)

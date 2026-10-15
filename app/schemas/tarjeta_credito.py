@@ -198,6 +198,14 @@ class ResultadoPagoTarjeta(BaseModel):
     class Config:
         from_attributes = True
 
+class ResumenImpagoResponse(BaseModel):
+    vencimiento: date
+    monto: DecimalJSON
+    moneda: str
+    notificacion_id: UUID
+    mensaje: str | None = None
+
+
 class TarjetaCreditoResponse(TarjetaCreditoBase):
     id: UUID
     usuario_id: UUID
@@ -210,6 +218,7 @@ class TarjetaCreditoResponse(TarjetaCreditoBase):
     proximo_cierre: date | None = None
     proximo_vencimiento: date | None = None
     texto_fechas: str | None = None
+    resumen_impago: ResumenImpagoResponse | None = None
 
     class Config:
         from_attributes = True
@@ -230,7 +239,7 @@ class PagarTarjetaBody(BaseModel):
     cotizacion_personalizada: DecimalJSON | None = Field(default=None, gt=0, max_digits=15, decimal_places=4)
     monto_pesos_personalizado: DecimalJSON | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
     monto_percepcion_personalizado: DecimalJSON | None = Field(default=None, ge=0, max_digits=15, decimal_places=2)
-    diferencia_tipo: Literal["cargos_banco", "compras_no_cargadas"] = "cargos_banco"
+    diferencia_tipo: Literal["cargos_banco", "intereses", "compras_no_cargadas"] = "cargos_banco"
     diferencia_categoria_id: UUID | None = None
     diferencia_subcategoria_id: UUID | None = None
 

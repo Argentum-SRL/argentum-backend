@@ -306,5 +306,22 @@ def resolver_canales_notificacion(
             return None
         return (config.inactividad_web, config.inactividad_whatsapp)
 
+    elif tipo == TipoNotificacion.RESUMEN_IMPAGO:
+        # Solo canal web, aviso financiero importante no configurable/apagable por el usuario
+        return (True, False)
+
     return (True, False)
+
+
+def archivar_notificacion(db: Session, usuario_id: UUID, notificacion_id: UUID) -> Notificacion:
+    notif = db.query(Notificacion).filter(
+        Notificacion.id == notificacion_id,
+        Notificacion.usuario_id == usuario_id,
+    ).first()
+    if not notif:
+        raise ValueError("Notificación no encontrada")
+    notif.archivada = True
+    db.commit()
+    db.refresh(notif)
+    return notif
 

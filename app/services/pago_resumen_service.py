@@ -67,6 +67,29 @@ def _subcategoria_impuestos_banco(db: Session, categoria_banco: Categoria | None
     return subcat_impuestos
 
 
+def _subcategoria_intereses_banco(db: Session, categoria_banco: Categoria | None) -> Subcategoria | None:
+    """
+    Busca o crea la subcategoría 'Intereses pagados' dentro de la categoría Banco recibida.
+    """
+    if not categoria_banco:
+        return None
+    subcat_intereses = db.query(Subcategoria).filter(
+        Subcategoria.categoria_id == categoria_banco.id,
+        Subcategoria.nombre.ilike("Intereses pagados")
+    ).first()
+
+    if not subcat_intereses:
+        subcat_intereses = Subcategoria(
+            categoria_id=categoria_banco.id,
+            nombre="Intereses pagados",
+            orden=11
+        )
+        db.add(subcat_intereses)
+        db.flush()
+
+    return subcat_intereses
+
+
 def pagar_resumen_tarjeta(
     db: Session,
     usuario_id: UUID,
@@ -80,7 +103,7 @@ def pagar_resumen_tarjeta(
     cotizacion_personalizada: Decimal | None = None,
     monto_pesos_personalizado: Decimal | None = None,
     monto_percepcion_personalizado: Decimal | None = None,
-    diferencia_tipo: Literal["cargos_banco", "compras_no_cargadas"] = "cargos_banco",
+    diferencia_tipo: Literal["cargos_banco", "intereses", "compras_no_cargadas"] = "cargos_banco",
     diferencia_categoria_id: UUID | None = None,
     diferencia_subcategoria_id: UUID | None = None,
     commit: bool = True,  # commit=False: la operación de afuera hace el único commit
@@ -408,6 +431,11 @@ def pagar_resumen_tarjeta(
                 cat_excedente_id = categoria.id if categoria else None
                 subcat_excedente_id = subcat_cargos.id if subcat_cargos else None
                 desc_excedente = f"Cargos del resumen {ultimos_4}"
+            elif diferencia_tipo == "intereses":
+                subcat_intereses = _subcategoria_intereses_banco(db, categoria)
+                cat_excedente_id = categoria.id if categoria else None
+                subcat_excedente_id = subcat_intereses.id if subcat_intereses else None
+                desc_excedente = f"Intereses del resumen {ultimos_4}"
             else:
                 cat_excedente_id = diferencia_categoria_id
                 subcat_excedente_id = diferencia_subcategoria_id
@@ -493,6 +521,23 @@ def pagar_resumen_tarjeta(
                     transaccion_origen_id=tx.id
                 )
                 db.add(nuevo_saldo)
+
+        # Archivar notificaciones RESUMEN_IMPAGO de este resumen
+        from app.models.notificacion import Notificacion, TipoNotificacion
+        notifs_impago = db.query(Notificacion).filter(
+            Notificacion.usuario_id == usuario_id,
+            Notificacion.entidad_id == tarjeta.id,
+            Notificacion.tipo == TipoNotificacion.RESUMEN_IMPAGO,
+        ).all()
+        target_str = limite_vencimiento.strftime("%Y%m%d")
+        for n in notifs_impago:
+            es_de_este_resumen = False
+            if n.grupo_agrupacion and f"RESUMEN_IMPAGO_{tarjeta.id}_{target_str}" in n.grupo_agrupacion:
+                es_de_este_resumen = True
+            elif n.datos_template and n.datos_template.get("vencimiento") == limite_vencimiento.isoformat():
+                es_de_este_resumen = True
+            if es_de_este_resumen:
+                n.archivada = True
 
         if commit:
             db.commit()

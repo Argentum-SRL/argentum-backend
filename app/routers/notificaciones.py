@@ -88,6 +88,18 @@ def silenciar_notificacion(
         raise HTTPException(status_code=404, detail=str(e))
 
 
+@router.put("/{id}/archivar", response_model=NotificacionRead)
+def archivar_notificacion(
+    id: UUID,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    try:
+        return notificacion_service.archivar_notificacion(db, usuario.id, id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @router.delete("/{id}")
 def eliminar_notificacion(
     id: UUID,

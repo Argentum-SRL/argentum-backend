@@ -1,101 +1,108 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
+from sqlalchemy.orm import Session
 from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
 from app.models.transaccion import (
     Transaccion,
     TipoTransaccion,
-    MetodoPago,
-    OrigenTransaccion,
-    EstadoVerificacionTransaccion
+    EstadoVerificacionTransaccion,
 )
-from app.models.grupo_cuotas import GrupoCuotas
-from app.models.cuota import Cuota
-from app.services.resumen_tarjeta_service import calcular_resumen_actual
-from app.services import calendario_tarjeta_service
+from app.models.notificacion import (
+    TipoNotificacion,
+    NivelNotificacion,
+)
+from app.services import calendario_tarjeta_service, tarjeta_service
+from app.services.notificacion_service import crear_notificacion
 from app.utils.fecha import hoy_argentina
+from app.utils.formato import formatear_monto
 
-def procesar_vencimientos_tarjetas(db: Session) -> None:
-    hoy = hoy_argentina()
 
-    # Buscar tarjetas activas cuyo vencimiento (ajustado a día hábil posterior) cae HOY
+def procesar_vencimientos_tarjetas(db: Session, hoy: date | None = None) -> None:
+    """
+    Job de vencimientos de resúmenes de tarjetas de crédito.
+    Deja de crear transacciones automáticas.
+    Para cada tarjeta activa y cada d en (0, 3, 7, 14, 21), toma el resumen cuyo
+    vencimiento es hoy - d. Si ese resumen no tiene ningún pago CONFIRMADO (egreso con
+    tarjeta_id y pago_resumen_vencimiento = ese vencimiento, estado confirmada o nulo)
+    y lo que queda sin pagar es > 0, crea una notificación RESUMEN_IMPAGO (solo canal web).
+    """
+    if hoy is None:
+        hoy = hoy_argentina()
+
     tarjetas_activas = db.query(TarjetaCredito).filter(
         TarjetaCredito.estado == EstadoTarjeta.ACTIVA
     ).all()
-    tarjetas = [t for t in tarjetas_activas if calendario_tarjeta_service.vencimiento_proximo(t, hoy) == hoy]
 
-    if not tarjetas:
+    if not tarjetas_activas:
         return
 
-    # Optimización N+1: Pre-cargar todas las cuotas del último año para cálculo exacto
-    from dateutil.relativedelta import relativedelta
-    one_year_ago = hoy - relativedelta(years=1)
-    all_cuotas = (
-        db.query(Cuota)
-        .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
-        .options(
-            joinedload(Cuota.transaccion).joinedload(Transaccion.subcategoria),
-            joinedload(Cuota.grupo)
+    intervalos_dias = (0, 3, 7, 14, 21)
+
+    for tarjeta in tarjetas_activas:
+        # Obtener los resúmenes de la tarjeta en una ventana de fechas alrededor de hoy
+        resumenes = calendario_tarjeta_service.resumenes(
+            tarjeta,
+            hoy - timedelta(days=90),
+            hoy + timedelta(days=30),
         )
-        .filter(
-            GrupoCuotas.tarjeta_id.in_([t.id for t in tarjetas]) if tarjetas else False,
-            Cuota.fecha_vencimiento >= one_year_ago
-        )
-        .all()
-    )
 
-    cuotas_por_tarjeta = {}
-    for c in all_cuotas:
-        tid = c.grupo.tarjeta_id
-        if tid not in cuotas_por_tarjeta:
-            cuotas_por_tarjeta[tid] = []
-        cuotas_por_tarjeta[tid].append(c)
+        for d in intervalos_dias:
+            vencimiento_objetivo = hoy - timedelta(days=d)
 
-    for tarjeta in tarjetas:
+            # Verificar si existe un resumen de esta tarjeta con ese vencimiento exacto
+            tiene_resumen = any(venc == vencimiento_objetivo for _, venc in resumenes)
+            if not tiene_resumen:
+                continue
 
-        # ── Idempotencia estricta: verificar que no existe ya una transacción de pago ──────
-        # Detecta cualquier transacción de pago vinculada a este vencimiento sin importar su estado
-        ya_existe = db.query(Transaccion).filter(
-            Transaccion.tarjeta_id == tarjeta.id,
-            Transaccion.pago_resumen_vencimiento == hoy,
-            Transaccion.tipo == TipoTransaccion.EGRESO
-        ).first()
+            # Verificar si existe un pago confirmado (o con estado nulo) para este vencimiento
+            pago_confirmado = db.query(Transaccion).filter(
+                Transaccion.tarjeta_id == tarjeta.id,
+                Transaccion.pago_resumen_vencimiento == vencimiento_objetivo,
+                Transaccion.tipo == TipoTransaccion.EGRESO,
+                or_(
+                    Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
+                    Transaccion.estado_verificacion.is_(None),
+                ),
+            ).first()
 
-        if ya_existe:
-            continue
+            # Si hay un pago confirmado, aunque sea parcial, no se manda nada más
+            if pago_confirmado:
+                continue
 
-        # ── Calcular total a pagar del resumen actual (incluye atrasadas si las hubiera) ───
-        resumen = calcular_resumen_actual(db, tarjeta, cuotas_preloaded=cuotas_por_tarjeta.get(tarjeta.id, []))
-        total = resumen.total_a_pagar_resumen_actual
+            # Calcular el monto que queda sin pagar usando el detalle de resumen de la tarjeta
+            detalle = tarjeta_service.obtener_detalle_resumen_vencimiento(db, tarjeta.id, vencimiento_objetivo)
+            monto_sin_pagar = Decimal(str(detalle.get("monto_deuda_restante", Decimal("0"))))
 
-        if total <= 0:
-            continue
+            if monto_sin_pagar <= Decimal("0"):
+                continue
 
-        # ── Mes en español para la descripción ───────────
-        MESES = {
-            1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril',
-            5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto',
-            9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'
-        }
-        mes_label = MESES[hoy.month]
+            moneda_val = tarjeta.moneda.value if hasattr(tarjeta.moneda, "value") else str(tarjeta.moneda)
+            monto_fmt = formatear_monto(monto_sin_pagar, moneda_val)
+            venc_fmt = vencimiento_objetivo.strftime("%d/%m")
+            mensaje = f"¿Pagaste el resumen de {tarjeta.nombre} de {monto_fmt} que venció el {venc_fmt}?"
+            grupo = f"RESUMEN_IMPAGO_{tarjeta.id}_{vencimiento_objetivo:%Y%m%d}_{d}"
+            deep_link = f"/app/billeteras/{tarjeta.billetera_id}?tab=credito&tarjeta_id={tarjeta.id}"
 
-        # ── Crear transacción pendiente vinculada al vencimiento del resumen ───
-        tx = Transaccion(
-            usuario_id=tarjeta.usuario_id,
-            tipo=TipoTransaccion.EGRESO,
-            monto=total,
-            moneda=tarjeta.moneda,
-            fecha=hoy,
-            descripcion=f'Resumen {tarjeta.nombre} — {mes_label} {hoy.year}',
-            billetera_id=tarjeta.billetera_id,
-            tarjeta_id=tarjeta.id,
-            metodo_pago=MetodoPago.DEBITO,
-            origen=OrigenTransaccion.RECURRENTE,
-            estado_verificacion=EstadoVerificacionTransaccion.PENDIENTE,
-            es_cuota_hija=False,
-            es_padre_cuotas=False,
-            pago_resumen_vencimiento=hoy
-        )
-        db.add(tx)
+            crear_notificacion(
+                db=db,
+                usuario_id=tarjeta.usuario_id,
+                tipo=TipoNotificacion.RESUMEN_IMPAGO,
+                nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                mensaje=mensaje,
+                entidad_tipo="tarjeta",
+                entidad_id=tarjeta.id,
+                deep_link=deep_link,
+                canal_web=True,
+                canal_whatsapp=False,
+                canal_email=False,
+                grupo_agrupacion_override=grupo,
+                commit=False,
+                datos_template={
+                    "vencimiento": vencimiento_objetivo.isoformat(),
+                    "monto": str(monto_sin_pagar),
+                    "d": d,
+                },
+            )
 
     db.commit()

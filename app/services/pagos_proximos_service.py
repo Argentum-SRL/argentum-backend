@@ -23,7 +23,7 @@ from app.models.historial_suscripcion import HistorialSuscripcion
 from app.models.subcategoria import Subcategoria
 from app.models.suscripcion import EstadoSuscripcion, Suscripcion
 from app.models.tarjeta_credito import EstadoTarjeta, TarjetaCredito
-from app.models.transaccion import TipoTransaccion, Transaccion
+from app.models.transaccion import TipoTransaccion, Transaccion, EstadoVerificacionTransaccion
 from app.models.usuario import Usuario
 from app.services import factura_service
 from app.services.resumen_tarjeta_service import calcular_resumen_actual
@@ -208,12 +208,16 @@ def listar_pagos_proximos(
         if tid:
             cuotas_por_tarjeta.setdefault(tid, []).append(c)
 
-    # Identificar pagos de resumen registrados para descontar cuotas cubiertas
+    # Identificar pagos de resumen registrados para descontar cuotas cubiertas (solo confirmada o nulo)
     pago_resumen_stmt = select(Transaccion.tarjeta_id, Transaccion.pago_resumen_vencimiento).where(
         Transaccion.usuario_id == usuario.id,
         Transaccion.tipo == TipoTransaccion.EGRESO,
         Transaccion.tarjeta_id.isnot(None),
         Transaccion.pago_resumen_vencimiento.isnot(None),
+        or_(
+            Transaccion.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA,
+            Transaccion.estado_verificacion.is_(None),
+        ),
     )
     pagos_resumen = db.execute(pago_resumen_stmt).all()
     max_pago_por_tarjeta: Dict[UUID, date] = {}
