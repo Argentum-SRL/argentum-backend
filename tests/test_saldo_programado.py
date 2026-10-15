@@ -124,6 +124,7 @@ def _crear_entorno_prueba(
         moneda=Moneda.ARS,
         saldo_inicial=saldo,
         saldo_actual=saldo,
+        fecha_creacion=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
     )
     c = Categoria(
         id=uuid4(),

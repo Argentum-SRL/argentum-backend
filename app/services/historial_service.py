@@ -43,14 +43,15 @@ from app.services.definiciones_service import (
     etiqueta_movimiento,
     visible_en_historial,
 )
+from app.services.saldo_billetera_service import fecha_creacion_billetera
 from app.services.transaccion_service import _normalizar_texto_busqueda
-from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
+from app.utils.fecha import hoy_argentina
 
 # Constantes de etiquetas para movimientos no transaccionales
 ETIQUETA_TRANSFERENCIA = ("Transferencia", "nada", "Entre tus cuentas: no es gasto ni ingreso")
 ETIQUETA_RENDIMIENTO = ("Rendimiento", "nada", "No suma a tus ingresos")
 ETIQUETA_AJUSTE_SALDO = ("Ajuste de saldo", "nada", "Corrección del saldo: no es gasto ni ingreso")
-ETIQUETA_SALDO_INICIAL = ("Saldo inicial", "nada", "Lo que tenías al crear la billetera")
+ETIQUETA_SALDO_INICIAL = ("Saldo inicial", "nada", "Con lo que arranca el historial de esta billetera")
 
 
 def _norm_dt(dt: Optional[datetime]) -> datetime:
@@ -555,10 +556,14 @@ def listar_movimientos(
     # E. SALDO INICIAL (Solo modo billetera)
     # ==========================================================================
     if modo == "billetera" and billetera_actual and not solo_transacciones and not busqueda_activa:
-        fc = billetera_actual.fecha_creacion
-        if fc.tzinfo is None:
-            fc = fc.replace(tzinfo=timezone.utc)
-        fecha_saldo_inicial = fc.astimezone(TZ_ARGENTINA).date()
+        fc_arg = fecha_creacion_billetera(billetera_actual)
+        fechas_movs_saldo = [
+            m["fecha"] for m in raw_movimientos if m.get("cuenta_en_saldo")
+        ]
+        if fechas_movs_saldo:
+            fecha_saldo_inicial = min(fc_arg, min(fechas_movs_saldo))
+        else:
+            fecha_saldo_inicial = fc_arg
 
         cumple_desde = fecha_desde is None or fecha_saldo_inicial >= fecha_desde
         cumple_hasta = fecha_hasta is None or fecha_saldo_inicial <= fecha_hasta

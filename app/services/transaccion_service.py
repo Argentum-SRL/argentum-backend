@@ -21,6 +21,7 @@ from app.services.tarjeta_service import (
     calcular_fecha_vencimiento_proximo,
 )
 from app.services import cuotas_service, presupuesto_service
+from app.services.saldo_billetera_service import aplicar_impacto_saldo
 from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 
@@ -419,36 +420,34 @@ def crear_transaccion(
     # 4. Actualizar saldo solo si es confirmada, es hoy o pasada, y NO es crédito
     # (El crédito impacta vía el pago del resumen consolidado)
     if _afecta_saldo(nueva_transaccion):
-        if nueva_transaccion.tipo == TipoTransaccion.INGRESO:
-            billetera.saldo_actual += nueva_transaccion.monto
-        else:
-            billetera.saldo_actual -= nueva_transaccion.monto
-            if billetera.saldo_actual <= 0:
-                try:
-                    from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
-                    from app.models.notificacion import TipoNotificacion, NivelNotificacion
-                    config = obtener_configuracion(db, usuario_id, commit=False)
-                    canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
-                    if canales is not None:
-                        canal_web, canal_whatsapp = canales
-                        if nueva_transaccion.origen == OrigenTransaccion.IA_WPP:
-                            canal_whatsapp = False
-                        crear_notificacion(
-                            db=db,
-                            usuario_id=usuario_id,
-                            tipo=TipoNotificacion.SALDO_CERO,
-                            nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                            mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
-                            entidad_tipo="billetera",
-                            entidad_id=billetera.id,
-                            deep_link="/app/billeteras",
-                            canal_web=canal_web,
-                            canal_whatsapp=canal_whatsapp,
-                            commit=False,
-                            datos_template={"billetera_nombre": billetera.nombre},
-                        )
-                except Exception:
-                    pass
+        impacto = nueva_transaccion.monto if nueva_transaccion.tipo == TipoTransaccion.INGRESO else -nueva_transaccion.monto
+        aplicar_impacto_saldo(billetera, impacto, nueva_transaccion.fecha)
+        if nueva_transaccion.tipo != TipoTransaccion.INGRESO and billetera.saldo_actual <= 0:
+            try:
+                from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
+                from app.models.notificacion import TipoNotificacion, NivelNotificacion
+                config = obtener_configuracion(db, usuario_id, commit=False)
+                canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
+                if canales is not None:
+                    canal_web, canal_whatsapp = canales
+                    if nueva_transaccion.origen == OrigenTransaccion.IA_WPP:
+                        canal_whatsapp = False
+                    crear_notificacion(
+                        db=db,
+                        usuario_id=usuario_id,
+                        tipo=TipoNotificacion.SALDO_CERO,
+                        nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                        mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
+                        entidad_tipo="billetera",
+                        entidad_id=billetera.id,
+                        deep_link="/app/billeteras",
+                        canal_web=canal_web,
+                        canal_whatsapp=canal_whatsapp,
+                        commit=False,
+                        datos_template={"billetera_nombre": billetera.nombre},
+                    )
+            except Exception:
+                pass
 
     # Impacto en presupuestos
     presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False, commit=False)
@@ -562,10 +561,8 @@ def actualizar_transaccion(
             if billetera_vieja:
                 try:
                     _validar_moneda_coincide(transaccion.moneda, billetera_vieja)
-                    if transaccion.tipo == TipoTransaccion.INGRESO:
-                        billetera_vieja.saldo_actual -= transaccion.monto
-                    else:
-                        billetera_vieja.saldo_actual += transaccion.monto
+                    impacto_viejo = transaccion.monto if transaccion.tipo == TipoTransaccion.INGRESO else -transaccion.monto
+                    aplicar_impacto_saldo(billetera_vieja, -impacto_viejo, transaccion.fecha)
                 except Exception as e:
                     logger.error(f"Inconsistencia al revertir saldo de billetera vieja {billetera_vieja.id} para tx {transaccion.id}: {e}")
 
@@ -582,34 +579,32 @@ def actualizar_transaccion(
                 raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
 
             _validar_moneda_coincide(transaccion.moneda, billetera_nueva)
-            if transaccion.tipo == TipoTransaccion.INGRESO:
-                billetera_nueva.saldo_actual += transaccion.monto
-            else:
-                billetera_nueva.saldo_actual -= transaccion.monto
-                if billetera_nueva.saldo_actual <= 0:
-                    try:
-                        from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
-                        from app.models.notificacion import TipoNotificacion, NivelNotificacion
-                        config = obtener_configuracion(db, usuario_id, commit=False)
-                        canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
-                        if canales is not None:
-                            canal_web, canal_whatsapp = canales
-                            crear_notificacion(
-                                db=db,
-                                usuario_id=usuario_id,
-                                tipo=TipoNotificacion.SALDO_CERO,
-                                nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                                mensaje=f"Tu billetera '{billetera_nueva.nombre}' quedó sin saldo disponible.",
-                                entidad_tipo="billetera",
-                                entidad_id=billetera_nueva.id,
-                                deep_link="/app/billeteras",
-                                canal_web=canal_web,
-                                canal_whatsapp=canal_whatsapp,
-                                commit=False,
-                                datos_template={"billetera_nombre": billetera_nueva.nombre},
-                            )
-                    except Exception:
-                        pass
+            impacto_nuevo = transaccion.monto if transaccion.tipo == TipoTransaccion.INGRESO else -transaccion.monto
+            aplicar_impacto_saldo(billetera_nueva, impacto_nuevo, transaccion.fecha)
+            if transaccion.tipo != TipoTransaccion.INGRESO and billetera_nueva.saldo_actual <= 0:
+                try:
+                    from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
+                    from app.models.notificacion import TipoNotificacion, NivelNotificacion
+                    config = obtener_configuracion(db, usuario_id, commit=False)
+                    canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
+                    if canales is not None:
+                        canal_web, canal_whatsapp = canales
+                        crear_notificacion(
+                            db=db,
+                            usuario_id=usuario_id,
+                            tipo=TipoNotificacion.SALDO_CERO,
+                            nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                            mensaje=f"Tu billetera '{billetera_nueva.nombre}' quedó sin saldo disponible.",
+                            entidad_tipo="billetera",
+                            entidad_id=billetera_nueva.id,
+                            deep_link="/app/billeteras",
+                            canal_web=canal_web,
+                            canal_whatsapp=canal_whatsapp,
+                            commit=False,
+                            datos_template={"billetera_nombre": billetera_nueva.nombre},
+                        )
+                except Exception:
+                    pass
 
         # Actualizar estado de saldo_aplicado con los datos nuevos tras aplicar cambios de saldo
         transaccion.saldo_aplicado = not _queda_pendiente_por_fecha(transaccion)
@@ -662,10 +657,8 @@ def eliminar_transaccion(
                         if b:
                             try:
                                 _validar_moneda_coincide(tx_hija.moneda, b)
-                                if tx_hija.tipo == TipoTransaccion.INGRESO:
-                                    b.saldo_actual -= tx_hija.monto
-                                else:
-                                    b.saldo_actual += tx_hija.monto
+                                impacto_hija = tx_hija.monto if tx_hija.tipo == TipoTransaccion.INGRESO else -tx_hija.monto
+                                aplicar_impacto_saldo(b, -impacto_hija, tx_hija.fecha)
                             except Exception as e:
                                 logger.critical(f"Error crítico de inconsistencia de moneda al eliminar cuota hija {tx_hija.id}: {e}")
             
@@ -810,7 +803,8 @@ def eliminar_transaccion(
         if _afecta_saldo(p):
             b_p = db.get(Billetera, p.billetera_id)
             if b_p:
-                b_p.saldo_actual += p.monto
+                impacto_p = p.monto if p.tipo == TipoTransaccion.INGRESO else -p.monto
+                aplicar_impacto_saldo(b_p, -impacto_p, p.fecha)
         presupuesto_service.registrar_impacto_presupuesto(db, p, revertir=True, commit=False)
         db.delete(p)
 
@@ -820,10 +814,8 @@ def eliminar_transaccion(
         if billetera:
             try:
                 _validar_moneda_coincide(transaccion.moneda, billetera)
-                if transaccion.tipo == TipoTransaccion.INGRESO:
-                    billetera.saldo_actual -= transaccion.monto
-                else:
-                    billetera.saldo_actual += transaccion.monto
+                impacto = transaccion.monto if transaccion.tipo == TipoTransaccion.INGRESO else -transaccion.monto
+                aplicar_impacto_saldo(billetera, -impacto, transaccion.fecha)
             except Exception as e:
                 logger.critical(f"Error crítico de inconsistencia de moneda al eliminar transacción {transaccion.id}: {e}")
             
@@ -865,34 +857,32 @@ def confirmar_transaccion_ia(
             
         _validar_moneda_coincide(transaccion.moneda, billetera)
 
-        if transaccion.tipo == TipoTransaccion.INGRESO:
-            billetera.saldo_actual += transaccion.monto
-        else:
-            billetera.saldo_actual -= transaccion.monto
-            if billetera.saldo_actual <= 0:
-                try:
-                    from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
-                    from app.models.notificacion import TipoNotificacion, NivelNotificacion
-                    config = obtener_configuracion(db, usuario_id, commit=False)
-                    canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
-                    if canales is not None:
-                        canal_web, canal_whatsapp = canales
-                        crear_notificacion(
-                            db=db,
-                            usuario_id=usuario_id,
-                            tipo=TipoNotificacion.SALDO_CERO,
-                            nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                            mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
-                            entidad_tipo="billetera",
-                            entidad_id=billetera.id,
-                            deep_link="/app/billeteras",
-                            canal_web=canal_web,
-                            canal_whatsapp=canal_whatsapp,
-                            commit=False,
-                            datos_template={"billetera_nombre": billetera.nombre},
-                        )
-                except Exception:
-                    pass
+        impacto = transaccion.monto if transaccion.tipo == TipoTransaccion.INGRESO else -transaccion.monto
+        aplicar_impacto_saldo(billetera, impacto, transaccion.fecha)
+        if transaccion.tipo != TipoTransaccion.INGRESO and billetera.saldo_actual <= 0:
+            try:
+                from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
+                from app.models.notificacion import TipoNotificacion, NivelNotificacion
+                config = obtener_configuracion(db, usuario_id, commit=False)
+                canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)
+                if canales is not None:
+                    canal_web, canal_whatsapp = canales
+                    crear_notificacion(
+                        db=db,
+                        usuario_id=usuario_id,
+                        tipo=TipoNotificacion.SALDO_CERO,
+                        nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                        mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
+                        entidad_tipo="billetera",
+                        entidad_id=billetera.id,
+                        deep_link="/app/billeteras",
+                        canal_web=canal_web,
+                        canal_whatsapp=canal_whatsapp,
+                        commit=False,
+                        datos_template={"billetera_nombre": billetera.nombre},
+                    )
+            except Exception:
+                pass
 
     # Al confirmar, después de aplicar los cambios de saldo, lo mismo con los datos nuevos
     transaccion.saldo_aplicado = not _queda_pendiente_por_fecha(transaccion)

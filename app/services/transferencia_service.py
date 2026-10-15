@@ -9,6 +9,7 @@ from app.models.billetera import Billetera, EstadoBilletera
 from app.models.transferencia_interna import TransferenciaInterna
 from app.schemas.transferencia_interna import TransferenciaInternaCreate
 from app.models.usuario import Moneda
+from app.services.saldo_billetera_service import aplicar_impacto_saldo
 
 logger = logging.getLogger(__name__)
 
@@ -209,8 +210,8 @@ def crear_transferencia(
 
     # 5. Impactar saldos de la transferencia propiamente dicha
     # Se descuenta de origen en su moneda y se suma a destino en la suya
-    b_origen.saldo_actual -= monto_origen
-    b_destino.saldo_actual += monto_destino
+    aplicar_impacto_saldo(b_origen, -monto_origen, data.fecha)
+    aplicar_impacto_saldo(b_destino, monto_destino, data.fecha)
 
     db.add(nueva_tr)
     if commit:
@@ -258,8 +259,8 @@ def eliminar_transferencia(
     monto_destino = tr.monto_destino if tr.monto_destino is not None else tr.monto
 
     # Revertir saldos por su moneda
-    b_origen.saldo_actual += monto_origen
-    b_destino.saldo_actual -= monto_destino
+    aplicar_impacto_saldo(b_origen, monto_origen, tr.fecha)
+    aplicar_impacto_saldo(b_destino, -monto_destino, tr.fecha)
 
     db.delete(tr)
     if commit:

@@ -124,6 +124,7 @@ def _crear_escenario_base(db: Session):
         saldo_inicial=Decimal("1000000.00"),
         saldo_actual=Decimal("1000000.00"),
         es_inversion=False,
+        fecha_creacion=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
     )
     db.add(b)
 
