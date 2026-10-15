@@ -335,7 +335,8 @@ def crear_transaccion(
             tarjeta = _validar_tarjeta(db, data.tarjeta_id, usuario_id)
             proximo_resumen = data.info_cuotas.proximo_resumen if data.info_cuotas else False
             if data.info_cuotas and data.info_cuotas.cuota_inicial > 1:
-                primer_vencimiento = calendario_tarjeta_service.vencimiento_proximo(tarjeta, data.fecha)
+                # Decisión 1: con cuota_inicial > 1 y tarjeta, el vencimiento de la cuota N es el resumen vigente al momento de cargar
+                primer_vencimiento = calendario_tarjeta_service.vencimiento_proximo(tarjeta, hoy_argentina())
             else:
                 _, primer_vencimiento = calendario_tarjeta_service.resumen_de_compra(
                     tarjeta, data.fecha, proximo_resumen

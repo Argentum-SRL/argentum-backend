@@ -83,19 +83,26 @@ def crear_cuotas(
     dia_nominal = tarjeta.dia_vencimiento if tarjeta else primer_vencimiento.day
 
     res_stmts: list[tuple[date, date]] = []
+    idx_cuota_n = 0
     if tarjeta is not None:
-        primer_cierre = calendario_tarjeta_service.cierre_de_vencimiento(tarjeta, primer_vencimiento)
-        desde_c = date(primer_cierre.year, primer_cierre.month, 1)
-        hasta_c = desde_c + relativedelta(months=cantidad_cuotas + 3)
+        cierre_cuota_n = calendario_tarjeta_service.cierre_de_vencimiento(tarjeta, primer_vencimiento)
+        # Decisión 2: lista de resúmenes desde (cierre de cuota N - (cuota_inicial - 1) meses)
+        cierre_base = cierre_cuota_n - relativedelta(months=cuota_inicial - 1)
+        desde_c = date(cierre_base.year, cierre_base.month, 1)
+        hasta_c = date(cierre_cuota_n.year, cierre_cuota_n.month, 1) + relativedelta(months=cantidad_cuotas + 3)
         res_stmts = calendario_tarjeta_service.resumenes(tarjeta, desde_c, hasta_c)
+        for idx, (c, v) in enumerate(res_stmts):
+            if v == primer_vencimiento or c == cierre_cuota_n:
+                idx_cuota_n = idx
+                break
 
     # Empezamos desde desde_cuota hasta cantidad_cuotas para registrar las cuotas requeridas
     for i in range(desde_cuota, cantidad_cuotas + 1):
         if i == cuota_inicial:
             fecha_cuota = primer_vencimiento
         else:
-            k = i - cuota_inicial
-            if tarjeta is not None and k < len(res_stmts):
+            k = idx_cuota_n + (i - cuota_inicial)
+            if tarjeta is not None and 0 <= k < len(res_stmts):
                 fecha_cuota = res_stmts[k][1]
             else:
                 # Derivar mes ancla estrictamente desde el calendario, nunca de una fecha ya ajustada
