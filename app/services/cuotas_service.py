@@ -683,3 +683,79 @@ def actualizar_grupo(
         db.flush()
     return grupo
 
+
+def adelantar_grupo(
+    db: Session,
+    grupo_id: any,
+    usuario_id: any,
+    commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+) -> GrupoCuotas:
+    """
+    Adelanta las cuotas restantes de una compra con tarjeta al resumen destino
+    (el primero que todavía no cerró).
+    Toda cuota no pagada con fecha_vencimiento posterior al vencimiento destino pasa
+    a ese vencimiento, y su transacción hija también.
+    No cambia ningún monto, no se crea ninguna transacción y no se mueve ningún saldo.
+    """
+    from fastapi import HTTPException
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload, joinedload
+    from app.models.grupo_cuotas import GrupoCuotas, EstadoGrupoCuotas
+    from app.models.tarjeta_credito import TarjetaCredito
+    from app.models.transaccion import Transaccion
+    from app.services import calendario_tarjeta_service
+    from app.utils.fecha import hoy_argentina
+
+    # 1. Buscar el grupo por grupo_id y usuario_id
+    grupo = db.execute(
+        select(GrupoCuotas)
+        .options(
+            selectinload(GrupoCuotas.cuotas).joinedload(Cuota.transaccion),
+            joinedload(GrupoCuotas.tarjeta)
+        )
+        .where(GrupoCuotas.id == grupo_id, GrupoCuotas.usuario_id == usuario_id)
+    ).scalar_one_or_none()
+
+    if not grupo:
+        raise HTTPException(status_code=404, detail="No encontramos ese grupo de cuotas.")
+
+    # 2. Solo para grupos con tarjeta_id y estado activo
+    if not grupo.tarjeta_id:
+        raise HTTPException(status_code=400, detail="Esta opción es solo para compras con tarjeta.")
+
+    if grupo.estado != EstadoGrupoCuotas.ACTIVO:
+        raise HTTPException(status_code=400, detail="El grupo no está activo")
+
+    tarjeta = grupo.tarjeta or db.get(TarjetaCredito, grupo.tarjeta_id)
+    if not tarjeta:
+        raise HTTPException(status_code=400, detail="Esta opción es solo para compras con tarjeta.")
+
+    # 3. Resumen destino = calendario_tarjeta_service.resumen_de_compra(tarjeta, hoy_argentina())
+    hoy = hoy_argentina()
+    _, vencimiento_destino = calendario_tarjeta_service.resumen_de_compra(tarjeta, hoy)
+
+    # 4. Toda cuota no pagada con fecha_vencimiento posterior al vencimiento destino
+    cuotas_a_mover = [
+        c for c in grupo.cuotas
+        if not c.pagada and c.fecha_vencimiento > vencimiento_destino
+    ]
+
+    # 5. Si no hay ninguna cuota para mover: 400 "No hay cuotas para adelantar."
+    if not cuotas_a_mover:
+        raise HTTPException(status_code=400, detail="No hay cuotas para adelantar.")
+
+    for cuota in cuotas_a_mover:
+        cuota.fecha_vencimiento = vencimiento_destino
+        tx_hija = cuota.transaccion or (db.get(Transaccion, cuota.transaccion_id) if cuota.transaccion_id else None)
+        if tx_hija:
+            tx_hija.fecha = vencimiento_destino
+
+    if commit:
+        db.commit()
+        db.refresh(grupo)
+    else:
+        db.flush()
+
+    return grupo
+
+

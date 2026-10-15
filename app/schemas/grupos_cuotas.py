@@ -14,6 +14,7 @@ class GrupoCuotasResumen(BaseModel):
     cantidad_pendientes: int
     monto_cuota: DecimalJSON
     proximo_vencimiento: date | None = None
+    vencimiento_adelanto: date | None = None
     total_pagado: DecimalJSON
     total_pendiente: DecimalJSON
     moneda: str

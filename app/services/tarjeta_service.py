@@ -672,7 +672,6 @@ def calcular_presion_futura(
     from decimal import Decimal
     from collections import defaultdict
     from sqlalchemy.orm import joinedload
-    from app.models.usuario import Moneda
 
     hoy = hoy_argentina()
     fecha_limite = hoy + relativedelta(months=meses)

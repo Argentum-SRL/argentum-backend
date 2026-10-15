@@ -17,13 +17,12 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 import sqlalchemy.types as types
 
-from app.main import app
 from app.core.database import Base
 from app.models.billetera import Billetera
 from app.models.categoria import Categoria, TipoCategoria
 from app.models.cuota import Cuota
 from app.models.grupo_cuotas import GrupoCuotas
-from app.models.tarjeta_credito import RedTarjeta, TarjetaCredito
+from app.models.tarjeta_credito import RedTarjeta
 from app.models.transaccion import MetodoPago, TipoTransaccion, Transaccion
 from app.models.usuario import AuthProvider, EstadoUsuario, Moneda, RolUsuario, Usuario
 from app.schemas.tarjeta_credito import FechasResumenBody, TarjetaCreditoCreate, TarjetaCreditoUpdate

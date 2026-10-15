@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session, selectinload, joinedload
 from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.models.usuario import Usuario
-from app.models.grupo_cuotas import GrupoCuotas
+from app.models.grupo_cuotas import GrupoCuotas, EstadoGrupoCuotas
+from app.models.tarjeta_credito import TarjetaCredito
 from app.models.cuota import Cuota
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion, MetodoPago
 from app.models.billetera import Billetera
@@ -84,6 +85,18 @@ def mapear_grupo_resumen(db: Session, grupo: GrupoCuotas) -> dict:
                 suscripcion_id = c.transaccion.suscripcion_id
                 break
 
+    vencimiento_adelanto = None
+    es_activo = (grupo.estado == EstadoGrupoCuotas.ACTIVO or getattr(grupo.estado, "value", str(grupo.estado)) == "activo")
+    if grupo.tarjeta_id and es_activo:
+        tarjeta = grupo.tarjeta or (db.get(TarjetaCredito, grupo.tarjeta_id) if grupo.tarjeta_id else None)
+        if tarjeta:
+            from app.services import calendario_tarjeta_service
+            from app.utils.fecha import hoy_argentina
+            try:
+                _, vencimiento_adelanto = calendario_tarjeta_service.resumen_de_compra(tarjeta, hoy_argentina())
+            except Exception:
+                vencimiento_adelanto = None
+
     return {
         "id": grupo.id,
         "descripcion": grupo.descripcion,
@@ -94,6 +107,7 @@ def mapear_grupo_resumen(db: Session, grupo: GrupoCuotas) -> dict:
         "cantidad_pendientes": cantidad_pendientes,
         "monto_cuota": monto_cuota,
         "proximo_vencimiento": proximo_vencimiento,
+        "vencimiento_adelanto": vencimiento_adelanto,
         "total_pagado": total_pagado,
         "total_pendiente": total_pendiente,
         "moneda": grupo.moneda.value,
@@ -200,7 +214,7 @@ def delete_grupo_cuotas(
 
 from pydantic import BaseModel
 from typing import Optional
-from app.services.cuotas_service import cancelar_grupo, prepagar_grupo
+from app.services.cuotas_service import cancelar_grupo, prepagar_grupo, adelantar_grupo
 
 class PrepagoDatos(BaseModel):
     billetera_id: UUID
@@ -223,4 +237,13 @@ def prepagar_grupo_cuotas(
     current_user: Usuario = Depends(get_current_user),
 ):
     grupo = prepagar_grupo(db, grupo_id, current_user.id, datos.billetera_id, datos.categoria_id)
+    return mapear_grupo_resumen(db, grupo)
+
+@router.post("/{grupo_id}/adelantar", response_model=GrupoCuotasResumen)
+def adelantar_grupo_cuotas(
+    grupo_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    grupo = adelantar_grupo(db, grupo_id, current_user.id)
     return mapear_grupo_resumen(db, grupo)
