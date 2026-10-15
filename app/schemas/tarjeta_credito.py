@@ -11,8 +11,8 @@ class TarjetaCreditoBase(BaseModel):
     nombre: str = Field(..., min_length=1, max_length=100)
     apodo: str | None = Field(default=None, max_length=50)
     red: RedTarjeta
-    dia_cierre: int = Field(..., ge=1, le=28)
-    dia_vencimiento: int = Field(..., ge=1, le=28)
+    dia_cierre: int | None = Field(default=None, ge=1, le=31)
+    dia_vencimiento: int | None = Field(default=None, ge=1, le=31)
     limite_credito: DecimalJSON | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
     moneda: Moneda = Moneda.ARS
     percepcion_moneda_extranjera: DecimalJSON = Field(
@@ -31,13 +31,19 @@ class TarjetaCreditoBase(BaseModel):
 
 class TarjetaCreditoCreate(TarjetaCreditoBase):
     billetera_id: UUID
+    proximo_cierre: date
+    proximo_vencimiento: date
+    ultimo_cierre: date | None = None
 
 class TarjetaCreditoUpdate(BaseModel):
     nombre: str | None = Field(default=None, min_length=1, max_length=100)
     apodo: str | None = Field(default=None, max_length=50)
     red: RedTarjeta | None = None
-    dia_cierre: int | None = Field(None, ge=1, le=28)
-    dia_vencimiento: int | None = Field(None, ge=1, le=28)
+    dia_cierre: int | None = Field(None, ge=1, le=31)
+    dia_vencimiento: int | None = Field(None, ge=1, le=31)
+    proximo_cierre: date | None = None
+    proximo_vencimiento: date | None = None
+    ultimo_cierre: date | None = None
     limite_credito: DecimalJSON | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
     moneda: Moneda | None = None
     percepcion_moneda_extranjera: DecimalJSON | None = Field(default=None, ge=0, le=100, max_digits=5, decimal_places=2)
@@ -200,9 +206,18 @@ class TarjetaCreditoResponse(TarjetaCreditoBase):
     fecha_creacion: datetime
     resumen_actual: ResumenTarjeta | None = None
     cuotas_recalculadas: int = 0
+    regla_cierre: str = "dia_fijo"
+    proximo_cierre: date | None = None
+    proximo_vencimiento: date | None = None
+    texto_fechas: str | None = None
 
     class Config:
         from_attributes = True
+
+
+class FechasResumenBody(BaseModel):
+    fecha_cierre: date
+    fecha_vencimiento: date
 
 
 class PagarTarjetaBody(BaseModel):

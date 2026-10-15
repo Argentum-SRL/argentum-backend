@@ -35,10 +35,9 @@ from app.services.resumen_tarjeta_service import (
     calcular_resumen_actual,
 )
 from app.services.tarjeta_service import (
-    calcular_fecha_cierre_de_vencimiento,
-    calcular_fecha_vencimiento_proximo,
     get_info_transaccion,
 )
+from app.services import calendario_tarjeta_service
 from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 
@@ -104,7 +103,7 @@ def pagar_resumen_tarjeta(
         limite_vencimiento = fecha_resumen
     else:
         hoy = hoy_argentina()
-        limite_vencimiento = calcular_fecha_vencimiento_proximo(tarjeta, hoy)
+        limite_vencimiento = calendario_tarjeta_service.vencimiento_proximo(tarjeta, hoy)
 
     # 2.1 Buscar saldos arrastrados activos de la tarjeta de ESTA moneda hasta este vencimiento (Tarea 3.2 y 3.9)
     if _tabla_saldo_arrastrado_existe(db):
@@ -270,9 +269,7 @@ def pagar_resumen_tarjeta(
 
             # Cotización dólar oficial de la fecha de cierre (Tarea 3.5 y 3.6)
             from app.services.dolar_service import obtener_cotizacion_por_fecha
-            fecha_cierre = calcular_fecha_cierre_de_vencimiento(
-                limite_vencimiento, tarjeta.dia_cierre, tarjeta.dia_vencimiento
-            )
+            fecha_cierre = calendario_tarjeta_service.cierre_de_vencimiento(tarjeta, limite_vencimiento)
 
             if cotizacion_personalizada is not None and cotizacion_personalizada > Decimal("0"):
                 cotizacion = cotizacion_personalizada
@@ -574,11 +571,9 @@ def simular_pesificacion(
         limite_vencimiento = fecha_resumen
     else:
         hoy = hoy_argentina()
-        limite_vencimiento = calcular_fecha_vencimiento_proximo(tarjeta, hoy)
+        limite_vencimiento = calendario_tarjeta_service.vencimiento_proximo(tarjeta, hoy)
 
-    fecha_cierre = calcular_fecha_cierre_de_vencimiento(
-        limite_vencimiento, tarjeta.dia_cierre, tarjeta.dia_vencimiento
-    )
+    fecha_cierre = calendario_tarjeta_service.cierre_de_vencimiento(tarjeta, limite_vencimiento)
 
     if monto_usd is None or monto_usd <= Decimal("0"):
         res = calcular_resumen_actual(db, tarjeta)

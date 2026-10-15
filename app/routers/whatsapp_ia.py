@@ -209,7 +209,7 @@ from app.services import (
 from app.services.evento_service import emitir_evento_actualizacion
 from app.services.openai_client import get_openai_client
 from app.services.rate_limit_service import verificar_rate_limit
-from app.services.tarjeta_service import calcular_primer_vencimiento
+from app.services import calendario_tarjeta_service
 from app.services.transaccion_service import (
     actualizar_transaccion,
     deducir_metodo_pago,

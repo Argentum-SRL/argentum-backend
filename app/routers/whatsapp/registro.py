@@ -73,7 +73,7 @@ from app.services import (
     whatsapp_service,
 )
 from app.services.evento_service import emitir_evento_actualizacion
-from app.services.tarjeta_service import calcular_primer_vencimiento
+from app.services import calendario_tarjeta_service
 from app.services.transaccion_service import (
     actualizar_transaccion,
     deducir_metodo_pago,
@@ -611,7 +611,7 @@ def _confirmar_propuesta_transaccion(
         emitir_evento_actualizacion(db, usuario.id, "tarjetas")
         db.commit()
 
-        primer_v = calcular_primer_vencimiento(fecha_obj, tarjeta.dia_cierre, tarjeta.dia_vencimiento, False)
+        _, primer_v = calendario_tarjeta_service.resumen_de_compra(tarjeta, fecha_obj, proximo_resumen=False)
         venc_mes = MESES_ES_GEN[primer_v.month - 1]
         venc_anio = primer_v.year
         cat_disp = _nombre_corto_categoria(entidades.get("categoria"))
@@ -1033,7 +1033,7 @@ def _registrar_movimiento_directo(
         emitir_evento_actualizacion(db, usuario.id, "tarjetas")
         db.commit()
 
-        primer_v = calcular_primer_vencimiento(fecha_obj, tarjeta.dia_cierre, tarjeta.dia_vencimiento, False)
+        _, primer_v = calendario_tarjeta_service.resumen_de_compra(tarjeta, fecha_obj, proximo_resumen=False)
         venc_mes = MESES_ES_GEN[primer_v.month - 1]
         venc_anio = primer_v.year
         cat_disp = _nombre_corto_categoria(entidades.get("categoria"))

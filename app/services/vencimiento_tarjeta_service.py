@@ -12,7 +12,7 @@ from app.models.transaccion import (
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.cuota import Cuota
 from app.services.resumen_tarjeta_service import calcular_resumen_actual
-from app.services.tarjeta_service import calcular_fecha_vencimiento_proximo
+from app.services import calendario_tarjeta_service
 from app.utils.fecha import hoy_argentina
 
 def procesar_vencimientos_tarjetas(db: Session) -> None:
@@ -22,7 +22,7 @@ def procesar_vencimientos_tarjetas(db: Session) -> None:
     tarjetas_activas = db.query(TarjetaCredito).filter(
         TarjetaCredito.estado == EstadoTarjeta.ACTIVA
     ).all()
-    tarjetas = [t for t in tarjetas_activas if calcular_fecha_vencimiento_proximo(t, hoy) == hoy]
+    tarjetas = [t for t in tarjetas_activas if calendario_tarjeta_service.vencimiento_proximo(t, hoy) == hoy]
 
     if not tarjetas:
         return

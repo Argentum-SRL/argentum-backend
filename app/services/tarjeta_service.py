@@ -5,6 +5,7 @@ from uuid import UUID
 from calendar import monthrange
 from dateutil.relativedelta import relativedelta
 from fastapi import HTTPException
+from sqlalchemy import extract
 from sqlalchemy.orm import Session, joinedload
 
 logger = logging.getLogger(__name__)
@@ -17,7 +18,9 @@ from app.models.transaccion import Transaccion
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.cuota import Cuota
 from app.models.saldo_arrastrado import SaldoArrastradoTarjeta, PagoSaldoArrastrado, EstadoSaldoArrastrado
+from app.models.fecha_resumen_tarjeta import FechaResumenTarjeta
 from app.models.usuario import Moneda
+from app.services import calendario_tarjeta_service
 from app.schemas.tarjeta_credito import (
     TarjetaCreditoCreate, 
     TarjetaCreditoUpdate,
@@ -107,23 +110,8 @@ def calcular_cierre_de_compra(
 
 
 def calcular_fecha_vencimiento_proximo(tarjeta: TarjetaCredito, hoy: date | None = None) -> date:
-    """Devuelve la fecha del próximo vencimiento de la tarjeta a partir de hoy (ajustada a día hábil posterior)."""
-    if hoy is None:
-        hoy = hoy_argentina()
-    from app.services.dias_habiles_service import ajustar_fecha_habil_sync
-
-    ultimo_dia_mes = monthrange(hoy.year, hoy.month)[1]
-    dia_venc = min(tarjeta.dia_vencimiento, ultimo_dia_mes)
-    venc_nominal = date(hoy.year, hoy.month, dia_venc)
-    venc = ajustar_fecha_habil_sync(venc_nominal, direccion="posterior")
-
-    if hoy > venc:
-        proximo_mes = hoy + relativedelta(months=1)
-        ultimo_dia_proximo = monthrange(proximo_mes.year, proximo_mes.month)[1]
-        dia_venc_proximo = min(tarjeta.dia_vencimiento, ultimo_dia_proximo)
-        venc_nominal_prox = date(proximo_mes.year, proximo_mes.month, dia_venc_proximo)
-        venc = ajustar_fecha_habil_sync(venc_nominal_prox, direccion="posterior")
-    return venc
+    """Devuelve la fecha del próximo vencimiento de la tarjeta a partir de hoy delegando en el calendario."""
+    return calendario_tarjeta_service.vencimiento_proximo(tarjeta, hoy)
 
 
 def obtener_tarjetas(db: Session, usuario_id: UUID) -> list[TarjetaCredito]:
@@ -165,14 +153,35 @@ def crear_tarjeta(db: Session, usuario_id: UUID, data: TarjetaCreditoCreate) -> 
             detail="La moneda de la tarjeta debe coincidir con la moneda de la billetera asociada."
         )
 
+    # Deducir regla de cierre y vencimiento (Decisión 4)
+    if data.proximo_cierre is not None and data.proximo_vencimiento is not None:
+        regla_dict = calendario_tarjeta_service.deducir_regla_tarjeta(
+            proximo_cierre=data.proximo_cierre,
+            proximo_vencimiento=data.proximo_vencimiento,
+            ultimo_cierre=data.ultimo_cierre
+        )
+    else:
+        regla_dict = {
+            "regla_cierre": "dia_fijo",
+            "dia_cierre": data.dia_cierre or 1,
+            "dia_vencimiento": data.dia_vencimiento or 1,
+            "semana_cierre": None,
+            "dia_semana_cierre": None,
+            "dias_hasta_vencimiento": None,
+        }
+
     nueva_tarjeta = TarjetaCredito(
         usuario_id=usuario_id,
         billetera_id=data.billetera_id,
         nombre=data.nombre,
         apodo=data.apodo,
         red=data.red,
-        dia_cierre=data.dia_cierre,
-        dia_vencimiento=data.dia_vencimiento,
+        dia_cierre=regla_dict["dia_cierre"],
+        dia_vencimiento=regla_dict["dia_vencimiento"],
+        regla_cierre=regla_dict["regla_cierre"],
+        semana_cierre=regla_dict["semana_cierre"],
+        dia_semana_cierre=regla_dict["dia_semana_cierre"],
+        dias_hasta_vencimiento=regla_dict["dias_hasta_vencimiento"],
         limite_credito=data.limite_credito,
         moneda=data.moneda,
         percepcion_moneda_extranjera=data.percepcion_moneda_extranjera,
@@ -180,6 +189,17 @@ def crear_tarjeta(db: Session, usuario_id: UUID, data: TarjetaCreditoCreate) -> 
     )
     
     db.add(nueva_tarjeta)
+    db.flush()
+
+    # Siempre se guarda además una fila en fechas_resumen_tarjeta con proximo_cierre y proximo_vencimiento tal cual
+    if data.proximo_cierre is not None and data.proximo_vencimiento is not None:
+        fila_resumen = FechaResumenTarjeta(
+            tarjeta_id=nueva_tarjeta.id,
+            fecha_cierre=data.proximo_cierre,
+            fecha_vencimiento=data.proximo_vencimiento
+        )
+        db.add(fila_resumen)
+
     db.commit()
     db.refresh(nueva_tarjeta)
     return nueva_tarjeta
@@ -209,18 +229,52 @@ def actualizar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID, data: Ta
                 detail="No podés cambiar la moneda de una tarjeta que ya tiene transacciones registradas."
             )
 
-    cierre_cambio = "dia_cierre" in update_data and update_data["dia_cierre"] != tarjeta.dia_cierre
-    venc_cambio = "dia_vencimiento" in update_data and update_data["dia_vencimiento"] != tarjeta.dia_vencimiento
+    fechas_cambiaron = False
 
-    nuevo_dia_vencimiento = update_data.get("dia_vencimiento", tarjeta.dia_vencimiento)
+    if data.proximo_cierre is not None and data.proximo_vencimiento is not None:
+        regla_dict = calendario_tarjeta_service.deducir_regla_tarjeta(
+            proximo_cierre=data.proximo_cierre,
+            proximo_vencimiento=data.proximo_vencimiento,
+            ultimo_cierre=data.ultimo_cierre
+        )
+        tarjeta.regla_cierre = regla_dict["regla_cierre"]
+        tarjeta.semana_cierre = regla_dict["semana_cierre"]
+        tarjeta.dia_semana_cierre = regla_dict["dia_semana_cierre"]
+        tarjeta.dias_hasta_vencimiento = regla_dict["dias_hasta_vencimiento"]
+        tarjeta.dia_cierre = regla_dict["dia_cierre"]
+        tarjeta.dia_vencimiento = regla_dict["dia_vencimiento"]
+
+        # Siempre se guarda además una fila en fechas_resumen_tarjeta con proximo_cierre y proximo_vencimiento tal cual
+        override = db.query(FechaResumenTarjeta).filter(
+            FechaResumenTarjeta.tarjeta_id == tarjeta.id,
+            extract("year", FechaResumenTarjeta.fecha_cierre) == data.proximo_cierre.year,
+            extract("month", FechaResumenTarjeta.fecha_cierre) == data.proximo_cierre.month
+        ).first()
+        if override:
+            override.fecha_cierre = data.proximo_cierre
+            override.fecha_vencimiento = data.proximo_vencimiento
+        else:
+            override = FechaResumenTarjeta(
+                tarjeta_id=tarjeta.id,
+                fecha_cierre=data.proximo_cierre,
+                fecha_vencimiento=data.proximo_vencimiento
+            )
+            db.add(override)
+        fechas_cambiaron = True
+    else:
+        cierre_cambio = "dia_cierre" in update_data and update_data["dia_cierre"] != tarjeta.dia_cierre
+        venc_cambio = "dia_vencimiento" in update_data and update_data["dia_vencimiento"] != tarjeta.dia_vencimiento
+        if cierre_cambio or venc_cambio:
+            fechas_cambiaron = True
 
     for key, value in update_data.items():
-        setattr(tarjeta, key, value)
+        if key not in ("proximo_cierre", "proximo_vencimiento", "ultimo_cierre"):
+            setattr(tarjeta, key, value)
     
     cuotas_recalculadas = 0
-    if cierre_cambio or venc_cambio:
+    if fechas_cambiaron:
         hoy = hoy_argentina()
-        # Recalcular cuotas NO pagadas cuyo vencimiento sea posterior a hoy
+        # Recalcular cuotas NO pagadas cuyo vencimiento sea posterior a hoy (Decisión 5)
         cuotas_futuras = (
             db.query(Cuota)
             .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
@@ -232,25 +286,117 @@ def actualizar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID, data: Ta
             )
             .all()
         )
-        from app.services.dias_habiles_service import ajustar_fecha_habil_sync
-        for c in cuotas_futuras:
-            anio_c = c.fecha_vencimiento.year
-            mes_c = c.fecha_vencimiento.month
-            ultimo_dia_mes = monthrange(anio_c, mes_c)[1]
-            dia_real = min(nuevo_dia_vencimiento, ultimo_dia_mes)
-            f_nom = date(anio_c, mes_c, dia_real)
-            nueva_fecha = ajustar_fecha_habil_sync(f_nom, direccion="posterior")
+        if cuotas_futuras:
+            min_v = min(c.fecha_vencimiento for c in cuotas_futuras)
+            max_v = max(c.fecha_vencimiento for c in cuotas_futuras)
+            desde_m = date(min_v.year, min_v.month, 1) - relativedelta(months=1)
+            hasta_m = date(max_v.year, max_v.month, 1) + relativedelta(months=2)
+            res_nuevos = calendario_tarjeta_service.resumenes(tarjeta, desde_m, hasta_m)
+            mapa_venc = {(v.year, v.month): v for _, v in res_nuevos}
 
-            if c.fecha_vencimiento != nueva_fecha:
-                c.fecha_vencimiento = nueva_fecha
-                if c.transaccion:
-                    c.transaccion.fecha = nueva_fecha
-                cuotas_recalculadas += 1
+            for c in cuotas_futuras:
+                anio_c = c.fecha_vencimiento.year
+                mes_c = c.fecha_vencimiento.month
+                nuevo_venc = mapa_venc.get((anio_c, mes_c))
+                if nuevo_venc is None:
+                    stmt_m = calendario_tarjeta_service.resumenes(
+                        tarjeta,
+                        date(anio_c, mes_c, 1) - relativedelta(months=1),
+                        date(anio_c, mes_c, 1) + relativedelta(months=1)
+                    )
+                    for _, v in stmt_m:
+                        if v.year == anio_c and v.month == mes_c:
+                            nuevo_venc = v
+                            break
+
+                if nuevo_venc and c.fecha_vencimiento != nuevo_venc:
+                    c.fecha_vencimiento = nuevo_venc
+                    if c.transaccion:
+                        c.transaccion.fecha = nuevo_venc
+                    cuotas_recalculadas += 1
 
     db.commit()
     db.refresh(tarjeta)
     setattr(tarjeta, "cuotas_recalculadas", cuotas_recalculadas)
     return tarjeta
+
+
+def actualizar_fechas_resumen(
+    db: Session,
+    usuario_id: UUID,
+    tarjeta_id: UUID,
+    fecha_cierre: date,
+    fecha_vencimiento: date,
+) -> dict:
+    """Corrige un solo resumen según Decisión 6: crea o reemplaza la fila del mes de ese cierre y mueve cuotas."""
+    tarjeta = db.query(TarjetaCredito).filter(
+        TarjetaCredito.id == tarjeta_id,
+        TarjetaCredito.usuario_id == usuario_id
+    ).first()
+    if not tarjeta:
+        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
+
+    # Validación del punto 4
+    if fecha_vencimiento <= fecha_cierre or (fecha_vencimiento - fecha_cierre).days > 31:
+        raise HTTPException(
+            status_code=400,
+            detail="El vencimiento tiene que ser posterior al cierre y dentro del mes siguiente.",
+        )
+
+    # Determinar el vencimiento viejo de este resumen antes de aplicar el override
+    resumenes_actuales = calendario_tarjeta_service.resumenes(
+        tarjeta,
+        date(fecha_cierre.year, fecha_cierre.month, 1),
+        date(fecha_cierre.year, fecha_cierre.month, 1),
+    )
+    vencimiento_viejo = resumenes_actuales[0][1] if resumenes_actuales else None
+
+    # Crea o reemplaza la fila del mes de ese cierre en fechas_resumen_tarjeta
+    override = db.query(FechaResumenTarjeta).filter(
+        FechaResumenTarjeta.tarjeta_id == tarjeta.id,
+        extract("year", FechaResumenTarjeta.fecha_cierre) == fecha_cierre.year,
+        extract("month", FechaResumenTarjeta.fecha_cierre) == fecha_cierre.month,
+    ).first()
+
+    if override:
+        override.fecha_cierre = fecha_cierre
+        override.fecha_vencimiento = fecha_vencimiento
+    else:
+        override = FechaResumenTarjeta(
+            tarjeta_id=tarjeta.id,
+            fecha_cierre=fecha_cierre,
+            fecha_vencimiento=fecha_vencimiento,
+        )
+        db.add(override)
+    db.flush()
+
+    # Mover cuotas no pagadas del vencimiento viejo de ese resumen al nuevo
+    cuotas_movidas = 0
+    if vencimiento_viejo and vencimiento_viejo != fecha_vencimiento:
+        cuotas_a_mover = (
+            db.query(Cuota)
+            .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
+            .options(joinedload(Cuota.transaccion))
+            .filter(
+                GrupoCuotas.tarjeta_id == tarjeta.id,
+                Cuota.pagada == False,
+                Cuota.fecha_vencimiento == vencimiento_viejo,
+            )
+            .all()
+        )
+        for c in cuotas_a_mover:
+            c.fecha_vencimiento = fecha_vencimiento
+            if c.transaccion:
+                c.transaccion.fecha = fecha_vencimiento
+            cuotas_movidas += 1
+
+    db.commit()
+    return {
+        "ok": True,
+        "fecha_cierre": fecha_cierre,
+        "fecha_vencimiento": fecha_vencimiento,
+        "cuotas_movidas": cuotas_movidas,
+    }
 
 
 def archivar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID) -> TarjetaCredito:

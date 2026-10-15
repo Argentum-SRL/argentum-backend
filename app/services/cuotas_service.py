@@ -74,6 +74,7 @@ def crear_cuotas(
     from calendar import monthrange
     from app.services.dias_habiles_service import ajustar_fecha_habil_sync
     from app.models.tarjeta_credito import TarjetaCredito
+    from app.services import calendario_tarjeta_service
 
     tarjeta = None
     t_id = grupo.tarjeta_id if grupo else transaccion_padre.tarjeta_id
@@ -81,16 +82,27 @@ def crear_cuotas(
         tarjeta = db.get(TarjetaCredito, t_id)
     dia_nominal = tarjeta.dia_vencimiento if tarjeta else primer_vencimiento.day
 
+    res_stmts: list[tuple[date, date]] = []
+    if tarjeta is not None:
+        primer_cierre = calendario_tarjeta_service.cierre_de_vencimiento(tarjeta, primer_vencimiento)
+        desde_c = date(primer_cierre.year, primer_cierre.month, 1)
+        hasta_c = desde_c + relativedelta(months=cantidad_cuotas + 3)
+        res_stmts = calendario_tarjeta_service.resumenes(tarjeta, desde_c, hasta_c)
+
     # Empezamos desde desde_cuota hasta cantidad_cuotas para registrar las cuotas requeridas
     for i in range(desde_cuota, cantidad_cuotas + 1):
         if i == cuota_inicial:
             fecha_cuota = primer_vencimiento
         else:
-            # Derivar mes ancla estrictamente desde el calendario, nunca de una fecha ya ajustada
-            mes_anchor = date(primer_vencimiento.year, primer_vencimiento.month, 1) + relativedelta(months=i - cuota_inicial)
-            ultimo_dia = monthrange(mes_anchor.year, mes_anchor.month)[1]
-            f_nom = date(mes_anchor.year, mes_anchor.month, min(dia_nominal, ultimo_dia))
-            fecha_cuota = ajustar_fecha_habil_sync(f_nom, direccion="posterior")
+            k = i - cuota_inicial
+            if tarjeta is not None and k < len(res_stmts):
+                fecha_cuota = res_stmts[k][1]
+            else:
+                # Derivar mes ancla estrictamente desde el calendario, nunca de una fecha ya ajustada
+                mes_anchor = date(primer_vencimiento.year, primer_vencimiento.month, 1) + relativedelta(months=i - cuota_inicial)
+                ultimo_dia = monthrange(mes_anchor.year, mes_anchor.month)[1]
+                f_nom = date(mes_anchor.year, mes_anchor.month, min(dia_nominal, ultimo_dia))
+                fecha_cuota = ajustar_fecha_habil_sync(f_nom, direccion="posterior")
         
         # Determinar el monto de esta cuota
         if i == cantidad_cuotas:
@@ -524,11 +536,11 @@ def actualizar_grupo(
 
         # Calcular fecha del próximo vencimiento
         if tarjeta is not None:
-            from app.services.tarjeta_service import calcular_fecha_vencimiento_proximo, calcular_primer_vencimiento
+            from app.services import calendario_tarjeta_service
             if n_pagadas > 0:
-                proximo_venc = calcular_fecha_vencimiento_proximo(tarjeta, fecha_ref)
+                proximo_venc = calendario_tarjeta_service.vencimiento_proximo(tarjeta, fecha_ref)
             else:
-                proximo_venc = calcular_primer_vencimiento(fecha_ref, tarjeta.dia_cierre, tarjeta.dia_vencimiento)
+                _, proximo_venc = calendario_tarjeta_service.resumen_de_compra(tarjeta, fecha_ref)
         else:
             proximo_venc = fecha_ref + relativedelta(months=1)
 

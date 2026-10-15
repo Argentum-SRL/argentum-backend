@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from uuid import UUID, uuid4
@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.usuario import Usuario
     from app.models.billetera import Billetera
+    from app.models.fecha_resumen_tarjeta import FechaResumenTarjeta
 
 from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Numeric, String, Integer, Index
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
@@ -69,6 +70,14 @@ class TarjetaCredito(Base):
         default=EstadoTarjeta.ACTIVA,
     )
     color: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    # Reglas reales de cierre y vencimiento (fase 5a)
+    regla_cierre: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="dia_fijo", server_default="dia_fijo"
+    )
+    semana_cierre: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dia_semana_cierre: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dias_hasta_vencimiento: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # Etapa 3C: Porcentaje de percepción sobre consumos en moneda extranjera al pesificar (ej. 30 para 30%).
     # IMPORTANTE: Es un porcentaje, no un factor (se almacena 30.00, no 0.30 ni 1.30).
     percepcion_moneda_extranjera: Mapped[Decimal] = mapped_column(
@@ -84,6 +93,25 @@ class TarjetaCredito(Base):
 
     usuario: Mapped["Usuario"] = relationship("Usuario")
     billetera: Mapped["Billetera"] = relationship("Billetera")
+    fechas_resumen: Mapped[list["FechaResumenTarjeta"]] = relationship(
+        "FechaResumenTarjeta", back_populates="tarjeta", cascade="all, delete-orphan"
+    )
+
+    @property
+    def proximo_vencimiento(self) -> date:
+        from app.services import calendario_tarjeta_service
+        from app.utils.fecha import hoy_argentina
+        return calendario_tarjeta_service.vencimiento_proximo(self, hoy_argentina())
+
+    @property
+    def proximo_cierre(self) -> date:
+        from app.services import calendario_tarjeta_service
+        return calendario_tarjeta_service.cierre_de_vencimiento(self, self.proximo_vencimiento)
+
+    @property
+    def texto_fechas(self) -> str:
+        from app.services import calendario_tarjeta_service
+        return calendario_tarjeta_service.texto_fechas(self)
 
     def __repr__(self) -> str:
         return (

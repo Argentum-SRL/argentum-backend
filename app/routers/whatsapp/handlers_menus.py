@@ -54,8 +54,7 @@ from app.routers.whatsapp.parsers import (
     _extraer_monto_y_moneda_suscripcion,
     _extraer_nombre_servicio,
 )
-from app.services import suscripcion_service, whatsapp_service
-from app.services.tarjeta_service import calcular_primer_vencimiento
+from app.services import calendario_tarjeta_service, suscripcion_service, whatsapp_service
 from app.core.catalogo_suscripciones import buscar_servicio_por_texto
 from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
 from app.utils.formato import formatear_monto
@@ -143,7 +142,7 @@ Si no aplica, retorna False. Si aplica, persiste ConversacionWpp, envía la resp
         monto_total = Decimal(str(estado_prev_tarj.get('monto_total', estado_prev_tarj['monto'])))
         monto_cuota = Decimal(str(estado_prev_tarj.get('monto_cuota', monto_total / Decimal(str(cant_cuotas)))))
         fecha_obj, _ = _resolver_y_validar_fecha(estado_prev_tarj.get('fecha'))
-        primer_v = calcular_primer_vencimiento(fecha_obj, tarjeta_elegida.dia_cierre, tarjeta_elegida.dia_vencimiento, False)
+        _, primer_v = calendario_tarjeta_service.resumen_de_compra(tarjeta_elegida, fecha_obj, proximo_resumen=False)
         estado_prev_tarj['tarjeta_id'] = str(tarjeta_elegida.id)
         estado_prev_tarj['tarjeta_nombre'] = tarjeta_elegida.nombre
         estado_prev_tarj['tarjeta_billetera_id'] = str(tarjeta_elegida.billetera_id)
@@ -201,7 +200,7 @@ Si no aplica, retorna False. Si aplica, persiste ConversacionWpp, envía la resp
             tarjeta_obj = next((t for t in tarjetas_activas if t.billetera and t.billetera.es_principal), tarjetas_activas[0])
     if tarjeta_obj:
         fecha_obj, _ = _resolver_y_validar_fecha(estado_prev_cuotas.get('fecha'))
-        primer_v = calcular_primer_vencimiento(fecha_obj, tarjeta_obj.dia_cierre, tarjeta_obj.dia_vencimiento, False)
+        _, primer_v = calendario_tarjeta_service.resumen_de_compra(tarjeta_obj, fecha_obj, proximo_resumen=False)
         estado_prev_cuotas['tarjeta_id'] = str(tarjeta_obj.id)
         estado_prev_cuotas['tarjeta_nombre'] = tarjeta_obj.nombre
         estado_prev_cuotas['tarjeta_billetera_id'] = str(tarjeta_obj.billetera_id)

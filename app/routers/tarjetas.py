@@ -16,10 +16,11 @@ from app.schemas.tarjeta_credito import (
     PresionFuturaResponse,
     ResultadoPagoTarjeta,
     SimularPesificacionResponse,
-    ResumenDeCompraResponse
+    ResumenDeCompraResponse,
+    FechasResumenBody,
 )
 from app.schemas.transaccion import TransaccionRead
-from app.services import pago_resumen_service, resumen_tarjeta_service, tarjeta_service
+from app.services import calendario_tarjeta_service, pago_resumen_service, resumen_tarjeta_service, tarjeta_service
 
 router = APIRouter()
 
@@ -128,21 +129,31 @@ def resumen_de_compra(
     if not tarjeta:
         raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
 
-    fecha_cierre = tarjeta_service.calcular_cierre_de_compra(
+    fecha_cierre, fecha_vencimiento = calendario_tarjeta_service.resumen_de_compra(
+        tarjeta=tarjeta,
         fecha_compra=fecha,
-        dia_cierre=tarjeta.dia_cierre,
-        proximo_resumen=proximo_resumen
-    )
-    fecha_vencimiento = tarjeta_service.calcular_primer_vencimiento(
-        fecha_compra=fecha,
-        dia_cierre=tarjeta.dia_cierre,
-        dia_vencimiento=tarjeta.dia_vencimiento,
         proximo_resumen=proximo_resumen
     )
 
     return ResumenDeCompraResponse(
         fecha_cierre=fecha_cierre,
         fecha_vencimiento=fecha_vencimiento
+    )
+
+
+@router.post("/{tarjeta_id}/fechas-resumen")
+def actualizar_fechas_resumen(
+    tarjeta_id: UUID,
+    body: FechasResumenBody,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    return tarjeta_service.actualizar_fechas_resumen(
+        db=db,
+        usuario_id=current_user.id,
+        tarjeta_id=tarjeta_id,
+        fecha_cierre=body.fecha_cierre,
+        fecha_vencimiento=body.fecha_vencimiento
     )
 
 

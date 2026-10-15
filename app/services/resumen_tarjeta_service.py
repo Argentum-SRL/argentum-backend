@@ -35,10 +35,9 @@ from app.schemas.tarjeta_credito import (
 )
 from app.services.tarjeta_service import (
     MESES_ES,
-    calcular_fecha_cierre_de_vencimiento,
-    calcular_fecha_vencimiento_proximo,
     get_info_transaccion,
 )
+from app.services import calendario_tarjeta_service
 from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 
@@ -59,12 +58,12 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
     hoy = hoy_argentina()
 
     # ── Calcular fecha de vencimiento próximo (ajustada a día hábil) ─────────────
-    fecha_vencimiento_proximo = calcular_fecha_vencimiento_proximo(tarjeta, hoy)
+    fecha_vencimiento_proximo = calendario_tarjeta_service.vencimiento_proximo(tarjeta, hoy)
 
     # ── Calcular fecha de cierre próximo ──────────────────
     # El cierre debe corresponder al período de vencimiento próximo (sin ajuste hábil)
-    fecha_cierre_proximo = calcular_fecha_cierre_de_vencimiento(
-        fecha_vencimiento_proximo, tarjeta.dia_cierre, tarjeta.dia_vencimiento
+    fecha_cierre_proximo = calendario_tarjeta_service.cierre_de_vencimiento(
+        tarjeta, fecha_vencimiento_proximo
     )
 
     # ── Obtener todas las cuotas de esta tarjeta (incluidas las del último año) ──
@@ -163,8 +162,8 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
             mes_label = f"{nombre_mes_es} {p_year}"
             
             if venc_key not in anteriores_dict:
-                cierre_date = calcular_fecha_cierre_de_vencimiento(
-                    p_venc, tarjeta.dia_cierre, tarjeta.dia_vencimiento
+                cierre_date = calendario_tarjeta_service.cierre_de_vencimiento(
+                    tarjeta, p_venc
                 )
                 anteriores_dict[venc_key] = {
                     "mes": mes_label,

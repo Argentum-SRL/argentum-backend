@@ -323,9 +323,9 @@ def importar_transacciones_resumen(
                 # Calcular primer vencimiento si es tarjeta de crédito
                 primer_venc_calc = cruda.fecha
                 if t_id and tarjeta:
-                    from app.services.tarjeta_service import calcular_primer_vencimiento
-                    primer_venc_calc = calcular_primer_vencimiento(
-                        cruda.fecha, tarjeta.dia_cierre, tarjeta.dia_vencimiento
+                    from app.services import calendario_tarjeta_service
+                    _, primer_venc_calc = calendario_tarjeta_service.resumen_de_compra(
+                        tarjeta, cruda.fecha
                     )
 
                 # 1. Calcular hash unívoco para control de duplicados

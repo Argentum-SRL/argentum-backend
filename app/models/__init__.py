@@ -21,6 +21,7 @@ from app.models.refresh_token import RefreshToken
 from app.models.subcategoria import Subcategoria
 from app.models.suscripcion import Suscripcion
 from app.models.tarjeta_credito import TarjetaCredito
+from app.models.fecha_resumen_tarjeta import FechaResumenTarjeta
 from app.models.transaccion import Transaccion
 from app.models.transferencia_interna import TransferenciaInterna
 from app.models.rendimiento_billetera import RendimientoBilletera
@@ -49,6 +50,7 @@ __all__ = [
     "Factura",
     "Billetera",
     "TarjetaCredito",
+    "FechaResumenTarjeta",
     "SaldoArrastradoTarjeta",
     "PagoSaldoArrastrado",
     "EstadoSaldoArrastrado",

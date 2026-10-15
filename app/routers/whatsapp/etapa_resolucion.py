@@ -46,7 +46,7 @@ from app.routers.whatsapp.resolvers_cascada import (
     resolver_billetera_cascada,
     resolver_tarjeta_cascada,
 )
-from app.services.tarjeta_service import calcular_primer_vencimiento
+from app.services import calendario_tarjeta_service
 from app.utils.fecha import TZ_ARGENTINA
 from app.utils.formato import formatear_monto
 from app.utils.texto import normalizar_texto
@@ -369,7 +369,7 @@ def _resolver_tarjeta_y_cuotas(
                 resultado_ia["respuesta_usuario"] = _generar_menu_tarjetas(cands_res)
             elif t_match:
                 fecha_obj, _ = _resolver_y_validar_fecha(entidades_actuales.get("fecha"))
-                primer_v = calcular_primer_vencimiento(fecha_obj, t_match.dia_cierre, t_match.dia_vencimiento, False)
+                _, primer_v = calendario_tarjeta_service.resumen_de_compra(t_match, fecha_obj, proximo_resumen=False)
                 entidades_actuales["tarjeta_id"] = str(t_match.id)
                 entidades_actuales["tarjeta_nombre"] = t_match.nombre
                 entidades_actuales["tarjeta_billetera_id"] = str(t_match.billetera_id)

@@ -22,7 +22,7 @@ from app.services.suscripcion_service import (
     normalizar_proximo_cobro,
 )
 from app.services.dolar_service import obtener_cotizacion_por_fecha
-from app.services import cuotas_service, tarjeta_service
+from app.services import calendario_tarjeta_service, cuotas_service
 from app.utils.fecha import hoy_argentina, TZ_ARGENTINA
 
 logger = logging.getLogger(__name__)
@@ -186,8 +186,8 @@ def _cobrar_suscripcion(db: Session, suscripcion: Suscripcion, hoy: date, primer
 
         # Si no se pasa primer_vencimiento explícito, calcularlo desde la fecha del período a cobrar
         if primer_vencimiento is None:
-            primer_vencimiento = tarjeta_service.calcular_primer_vencimiento(
-                fecha_periodo_a_cobrar, tarjeta.dia_cierre, tarjeta.dia_vencimiento, False
+            _, primer_vencimiento = calendario_tarjeta_service.resumen_de_compra(
+                tarjeta, fecha_periodo_a_cobrar, proximo_resumen=False
             )
 
         tx = Transaccion(

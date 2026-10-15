@@ -16,11 +16,7 @@ from app.models.tarjeta_credito import TarjetaCredito
 from app.models.saldo_arrastrado import SaldoArrastradoTarjeta, PagoSaldoArrastrado, EstadoSaldoArrastrado
 from app.schemas.transaccion import TransaccionCreate, TransaccionUpdate
 from app.services.resumen_tarjeta_service import _tabla_saldo_arrastrado_existe
-from app.services.tarjeta_service import (
-    calcular_primer_vencimiento,
-    calcular_fecha_vencimiento_proximo,
-)
-from app.services import cuotas_service, presupuesto_service
+from app.services import calendario_tarjeta_service, cuotas_service, presupuesto_service
 from app.services.saldo_billetera_service import aplicar_impacto_saldo
 from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
@@ -339,10 +335,10 @@ def crear_transaccion(
             tarjeta = _validar_tarjeta(db, data.tarjeta_id, usuario_id)
             proximo_resumen = data.info_cuotas.proximo_resumen if data.info_cuotas else False
             if data.info_cuotas and data.info_cuotas.cuota_inicial > 1:
-                primer_vencimiento = calcular_fecha_vencimiento_proximo(tarjeta, data.fecha)
+                primer_vencimiento = calendario_tarjeta_service.vencimiento_proximo(tarjeta, data.fecha)
             else:
-                primer_vencimiento = calcular_primer_vencimiento(
-                    data.fecha, tarjeta.dia_cierre, tarjeta.dia_vencimiento, proximo_resumen
+                _, primer_vencimiento = calendario_tarjeta_service.resumen_de_compra(
+                    tarjeta, data.fecha, proximo_resumen
                 )
         elif data.primer_vencimiento_manual:
             primer_vencimiento = data.primer_vencimiento_manual
