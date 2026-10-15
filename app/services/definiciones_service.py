@@ -382,4 +382,121 @@ def es_ingreso(tx: Any, ctx: ContextoDefiniciones) -> bool:
 
 
 # ==============================================================================
+# 4.3 HISTORIAL Y ETIQUETAS UNIFICADAS
+# ==============================================================================
+
+def visible_en_historial(tx: Any, ctx: ContextoDefiniciones) -> bool:
+    """
+    Determina si una transacción es visible en el historial (modo general).
+    Aplica exactamente la regla 6 de condicion_gasto:
+    - No se ven los padres de cuotas con cantidad_cuotas distinta de 1.
+    - No se ven las hijas de grupos con cantidad_cuotas 1 o sin grupo.
+    - Se ve todo lo demás (transacciones normales, compras en 1 cuota el día de la compra,
+      hijas con más de una cuota en su respectivo vencimiento).
+    """
+    es_padre = getattr(tx, "es_padre_cuotas", False)
+    es_hija = getattr(tx, "es_cuota_hija", False)
+    gid = getattr(tx, "grupo_cuotas_id", None)
+    cant_cuotas = ctx.grupos_cuotas_cantidades.get(gid) if gid else None
+
+    if es_padre:
+        if cant_cuotas != 1:
+            return False
+    elif es_hija:
+        if cant_cuotas is None or cant_cuotas <= 1:
+            return False
+
+    return True
+
+
+def etiqueta_movimiento(
+    tx: Any,
+    ctx: Optional[ContextoDefiniciones] = None,
+) -> tuple[str, str, Optional[str]]:
+    """
+    Determina la etiqueta, cuenta_como ('gasto', 'ingreso', 'nada') y aclaración
+    de un movimiento financiero para el historial unificado.
+    """
+    # Evaluación para objetos Transacción
+    tipo = getattr(tx, "tipo", None)
+    tipo_val = tipo.value if hasattr(tipo, "value") else str(tipo) if tipo else ""
+
+    est = getattr(tx, "estado_verificacion", None)
+    est_val = est.value if hasattr(est, "value") else (str(est) if est is not None else None)
+
+    es_hija = getattr(tx, "es_cuota_hija", False)
+    f = getattr(tx, "fecha", None)
+
+    ref_hoy = ctx.hoy if ctx else hoy_argentina()
+
+    # 1. no es hija y estado pendiente: "Por confirmar", nada, "Falta confirmarlo"
+    if not es_hija and est_val == "pendiente":
+        return ("Por confirmar", "nada", "Falta confirmarlo")
+
+    # 2. fecha > hoy: "Programado", nada, "Todavía no pasó"
+    if f is not None and f > ref_hoy:
+        return ("Programado", "nada", "Todavía no pasó")
+
+    # 3. billetera de inversión: "Inversión", nada, "No cuenta: billetera de inversión"
+    bid = getattr(tx, "billetera_id", None)
+    billetera = getattr(tx, "billetera", None)
+    es_inv = False
+    if ctx and bid in ctx.billeteras_inversion_ids:
+        es_inv = True
+    if billetera is not None and getattr(billetera, "es_inversion", False):
+        es_inv = True
+    if es_inv:
+        return ("Inversión", "nada", "No cuenta: billetera de inversión")
+
+    # 4. movimiento_meta_id con egreso: "Aporte a meta", nada, "No es gasto: va a tu meta"
+    meta_id = getattr(tx, "movimiento_meta_id", None)
+    if meta_id is not None and tipo_val == "egreso":
+        return ("Aporte a meta", "nada", "No es gasto: va a tu meta")
+
+    # 5. movimiento_meta_id con ingreso: "Retiro de meta", nada, "No es ingreso: sale de tu meta"
+    if meta_id is not None and tipo_val == "ingreso":
+        return ("Retiro de meta", "nada", "No es ingreso: sale de tu meta")
+
+    # 6. egreso con pago_resumen_vencimiento o con subcategoría Banco > Tarjeta de crédito:
+    #    "Pago de tarjeta", nada, "No es gasto: las compras ya se contaron"
+    pago_resumen = getattr(tx, "pago_resumen_vencimiento", None)
+    scid = getattr(tx, "subcategoria_id", None)
+    es_sc_tc = False
+    if ctx and scid is not None and (scid in ctx.subcategoria_tarjeta_ids or scid == ctx.subcategoria_tarjeta_id):
+        es_sc_tc = True
+    subcat_obj = getattr(tx, "subcategoria", None)
+    if subcat_obj is not None:
+        cat_obj = getattr(subcat_obj, "categoria", None)
+        c_name = getattr(cat_obj, "nombre", "").lower() if cat_obj else ""
+        sc_name = getattr(subcat_obj, "nombre", "").lower()
+        if c_name == "banco" and sc_name == "tarjeta de crédito":
+            es_sc_tc = True
+
+    if tipo_val == "egreso" and (pago_resumen is not None or es_sc_tc):
+        return ("Pago de tarjeta", "nada", "No es gasto: las compras ya se contaron")
+
+    # 7. categoría Ahorro: "Ahorro", nada, "No es gasto"
+    cid = getattr(tx, "categoria_id", None)
+    es_cat_ahorro = False
+    if ctx and cid in ctx.categoria_ahorro_ids:
+        es_cat_ahorro = True
+    cat_obj = getattr(tx, "categoria", None)
+    if cat_obj is not None and getattr(cat_obj, "nombre", "").lower() == "ahorro":
+        es_cat_ahorro = True
+    if es_cat_ahorro:
+        return ("Ahorro", "nada", "No es gasto")
+
+    # 8. es_gasto: "Gasto", gasto, None
+    if ctx is not None and es_gasto(tx, ctx):
+        return ("Gasto", "gasto", None)
+
+    # 9. es_ingreso: "Ingreso", ingreso, None
+    if ctx is not None and es_ingreso(tx, ctx):
+        return ("Ingreso", "ingreso", None)
+
+    # 10. cualquier otro caso: "Movimiento", nada, None
+    return ("Movimiento", "nada", None)
+
+
+# ==============================================================================
 # 4.3 PERÍODOS DE CICLO

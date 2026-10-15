@@ -8,13 +8,13 @@ from uuid import UUID
 
 from fastapi import HTTPException
 from dateutil.relativedelta import relativedelta
-from sqlalchemy import and_, func, select, desc, or_, literal, String, cast
+from sqlalchemy import and_, func, select, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.utils.fecha import hoy_argentina
 from app.models.usuario import Usuario, CicloTipo, Moneda
 from app.models.billetera import Billetera, EstadoBilletera
-from app.models.transaccion import Transaccion, TipoTransaccion, MetodoPago
+from app.models.transaccion import Transaccion, TipoTransaccion
 from app.models.categoria import Categoria
 from app.models.subcategoria import Subcategoria, EstadoSubcategoria
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion
@@ -324,12 +324,14 @@ def get_dashboard_resumen(
     fecha_desde_override: Optional[date] = None, 
     fecha_hasta_override: Optional[date] = None,
     total_billeteras_override: Optional[Dict[str, Decimal]] = None,
-    billetera_ids: Optional[List[UUID]] = None
+    billetera_ids: Optional[List[UUID]] = None,
+    hoy: Optional[date] = None,
 ) -> Dict[str, Any]:
     """
     Retorna el resumen optimizado del dashboard en máximo 2 queries DB.
     """
-    hoy = hoy_argentina()
+    ref_hoy = hoy or hoy_argentina()
+    hoy = ref_hoy
     fecha_inicio, fecha_fin = (fecha_desde_override, fecha_hasta_override) if (fecha_desde_override and fecha_hasta_override) else get_ciclo_fechas(usuario, hoy)
     fecha_inicio_ant, fecha_fin_ant = get_ciclo_fechas(usuario, fecha_inicio - timedelta(days=1))
     fecha_inicio_prox, fecha_fin_prox = get_ciclo_fechas(usuario, fecha_fin + timedelta(days=1))
@@ -338,43 +340,70 @@ def get_dashboard_resumen(
     primera_tx = db.execute(select(func.min(Transaccion.fecha)).where(Transaccion.usuario_id == usuario.id)).scalar()
     balance_res = calcular_balance_ciclo(db, usuario, fecha_desde_override=fecha_inicio, fecha_hasta_override=fecha_fin, billetera_ids=billetera_ids)
 
-    # --- QUERY 2: Últimos movimientos del ciclo/período ---
-    m_stmt_where = and_(
-        Transaccion.usuario_id == usuario.id,
-        Transaccion.fecha >= fecha_inicio,
-        Transaccion.fecha <= fecha_fin,
-        Transaccion.es_padre_cuotas == False,
-        Transaccion.metodo_pago.is_distinct_from(MetodoPago.CREDITO)
+    # --- QUERY 2: Últimos movimientos del ciclo/período (vía listar_movimientos) ---
+    from app.services.historial_service import listar_movimientos
+    resp_movs = listar_movimientos(
+        db=db,
+        usuario_id=usuario.id,
+        modo="general",
+        billetera_ids=billetera_ids,
+        fecha_desde=fecha_inicio,
+        fecha_hasta=hoy,
+        skip=0,
+        limit=6,
+        hoy=hoy,
     )
-    if billetera_ids:
-        m_stmt_where = and_(m_stmt_where, Transaccion.billetera_id.in_(billetera_ids))
 
-    m_stmt = select(
-        literal("movimiento").label("item_tipo"),
-        cast(Transaccion.id, String).label("id"),
-        Transaccion.descripcion.label("nombre"),
-        Transaccion.monto.label("monto"),
-        cast(Transaccion.moneda, String).label("moneda"),
-        Transaccion.fecha.label("fecha"),
-        Categoria.nombre.label("extra_1"), # categoria_nombre
-        Billetera.nombre.label("extra_2"), # billetera_nombre
-        cast(Transaccion.estado_verificacion, String).label("extra_3"), # estado_verificacion
-        cast(Transaccion.tipo, String).label("extra_4"), # tipo_transaccion
-        Subcategoria.nombre.label("extra_5"), # subcategoria_nombre
-        cast(Transaccion.movimiento_meta_id, String).label("extra_6") # movimiento_meta_id
-    ).join(Categoria, Transaccion.categoria_id == Categoria.id, isouter=True)\
-     .join(Billetera, Transaccion.billetera_id == Billetera.id, isouter=True)\
-     .join(Subcategoria, Transaccion.subcategoria_id == Subcategoria.id, isouter=True).where(m_stmt_where)\
-     .order_by(desc(Transaccion.fecha), desc(Transaccion.fecha_creacion)).limit(6)
+    cats_rows = db.execute(select(Categoria.id, Categoria.nombre)).all()
+    cat_names_map = {c[0]: c[1] for c in cats_rows}
 
-    movimientos_rows = db.execute(m_stmt).all()
-    movimientos_data = [{
-        "id": r.id, "descripcion": r.nombre, "fecha": r.fecha.isoformat(), "monto": float(r.monto),
-        "tipo": r.extra_4, "moneda": r.moneda, "billetera_nombre": r.extra_2 or "Billetera",
-        "categoria_nombre": r.extra_1, "estado_verificacion": r.extra_3,
-        "subcategoria_nombre": r.extra_5,
-        "movimiento_meta_id": r.extra_6 if hasattr(r, "extra_6") else None
-    } for r in movimientos_rows]
+    movimientos_data = []
+    for item in resp_movs.items:
+        tx = item.transaccion
+        if item.clase == "transaccion" and tx is not None:
+            tipo_item = tx.tipo.value if hasattr(tx.tipo, "value") else str(tx.tipo)
+            moneda_item = tx.moneda.value if hasattr(tx.moneda, "value") else str(tx.moneda)
+        else:
+            tipo_item = item.clase
+            moneda_item = item.moneda
+
+        cat_nom = None
+        subcat_nom = None
+        estado_verif = None
+        mov_meta_id = None
+
+        if tx is not None:
+            cat_nom = cat_names_map.get(tx.categoria_id)
+            if tx.subcategoria:
+                subcat_nom = tx.subcategoria.nombre
+            if tx.estado_verificacion:
+                estado_verif = (
+                    tx.estado_verificacion.value
+                    if hasattr(tx.estado_verificacion, "value")
+                    else str(tx.estado_verificacion)
+                )
+            if tx.movimiento_meta_id:
+                mov_meta_id = str(tx.movimiento_meta_id)
+
+        movimientos_data.append({
+            "id": item.id,
+            "descripcion": item.descripcion,
+            "fecha": item.fecha.isoformat(),
+            "monto": float(item.monto),
+            "tipo": tipo_item,
+            "moneda": moneda_item,
+            "sentido": item.sentido,
+            "cuenta_como": item.cuenta_como,
+            "billetera_nombre": item.billetera_nombre or "Billetera",
+            "categoria_nombre": cat_nom,
+            "estado_verificacion": estado_verif,
+            "subcategoria_nombre": subcat_nom,
+            "movimiento_meta_id": mov_meta_id,
+            "etiqueta": item.etiqueta,
+            "aclaracion": item.aclaracion,
+            "cuota_texto": item.cuota_texto,
+        })
+
 
     # --- Próximos Pagos y Disponible Libre (Ciclo actual canónico del usuario) ---
     fecha_inicio_ciclo_act, fecha_fin_ciclo_act = get_ciclo_fechas(usuario, hoy)

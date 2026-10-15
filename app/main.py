@@ -987,7 +987,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 
-from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin, perfil_financiero, importacion, reporte_error, memoria_comercios, facturas, patrones, salud
+from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin, perfil_financiero, importacion, reporte_error, memoria_comercios, facturas, patrones, salud, movimientos
 
 app.include_router(salud.router)
 app.include_router(auth.router)
@@ -996,6 +996,7 @@ app.include_router(usuarios.router)
 app.include_router(billeteras.router)
 app.include_router(tarjetas.router, prefix="/tarjetas", tags=["tarjetas"])
 app.include_router(transacciones.router)
+app.include_router(movimientos.router)
 app.include_router(transferencias.router)
 app.include_router(categorias.router)
 app.include_router(memoria_comercios.router)
