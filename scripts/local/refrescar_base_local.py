@@ -31,6 +31,30 @@ PG_DUMP = PGSQL_DIR / "bin" / "pg_dump.exe"
 PG_RESTORE = PGSQL_DIR / "bin" / "pg_restore.exe"
 PSQL = PGSQL_DIR / "bin" / "psql.exe"
 
+# Tablas que cambian solas en producción durante la copia (ejecuciones de jobs y renovación de sesiones).
+# Se tolera una pequeña cantidad de filas adicionales en producción para evitar falsos positivos al refrescar.
+TABLAS_QUE_CAMBIAN_SOLAS = {
+    "ejecuciones_jobs": 5,
+    "user_refresh_tokens": 5,
+}
+
+
+def clasificar_tabla(tabla: str, cnt_prod: int, cnt_local: int) -> str:
+    """
+    Clasifica el estado de sincronización de una tabla entre producción y local.
+    Devuelve:
+      - "OK": si cnt_prod == cnt_local.
+      - "TOLERADA": si la tabla está en TABLAS_QUE_CAMBIAN_SOLAS, cnt_local >= 0 y
+        0 < cnt_prod - cnt_local <= tope.
+      - "DIFERENCIA": en cualquier otro caso (incluyendo local mayor o tabla faltante cnt_local == -1).
+    """
+    if cnt_prod == cnt_local:
+        return "OK"
+    tope = TABLAS_QUE_CAMBIAN_SOLAS.get(tabla)
+    if tope is not None and cnt_local >= 0 and 0 < (cnt_prod - cnt_local) <= tope:
+        return "TOLERADA"
+    return "DIFERENCIA"
+
 def asegurar_servidor_levantado():
     if not PG_CTL.exists():
         raise FileNotFoundError(f"No existe pg_ctl en {PG_CTL}")
@@ -185,6 +209,7 @@ def main():
         tables_local = [r[0] for r in conn_l.execute(tablas_sql).fetchall()]
 
         discrepancias = []
+        toleradas = []
         iguales = 0
         total_tablas = len(tables_prod)
 
@@ -197,16 +222,20 @@ def main():
             else:
                 cnt_l = -1
 
-            match = cnt_p == cnt_l
-            estado = "OK" if match else "DIFERENCIA"
-            if match:
+            estado = clasificar_tabla(t, cnt_p, cnt_l)
+            if estado in ("OK", "TOLERADA"):
                 iguales += 1
+                if estado == "TOLERADA":
+                    toleradas.append((t, cnt_p, cnt_l))
             else:
                 discrepancias.append((t, cnt_p, cnt_l))
             print(f"{t:<35} | {cnt_p:>8} | {cnt_l:>8} | {estado:<10}")
 
         print("-" * 70)
         print(f"Total tablas: {total_tablas} | Tablas iguales: {iguales} | Tablas distintas: {len(discrepancias)}")
+        if toleradas:
+            for t, cp, cl in toleradas:
+                print(f"Tolerada (cambia sola en producción): {t} prod={cp} local={cl}")
 
     duracion_total = time.time() - t0
     print(f"\nDuracion total del refresco: {duracion_total:.2f} s")

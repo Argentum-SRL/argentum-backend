@@ -1058,6 +1058,12 @@ def ejecutar_cierre(paso: str) -> int:
 
 
 def main():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
     if len(sys.argv) < 3:
         print("Uso:")
         print("  python paso.py inicio <paso>")
