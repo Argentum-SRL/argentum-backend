@@ -7,6 +7,8 @@ No importa dashboard_service ni contexto_financiero_service.
 """
 from __future__ import annotations
 
+import logging
+import re
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
@@ -17,6 +19,7 @@ from sqlalchemy.orm import joinedload, Session
 
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria
+from app.models.cotizacion_dolar import CotizacionDolar
 from app.models.cuota import Cuota
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.historial_suscripcion import HistorialSuscripcion
@@ -26,8 +29,11 @@ from app.models.tarjeta_credito import EstadoTarjeta, TarjetaCredito
 from app.models.transaccion import TipoTransaccion, Transaccion, EstadoVerificacionTransaccion
 from app.models.usuario import Usuario
 from app.services import factura_service
+from app.services.dolar_service import obtener_cotizacion_por_fecha
 from app.services.resumen_tarjeta_service import calcular_resumen_actual
 from app.utils.fecha import hoy_argentina
+
+logger = logging.getLogger(__name__)
 
 
 def listar_pagos_proximos(
@@ -233,6 +239,10 @@ def listar_pagos_proximos(
             continue
 
         tarjeta_moneda_val = tarjeta.moneda.value if hasattr(tarjeta.moneda, "value") else str(tarjeta.moneda)
+        otra_moneda = "USD" if tarjeta_moneda_val == "ARS" else "ARS"
+        otra_sufijo = "-usd" if otra_moneda == "USD" else "-ars"
+        otra_nombre_moneda = "(en dólares)" if otra_moneda == "USD" else "(en pesos)"
+        percepcion_tarjeta = getattr(tarjeta, "percepcion_moneda_extranjera", Decimal("30.00"))
         max_pago = max_pago_por_tarjeta.get(tarjeta.id)
 
         # Caso 2c: El resumen vence dentro del ciclo actual
@@ -269,12 +279,56 @@ def listar_pagos_proximos(
                     "es_vencido": dias_rest < 0,
                     "factura_id": None,
                     "estado_factura": None,
+                    "percepcion": float(percepcion_tarjeta),
+                })
+
+            # Además del ítem en la moneda de la tarjeta, si ese resumen tiene cuotas sin pagar en otra moneda:
+            total_otra = Decimal("0.00")
+            if hasattr(resumen_t, "totales_por_moneda") and resumen_t.totales_por_moneda and otra_moneda in resumen_t.totales_por_moneda:
+                bloque_otra = resumen_t.totales_por_moneda[otra_moneda]
+                total_otra = Decimal(str(getattr(bloque_otra, "total_a_pagar", 0) or 0))
+            else:
+                if otra_moneda == "USD":
+                    total_otra = Decimal(str(getattr(resumen_t, "total_actual_usd", 0) or 0))
+                else:
+                    total_otra = Decimal(str(getattr(resumen_t, "total_actual_ars", 0) or 0))
+
+            cuotas_cubiertas_otra = Decimal("0.00")
+            if max_pago:
+                for ra in getattr(resumen_t, "resumenes_anteriores", []):
+                    for c_ant in ra.cuotas:
+                        if not c_ant.pagada and c_ant.fecha_vencimiento <= max_pago and c_ant.moneda == otra_moneda:
+                            cuotas_cubiertas_otra += Decimal(str(c_ant.monto))
+                for c_act in getattr(resumen_t, "cuotas_resumen_actual", []):
+                    if not c_act.pagada and c_act.fecha_vencimiento <= max_pago and c_act.moneda == otra_moneda:
+                        cuotas_cubiertas_otra += Decimal(str(c_act.monto))
+
+            monto_otra_final = max(Decimal("0.00"), total_otra - cuotas_cubiertas_otra)
+
+            if monto_otra_final > Decimal("0.00"):
+                dias_rest = (d_venc - hoy).days
+                proximos_pagos.append({
+                    "id": f"{tarjeta.id}{otra_sufijo}",
+                    "nombre": f"Resumen {tarjeta.nombre} {otra_nombre_moneda}",
+                    "monto": float(monto_otra_final),
+                    "moneda": otra_moneda,
+                    "fecha_cobro": d_venc.isoformat(),
+                    "dias_restantes": dias_rest,
+                    "tipo": "resumen_tarjeta",
+                    "color": tarjeta.color,
+                    "red": tarjeta.red.value if hasattr(tarjeta.red, "value") else str(tarjeta.red),
+                    "billetera_nombre": tarjeta.billetera.nombre if tarjeta.billetera else None,
+                    "billetera_id": str(tarjeta.billetera_id),
+                    "es_vencido": dias_rest < 0,
+                    "factura_id": None,
+                    "estado_factura": None,
+                    "percepcion": float(percepcion_tarjeta),
                 })
 
         # Caso 2d: El resumen vence después del fin del ciclo, pero quedan cuotas de resúmenes anteriores vencidas y sin pagar
         else:
             cuotas_vencidas_impagas = []
-            for ra in resumen_t.resumenes_anteriores:
+            for ra in getattr(resumen_t, "resumenes_anteriores", []):
                 for c_ant in ra.cuotas:
                     if not c_ant.pagada and c_ant.moneda == tarjeta_moneda_val:
                         # Una cuota cubierta por pago de resumen registrado cuenta como pagada
@@ -302,6 +356,38 @@ def listar_pagos_proximos(
                     "es_vencido": True,
                     "factura_id": None,
                     "estado_factura": None,
+                    "percepcion": float(percepcion_tarjeta),
+                })
+
+            cuotas_vencidas_impagas_otra = []
+            for ra in getattr(resumen_t, "resumenes_anteriores", []):
+                for c_ant in ra.cuotas:
+                    if not c_ant.pagada and c_ant.moneda == otra_moneda:
+                        if max_pago and c_ant.fecha_vencimiento <= max_pago:
+                            continue
+                        cuotas_vencidas_impagas_otra.append(c_ant)
+
+            if cuotas_vencidas_impagas_otra:
+                monto_total_vencido_otra = sum(Decimal(str(c.monto)) for c in cuotas_vencidas_impagas_otra)
+                venc_mas_viejo_otra = min(c.fecha_vencimiento for c in cuotas_vencidas_impagas_otra)
+                dias_rest_otra = (venc_mas_viejo_otra - hoy).days
+
+                proximos_pagos.append({
+                    "id": f"{tarjeta.id}{otra_sufijo}",
+                    "nombre": f"Resumen {tarjeta.nombre} {otra_nombre_moneda}",
+                    "monto": float(monto_total_vencido_otra),
+                    "moneda": otra_moneda,
+                    "fecha_cobro": venc_mas_viejo_otra.isoformat(),
+                    "dias_restantes": dias_rest_otra,
+                    "tipo": "resumen_tarjeta",
+                    "color": tarjeta.color,
+                    "red": tarjeta.red.value if hasattr(tarjeta.red, "value") else str(tarjeta.red),
+                    "billetera_nombre": tarjeta.billetera.nombre if tarjeta.billetera else None,
+                    "billetera_id": str(tarjeta.billetera_id),
+                    "es_vencido": True,
+                    "factura_id": None,
+                    "estado_factura": None,
+                    "percepcion": float(percepcion_tarjeta),
                 })
 
     # 5. Facturas de items_proximos_pagos con límite = fecha_fin_ciclo
@@ -361,49 +447,164 @@ def calcular_disponible_libre(
                 saldo_total[m_key] = Decimal(str(s or Decimal("0.00")))
 
     # 2. Desglose de compromisos impagos por moneda
-    resultado: Dict[str, Any] = {}
+    pagos_validos = [
+        p for p in pagos
+        if not (p.get("tipo") == "factura" and p.get("estado_factura") == "pagada")
+    ]
 
-    for m_key in ("ars", "usd"):
-        cuotas_pendientes = Decimal("0.00")
-        suscripciones_pendientes = Decimal("0.00")
-        facturas_pendientes = Decimal("0.00")
-        compromisos: List[Dict[str, Any]] = []
+    # Procesar compromisos en dólares
+    pagos_usd = [p for p in pagos_validos if str(p.get("moneda", "")).lower() == "usd"]
+    # Los compromisos en dólares se cubren primero con el saldo en dólares (billeteras activas sin inversión), por fecha_cobro ascendente
+    pagos_usd_sorted = sorted(pagos_usd, key=lambda x: str(x.get("fecha_cobro", "")))
 
-        for p in pagos:
-            moneda_pago = str(p.get("moneda", "")).lower()
-            if moneda_pago != m_key:
-                continue
+    saldo_usd_restante = saldo_total["usd"]
+    cubierto_usd_total = Decimal("0.00")
+    no_convertible_usd_total = Decimal("0.00")
+    items_dolares_con_pesos: List[Dict[str, Any]] = []
+    total_pesos_de_usd = Decimal("0.00")
+    total_usd_pesificado = Decimal("0.00")
 
-            # Las facturas pagadas no se restan del disponible libre
-            if p.get("tipo") == "factura" and p.get("estado_factura") == "pagada":
-                continue
+    cot_oficial_venta: Optional[Decimal] = None
+    cot_consultada = False
 
-            monto_dec = Decimal(str(p.get("monto") or 0))
+    def _obtener_cot_oficial() -> Optional[Decimal]:
+        nonlocal cot_oficial_venta, cot_consultada
+        if cot_consultada:
+            return cot_oficial_venta
+        cot_consultada = True
+        cot_obj = obtener_cotizacion_por_fecha(db, "oficial", hoy)
+        if cot_obj and cot_obj.venta is not None:
+            cot_oficial_venta = Decimal(str(cot_obj.venta))
+            return cot_oficial_venta
+        # Si no hay del día, la última disponible
+        stmt_last = (
+            select(CotizacionDolar)
+            .where(CotizacionDolar.tipo == "oficial", CotizacionDolar.venta.isnot(None))
+            .order_by(desc(CotizacionDolar.fecha))
+            .limit(1)
+        )
+        cot_last = db.execute(stmt_last).scalar_one_or_none()
+        if cot_last and cot_last.venta is not None:
+            cot_oficial_venta = Decimal(str(cot_last.venta))
+            return cot_oficial_venta
+        logger.warning("No se encontró cotización oficial (venta) para pesificar compromisos en dólares.")
+        return None
 
-            if p.get("tipo") in ("cuota", "resumen_tarjeta"):
-                cuotas_pendientes += monto_dec
-            elif p.get("tipo") == "suscripcion":
-                suscripciones_pendientes += monto_dec
-            elif p.get("tipo") == "factura":
-                facturas_pendientes += monto_dec
+    compromisos_usd: List[Dict[str, Any]] = []
+    cuotas_pendientes_usd = Decimal("0.00")
+    suscripciones_pendientes_usd = Decimal("0.00")
+    facturas_pendientes_usd = Decimal("0.00")
 
-            compromisos.append({
-                "id": str(p.get("id")),
-                "tipo": str(p.get("tipo")),
-                "nombre": str(p.get("nombre")),
-                "monto": monto_dec,
-                "fecha_cobro": str(p.get("fecha_cobro")),
-            })
+    for p in pagos_usd:
+        monto_dec = Decimal(str(p.get("monto") or 0))
+        if p.get("tipo") in ("cuota", "resumen_tarjeta"):
+            cuotas_pendientes_usd += monto_dec
+        elif p.get("tipo") == "suscripcion":
+            suscripciones_pendientes_usd += monto_dec
+        elif p.get("tipo") == "factura":
+            facturas_pendientes_usd += monto_dec
 
-        saldo_disp = saldo_total[m_key] - cuotas_pendientes - suscripciones_pendientes - facturas_pendientes
+        compromisos_usd.append({
+            "id": str(p.get("id")),
+            "tipo": str(p.get("tipo")),
+            "nombre": str(p.get("nombre")),
+            "monto": monto_dec,
+            "fecha_cobro": str(p.get("fecha_cobro")),
+        })
 
-        resultado[m_key] = {
-            "saldo_total": saldo_total[m_key],
-            "cuotas_pendientes": cuotas_pendientes,
-            "suscripciones_pendientes": suscripciones_pendientes,
-            "facturas_pendientes": facturas_pendientes,
-            "saldo_disponible": saldo_disp,
-            "compromisos": compromisos,
-        }
+    for p in pagos_usd_sorted:
+        monto_p = Decimal(str(p.get("monto") or 0))
+        if monto_p <= Decimal("0.00"):
+            continue
 
-    return resultado
+        cubierto = min(max(saldo_usd_restante, Decimal("0.00")), monto_p)
+        saldo_usd_restante -= cubierto
+        cubierto_usd_total += cubierto
+        faltante = monto_p - cubierto
+
+        if faltante > Decimal("0.00"):
+            if p.get("tipo") == "resumen_tarjeta":
+                cot = _obtener_cot_oficial()
+                if cot is None:
+                    no_convertible_usd_total += faltante
+                else:
+                    percep_raw = p.get("percepcion", Decimal("30.00"))
+                    percep = Decimal(str(percep_raw if percep_raw is not None else 30.00))
+                    # faltante × cotización oficial venta de hoy × (1 + percepcion/100)
+                    monto_en_pesos = (faltante * cot * (Decimal("1") + (percep / Decimal("100")))).quantize(Decimal("0.01"))
+                    total_pesos_de_usd += monto_en_pesos
+                    total_usd_pesificado += faltante
+
+                    nom_orig = str(p.get("nombre", ""))
+                    nom_base = re.sub(r"\s*\(en d[oó]lares\)", "", nom_orig, flags=re.IGNORECASE).strip()
+                    nom_pesificado = f"Parte en dólares de {nom_base} que se paga con pesos"
+
+                    monto_usd_val = int(faltante) if faltante == int(faltante) else faltante
+                    cot_val = int(cot) if cot == int(cot) else cot
+                    percep_val = int(percep) if percep == int(percep) else percep
+
+                    items_dolares_con_pesos.append({
+                        "id": f"{p.get('id')}-pesificado",
+                        "tipo": "dolares_con_pesos",
+                        "nombre": nom_pesificado,
+                        "monto": monto_en_pesos,
+                        "fecha_cobro": str(p.get("fecha_cobro")),
+                        "monto_usd": monto_usd_val,
+                        "cotizacion": cot_val,
+                        "percepcion": percep_val,
+                    })
+            else:
+                no_convertible_usd_total += faltante
+
+    # El libre en dólares es saldo_usd − lo cubierto con dólares − lo no convertible.
+    libre_usd = saldo_total["usd"] - cubierto_usd_total - no_convertible_usd_total
+    cuotas_pendientes_usd = max(Decimal("0.00"), cuotas_pendientes_usd - total_usd_pesificado)
+
+    # Procesar compromisos en pesos
+    pagos_ars = [p for p in pagos_validos if str(p.get("moneda", "")).lower() == "ars"]
+    compromisos_ars: List[Dict[str, Any]] = []
+    cuotas_pendientes_ars = Decimal("0.00")
+    suscripciones_pendientes_ars = Decimal("0.00")
+    facturas_pendientes_ars = Decimal("0.00")
+
+    for p in pagos_ars:
+        monto_dec = Decimal(str(p.get("monto") or 0))
+        if p.get("tipo") in ("cuota", "resumen_tarjeta"):
+            cuotas_pendientes_ars += monto_dec
+        elif p.get("tipo") == "suscripcion":
+            suscripciones_pendientes_ars += monto_dec
+        elif p.get("tipo") == "factura":
+            facturas_pendientes_ars += monto_dec
+
+        compromisos_ars.append({
+            "id": str(p.get("id")),
+            "tipo": str(p.get("tipo")),
+            "nombre": str(p.get("nombre")),
+            "monto": monto_dec,
+            "fecha_cobro": str(p.get("fecha_cobro")),
+        })
+
+    for item_dolar in items_dolares_con_pesos:
+        compromisos_ars.append(item_dolar)
+
+    cuotas_pendientes_ars += total_pesos_de_usd
+    libre_ars = saldo_total["ars"] - cuotas_pendientes_ars - suscripciones_pendientes_ars - facturas_pendientes_ars
+
+    return {
+        "ars": {
+            "saldo_total": saldo_total["ars"],
+            "cuotas_pendientes": cuotas_pendientes_ars,
+            "suscripciones_pendientes": suscripciones_pendientes_ars,
+            "facturas_pendientes": facturas_pendientes_ars,
+            "saldo_disponible": libre_ars,
+            "compromisos": compromisos_ars,
+        },
+        "usd": {
+            "saldo_total": saldo_total["usd"],
+            "cuotas_pendientes": cuotas_pendientes_usd,
+            "suscripciones_pendientes": suscripciones_pendientes_usd,
+            "facturas_pendientes": facturas_pendientes_usd,
+            "saldo_disponible": libre_usd,
+            "compromisos": compromisos_usd,
+        },
+    }

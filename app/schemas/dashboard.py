@@ -41,6 +41,10 @@ class CompromisoDisponibleItem(BaseModel):
     nombre: str
     monto: Decimal
     fecha_cobro: str
+    monto_usd: Optional[Decimal] = None
+    cotizacion: Optional[Decimal] = None
+    percepcion: Optional[Decimal] = None
+
 
 
 class SaldoDisponibleMoneda(BaseModel):
