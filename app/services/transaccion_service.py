@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 from dateutil.relativedelta import relativedelta
 
 from app.models.transaccion import Transaccion, TipoTransaccion, OrigenTransaccion, EstadoVerificacionTransaccion, MetodoPago
+from app.models.usuario import Moneda
 from app.models.billetera import Billetera
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.cuota import Cuota
@@ -248,6 +249,23 @@ def crear_transaccion(
     if not es_consumo_credito:
         _validar_moneda_coincide(data.moneda, billetera)
 
+    # Validación y cálculo para transacciones con moneda original USD (débito/consumo exterior)
+    es_moneda_original_usd = False
+    if getattr(data, "moneda_original", None) is not None:
+        es_moneda_original_usd = (
+            data.moneda_original == Moneda.USD
+            or str(getattr(data.moneda_original, "value", data.moneda_original)).upper() == "USD"
+        )
+
+    if es_moneda_original_usd:
+        if not data.monto_original or Decimal(str(data.monto_original)) <= Decimal("0"):
+            raise HTTPException(status_code=400, detail="Falta el monto en dólares.")
+
+        if data.moneda == Moneda.ARS and data.tipo == TipoTransaccion.EGRESO:
+            cotizacion_calculada = round(Decimal(str(data.monto)) / Decimal(str(data.monto_original)), 4)
+            data.cotizacion_aplicada = cotizacion_calculada
+            data.tipo_dolar_usado = "tarjeta"
+
     # 2. Validar categoría obligatoria
     if not data.categoria_id:
         raise HTTPException(status_code=400, detail="Debés seleccionar una categoría.")
@@ -412,6 +430,9 @@ def crear_transaccion(
         **data.model_dump(exclude={"usuario_id", "info_cuotas", "factura_id"}),
         usuario_id=usuario_id
     )
+    if es_moneda_original_usd and data.moneda == Moneda.ARS and data.tipo == TipoTransaccion.EGRESO:
+        nueva_transaccion.cotizacion_aplicada = data.cotizacion_aplicada
+        nueva_transaccion.tipo_dolar_usado = data.tipo_dolar_usado
     nueva_transaccion.saldo_aplicado = not _queda_pendiente_por_fecha(nueva_transaccion)
     
     # 4. Actualizar saldo solo si es confirmada, es hoy o pasada, y NO es crédito

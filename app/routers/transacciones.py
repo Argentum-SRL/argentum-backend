@@ -1,16 +1,19 @@
 from typing import List, Optional
 from uuid import UUID
 from datetime import date
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.usuario import Usuario
 from app.models.transaccion import TipoTransaccion
 from app.schemas.transaccion import TransaccionCreate, TransaccionUpdate, TransaccionRead
-from app.services import transaccion_service
+from app.services import transaccion_service, dolar_service
+from app.utils.fecha import hoy_argentina
 
 router = APIRouter(prefix="/transacciones", tags=["transacciones"])
 
@@ -77,6 +80,38 @@ def get_pendientes_ia(
     Lista transacciones con estado_verificacion='pendiente' con límites.
     """
     return transaccion_service.obtener_pendientes_ia(db, current_user.id, skip=skip, limit=limit)
+
+
+@router.get("/sugerencia-pesos")
+def sugerencia_pesos(
+    monto_usd: Decimal = Query(..., gt=0),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    """
+    Sugerencia de cotización, percepción y monto en pesos para un gasto en dólares.
+    """
+    cotizacion_obj = dolar_service.obtener_cotizacion_por_fecha(
+        db, tipo="oficial", fecha_consulta=hoy_argentina()
+    )
+    percepcion = settings.PERCEPCION_EXTERIOR_PORCENTAJE
+
+    if cotizacion_obj is None or cotizacion_obj.venta is None:
+        return {
+            "cotizacion": None,
+            "percepcion": percepcion,
+            "monto_pesos": None,
+        }
+
+    cotizacion = cotizacion_obj.venta
+    factor = Decimal("1") + (Decimal(str(percepcion)) / Decimal("100"))
+    monto_pesos = round(monto_usd * cotizacion * factor, 2)
+
+    return {
+        "cotizacion": float(cotizacion),
+        "percepcion": percepcion,
+        "monto_pesos": float(monto_pesos),
+    }
 
 
 @router.get("/{transaccion_id}", response_model=TransaccionRead)

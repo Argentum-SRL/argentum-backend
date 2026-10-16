@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     # Dolar API
     DOLAR_API_BASE_URL: str = "https://dolarapi.com"
     DOLAR_API_TIMEOUT_SECONDS: int = 10
+    PERCEPCION_EXTERIOR_PORCENTAJE: int = 30
+    # Percepción sobre consumos en el exterior pagados en pesos; dólar tarjeta ≈ oficial × 1,3 (El Destape 04/08/2026, iProfesional 22/06/2026)
 
     # Meta WhatsApp Cloud API
     WHATSAPP_ACCESS_TOKEN: str = ""
