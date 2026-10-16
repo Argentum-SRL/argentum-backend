@@ -179,6 +179,7 @@ from app.routers.whatsapp.propuestas import (
     _resolver_mencion_tarjeta_en_texto,
 )
 from app.routers.whatsapp.registro import _registrar_directo_si_corresponde
+from app.routers.whatsapp.recordatorio_impago_wpp import enviar_recordatorio_impago_si_corresponde
 from app.routers.whatsapp.resolvers_cascada import (
     ALIAS_BANCOS_ARGENTINOS,
     ALIAS_BILLETERAS,
@@ -592,6 +593,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                 whatsapp_service.enviar_whatsapp(from_number, ctx.resultado_ia["respuesta_usuario"])
                 t_envio_end = time.perf_counter()
                 logger.info("[LATENCIA][ENVIO_META] Envío de mensaje: %.2fs", t_envio_end - t_envio_start)
+                enviar_recordatorio_impago_si_corresponde(db, usuario, from_number)
 
             t_total = time.perf_counter() - t_inicio
             logger.info(
