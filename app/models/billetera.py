@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, ForeignKey, Numeric, String, Index
+from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, String, Index
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from typing import TYPE_CHECKING
@@ -61,6 +61,12 @@ class Billetera(Base):
 
     nivel_tasa: Mapped[str | None] = mapped_column(String(120), nullable=True)
     fecha_ultimo_rendimiento: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fecha_saldo: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    @property
+    def fecha_saldo_efectiva(self) -> date:
+        from app.services.saldo_billetera_service import fecha_creacion_billetera
+        return fecha_creacion_billetera(self)
     estado: Mapped[EstadoBilletera] = mapped_column(
         SAEnum(EstadoBilletera, values_callable=lambda obj: [e.value for e in obj], name="estado_billetera_enum"),
         nullable=False,

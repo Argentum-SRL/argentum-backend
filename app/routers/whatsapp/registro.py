@@ -543,6 +543,11 @@ def _confirmar_propuesta_transaccion(
         from app.routers.whatsapp.factura_wpp import linea_facturas_pagadas
         msg_resp += linea_facturas_pagadas(db, [t.id for t in txs_registradas if t and t.id])
 
+        from app.routers.whatsapp.aviso_saldo_wpp import obtener_aviso_saldo_lote
+        aviso_lote = obtener_aviso_saldo_lote(txs_registradas, db=db, billeteras_map=b_map)
+        if aviso_lote:
+            msg_resp += f"\n{aviso_lote}"
+
         if conv_previa:
             conv_previa.accion_ejecutada = f"lote:{','.join(str(t.id) for t in txs_registradas)}"
         emitir_evento_actualizacion(db, usuario.id, "transacciones")
@@ -783,6 +788,17 @@ def _confirmar_propuesta_transaccion(
     if tx_ids:
         from app.routers.whatsapp.factura_wpp import linea_facturas_pagadas
         msg_resp += linea_facturas_pagadas(db, tx_ids)
+
+    if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
+        from app.routers.whatsapp.aviso_saldo_wpp import obtener_aviso_saldo_lote
+        aviso_lote = obtener_aviso_saldo_lote([transaccion] + adicionales_registradas, db=db)
+        if aviso_lote:
+            msg_resp += f"\n{aviso_lote}"
+    else:
+        from app.routers.whatsapp.aviso_saldo_wpp import obtener_aviso_saldo_individual
+        aviso_ind = obtener_aviso_saldo_individual(transaccion, billetera=billetera, db=db)
+        if aviso_ind:
+            msg_resp += f"\n{aviso_ind}"
 
     return transaccion, msg_resp, False
 
@@ -1175,6 +1191,17 @@ def _registrar_movimiento_directo(
     if tx_ids:
         from app.routers.whatsapp.factura_wpp import linea_facturas_pagadas
         msg_resp += linea_facturas_pagadas(db, tx_ids)
+
+    if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
+        from app.routers.whatsapp.aviso_saldo_wpp import obtener_aviso_saldo_lote
+        aviso_lote = obtener_aviso_saldo_lote([tx] + adicionales_registradas, db=db)
+        if aviso_lote:
+            msg_resp += f"\n{aviso_lote}"
+    else:
+        from app.routers.whatsapp.aviso_saldo_wpp import obtener_aviso_saldo_individual
+        aviso_ind = obtener_aviso_saldo_individual(tx, billetera=billetera, db=db)
+        if aviso_ind:
+            msg_resp += f"\n{aviso_ind}"
 
     return tx, msg_resp
 

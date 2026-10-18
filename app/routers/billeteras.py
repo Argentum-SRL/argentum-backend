@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import List
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
@@ -49,6 +49,7 @@ class CrearBilleteraRequest(BaseModel):
     es_inversion: bool = False
     tna: Decimal | None = Field(default=None, ge=Decimal("0"), decimal_places=2, max_digits=6)
     bank_id: str | None = Field(default=None, max_length=50)
+    fecha_saldo: date | None = None
 
     @field_validator("nombre")
     @classmethod
@@ -299,6 +300,31 @@ def create_billetera(
             detail="Una billetera de efectivo no puede tener tasa",
         )
 
+    if body.fecha_saldo is not None:
+        hoy = hoy_argentina()
+        if body.fecha_saldo > hoy:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "detail": "La fecha del saldo no puede ser futura.",
+                    "error": {
+                        "code": "UNPROCESSABLE",
+                        "message": "La fecha del saldo no puede ser futura.",
+                    },
+                },
+            )
+        if (hoy - body.fecha_saldo).days > 730:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "detail": "La fecha del saldo no puede ser de hace más de 2 años.",
+                    "error": {
+                        "code": "UNPROCESSABLE",
+                        "message": "La fecha del saldo no puede ser de hace más de 2 años.",
+                    },
+                },
+            )
+
     if body.tna is not None:
         fecha_ultimo_rendimiento = datetime.now(timezone.utc)
     else:
@@ -323,6 +349,7 @@ def create_billetera(
         tna=body.tna,
         entidad_id=entidad_id,
         fecha_ultimo_rendimiento=fecha_ultimo_rendimiento,
+        fecha_saldo=body.fecha_saldo,
     )
     db.add(b)
     db.commit()

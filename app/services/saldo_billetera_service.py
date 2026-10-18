@@ -4,21 +4,47 @@ Ubicación: app/services/saldo_billetera_service.py
 """
 from __future__ import annotations
 
-from datetime import date, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from app.models.billetera import Billetera
+from app.models.transaccion import MetodoPago
 from app.utils.fecha import TZ_ARGENTINA
 
 
 def fecha_creacion_billetera(billetera: Billetera) -> date:
     """
-    Retorna la fecha de creación de la billetera pasada a la hora de Argentina, como date.
+    Retorna la fecha efectiva del saldo de la billetera:
+    fecha_saldo si existe; si no, la fecha de creación en hora Argentina como date.
     """
+    if getattr(billetera, "fecha_saldo", None) is not None:
+        return billetera.fecha_saldo
+
     fc = billetera.fecha_creacion
     if fc.tzinfo is None:
         fc = fc.replace(tzinfo=timezone.utc)
     return fc.astimezone(TZ_ARGENTINA).date()
+
+
+def movimiento_anterior_al_saldo(
+    billetera: Billetera | None,
+    fecha: date | datetime,
+    metodo_pago: MetodoPago | str | None = None,
+) -> bool:
+    """
+    Indica si un movimiento es anterior a la fecha efectiva de saldo de la billetera
+    y no corresponde a un método de pago de crédito.
+    """
+    if billetera is None:
+        return False
+
+    if metodo_pago is not None:
+        val = metodo_pago.value if hasattr(metodo_pago, "value") else str(metodo_pago)
+        if val.lower() == "credito":
+            return False
+
+    f_date = fecha.date() if isinstance(fecha, datetime) else fecha
+    return f_date < fecha_creacion_billetera(billetera)
 
 
 def aplicar_impacto_saldo(billetera: Billetera, impacto: Decimal, fecha: date) -> None:
