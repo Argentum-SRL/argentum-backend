@@ -543,8 +543,8 @@ def _confirmar_propuesta_transaccion(
         from app.routers.whatsapp.factura_wpp import linea_facturas_pagadas
         msg_resp += linea_facturas_pagadas(db, [t.id for t in txs_registradas if t and t.id])
 
-        from app.routers.whatsapp.aviso_saldo_wpp import obtener_aviso_saldo_lote
-        aviso_lote = obtener_aviso_saldo_lote(txs_registradas, db=db, billeteras_map=b_map)
+        from app.routers.whatsapp.aviso_saldo_wpp import obtener_aviso_saldo
+        aviso_lote = obtener_aviso_saldo(txs_registradas, db=db, billeteras_map=b_map)
         if aviso_lote:
             msg_resp += f"\n{aviso_lote}"
 
@@ -789,16 +789,11 @@ def _confirmar_propuesta_transaccion(
         from app.routers.whatsapp.factura_wpp import linea_facturas_pagadas
         msg_resp += linea_facturas_pagadas(db, tx_ids)
 
-    if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
-        from app.routers.whatsapp.aviso_saldo_wpp import obtener_aviso_saldo_lote
-        aviso_lote = obtener_aviso_saldo_lote([transaccion] + adicionales_registradas, db=db)
-        if aviso_lote:
-            msg_resp += f"\n{aviso_lote}"
-    else:
-        from app.routers.whatsapp.aviso_saldo_wpp import obtener_aviso_saldo_individual
-        aviso_ind = obtener_aviso_saldo_individual(transaccion, billetera=billetera, db=db)
-        if aviso_ind:
-            msg_resp += f"\n{aviso_ind}"
+    from app.routers.whatsapp.aviso_saldo_wpp import obtener_aviso_saldo
+    movs_aviso = [transaccion] + (adicionales_registradas if (adicionales and isinstance(adicionales, list)) else [])
+    aviso_wpp = obtener_aviso_saldo(movs_aviso, db=db, billetera_defecto=billetera)
+    if aviso_wpp:
+        msg_resp += f"\n{aviso_wpp}"
 
     return transaccion, msg_resp, False
 
@@ -1192,16 +1187,11 @@ def _registrar_movimiento_directo(
         from app.routers.whatsapp.factura_wpp import linea_facturas_pagadas
         msg_resp += linea_facturas_pagadas(db, tx_ids)
 
-    if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
-        from app.routers.whatsapp.aviso_saldo_wpp import obtener_aviso_saldo_lote
-        aviso_lote = obtener_aviso_saldo_lote([tx] + adicionales_registradas, db=db)
-        if aviso_lote:
-            msg_resp += f"\n{aviso_lote}"
-    else:
-        from app.routers.whatsapp.aviso_saldo_wpp import obtener_aviso_saldo_individual
-        aviso_ind = obtener_aviso_saldo_individual(tx, billetera=billetera, db=db)
-        if aviso_ind:
-            msg_resp += f"\n{aviso_ind}"
+    from app.routers.whatsapp.aviso_saldo_wpp import obtener_aviso_saldo
+    movs_aviso_dir = [tx] + (adicionales_registradas if (adicionales and isinstance(adicionales, list)) else [])
+    aviso_wpp_dir = obtener_aviso_saldo(movs_aviso_dir, db=db, billetera_defecto=billetera)
+    if aviso_wpp_dir:
+        msg_resp += f"\n{aviso_wpp_dir}"
 
     return tx, msg_resp
 

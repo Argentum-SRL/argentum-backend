@@ -26,6 +26,7 @@ class BilleteraBase(BaseModel):
     bank_id: str | None = Field(default=None, max_length=50)
     nivel_tasa: str | None = Field(default=None, max_length=120)
     fecha_saldo: date | None = None
+    tiene_punto_partida: bool = True
 
     @field_validator("nombre")
     @classmethod
@@ -65,7 +66,7 @@ class BilleteraUpdate(BaseModel):
 class BilleteraRead(BilleteraBase):
     id: UUID
     fecha_creacion: datetime
-    fecha_saldo_efectiva: date
+    fecha_saldo_efectiva: date | None = None
     tiene_transacciones: bool = False
     entidad_efectiva: str | None = None
 

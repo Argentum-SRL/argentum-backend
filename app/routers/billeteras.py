@@ -18,6 +18,7 @@ from app.models.transaccion import Transaccion
 from app.models.transferencia_interna import TransferenciaInterna
 from app.models.tarjeta_credito import TarjetaCredito
 from app.core.entidades import ENTIDADES, entidad_de_billetera, opciones_de_entidad
+from app.schemas.tipos import DecimalJSON
 from app.schemas.billetera import (
     BilleteraRead,
     BilleteraUpdate,
@@ -58,6 +59,18 @@ class CrearBilleteraRequest(BaseModel):
         if not v_clean:
             raise ValueError("El nombre de la billetera no puede estar vacío.")
         return v_clean
+
+
+class FechaSaldoBody(BaseModel):
+    fecha_saldo: date
+
+
+class PrevisualizarFechaSaldoResponse(BaseModel):
+    saldo_actual: DecimalJSON
+    saldo_nuevo: DecimalJSON
+    cantidad_movimientos: int
+    fecha_actual: date
+    fecha_nueva: date
 
 
 @router.get("", response_model=List[BilleteraRead])
@@ -300,30 +313,36 @@ def create_billetera(
             detail="Una billetera de efectivo no puede tener tasa",
         )
 
-    if body.fecha_saldo is not None:
-        hoy = hoy_argentina()
-        if body.fecha_saldo > hoy:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "detail": "La fecha del saldo no puede ser futura.",
-                    "error": {
-                        "code": "UNPROCESSABLE",
-                        "message": "La fecha del saldo no puede ser futura.",
+    if body.saldo_inicial and body.saldo_inicial > Decimal("0"):
+        tiene_punto_partida = True
+        fecha_saldo_creacion = body.fecha_saldo
+        if fecha_saldo_creacion is not None:
+            hoy = hoy_argentina()
+            if fecha_saldo_creacion > hoy:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail={
+                        "detail": "La fecha del saldo no puede ser futura.",
+                        "error": {
+                            "code": "UNPROCESSABLE",
+                            "message": "La fecha del saldo no puede ser futura.",
+                        },
                     },
-                },
-            )
-        if (hoy - body.fecha_saldo).days > 730:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "detail": "La fecha del saldo no puede ser de hace más de 2 años.",
-                    "error": {
-                        "code": "UNPROCESSABLE",
-                        "message": "La fecha del saldo no puede ser de hace más de 2 años.",
+                )
+            if (hoy - fecha_saldo_creacion).days > 730:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail={
+                        "detail": "La fecha del saldo no puede ser de hace más de 2 años.",
+                        "error": {
+                            "code": "UNPROCESSABLE",
+                            "message": "La fecha del saldo no puede ser de hace más de 2 años.",
+                        },
                     },
-                },
-            )
+                )
+    else:
+        tiene_punto_partida = False
+        fecha_saldo_creacion = None
 
     if body.tna is not None:
         fecha_ultimo_rendimiento = datetime.now(timezone.utc)
@@ -349,7 +368,8 @@ def create_billetera(
         tna=body.tna,
         entidad_id=entidad_id,
         fecha_ultimo_rendimiento=fecha_ultimo_rendimiento,
-        fecha_saldo=body.fecha_saldo,
+        fecha_saldo=fecha_saldo_creacion,
+        tiene_punto_partida=tiene_punto_partida,
     )
     db.add(b)
     db.commit()
@@ -658,3 +678,33 @@ def eliminar_ajuste_billetera(
         db, current_user.id, ajuste_id, billetera_id=billetera_id, commit=True
     )
     return None
+
+
+@router.post(
+    "/{billetera_id}/fecha-saldo/previsualizar",
+    response_model=PrevisualizarFechaSaldoResponse,
+)
+def previsualizar_cambio_fecha_endpoint(
+    billetera_id: str,
+    body: FechaSaldoBody,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Previsualiza el impacto de retroceder la fecha de saldo sin modificar datos."""
+    from app.services.fecha_saldo_service import previsualizar_cambio_fecha
+    return previsualizar_cambio_fecha(db, current_user.id, billetera_id, body.fecha_saldo)
+
+
+@router.patch(
+    "/{billetera_id}/fecha-saldo",
+    response_model=BilleteraRead,
+)
+def cambiar_fecha_saldo_endpoint(
+    billetera_id: str,
+    body: FechaSaldoBody,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Cambia la fecha de saldo hacia atrás, actualizando saldo actual e inicial."""
+    from app.services.fecha_saldo_service import cambiar_fecha_saldo
+    return cambiar_fecha_saldo(db, current_user.id, billetera_id, body.fecha_saldo)

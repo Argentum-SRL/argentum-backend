@@ -558,7 +558,8 @@ def crear_billeteras_efectivo_default(db: Session, usuario_id: UUID) -> None:
             saldo_inicial=0,
             saldo_actual=0,
             es_principal=False,
-            es_efectivo=True
+            es_efectivo=True,
+            tiene_punto_partida=False,
         )
         db.add(b_ars)
 
@@ -570,7 +571,8 @@ def crear_billeteras_efectivo_default(db: Session, usuario_id: UUID) -> None:
             saldo_inicial=0,
             saldo_actual=0,
             es_principal=False,
-            es_efectivo=True
+            es_efectivo=True,
+            tiene_punto_partida=False,
         )
         db.add(b_usd)
     

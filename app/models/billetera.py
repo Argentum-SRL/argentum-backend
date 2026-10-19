@@ -62,9 +62,12 @@ class Billetera(Base):
     nivel_tasa: Mapped[str | None] = mapped_column(String(120), nullable=True)
     fecha_ultimo_rendimiento: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     fecha_saldo: Mapped[date | None] = mapped_column(Date, nullable=True)
+    tiene_punto_partida: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
 
     @property
-    def fecha_saldo_efectiva(self) -> date:
+    def fecha_saldo_efectiva(self) -> date | None:
+        if not getattr(self, "tiene_punto_partida", True):
+            return None
         from app.services.saldo_billetera_service import fecha_creacion_billetera
         return fecha_creacion_billetera(self)
     estado: Mapped[EstadoBilletera] = mapped_column(

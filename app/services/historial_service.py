@@ -43,7 +43,7 @@ from app.services.definiciones_service import (
     etiqueta_movimiento,
     visible_en_historial,
 )
-from app.services.saldo_billetera_service import fecha_creacion_billetera
+from app.services.saldo_billetera_service import fecha_creacion_billetera, fecha_punto_partida
 from app.services.transaccion_service import _normalizar_texto_busqueda
 from app.utils.fecha import hoy_argentina
 
@@ -556,51 +556,53 @@ def listar_movimientos(
     # E. SALDO INICIAL (Solo modo billetera)
     # ==========================================================================
     if modo == "billetera" and billetera_actual and not solo_transacciones and not busqueda_activa:
-        fc_arg = fecha_creacion_billetera(billetera_actual)
-        fechas_movs_saldo = [
-            m["fecha"] for m in raw_movimientos if m.get("cuenta_en_saldo")
-        ]
-        if fechas_movs_saldo:
-            fecha_saldo_inicial = min(fc_arg, min(fechas_movs_saldo))
-        else:
-            fecha_saldo_inicial = fc_arg
+        f_pp = fecha_punto_partida(billetera_actual)
+        if f_pp is not None:
+            fc_arg = f_pp
+            fechas_movs_saldo = [
+                m["fecha"] for m in raw_movimientos if m.get("cuenta_en_saldo")
+            ]
+            if fechas_movs_saldo:
+                fecha_saldo_inicial = min(fc_arg, min(fechas_movs_saldo))
+            else:
+                fecha_saldo_inicial = fc_arg
 
-        cumple_desde = fecha_desde is None or fecha_saldo_inicial >= fecha_desde
-        cumple_hasta = fecha_hasta is None or fecha_saldo_inicial <= fecha_hasta
-        mon_b = (
-            billetera_actual.moneda.value
-            if hasattr(billetera_actual.moneda, "value")
-            else str(billetera_actual.moneda)
-        )
-        cumple_moneda = moneda is None or mon_b == (moneda.value if hasattr(moneda, "value") else str(moneda))
+            cumple_desde = fecha_desde is None or fecha_saldo_inicial >= fecha_desde
+            cumple_hasta = fecha_hasta is None or fecha_saldo_inicial <= fecha_hasta
+            mon_b = (
+                billetera_actual.moneda.value
+                if hasattr(billetera_actual.moneda, "value")
+                else str(billetera_actual.moneda)
+            )
+            cumple_moneda = moneda is None or mon_b == (moneda.value if hasattr(moneda, "value") else str(moneda))
 
-        if cumple_desde and cumple_hasta and cumple_moneda:
-            saldo_ini_dec = billetera_actual.saldo_inicial or Decimal("0.00")
-            raw_movimientos.append({
-                "id": f"saldo_inicial:{billetera_actual.id}",
-                "clase": "saldo_inicial",
-                "fecha": fecha_saldo_inicial,
-                "fecha_creacion": datetime.min.replace(tzinfo=timezone.utc),
-                "descripcion": "Saldo inicial",
-                "monto": abs(saldo_ini_dec),
-                "moneda": mon_b,
-                "sentido": "entra" if saldo_ini_dec >= 0 else "sale",
-                "etiqueta": ETIQUETA_SALDO_INICIAL[0],
-                "cuenta_como": ETIQUETA_SALDO_INICIAL[1],
-                "aclaracion": ETIQUETA_SALDO_INICIAL[2],
-                "cuenta_en_saldo": True,
-                "saldo_despues": saldo_ini_dec,
-                "cuota_texto": None,
-                "grupo_cuotas_id": None,
-                "billetera_id": billetera_actual.id,
-                "billetera_nombre": billetera_actual.nombre,
-                "billetera_destino_nombre": None,
-                "monto_destino": None,
-                "moneda_destino": None,
-                "transaccion": None,
-                "prioridad_saldo_inicial": 0,
-                "entity": None,
-            })
+            if cumple_desde and cumple_hasta and cumple_moneda:
+                saldo_ini_dec = billetera_actual.saldo_inicial or Decimal("0.00")
+                raw_movimientos.append({
+                    "id": f"saldo_inicial:{billetera_actual.id}",
+                    "clase": "saldo_inicial",
+                    "fecha": fecha_saldo_inicial,
+                    "fecha_creacion": datetime.min.replace(tzinfo=timezone.utc),
+                    "descripcion": "Saldo inicial",
+                    "monto": abs(saldo_ini_dec),
+                    "moneda": mon_b,
+                    "sentido": "entra" if saldo_ini_dec >= 0 else "sale",
+                    "etiqueta": ETIQUETA_SALDO_INICIAL[0],
+                    "cuenta_como": ETIQUETA_SALDO_INICIAL[1],
+                    "aclaracion": ETIQUETA_SALDO_INICIAL[2],
+                    "cuenta_en_saldo": True,
+                    "saldo_despues": saldo_ini_dec,
+                    "cuota_texto": None,
+                    "grupo_cuotas_id": None,
+                    "billetera_id": billetera_actual.id,
+                    "billetera_nombre": billetera_actual.nombre,
+                    "billetera_destino_nombre": None,
+                    "monto_destino": None,
+                    "moneda_destino": None,
+                    "transaccion": None,
+                    "prioridad_saldo_inicial": 0,
+                    "entity": None,
+                })
 
     # ==========================================================================
     # F. CÁLCULO DE SALDO_DESPUES (Solo modo billetera)

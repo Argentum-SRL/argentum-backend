@@ -12,6 +12,17 @@ Esta sección manda: si otra parte de este archivo dice algo distinto, vale lo q
 - Las cuentas las hace siempre el sistema; la IA solo entiende y redacta.
 - "Hoy" se calcula con app/utils/fecha.py (hoy_argentina). Todo monto que ve el usuario pasa por app/utils/formato.py (formatear_monto).
 
+### Punto de partida del saldo y tipos de números (fase_saldo_punto_partida)
+- **Punto de partida**: El saldo inicial es una foto fechada (`fecha_saldo`), no un movimiento ni un ingreso. Una billetera con saldo inicial 0 se crea sin punto de partida (`tiene_punto_partida=False`): todo movimiento suma o resta sin importar su fecha. Con saldo > 0 (`tiene_punto_partida=True`), rige la fecha de saldo (`fecha_saldo_efectiva`): movimientos con fecha igual o posterior impactan en `saldo_actual`; movimientos anteriores no mueven `saldo_actual` y solo descuentan de `saldo_inicial`. La fecha de saldo se puede mover hacia atrás mediante `fecha_saldo_service` con validación invariante contra `calcular_saldo_teorico`.
+- **Tres tipos de números**:
+  1. *Historia*: Lo que realmente ocurrió (movimientos registrados). El saldo inicial nunca es ingreso, sueldo ni ahorro ni entra en ingreso habitual, gasto típico, tasa de ahorro, patrones, presupuestos ni balance del ciclo.
+  2. *Plata de hoy*: Dinero disponible ahora (`saldo_actual`), calculado como foto inicial más movimientos desde la fecha de saldo (o todos si no tiene punto de partida), más rendimientos y ajustes.
+  3. *Proyecciones*: Flujo futuro a partir del saldo actual considerando compromisos futuros y pagos programados.
+- **Avisos de saldo en WhatsApp**:
+  - Máximo una sola línea por mensaje del bot (< 90 caracteres).
+  - Dato primero: avisa únicamente si hay movimientos confirmados con fecha anterior a la fecha de saldo de billeteras con punto de partida (nunca con crédito ni billeteras sin punto de partida).
+  - Textos concisos y directos: "Ojo: es anterior a tu saldo de «...» (dd/mm) y no lo modifica."
+
 ### Servicios del motor (app/services/)
 - definiciones_service, ingreso_habitual_service, compromisos_service, conciliacion_service, datos_motor_service, perfil_financiero_service, calibracion_service, proyeccion_service, resumen_tarjeta_service, pago_resumen_service, tarjeta_service.
 
