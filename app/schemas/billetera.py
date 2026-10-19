@@ -16,7 +16,7 @@ class BilleteraBase(BaseModel):
     nombre: str = Field(..., min_length=1, max_length=100)
     moneda: Moneda
     saldo_actual: DecimalJSON = Field(default=Decimal("0"), decimal_places=2, max_digits=15)
-    saldo_inicial: DecimalJSON = Field(default=Decimal("0"), ge=0, decimal_places=2, max_digits=15)
+    saldo_inicial: DecimalJSON = Field(default=Decimal("0"), decimal_places=2, max_digits=15)
     es_principal: bool = False
     es_efectivo: bool = False
     es_inversion: bool = False
