@@ -310,6 +310,10 @@ def resolver_canales_notificacion(
         # Solo canal web, aviso financiero importante no configurable/apagable por el usuario
         return (True, False)
 
+    elif tipo == TipoNotificacion.REINTEGRO_PENDIENTE:
+        # D10: Solo canal web (True, False)
+        return (True, False)
+
     return (True, False)
 
 

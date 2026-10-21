@@ -417,6 +417,10 @@ def etiqueta_movimiento(
     Determina la etiqueta, cuenta_como ('gasto', 'ingreso', 'nada') y aclaración
     de un movimiento financiero para el historial unificado.
     """
+    # Reintegro standalone (D7)
+    if getattr(tx, "reintegro_de_id", None) is not None:
+        return ("Reintegro", "gasto", None)
+
     # Evaluación para objetos Transacción
     tipo = getattr(tx, "tipo", None)
     tipo_val = tipo.value if hasattr(tipo, "value") else str(tipo) if tipo else ""

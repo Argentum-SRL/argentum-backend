@@ -4,6 +4,8 @@ from decimal import Decimal
 from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
+from app.schemas.transaccion import ReintegroRead
+
 
 class PeriodoDashboard(BaseModel):
     fecha_inicio: str = Field(..., description="Fecha de inicio del ciclo en formato YYYY-MM-DD")
@@ -72,6 +74,7 @@ class MovimientoDashboard(BaseModel):
     categoria_nombre: Optional[str] = None
     estado_verificacion: Optional[str] = None
     subcategoria_nombre: Optional[str] = None
+    reintegro: Optional[ReintegroRead] = None
 
 
 class PagoDashboard(BaseModel):

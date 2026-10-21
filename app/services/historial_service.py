@@ -230,10 +230,14 @@ def listar_movimientos(
             else:
                 cuota_texto = None
 
+        es_espejo = getattr(tx, "reintegro_de_id", None) is not None
         monto_dec = abs(Decimal(str(tx.monto)))
         moneda_str = tx.moneda.value if hasattr(tx.moneda, "value") else str(tx.moneda)
         tipo_str = tx.tipo.value if hasattr(tx.tipo, "value") else str(tx.tipo)
-        sentido = "entra" if tipo_str == "ingreso" else "sale"
+        if es_espejo:
+            sentido = "entra"
+        else:
+            sentido = "entra" if tipo_str == "ingreso" else "sale"
 
         b_obj = billeteras_map.get(tx.billetera_id)
         b_nom = b_obj.nombre if b_obj else None
@@ -245,6 +249,10 @@ def listar_movimientos(
             else (str(tx.estado_verificacion) if tx.estado_verificacion is not None else None)
         )
         cuenta_en_saldo = (est_val != "pendiente") and (tx.fecha <= ref_hoy)
+
+        reintegro_info = None
+        if not es_espejo and getattr(tx, "reintegro", None):
+            reintegro_info = tx.reintegro
 
         raw_movimientos.append({
             "id": f"transaccion:{tx.id}",
@@ -268,6 +276,9 @@ def listar_movimientos(
             "monto_destino": None,
             "moneda_destino": None,
             "transaccion": None,
+            "reintegro": reintegro_info,
+            "reintegro_de_id": tx.reintegro_de_id,
+            "es_reintegro_standalone": es_espejo,
             "prioridad_saldo_inicial": 1,
             "entity": tx,
         })
@@ -553,6 +564,37 @@ def listar_movimientos(
             })
 
     # ==========================================================================
+    # D.1 CONSOLIDACIÓN DE REINTEGROS (D7)
+    # Si el espejo y su compra están los dos en la lista cruda, se juntan en UNA fila:
+    # la compra con monto neto (compra - espejo) y reintegro {estado, monto, fecha}.
+    # El espejo sale de la lista.
+    # ==========================================================================
+    compra_movs = {
+        m["entity"].id: m
+        for m in raw_movimientos
+        if m["clase"] == "transaccion" and m.get("entity") is not None and m.get("reintegro_de_id") is None
+    }
+    espejos_a_eliminar = set()
+    for m in raw_movimientos:
+        if m["clase"] == "transaccion" and m.get("reintegro_de_id") is not None:
+            c_id = m["reintegro_de_id"]
+            if c_id in compra_movs:
+                c_mov = compra_movs[c_id]
+                c_mov["monto"] = c_mov["monto"] - m["monto"]
+                c_mov["reintegro"] = {
+                    "estado": "recibido",
+                    "monto": m["monto"],
+                    "fecha_recibido": m["fecha"],
+                }
+                c_mov["es_reintegro_standalone"] = False
+                espejos_a_eliminar.add(m["id"])
+            else:
+                m["es_reintegro_standalone"] = True
+
+    if espejos_a_eliminar:
+        raw_movimientos = [m for m in raw_movimientos if m["id"] not in espejos_a_eliminar]
+
+    # ==========================================================================
     # E. SALDO INICIAL (Solo modo billetera)
     # ==========================================================================
     if modo == "billetera" and billetera_actual and not solo_transacciones and not busqueda_activa:
@@ -690,7 +732,10 @@ def listar_movimientos(
             totales_dict[mon] = TotalesMoneda(gastos=Decimal("0.00"), ingresos=Decimal("0.00"), balance=Decimal("0.00"))
 
         if m["cuenta_como"] == "gasto":
-            totales_dict[mon].gastos += m["monto"]
+            if m.get("es_reintegro_standalone"):
+                totales_dict[mon].gastos -= m["monto"]
+            else:
+                totales_dict[mon].gastos += m["monto"]
         elif m["cuenta_como"] == "ingreso":
             totales_dict[mon].ingresos += m["monto"]
 
@@ -733,6 +778,7 @@ def listar_movimientos(
                 monto_destino=m["monto_destino"],
                 moneda_destino=m["moneda_destino"],
                 transaccion=tx_read,
+                reintegro=m.get("reintegro"),
             )
         )
 

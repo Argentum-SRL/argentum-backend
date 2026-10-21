@@ -269,6 +269,12 @@ def _job_vencimientos_tarjetas():
             return
         lock_adquirido = True
         procesar_vencimientos_tarjetas(db)
+        try:
+            from app.services.reintegro_service import notificar_reintegros_pendientes
+            from app.utils.fecha import hoy_argentina
+            notificar_reintegros_pendientes(db, hoy_argentina())
+        except Exception as e_reintegro:
+            logger.exception("Error al notificar reintegros pendientes: %s", e_reintegro)
         logger.info("Job de vencimientos de tarjetas ejecutado.")
     except Exception as e:
         logger.exception("Error en job vencimientos_tarjetas")

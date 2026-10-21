@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.models.usuario import Usuario
 from app.models.transaccion import TipoTransaccion
-from app.schemas.transaccion import TransaccionCreate, TransaccionUpdate, TransaccionRead
+from app.schemas.transaccion import TransaccionCreate, TransaccionUpdate, TransaccionRead, ReintegroPayload
 from app.services import transaccion_service, dolar_service
 from app.utils.fecha import hoy_argentina
 
@@ -188,3 +188,42 @@ def confirmar_transaccion(
     Confirma una transacción detectada por IA, impactando el saldo.
     """
     return transaccion_service.confirmar_transaccion_ia(db, current_user.id, transaccion_id)
+
+
+@router.put("/{transaccion_id}/reintegro", response_model=TransaccionRead)
+def registrar_reintegro(
+    transaccion_id: UUID,
+    data: ReintegroPayload,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Registra o actualiza el reintegro de una compra (D6).
+    """
+    from app.services import reintegro_service
+    return reintegro_service.registrar_o_actualizar_reintegro(
+        db=db,
+        usuario_id=current_user.id,
+        transaccion_id=transaccion_id,
+        monto=data.monto,
+        recibido=data.recibido,
+        fecha_recibido=data.fecha_recibido,
+    )
+
+
+@router.delete("/{transaccion_id}/reintegro", response_model=TransaccionRead)
+def eliminar_reintegro(
+    transaccion_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Elimina el reintegro de una compra (D6).
+    """
+    from app.services import reintegro_service
+    return reintegro_service.eliminar_reintegro(
+        db=db,
+        usuario_id=current_user.id,
+        transaccion_id=transaccion_id,
+    )
+

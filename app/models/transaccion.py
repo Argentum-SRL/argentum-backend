@@ -80,6 +80,7 @@ class Transaccion(Base):
         Index("ix_transacciones_pago_origen_id", "pago_origen_id", postgresql_where=text("pago_origen_id IS NOT NULL")),
         Index("ix_transacciones_suscripcion_id", "suscripcion_id", postgresql_where=text("suscripcion_id IS NOT NULL")),
         Index("ix_transacciones_movimiento_meta_id", "movimiento_meta_id", postgresql_where=text("movimiento_meta_id IS NOT NULL")),
+        Index("ix_transacciones_reintegro_de_id", "reintegro_de_id", postgresql_where=text("reintegro_de_id IS NOT NULL")),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -155,6 +156,19 @@ class Transaccion(Base):
         PGUUID(as_uuid=True), ForeignKey("movimientos_meta.id", ondelete="SET NULL"), nullable=True
     )
 
+    # Campos de reintegro de compras (Fase 5C)
+    reintegro_esperado: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
+    reintegro_de_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("transacciones.id", ondelete="CASCADE"), nullable=True
+    )
+    espejos_reintegro: Mapped[list[Transaccion]] = relationship(
+        "Transaccion",
+        foreign_keys="[Transaccion.reintegro_de_id]",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="selectin",
+    )
+
     fecha_creacion: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
@@ -167,6 +181,26 @@ class Transaccion(Base):
     importacion: Mapped[ImportacionResumen | None] = relationship("ImportacionResumen", back_populates="transacciones")
     suscripcion: Mapped[Suscripcion | None] = relationship("Suscripcion", back_populates="transacciones")
     movimiento_meta: Mapped[MovimientoMeta | None] = relationship("MovimientoMeta")
+
+    @property
+    def reintegro(self) -> dict | None:
+        if getattr(self, "reintegro_de_id", None) is not None:
+            return None
+        espejos = getattr(self, "espejos_reintegro", None)
+        if espejos:
+            espejo = next((e for e in espejos if not getattr(e, "es_cuota_hija", False)), espejos[0])
+            return {
+                "estado": "recibido",
+                "monto": abs(espejo.monto),
+                "fecha_recibido": espejo.fecha,
+            }
+        if getattr(self, "reintegro_esperado", None) is not None:
+            return {
+                "estado": "pendiente",
+                "monto": self.reintegro_esperado,
+                "fecha_recibido": None,
+            }
+        return None
 
     def __repr__(self) -> str:
         return (

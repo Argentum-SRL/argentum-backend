@@ -556,6 +556,7 @@ def clasificar_gastos(
         tx for tx in txs_todos
         if es_gasto(tx, ctx)
         and not getattr(tx, "es_cuota_hija", False)
+        and getattr(tx, "reintegro_de_id", None) is None
     ]
     if not txs:
         return ClasificacionGasto(tuple(recurrentes_declarados), (), (), frozenset(), ())

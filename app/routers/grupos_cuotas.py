@@ -143,6 +143,9 @@ def get_grupos_cuotas(
     
     resumenes = []
     for g in grupos:
+        # D5: El grupo del espejo NO aparece en la pestaña Cuotas
+        if g.transaccion_padre and g.transaccion_padre.reintegro_de_id is not None:
+            continue
         resumenes.append(mapear_grupo_resumen(db, g))
         
     def get_sort_key(res):

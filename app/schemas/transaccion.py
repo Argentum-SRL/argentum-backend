@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -36,9 +37,21 @@ class InfoCuotas(BaseModel):
         return self
 
 
+class ReintegroRead(BaseModel):
+    estado: Literal["pendiente", "recibido"]
+    monto: DecimalJSON
+    fecha_recibido: date | None = None
+
+
+class ReintegroPayload(BaseModel):
+    monto: DecimalJSON
+    recibido: bool
+    fecha_recibido: date | None = None
+
+
 class TransaccionBase(BaseModel):
     tipo: TipoTransaccion
-    monto: DecimalJSON = Field(gt=0, max_digits=15, decimal_places=2, description="Monto mayor a 0")
+    monto: DecimalJSON = Field(max_digits=15, decimal_places=2, description="Monto de la transacción")
     moneda: Moneda
     fecha: date
     descripcion: str | None = Field(default="", max_length=300)
@@ -62,9 +75,12 @@ class TransaccionBase(BaseModel):
     pago_origen_id: UUID | None = None
     suscripcion_id: UUID | None = None
     movimiento_meta_id: UUID | None = None
+    reintegro_esperado: DecimalJSON | None = None
+    reintegro_de_id: UUID | None = None
 
 
 class TransaccionCreate(TransaccionBase):
+    monto: DecimalJSON = Field(gt=0, max_digits=15, decimal_places=2, description="Monto mayor a 0")
     info_cuotas: InfoCuotas | None = None
     factura_id: UUID | None = None
 
@@ -119,5 +135,6 @@ class TransaccionRead(TransaccionBase):
     metodo_pago: MetodoPago | None = None
     fecha_creacion: datetime
     subcategoria: SubcategoriaRead | None = None
+    reintegro: ReintegroRead | None = None
 
     model_config = ConfigDict(from_attributes=True)

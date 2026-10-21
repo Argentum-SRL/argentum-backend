@@ -350,7 +350,7 @@ def get_dashboard_resumen(
         fecha_desde=fecha_inicio,
         fecha_hasta=hoy,
         skip=0,
-        limit=6,
+        limit=12,
         hoy=hoy,
     )
 
@@ -360,6 +360,10 @@ def get_dashboard_resumen(
     movimientos_data = []
     for item in resp_movs.items:
         tx = item.transaccion
+        # D8: Los espejos no se listan en Últimos movimientos
+        if item.etiqueta == "Reintegro" or (tx is not None and getattr(tx, "reintegro_de_id", None) is not None):
+            continue
+
         if item.clase == "transaccion" and tx is not None:
             tipo_item = tx.tipo.value if hasattr(tx.tipo, "value") else str(tx.tipo)
             moneda_item = tx.moneda.value if hasattr(tx.moneda, "value") else str(tx.moneda)
@@ -385,6 +389,8 @@ def get_dashboard_resumen(
             if tx.movimiento_meta_id:
                 mov_meta_id = str(tx.movimiento_meta_id)
 
+        reintegro_val = item.reintegro or (tx.reintegro if tx else None)
+
         movimientos_data.append({
             "id": item.id,
             "descripcion": item.descripcion,
@@ -402,7 +408,10 @@ def get_dashboard_resumen(
             "etiqueta": item.etiqueta,
             "aclaracion": item.aclaracion,
             "cuota_texto": item.cuota_texto,
+            "reintegro": reintegro_val,
         })
+        if len(movimientos_data) == 6:
+            break
 
 
     # --- Próximos Pagos y Disponible Libre (Ciclo actual canónico del usuario) ---

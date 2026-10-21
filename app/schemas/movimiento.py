@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from app.schemas.tipos import DecimalJSON
-from app.schemas.transaccion import TransaccionRead
+from app.schemas.transaccion import ReintegroRead, TransaccionRead
 
 
 class MovimientoItem(BaseModel):
@@ -32,6 +32,7 @@ class MovimientoItem(BaseModel):
     monto_destino: Optional[DecimalJSON] = None
     moneda_destino: Optional[str] = None
     transaccion: Optional[TransaccionRead] = None
+    reintegro: Optional[ReintegroRead] = None
 
 
 class TotalesMoneda(BaseModel):

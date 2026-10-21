@@ -510,6 +510,22 @@ def actualizar_transaccion(
 ) -> Transaccion:
     transaccion = obtener_transaccion(db, usuario_id, transaccion_id)
     
+    # D6: si la compra tiene espejo y cambia billetera_id, tarjeta_id, metodo_pago o moneda:
+    # 400 "Primero quitá el reintegro para cambiar el medio de pago o la billetera."
+    tiene_espejo = db.execute(
+        select(Transaccion.id).where(Transaccion.reintegro_de_id == transaccion.id)
+    ).first() is not None
+    if tiene_espejo:
+        cambia_billetera = data.billetera_id is not None and data.billetera_id != transaccion.billetera_id
+        cambia_tarjeta = data.tarjeta_id is not None and data.tarjeta_id != transaccion.tarjeta_id
+        cambia_metodo = data.metodo_pago is not None and data.metodo_pago != transaccion.metodo_pago
+        cambia_moneda = data.moneda is not None and data.moneda != transaccion.moneda
+        if cambia_billetera or cambia_tarjeta or cambia_metodo or cambia_moneda:
+            raise HTTPException(
+                status_code=400,
+                detail="Primero quitá el reintegro para cambiar el medio de pago o la billetera.",
+            )
+
     # Validar que la nueva moneda (o la actual) coincida con la nueva billetera (o la actual)
     billetera_id = data.billetera_id if data.billetera_id is not None else transaccion.billetera_id
     billetera = db.get(Billetera, billetera_id)
@@ -654,6 +670,14 @@ def eliminar_transaccion(
     from app.services import factura_service
     transaccion = obtener_transaccion(db, usuario_id, transaccion_id)
     
+    # D6: Si se borra la compra, antes se borran sus espejos con la misma función.
+    espejos_ids = db.execute(
+        select(Transaccion.id).where(Transaccion.reintegro_de_id == transaccion.id)
+    ).scalars().all()
+    for esp_id in espejos_ids:
+        if db.get(Transaccion, esp_id) is not None:
+            eliminar_transaccion(db, usuario_id, esp_id, commit=False)
+
     # Manejo de cascada para cuotas
     if transaccion.es_padre_cuotas or transaccion.es_cuota_hija:
         # 1. Identificar el grupo

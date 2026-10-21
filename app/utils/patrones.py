@@ -167,6 +167,8 @@ def movimientos_elegibles(transacciones: Iterable[Any], ctx: Any) -> list[Any]:
             continue
         if getattr(tx, "suscripcion_id", None) is not None:
             continue
+        if getattr(tx, "reintegro_de_id", None) is not None:
+            continue
         elegibles.append(tx)
     return elegibles
 
