@@ -27,7 +27,6 @@ FRONTEND_DIR = WORKSPACE_DIR / "argentum-frontend"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 from scripts.local.rutas import (
-    auditorias_dir,
     raw_dir as rutas_raw_dir,
     backups_dir as rutas_backups_dir,
     fotos_dir as rutas_fotos_dir,
@@ -653,6 +652,14 @@ def podar_backups(backups_dir_path: Path, limite_poda: int = 20) -> ResultadoPod
     return ResultadoPoda(len(pasos_podados), pasos_podados)
 
 
+def hubo_cambio_frontend(porcelain_fe: str, head_inicio_fe: str, head_actual_fe: str) -> bool:
+    """
+    Indica si hubo algún cambio en el repositorio del frontend comparando el estado porcelain
+    o si el HEAD actual difiere del HEAD al inicio del paso.
+    """
+    return bool(porcelain_fe and porcelain_fe.strip()) or (head_inicio_fe != head_actual_fe)
+
+
 # =============================================================================
 # COMANDOS PRINCIPALES: INICIO Y CIERRE
 # =============================================================================
@@ -971,10 +978,12 @@ def ejecutar_cierre(paso: str) -> int:
     # Verificar duración del paso (hasta 12 horas)
     estado_ini_file = raw_dir / "estado_inicio.json"
     fecha_hora_ini = ""
+    head_inicio_fe = ""
     if estado_ini_file.exists():
         try:
             data_ini = json.loads(estado_ini_file.read_text(encoding="utf-8"))
             fecha_hora_ini = data_ini.get("fecha_hora", "")
+            head_inicio_fe = str(data_ini.get("frontend_head", ""))
         except Exception:
             pass
 
@@ -1063,7 +1072,10 @@ def ejecutar_cierre(paso: str) -> int:
         buf_03.write("\nAVISO: No se encontraron archivos de salidas para comparar_salidas.\n")
 
     # Build frontend si cambió algo de frontend
-    cambio_frontend = any(f.startswith("src/") for f in archivos_tocados)
+    git_fe_actual = inspeccionar_git_repo(FRONTEND_DIR)
+    porcelain_fe = git_fe_actual.get("status_porcelain", "")
+    head_actual_fe = str(git_fe_actual.get("head", ""))
+    cambio_frontend = hubo_cambio_frontend(porcelain_fe, head_inicio_fe, head_actual_fe)
     out_build = ""
     rc_build = 0
     build_ejecutado = False

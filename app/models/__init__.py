@@ -41,10 +41,12 @@ from app.models.codigo_verificacion import CodigoVerificacion
 from app.models.rate_limit import RateLimit
 from app.models.ejecucion_job import EjecucionJob
 from app.models.uso_ia import UsoIA
+from app.models.mensaje_saliente_wpp import MensajeSalienteWpp
 
 __all__ = [
     "EjecucionJob",
     "UsoIA",
+    "MensajeSalienteWpp",
     "Usuario",
     "DecisionPatron",
     "Factura",

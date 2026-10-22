@@ -8,11 +8,10 @@ Imprime IGUAL por escenario, o el detalle de cada diferencia.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
-
-
 import re
 
 
@@ -25,16 +24,26 @@ def serializar_item(item: dict) -> str:
     return json.dumps(item, ensure_ascii=False, sort_keys=True)
 
 
-def comparar_escenario(eid: str, sal_a: dict, sal_b: dict) -> list[str]:
+def comparar_escenario(eid: str, sal_a: dict, sal_b: dict, unir_mensajes: bool = False) -> list[str]:
     diferencias = []
 
     # 1. Comparar mensajes
-    msgs_a = [_normalizar_mensaje(m) for m in sal_a.get("mensajes", [])]
-    msgs_b = [_normalizar_mensaje(m) for m in sal_b.get("mensajes", [])]
-    if msgs_a != msgs_b:
-        diferencias.append(f"  MENSAJES ({len(msgs_a)} vs {len(msgs_b)}):")
-        diferencias.append(f"    A: {msgs_a}")
-        diferencias.append(f"    B: {msgs_b}")
+    if unir_mensajes:
+        msgs_a_raw = sal_a.get("mensajes", [])
+        msgs_b_raw = sal_b.get("mensajes", [])
+        msg_a_unido = "\n\n".join([_normalizar_mensaje(m) for m in msgs_a_raw])
+        msg_b_unido = "\n\n".join([_normalizar_mensaje(m) for m in msgs_b_raw])
+        if msg_a_unido != msg_b_unido:
+            diferencias.append("  MENSAJES (unidos):")
+            diferencias.append(f"    A: {msg_a_unido}")
+            diferencias.append(f"    B: {msg_b_unido}")
+    else:
+        msgs_a = [_normalizar_mensaje(m) for m in sal_a.get("mensajes", [])]
+        msgs_b = [_normalizar_mensaje(m) for m in sal_b.get("mensajes", [])]
+        if msgs_a != msgs_b:
+            diferencias.append(f"  MENSAJES ({len(msgs_a)} vs {len(msgs_b)}):")
+            diferencias.append(f"    A: {msgs_a}")
+            diferencias.append(f"    B: {msgs_b}")
 
     # 2. Comparar movimientos
     movs_a = sal_a.get("movimientos", [])
@@ -56,12 +65,14 @@ def comparar_escenario(eid: str, sal_a: dict, sal_b: dict) -> list[str]:
 
 
 def main():
-    if len(sys.argv) < 3:
-        print("Uso: python comparar_salidas.py <salidas_a.json> <salidas_b.json>")
-        sys.exit(2)
+    parser = argparse.ArgumentParser(description="Comparador de fotos de salida de la suite de WhatsApp")
+    parser.add_argument("salidas_a", type=str, help="Ruta de salidas A")
+    parser.add_argument("salidas_b", type=str, help="Ruta de salidas B")
+    parser.add_argument("--unir-mensajes", action="store_true", help="Compara mensajes unidos con \\n\\n")
+    args = parser.parse_args()
 
-    path_a = Path(sys.argv[1])
-    path_b = Path(sys.argv[2])
+    path_a = Path(args.salidas_a)
+    path_b = Path(args.salidas_b)
 
     if not path_a.exists():
         print(f"ERROR: No existe archivo {path_a}")
@@ -99,7 +110,7 @@ def main():
             distintos += 1
             continue
 
-        diffs = comparar_escenario(eid, data_a[eid], data_b[eid])
+        diffs = comparar_escenario(eid, data_a[eid], data_b[eid], unir_mensajes=args.unir_mensajes)
         if not diffs:
             print(f"[{eid}] IGUAL")
             iguales += 1

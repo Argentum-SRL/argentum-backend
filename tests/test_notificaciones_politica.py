@@ -493,7 +493,7 @@ def test_10_endpoint_configuracion_whatsapp_tipos_activos(db_session, monkeypatc
 
 
 def test_11_timeout_reintentos_enviar_whatsapp_template(monkeypatch):
-    """11. enviar_whatsapp_template con timeout simulado: con max_intentos=1 -> 1 intento; sin el parámetro -> 3."""
+    """11. TimeoutException → 1 pedido con max_intentos=1 y 1 pedido sin el parámetro; ConnectError sin el parámetro → 3 pedidos."""
     monkeypatch.setattr(settings, "WHATSAPP_ACCESS_TOKEN", "fake_token")
     monkeypatch.setattr(settings, "WHATSAPP_PHONE_NUMBER_ID", "fake_id")
     monkeypatch.setattr("time.sleep", lambda s: None)
@@ -502,13 +502,20 @@ def test_11_timeout_reintentos_enviar_whatsapp_template(monkeypatch):
     mock_client.post.side_effect = httpx.TimeoutException("Timeout")
     monkeypatch.setattr("app.services.whatsapp_service.get_meta_http_client", lambda: mock_client)
 
-    # Con max_intentos=1
+    # Con max_intentos=1 y TimeoutException -> 1 pedido
     res1 = enviar_whatsapp_template("+5491112345678", "template_test", "es", [], max_intentos=1)
     assert res1 is False
     assert mock_client.post.call_count == 1
 
-    # Sin el parámetro -> 3 intentos
+    # Sin el parámetro y TimeoutException -> 1 pedido
     mock_client.post.reset_mock()
+    res2 = enviar_whatsapp_template("+5491112345678", "template_test", "es", [])
+    assert res2 is False
+    assert mock_client.post.call_count == 1
+
+    # ConnectError sin el parámetro -> 3 pedidos
+    mock_client.post.reset_mock()
+    mock_client.post.side_effect = httpx.ConnectError("Connection refused")
     res3 = enviar_whatsapp_template("+5491112345678", "template_test", "es", [])
     assert res3 is False
     assert mock_client.post.call_count == 3

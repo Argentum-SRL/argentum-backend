@@ -1,8 +1,6 @@
 """
-app/routers/whatsapp/recordatorio_impago_wpp.py
-
-Envío de recordatorio de resúmenes de tarjeta impagos tras la respuesta normal
-del bot de WhatsApp dentro de la ventana de 24 horas del usuario.
+app/routers/whatsapp/recordatorio_impago_wpp.py — Agregado de recordatorio de resúmenes de tarjeta impagos
+como aviso de última línea dentro del buzón de respuesta de WhatsApp.
 """
 from __future__ import annotations
 
@@ -14,7 +12,6 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.models.notificacion import Notificacion, TipoNotificacion
 from app.models.tarjeta_credito import TarjetaCredito
 from app.models.usuario import Usuario
@@ -26,6 +23,7 @@ from app.services import tarjeta_service, whatsapp_service
 from app.utils.formato import formatear_monto
 
 logger = logging.getLogger(__name__)
+obtener_detalle_resumen_vencimiento = tarjeta_service.obtener_detalle_resumen_vencimiento
 
 
 def _obtener_fecha_vencimiento(notif: Notificacion) -> date | None:
@@ -48,26 +46,37 @@ def _obtener_fecha_vencimiento(notif: Notificacion) -> date | None:
         return None
 
 
-def enviar_recordatorio_impago_si_corresponde(
+def agregar_recordatorio_impago(
     db: Session,
     usuario: Usuario,
-    from_number: str,
     commit: bool = True,
 ) -> bool:
     """
-    Envía un mensaje recordatorio si el usuario tiene resúmenes de tarjeta sin pagar.
-    Solo se envía si el bot no está esperando datos o propuestas pendientes.
-    Menciona hasta 3 resúmenes ordenados por vencimiento del más viejo al más nuevo.
+    Agrega el recordatorio de resúmenes de tarjeta sin pagar como aviso al buzón de respuesta activo.
+    Reglas:
+    - Sin propuesta pendiente ni slot filling.
+    - Notificaciones no archivadas, no enviadas por WhatsApp, agrupadas por (tarjeta_id, vencimiento).
+    - Descarta y marca inmediatamente notificaciones de tarjetas inexistentes o con deuda <= 0.
+    - Un resumen: "Ojo: el resumen de {nombre} de {monto} (venció {dd/mm}) figura sin pagar."
+      (nombre recortado a 18 caracteres; si pasa de 90 chars, sin el monto).
+    - Dos o más: "Ojo: tenés {n} resúmenes de tarjeta sin pagar; el más viejo venció el {dd/mm}."
+    - Registra el aviso vía buzon_actual().agregar_aviso(...) con callback al_enviar.
+    - Sin buzón abierto: devuelve False y no hace nada.
+    - Ante cualquier excepción: rollback, False, no propaga.
     """
     try:
-        if not usuario or not from_number:
+        if not usuario:
             return False
 
-        # No enviar recordatorio si hay una propuesta pendiente o slot filling activo
+        buzon = whatsapp_service.buzon_actual()
+        if buzon is None:
+            return False
+
+        # No incluir aviso si hay propuesta pendiente o slot filling activo
         if _buscar_propuesta_pendiente(usuario.id, db) or _buscar_slot_filling_activo(usuario.id, db):
             return False
 
-        # Obtener notificaciones RESUMEN_IMPAGO pendientes del usuario
+        # Obtener notificaciones RESUMEN_IMPAGO pendientes
         notificaciones = (
             db.query(Notificacion)
             .filter(
@@ -82,7 +91,7 @@ def enviar_recordatorio_impago_si_corresponde(
         if not notificaciones:
             return False
 
-        # Agrupar notificaciones por (tarjeta_id, vencimiento)
+        # Agrupar por (tarjeta_id, vencimiento)
         grupos: dict[tuple[UUID, date], list[Notificacion]] = {}
         for notif in notificaciones:
             if not notif.entidad_id:
@@ -104,90 +113,94 @@ def enviar_recordatorio_impago_si_corresponde(
         for (tarjeta_id, venc), notifs_grupo in grupos.items():
             tarjeta = db.query(TarjetaCredito).filter(TarjetaCredito.id == tarjeta_id).first()
             if not tarjeta:
-                # La tarjeta ya no existe: marcar notificaciones y descartar del mensaje
                 for n in notifs_grupo:
                     n.enviada_whatsapp = True
                 notificaciones_descartadas.extend(notifs_grupo)
                 continue
 
-            detalle = tarjeta_service.obtener_detalle_resumen_vencimiento(db, tarjeta_id, venc)
-            deuda = detalle.get("monto_deuda_restante", Decimal("0"))
+            detalle = obtener_detalle_resumen_vencimiento(db, tarjeta_id, venc)
+            if isinstance(detalle, dict):
+                deuda = detalle.get("monto_deuda_restante", Decimal("0"))
+            elif isinstance(detalle, (list, tuple)):
+                deuda = detalle[0]
+            else:
+                deuda = Decimal("0")
+
             if deuda is None or deuda <= Decimal("0"):
-                # La deuda fue saldada: marcar notificaciones y descartar del mensaje
                 for n in notifs_grupo:
                     n.enviada_whatsapp = True
                 notificaciones_descartadas.extend(notifs_grupo)
                 continue
-
-            # Construir link y textos formateados
-            deep_link = notifs_grupo[0].deep_link or f"/app/billeteras/{tarjeta.billetera_id}?tab=credito&tarjeta_id={tarjeta.id}"
-            if not deep_link.startswith("/"):
-                deep_link = "/" + deep_link
-            link = f"{settings.FRONTEND_URL}{deep_link}"
-
-            monto_fmt = formatear_monto(deuda, tarjeta.moneda)
-            venc_fmt = venc.strftime("%d/%m")
 
             resumenes_validos.append({
-                "tarjeta_id": tarjeta_id,
-                "nombre_tarjeta": tarjeta.nombre,
+                "tarjeta": tarjeta,
                 "vencimiento": venc,
-                "venc_fmt": venc_fmt,
-                "monto": monto_fmt,
-                "link": link,
+                "deuda": deuda,
                 "notificaciones": notifs_grupo,
             })
 
-        if not resumenes_validos:
-            # Si solo hubo notificaciones descartadas (deuda 0 o sin tarjeta), persistir su estado
-            if notificaciones_descartadas:
-                if commit:
-                    db.commit()
-                else:
-                    db.flush()
-            return False
-
-        # Ordenar resúmenes por vencimiento del más viejo al más nuevo
-        resumenes_validos.sort(key=lambda r: r["vencimiento"])
-
-        # Mencionar hasta un máximo de 3 resúmenes
-        mencionados = resumenes_validos[:3]
-
-        if len(mencionados) == 1:
-            r = mencionados[0]
-            mensaje = (
-                f"Ojo: el resumen de {r['nombre_tarjeta']} de {r['monto']} "
-                f"que venció el {r['venc_fmt']} figura sin pagar. "
-                f"Si ya lo pagaste, marcalo acá: {r['link']}"
-            )
-        else:
-            lineas = [
-                f"- {r['nombre_tarjeta']}: {r['monto']}, venció el {r['venc_fmt']}. {r['link']}"
-                for r in mencionados
-            ]
-            cuerpo = "\n".join(lineas)
-            mensaje = (
-                f"Ojo: estos resúmenes figuran sin pagar:\n"
-                f"{cuerpo}\n"
-                f"Si ya los pagaste, marcalos desde esos links."
-            )
-
-        # Enviar mensaje por WhatsApp
-        exito = whatsapp_service.enviar_whatsapp(from_number, mensaje)
-        if exito:
-            for r in mencionados:
-                for n in r["notificaciones"]:
-                    n.enviada_whatsapp = True
+        if notificaciones_descartadas:
             if commit:
                 db.commit()
             else:
                 db.flush()
-            return True
-        else:
-            db.rollback()
+
+        if not resumenes_validos:
             return False
 
-    except Exception as e:
+        # Ordenar por vencimiento ascendente
+        resumenes_validos.sort(key=lambda r: r["vencimiento"])
+
+        if len(resumenes_validos) == 1:
+            r = resumenes_validos[0]
+            nom = r["tarjeta"].nombre
+            if len(nom) > 18:
+                nom_recortado = nom[:17].rstrip() + "…"
+            else:
+                nom_recortado = nom
+
+            monto_fmt = formatear_monto(r["deuda"], r["tarjeta"].moneda)
+            venc_fmt = r["vencimiento"].strftime("%d/%m")
+
+            texto = f"Ojo: el resumen de {nom_recortado} de {monto_fmt} (venció {venc_fmt}) figura sin pagar."
+            if len(texto) > 90:
+                texto = f"Ojo: el resumen de {nom_recortado} (venció {venc_fmt}) figura sin pagar."
+        else:
+            n = len(resumenes_validos)
+            venc_mas_viejo = resumenes_validos[0]["vencimiento"].strftime("%d/%m")
+            texto = f"Ojo: tenés {n} resúmenes de tarjeta sin pagar; el más viejo venció el {venc_mas_viejo}."
+
+        ids_notifs = [n.id for r in resumenes_validos for n in r["notificaciones"]]
+
+        def al_enviar():
+            for r in resumenes_validos:
+                for notif in r["notificaciones"]:
+                    notif.enviada_whatsapp = True
+            try:
+                if commit:
+                    db.commit()
+                else:
+                    db.flush()
+            except Exception:
+                pass
+
+            from sqlalchemy import update
+            from app.core.database import SessionLocal
+            try:
+                with SessionLocal() as s:
+                    s.execute(
+                        update(Notificacion)
+                        .where(Notificacion.id.in_(ids_notifs))
+                        .values(enviada_whatsapp=True)
+                    )
+                    s.commit()
+            except Exception as exc_cb:
+                logger.error("Error al persistir enviada_whatsapp en al_enviar: %s", exc_cb)
+
+        buzon.agregar_aviso(texto, "recordatorio_impago", al_enviar=al_enviar)
+        return True
+
+    except Exception as exc:
         db.rollback()
-        logger.error("Error al procesar recordatorio de resumen impago por WhatsApp: %s", e, exc_info=True)
+        logger.error("Error al procesar agregar_recordatorio_impago: %s", exc, exc_info=True)
         return False

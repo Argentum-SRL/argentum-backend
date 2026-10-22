@@ -233,3 +233,11 @@ def test_ta7_archivos_eliminados():
     if frontend_dir is not None and frontend_dir.exists():
         p_categorias = frontend_dir / "src" / "assets" / "icons" / "categorias_raw"
         assert not p_categorias.exists()
+
+
+def test_hubo_cambio_frontend():
+    from scripts.local.paso import hubo_cambio_frontend
+    assert hubo_cambio_frontend(" M src/assets/icons/x.svg", "a", "a") is True
+    assert hubo_cambio_frontend(" M scripts/audit-design-system.mjs", "a", "a") is True
+    assert hubo_cambio_frontend("", "a", "a") is False
+    assert hubo_cambio_frontend("", "a", "b") is True

@@ -395,7 +395,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P8.5", "punto": "Punto 8", "match": "exacto",
             "nombre": "Registrar un gasto y decir 'eso era supermercado', verificar la categoría",
             "ejecutar": lambda: p8_caso_5(datos),
-            "esperado": "Propuesta:\nVoy a corregir el último movimiento:\nAntes: $5.000 en Kiosco desde Galicia\nAhora: $5.000 en Supermercado desde Galicia\n¿Confirmás?\nConfirmación:\nListo, movimiento corregido.\n¿Siempre que diga \"kiosco\" lo pongo en Supermercado? Respondé sí o no.\nCategoría final: Supermercado",
+            "esperado": "Propuesta:\nVoy a corregir el último movimiento:\nAntes: $5.000 en Kiosco desde Galicia\nAhora: $5.000 en Supermercado desde Galicia\n¿Confirmás?\nConfirmación:\nListo, movimiento corregido.\n\n¿Siempre que diga \"kiosco\" lo pongo en Supermercado? Respondé sí o no.\nCategoría final: Supermercado",
         },
         {
             "id": "P8.5b", "punto": "Punto 8", "match": "exacto",

@@ -137,11 +137,38 @@ class SaludResumen(BaseModel):
     avisos_whatsapp_sin_enviar: int
 
 
+class SalientesMes(BaseModel):
+    enviados: int = 0
+    plantillas: int = 0
+    cobrados_meta: int = 0
+    gratis_meta: int = 0
+    sin_dato_meta: int = 0
+    cupo_gratis: int = 1000
+    cupo_usado: int = 0
+    no_enviados: int = 0
+
+
+class SalientesPorDia(BaseModel):
+    fecha: str
+    total: int = 0
+    respuestas: int = 0
+    plantillas: int = 0
+    otros: int = 0
+
+
+class SalientesWppResumen(BaseModel):
+    mes: SalientesMes = Field(default_factory=SalientesMes)
+    por_dia: list[SalientesPorDia] = Field(default_factory=list)
+    no_enviados_por_motivo: dict[str, int] = Field(default_factory=dict)
+    entrantes_con_mas_de_una_respuesta: int = 0
+
+
 class MonitorWppResumenResponse(BaseModel):
     calidad: CalidadResumen
     costo: CostoResumen
     topes_hoy: TopesHoyResumen
     salud: SaludResumen
+    whatsapp_salientes: SalientesWppResumen = Field(default_factory=SalientesWppResumen)
 
 
 class ConversacionMonitorItem(BaseModel):

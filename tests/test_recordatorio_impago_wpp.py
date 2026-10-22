@@ -1,85 +1,55 @@
 """
-tests/test_recordatorio_impago_wpp.py
-
-Casos de prueba para el recordatorio por WhatsApp de resúmenes de tarjeta impagos.
-Cubre los casos a) hasta j) requeridos por la especificación.
+tests/test_recordatorio_impago_wpp.py — Pruebas del recordatorio de resumen impago por WhatsApp
+como aviso al pie del mensaje de respuesta (Casos A a M).
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from uuid import UUID, uuid4
-import uuid
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
-import sqlalchemy.types as types
 
-from app.core.config import settings
+if not hasattr(PGUUID, "_compiler_dispatcher") or "sqlite" not in getattr(PGUUID._compiler_dispatcher, "specs", {}):
+    @compiles(PGUUID, "sqlite")
+    def compile_pguuid_sqlite(type_, compiler, **kw):
+        return "CHAR(32)"
+
+if not hasattr(JSONB, "_compiler_dispatcher") or "sqlite" not in getattr(JSONB._compiler_dispatcher, "specs", {}):
+    @compiles(JSONB, "sqlite")
+    def compile_jsonb_sqlite(type_, compiler, **kw):
+        return "TEXT"
+
 from app.core.database import Base
 from app.models.billetera import Billetera
-from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 from app.models.notificacion import NivelNotificacion, Notificacion, TipoNotificacion
 from app.models.tarjeta_credito import EstadoTarjeta, RedTarjeta, TarjetaCredito
-from app.models.usuario import AuthProvider, CicloTipo, EstadoUsuario, Moneda, RolUsuario, Usuario
-from app.routers.whatsapp.recordatorio_impago_wpp import enviar_recordatorio_impago_si_corresponde
+from app.models.usuario import AuthProvider, EstadoUsuario, Moneda, RolUsuario, Usuario
+from app.routers.whatsapp.recordatorio_impago_wpp import agregar_recordatorio_impago
+from app.services import whatsapp_service
+from app.services.whatsapp_service import buzon_de_respuesta, enviar_whatsapp
 
 
-@pytest.fixture(autouse=True)
-def setup_sqlite_compat(monkeypatch):
-    """Configuración de compatibilidad con SQLite en memoria para JSONB y UUID."""
-    had_sqlite = (
-        hasattr(JSONB, "_compiler_dispatcher")
-        and "sqlite" in getattr(JSONB._compiler_dispatcher, "specs", {})
-    )
-    if not had_sqlite:
-        compiles(JSONB, "sqlite")(lambda type_, compiler, **kw: "TEXT")
-
-    orig_uuid_processor = types.Uuid.bind_processor
-
-    def _safe_uuid_processor(self, dialect):
-        proc = orig_uuid_processor(self, dialect)
-        if proc is None:
-            return None
-
-        def process(value):
-            if isinstance(value, str):
-                try:
-                    value = uuid.UUID(value)
-                except Exception:
-                    pass
-            return proc(value)
-
-        return process
-
-    monkeypatch.setattr(types.Uuid, "bind_processor", _safe_uuid_processor)
-
-    import sqlite3
-    sqlite3.register_adapter(uuid.UUID, lambda u: u.hex)
-
-    yield
-
-    if not had_sqlite:
-        if hasattr(JSONB, "_compiler_dispatcher") and hasattr(JSONB._compiler_dispatcher, "specs"):
-            JSONB._compiler_dispatcher.specs.pop("sqlite", None)
-
-
-@pytest.fixture(name="db", scope="function")
-def db_fixture():
-    """Sesión de base de datos aislada en memoria."""
+@pytest.fixture(name="db_session", scope="function")
+def db_session_fixture(monkeypatch):
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    import app.models  # noqa: F401
+    import app.models
+    _ = app.models
     Base.metadata.create_all(bind=engine)
     TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    monkeypatch.setattr("app.core.database.SessionLocal", TestingSession)
+    monkeypatch.setattr("app.services.whatsapp_service.SessionLocal", TestingSession)
+    monkeypatch.setattr("time.sleep", lambda s: None)
     session = TestingSession()
     try:
         yield session
@@ -87,396 +57,433 @@ def db_fixture():
         session.close()
 
 
-def _crear_usuario(db: Session) -> Usuario:
-    """Crea un usuario activo para pruebas."""
+def _crear_usuario_test(db: Session, telefono: str = "+5491112345678") -> Usuario:
     u = Usuario(
         id=uuid4(),
         email=f"user_{uuid4().hex[:6]}@argentum.com",
-        telefono="+5491112345678",
-        telefono_normalizado="+5491112345678",
-        telefono_verificado=True,
+        telefono=telefono,
+        telefono_normalizado=telefono,
         auth_provider=AuthProvider.EMAIL,
         rol=RolUsuario.USUARIO,
         estado=EstadoUsuario.ACTIVO,
         moneda_principal=Moneda.ARS,
-        ciclo_tipo=CicloTipo.DIA_FIJO,
-        ciclo_valor="1",
+        nombre="Juan",
+        apellido="Pérez",
     )
     db.add(u)
     db.commit()
+    db.refresh(u)
     return u
 
 
-def _crear_tarjeta(db: Session, usuario: Usuario, nombre: str = "Visa") -> TarjetaCredito:
-    """Crea una tarjeta de crédito activa para el usuario."""
+def _crear_tarjeta(db: Session, usuario_id: UUID, nombre: str = "Visa") -> TarjetaCredito:
     b = Billetera(
         id=uuid4(),
-        usuario_id=usuario.id,
-        nombre="Cuenta Banco",
+        usuario_id=usuario_id,
+        nombre=f"Cuenta {nombre}",
         moneda=Moneda.ARS,
-        saldo_inicial=Decimal("100000.00"),
-        saldo_actual=Decimal("100000.00"),
-        es_inversion=False,
     )
     db.add(b)
-
     t = TarjetaCredito(
         id=uuid4(),
-        usuario_id=usuario.id,
+        usuario_id=usuario_id,
         billetera_id=b.id,
         nombre=nombre,
-        red=RedTarjeta.VISA,
-        moneda=Moneda.ARS,
-        dia_cierre=24,
-        dia_vencimiento=4,
-        regla_cierre="dia_fijo",
+        red=RedTarjeta.VISA if "visa" in nombre.lower() else RedTarjeta.MASTERCARD,
         estado=EstadoTarjeta.ACTIVA,
+        dia_cierre=20,
+        dia_vencimiento=4,
     )
     db.add(t)
     db.commit()
+    db.refresh(t)
     return t
 
 
-def _crear_notificacion_impago(
+def _crear_notificacion_resumen(
     db: Session,
-    usuario: Usuario,
-    tarjeta: TarjetaCredito,
-    vencimiento: date,
-    d: int = 0,
-    monto_str: str = "50000",
+    usuario_id: UUID,
+    tarjeta_nombre: str = "Visa",
+    vencimiento_str: str = "2026-11-04",
     archivada: bool = False,
-    enviada_whatsapp: bool = False,
+    enviada: bool = False,
+    dias_antes_vencimiento: int = 0,
 ) -> Notificacion:
-    """Crea una notificación RESUMEN_IMPAGO."""
-    deep_link = f"/app/billeteras/{tarjeta.billetera_id}?tab=credito&tarjeta_id={tarjeta.id}"
-    notif = Notificacion(
+    tarjeta = db.query(TarjetaCredito).filter(
+        TarjetaCredito.usuario_id == usuario_id,
+        TarjetaCredito.nombre == tarjeta_nombre,
+    ).first()
+    entidad_id = tarjeta.id if tarjeta else None
+    n = Notificacion(
         id=uuid4(),
-        usuario_id=usuario.id,
+        usuario_id=usuario_id,
         tipo=TipoNotificacion.RESUMEN_IMPAGO,
         nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-        mensaje=f"Resumen impago de {tarjeta.nombre}",
-        entidad_tipo="tarjeta",
-        entidad_id=tarjeta.id,
-        deep_link=deep_link,
-        canal_web=True,
-        canal_whatsapp=False,
-        canal_email=False,
+        mensaje=f"Resumen {tarjeta_nombre} impago",
+        canal_whatsapp=True,
+        enviada_whatsapp=enviada,
         archivada=archivada,
-        enviada_whatsapp=enviada_whatsapp,
+        entidad_tipo="tarjeta",
+        entidad_id=entidad_id,
         datos_template={
-            "vencimiento": vencimiento.isoformat(),
-            "monto": monto_str,
-            "d": d,
+            "tarjeta_nombre": tarjeta_nombre,
+            "vencimiento": vencimiento_str,
+            "dias_antes_vencimiento": dias_antes_vencimiento,
         },
+        created_at=datetime.now(timezone.utc),
     )
-    db.add(notif)
+    db.add(n)
     db.commit()
-    return notif
+    db.refresh(n)
+    return n
 
 
-def test_caso_a_un_resumen_impago_texto_exacto(db: Session):
-    """
-    a) 1 resumen impago con deuda 50000 ARS (tarjeta 'Visa', vencimiento 04/11):
-       sale exactamente el texto de 1 resumen y la notificación queda enviada_whatsapp=True.
-    """
-    usuario = _crear_usuario(db)
-    tarjeta = _crear_tarjeta(db, usuario, nombre="Visa")
-    vencimiento = date(2026, 11, 4)
-    notif = _crear_notificacion_impago(db, usuario, tarjeta, vencimiento, d=0, monto_str="50000")
+def test_caso_a_un_resumen_visa(db_session, monkeypatch):
+    """A 1 resumen Visa, deuda 50000, vence 04/11 →
+    aviso "Ojo: el resumen de Visa de $50.000 (venció 04/11) figura sin pagar.";
+    al despachar, notificación enviada_whatsapp=True."""
+    usuario = _crear_usuario_test(db_session)
+    _crear_tarjeta(db_session, usuario.id, "Visa")
+    notif = _crear_notificacion_resumen(db_session, usuario.id, "Visa", "2026-11-04")
 
-    expected_link = f"{settings.FRONTEND_URL}/app/billeteras/{tarjeta.billetera_id}?tab=credito&tarjeta_id={tarjeta.id}"
-    expected_texto = (
-        f"Ojo: el resumen de Visa de $50.000 que venció el 04/11 figura sin pagar. "
-        f"Si ya lo pagaste, marcalo acá: {expected_link}"
+    monkeypatch.setattr(
+        "app.routers.whatsapp.recordatorio_impago_wpp.obtener_detalle_resumen_vencimiento",
+        lambda *args, **kwargs: (Decimal("50000"), "ARS", False, False),
     )
+    mock_enviar = MagicMock(return_value=True)
+    monkeypatch.setattr(whatsapp_service, "_enviar_registrado", mock_enviar)
 
-    with patch("app.services.tarjeta_service.obtener_detalle_resumen_vencimiento") as mock_detalle, \
-         patch("app.services.whatsapp_service.enviar_whatsapp", return_value=True) as mock_wpp:
-        mock_detalle.return_value = {"monto_deuda_restante": Decimal("50000")}
-
-        res = enviar_recordatorio_impago_si_corresponde(db, usuario, usuario.telefono)
-
+    with buzon_de_respuesta(usuario.telefono):
+        enviar_whatsapp(usuario.telefono, "Listo.")
+        res = agregar_recordatorio_impago(db_session, usuario)
         assert res is True
-        mock_wpp.assert_called_once_with(usuario.telefono, expected_texto)
 
-    db.refresh(notif)
+    assert mock_enviar.call_count == 1
+    texto_saliente = mock_enviar.call_args[1].get("texto")
+    aviso_esperado = "Ojo: el resumen de Visa de $50.000 (venció 04/11) figura sin pagar."
+    assert texto_saliente == f"Listo.\n{aviso_esperado}"
+
+    db_session.refresh(notif)
     assert notif.enviada_whatsapp is True
 
 
-def test_caso_b_se_llama_de_nuevo_enseguida_no_sale_nada(db: Session):
-    """
-    b) Se llama de nuevo enseguida: no sale nada y devuelve False.
-    """
-    usuario = _crear_usuario(db)
-    tarjeta = _crear_tarjeta(db, usuario, nombre="Visa")
-    vencimiento = date(2026, 11, 4)
-    notif = _crear_notificacion_impago(db, usuario, tarjeta, vencimiento, d=0)
+def test_caso_b_se_llama_de_nuevo_despues_de_despachar(db_session, monkeypatch):
+    """B Se llama de nuevo después de despachar → False, sin aviso."""
+    usuario = _crear_usuario_test(db_session)
+    _crear_tarjeta(db_session, usuario.id, "Visa")
+    _crear_notificacion_resumen(db_session, usuario.id, "Visa", "2026-11-04")
 
-    with patch("app.services.tarjeta_service.obtener_detalle_resumen_vencimiento") as mock_detalle, \
-         patch("app.services.whatsapp_service.enviar_whatsapp", return_value=True) as mock_wpp:
-        mock_detalle.return_value = {"monto_deuda_restante": Decimal("50000")}
-
-        # Primera llamada exitosa
-        res1 = enviar_recordatorio_impago_si_corresponde(db, usuario, usuario.telefono)
-        assert res1 is True
-        assert mock_wpp.call_count == 1
-
-        # Segunda llamada enseguida
-        mock_wpp.reset_mock()
-        res2 = enviar_recordatorio_impago_si_corresponde(db, usuario, usuario.telefono)
-        assert res2 is False
-        mock_wpp.assert_not_called()
-
-    db.refresh(notif)
-    assert notif.enviada_whatsapp is True
-
-
-def test_caso_c_notificacion_archivada_no_sale_nada(db: Session):
-    """
-    c) Notificación archivada: no sale nada.
-    """
-    usuario = _crear_usuario(db)
-    tarjeta = _crear_tarjeta(db, usuario, nombre="Visa")
-    vencimiento = date(2026, 11, 4)
-    _crear_notificacion_impago(db, usuario, tarjeta, vencimiento, d=0, archivada=True)
-
-    with patch("app.services.tarjeta_service.obtener_detalle_resumen_vencimiento") as mock_detalle, \
-         patch("app.services.whatsapp_service.enviar_whatsapp") as mock_wpp:
-        mock_detalle.return_value = {"monto_deuda_restante": Decimal("50000")}
-
-        res = enviar_recordatorio_impago_si_corresponde(db, usuario, usuario.telefono)
-
-        assert res is False
-        mock_wpp.assert_not_called()
-
-
-def test_caso_d_deuda_restante_cero_no_sale_nada_y_queda_marcada(db: Session):
-    """
-    d) Deuda restante 0: no sale nada y la notificación queda enviada_whatsapp=True.
-    """
-    usuario = _crear_usuario(db)
-    tarjeta = _crear_tarjeta(db, usuario, nombre="Visa")
-    vencimiento = date(2026, 11, 4)
-    notif = _crear_notificacion_impago(db, usuario, tarjeta, vencimiento, d=0)
-
-    with patch("app.services.tarjeta_service.obtener_detalle_resumen_vencimiento") as mock_detalle, \
-         patch("app.services.whatsapp_service.enviar_whatsapp") as mock_wpp:
-        mock_detalle.return_value = {"monto_deuda_restante": Decimal("0")}
-
-        res = enviar_recordatorio_impago_si_corresponde(db, usuario, usuario.telefono)
-
-        assert res is False
-        mock_wpp.assert_not_called()
-
-    db.refresh(notif)
-    assert notif.enviada_whatsapp is True
-
-
-def test_caso_e_propuesta_pendiente_no_sale_nada_y_sigue_sin_marcar(db: Session):
-    """
-    e) Hay propuesta pendiente: no sale nada y la notificación sigue en enviada_whatsapp=False.
-    """
-    usuario = _crear_usuario(db)
-    tarjeta = _crear_tarjeta(db, usuario, nombre="Visa")
-    vencimiento = date(2026, 11, 4)
-    notif = _crear_notificacion_impago(db, usuario, tarjeta, vencimiento, d=0)
-
-    # Simular propuesta pendiente activa
-    propuesta = ConversacionWpp(
-        usuario_id=usuario.id,
-        mensaje_usuario="gasto 500",
-        mensaje_bot="¿Confirmás el gasto?",
-        intent_detectado="registrar_transaccion",
-        slot_filling_activo=False,
-        accion_ejecutada=None,
-        confianza=Decimal("0.950"),
-        fecha=datetime.now(timezone.utc),
+    monkeypatch.setattr(
+        "app.routers.whatsapp.recordatorio_impago_wpp.obtener_detalle_resumen_vencimiento",
+        lambda *args, **kwargs: (Decimal("50000"), "ARS", False, False),
     )
-    db.add(propuesta)
-    db.commit()
+    mock_enviar = MagicMock(return_value=True)
+    monkeypatch.setattr(whatsapp_service, "_enviar_registrado", mock_enviar)
 
-    with patch("app.services.tarjeta_service.obtener_detalle_resumen_vencimiento") as mock_detalle, \
-         patch("app.services.whatsapp_service.enviar_whatsapp") as mock_wpp:
-        mock_detalle.return_value = {"monto_deuda_restante": Decimal("50000")}
+    with buzon_de_respuesta(usuario.telefono):
+        enviar_whatsapp(usuario.telefono, "Listo.")
+        agregar_recordatorio_impago(db_session, usuario)
 
-        res = enviar_recordatorio_impago_si_corresponde(db, usuario, usuario.telefono)
+    # Segundo llamado con buzón nuevo: no hay resúmenes pendientes
+    mock_enviar.reset_mock()
+    with buzon_de_respuesta(usuario.telefono):
+        enviar_whatsapp(usuario.telefono, "Hola.")
+        res2 = agregar_recordatorio_impago(db_session, usuario)
+        assert res2 is False
 
+    assert mock_enviar.call_args[1].get("texto") == "Hola."
+    assert mock_enviar.call_args[1].get("aviso_tipo") is None
+
+
+def test_caso_c_archivada_sin_aviso(db_session, monkeypatch):
+    """C Archivada → sin aviso."""
+    usuario = _crear_usuario_test(db_session)
+    _crear_tarjeta(db_session, usuario.id, "Visa")
+    _crear_notificacion_resumen(db_session, usuario.id, "Visa", "2026-11-04", archivada=True)
+
+    monkeypatch.setattr(
+        "app.routers.whatsapp.recordatorio_impago_wpp.obtener_detalle_resumen_vencimiento",
+        lambda *args, **kwargs: (Decimal("50000"), "ARS", False, False),
+    )
+    mock_enviar = MagicMock(return_value=True)
+    monkeypatch.setattr(whatsapp_service, "_enviar_registrado", mock_enviar)
+
+    with buzon_de_respuesta(usuario.telefono):
+        enviar_whatsapp(usuario.telefono, "Listo.")
+        res = agregar_recordatorio_impago(db_session, usuario)
         assert res is False
-        mock_wpp.assert_not_called()
 
-    db.refresh(notif)
+    assert mock_enviar.call_args[1].get("texto") == "Listo."
+
+
+def test_caso_d_deuda_cero_sin_aviso_y_marcada(db_session, monkeypatch):
+    """D Deuda 0 → sin aviso y marcada."""
+    usuario = _crear_usuario_test(db_session)
+    _crear_tarjeta(db_session, usuario.id, "Visa")
+    notif = _crear_notificacion_resumen(db_session, usuario.id, "Visa", "2026-11-04")
+
+    # obtener_detalle devuelve deuda 0
+    monkeypatch.setattr(
+        "app.routers.whatsapp.recordatorio_impago_wpp.obtener_detalle_resumen_vencimiento",
+        lambda *args, **kwargs: (Decimal("0"), "ARS", True, False),
+    )
+    mock_enviar = MagicMock(return_value=True)
+    monkeypatch.setattr(whatsapp_service, "_enviar_registrado", mock_enviar)
+
+    with buzon_de_respuesta(usuario.telefono):
+        enviar_whatsapp(usuario.telefono, "Listo.")
+        res = agregar_recordatorio_impago(db_session, usuario)
+        assert res is False
+
+    assert mock_enviar.call_args[1].get("texto") == "Listo."
+    db_session.refresh(notif)
+    assert notif.enviada_whatsapp is True
+
+
+def test_caso_e_propuesta_pendiente_sin_aviso_y_sin_marcar(db_session, monkeypatch):
+    """E Propuesta pendiente → sin aviso y sin marcar."""
+    usuario = _crear_usuario_test(db_session)
+    _crear_tarjeta(db_session, usuario.id, "Visa")
+    notif = _crear_notificacion_resumen(db_session, usuario.id, "Visa", "2026-11-04")
+
+    monkeypatch.setattr(
+        "app.routers.whatsapp.recordatorio_impago_wpp._buscar_propuesta_pendiente",
+        lambda uid, db: True,
+    )
+    mock_enviar = MagicMock(return_value=True)
+    monkeypatch.setattr(whatsapp_service, "_enviar_registrado", mock_enviar)
+
+    with buzon_de_respuesta(usuario.telefono):
+        enviar_whatsapp(usuario.telefono, "Listo.")
+        res = agregar_recordatorio_impago(db_session, usuario)
+        assert res is False
+
+    assert mock_enviar.call_args[1].get("texto") == "Listo."
+    db_session.refresh(notif)
     assert notif.enviada_whatsapp is False
 
 
-def test_caso_f_dos_tarjetas_impagas_varios_resumenes_ordenados(db: Session):
-    """
-    f) 2 tarjetas impagas: un solo mensaje con el texto de varios resúmenes,
-       del vencimiento más viejo al más nuevo.
-    """
-    usuario = _crear_usuario(db)
-    tarjeta1 = _crear_tarjeta(db, usuario, nombre="Mastercard")
-    tarjeta2 = _crear_tarjeta(db, usuario, nombre="Visa")
+def test_caso_f_dos_resumenes_distintos(db_session, monkeypatch):
+    """F Mastercard deuda 20000 vence 20/10 y Visa deuda 50000 vence 04/11
+    → "Ojo: tenés 2 resúmenes de tarjeta sin pagar; el más viejo venció el 20/10."; las dos marcadas."""
+    usuario = _crear_usuario_test(db_session)
+    _crear_tarjeta(db_session, usuario.id, "Mastercard")
+    _crear_tarjeta(db_session, usuario.id, "Visa")
+    n1 = _crear_notificacion_resumen(db_session, usuario.id, "Mastercard", "2026-10-20")
+    n2 = _crear_notificacion_resumen(db_session, usuario.id, "Visa", "2026-11-04")
 
-    # Vencimientos: tarjeta1 más viejo (20/10), tarjeta2 más nuevo (04/11)
-    venc1 = date(2026, 10, 20)
-    venc2 = date(2026, 11, 4)
+    def _mock_detalle(db, tarjeta_id, venc, *args, **kwargs):
+        tarj = db.query(TarjetaCredito).filter(TarjetaCredito.id == tarjeta_id).first()
+        if tarj and "mastercard" in tarj.nombre.lower():
+            return (Decimal("20000"), "ARS", False, False)
+        return (Decimal("50000"), "ARS", False, False)
 
-    notif1 = _crear_notificacion_impago(db, usuario, tarjeta1, venc1, monto_str="20000")
-    notif2 = _crear_notificacion_impago(db, usuario, tarjeta2, venc2, monto_str="50000")
+    monkeypatch.setattr("app.routers.whatsapp.recordatorio_impago_wpp.obtener_detalle_resumen_vencimiento", _mock_detalle)
+    mock_enviar = MagicMock(return_value=True)
+    monkeypatch.setattr(whatsapp_service, "_enviar_registrado", mock_enviar)
 
-    link1 = f"{settings.FRONTEND_URL}/app/billeteras/{tarjeta1.billetera_id}?tab=credito&tarjeta_id={tarjeta1.id}"
-    link2 = f"{settings.FRONTEND_URL}/app/billeteras/{tarjeta2.billetera_id}?tab=credito&tarjeta_id={tarjeta2.id}"
-
-    expected_texto = (
-        "Ojo: estos resúmenes figuran sin pagar:\n"
-        f"- Mastercard: $20.000, venció el 20/10. {link1}\n"
-        f"- Visa: $50.000, venció el 04/11. {link2}\n"
-        "Si ya los pagaste, marcalos desde esos links."
-    )
-
-    def mock_obtener_detalle(db_sess, tarjeta_id, venc):
-        if tarjeta_id == tarjeta1.id:
-            return {"monto_deuda_restante": Decimal("20000")}
-        return {"monto_deuda_restante": Decimal("50000")}
-
-    with patch("app.services.tarjeta_service.obtener_detalle_resumen_vencimiento", side_effect=mock_obtener_detalle), \
-         patch("app.services.whatsapp_service.enviar_whatsapp", return_value=True) as mock_wpp:
-
-        res = enviar_recordatorio_impago_si_corresponde(db, usuario, usuario.telefono)
-
+    with buzon_de_respuesta(usuario.telefono):
+        enviar_whatsapp(usuario.telefono, "Listo.")
+        res = agregar_recordatorio_impago(db_session, usuario)
         assert res is True
-        mock_wpp.assert_called_once_with(usuario.telefono, expected_texto)
 
-    db.refresh(notif1)
-    db.refresh(notif2)
-    assert notif1.enviada_whatsapp is True
-    assert notif2.enviada_whatsapp is True
+    texto_saliente = mock_enviar.call_args[1].get("texto")
+    aviso_esperado = "Ojo: tenés 2 resúmenes de tarjeta sin pagar; el más viejo venció el 20/10."
+    assert texto_saliente == f"Listo.\n{aviso_esperado}"
 
-
-def test_caso_g_mismo_resumen_notificaciones_d0_y_d3_una_sola_linea(db: Session):
-    """
-    g) El mismo resumen con notificaciones d=0 y d=3: una sola línea y las dos quedan marcadas.
-    """
-    usuario = _crear_usuario(db)
-    tarjeta = _crear_tarjeta(db, usuario, nombre="Visa")
-    vencimiento = date(2026, 11, 4)
-
-    notif_d0 = _crear_notificacion_impago(db, usuario, tarjeta, vencimiento, d=0, monto_str="50000")
-    notif_d3 = _crear_notificacion_impago(db, usuario, tarjeta, vencimiento, d=3, monto_str="50000")
-
-    expected_link = f"{settings.FRONTEND_URL}/app/billeteras/{tarjeta.billetera_id}?tab=credito&tarjeta_id={tarjeta.id}"
-    expected_texto = (
-        f"Ojo: el resumen de Visa de $50.000 que venció el 04/11 figura sin pagar. "
-        f"Si ya lo pagaste, marcalo acá: {expected_link}"
-    )
-
-    with patch("app.services.tarjeta_service.obtener_detalle_resumen_vencimiento") as mock_detalle, \
-         patch("app.services.whatsapp_service.enviar_whatsapp", return_value=True) as mock_wpp:
-        mock_detalle.return_value = {"monto_deuda_restante": Decimal("50000")}
-
-        res = enviar_recordatorio_impago_si_corresponde(db, usuario, usuario.telefono)
-
-        assert res is True
-        mock_wpp.assert_called_once_with(usuario.telefono, expected_texto)
-
-    db.refresh(notif_d0)
-    db.refresh(notif_d3)
-    assert notif_d0.enviada_whatsapp is True
-    assert notif_d3.enviada_whatsapp is True
-
-
-def test_caso_h_cuatro_resumenes_solo_tres_mas_viejos(db: Session):
-    """
-    h) 4 resúmenes: se nombran los 3 más viejos y el cuarto queda en enviada_whatsapp=False.
-    """
-    usuario = _crear_usuario(db)
-    t1 = _crear_tarjeta(db, usuario, nombre="Tarjeta A")
-    t2 = _crear_tarjeta(db, usuario, nombre="Tarjeta B")
-    t3 = _crear_tarjeta(db, usuario, nombre="Tarjeta C")
-    t4 = _crear_tarjeta(db, usuario, nombre="Tarjeta D")
-
-    # Fechas ordenadas: t1 (01/10), t2 (10/10), t3 (20/10), t4 (05/11)
-    v1 = date(2026, 10, 1)
-    v2 = date(2026, 10, 10)
-    v3 = date(2026, 10, 20)
-    v4 = date(2026, 11, 5)
-
-    n1 = _crear_notificacion_impago(db, usuario, t1, v1)
-    n2 = _crear_notificacion_impago(db, usuario, t2, v2)
-    n3 = _crear_notificacion_impago(db, usuario, t3, v3)
-    n4 = _crear_notificacion_impago(db, usuario, t4, v4)
-
-    with patch("app.services.tarjeta_service.obtener_detalle_resumen_vencimiento") as mock_detalle, \
-         patch("app.services.whatsapp_service.enviar_whatsapp", return_value=True) as mock_wpp:
-        mock_detalle.return_value = {"monto_deuda_restante": Decimal("10000")}
-
-        res = enviar_recordatorio_impago_si_corresponde(db, usuario, usuario.telefono)
-
-        assert res is True
-        assert mock_wpp.call_count == 1
-        mensaje_enviado = mock_wpp.call_args[0][1]
-
-        # Debe mencionar las 3 más viejas (A, B, C) y no la cuarta (D)
-        assert "Tarjeta A" in mensaje_enviado
-        assert "Tarjeta B" in mensaje_enviado
-        assert "Tarjeta C" in mensaje_enviado
-        assert "Tarjeta D" not in mensaje_enviado
-
-    db.refresh(n1)
-    db.refresh(n2)
-    db.refresh(n3)
-    db.refresh(n4)
+    db_session.refresh(n1)
+    db_session.refresh(n2)
     assert n1.enviada_whatsapp is True
     assert n2.enviada_whatsapp is True
-    assert n3.enviada_whatsapp is True
-    assert n4.enviada_whatsapp is False
 
 
-def test_caso_i_obtener_detalle_resumen_vencimiento_excepcion_retorna_false(db: Session):
-    """
-    i) obtener_detalle_resumen_vencimiento lanza una excepción: devuelve False y no propaga nada.
-    """
-    usuario = _crear_usuario(db)
-    tarjeta = _crear_tarjeta(db, usuario, nombre="Visa")
-    vencimiento = date(2026, 11, 4)
-    notif = _crear_notificacion_impago(db, usuario, tarjeta, vencimiento, d=0)
+def test_caso_g_mismo_resumen_notificaciones_multiples(db_session, monkeypatch):
+    """G Mismo resumen con notificaciones d=0 y d=3 → el texto de A; las dos marcadas."""
+    usuario = _crear_usuario_test(db_session)
+    _crear_tarjeta(db_session, usuario.id, "Visa")
+    n1 = _crear_notificacion_resumen(db_session, usuario.id, "Visa", "2026-11-04", dias_antes_vencimiento=0)
+    n2 = _crear_notificacion_resumen(db_session, usuario.id, "Visa", "2026-11-04", dias_antes_vencimiento=3)
 
-    with patch("app.services.tarjeta_service.obtener_detalle_resumen_vencimiento", side_effect=RuntimeError("Falla de base")):
-        res = enviar_recordatorio_impago_si_corresponde(db, usuario, usuario.telefono)
+    monkeypatch.setattr(
+        "app.routers.whatsapp.recordatorio_impago_wpp.obtener_detalle_resumen_vencimiento",
+        lambda *args, **kwargs: (Decimal("50000"), "ARS", False, False),
+    )
+    mock_enviar = MagicMock(return_value=True)
+    monkeypatch.setattr(whatsapp_service, "_enviar_registrado", mock_enviar)
 
+    with buzon_de_respuesta(usuario.telefono):
+        enviar_whatsapp(usuario.telefono, "Listo.")
+        res = agregar_recordatorio_impago(db_session, usuario)
+        assert res is True
+
+    texto_saliente = mock_enviar.call_args[1].get("texto")
+    aviso_esperado = "Ojo: el resumen de Visa de $50.000 (venció 04/11) figura sin pagar."
+    assert texto_saliente == f"Listo.\n{aviso_esperado}"
+
+    db_session.refresh(n1)
+    db_session.refresh(n2)
+    assert n1.enviada_whatsapp is True
+    assert n2.enviada_whatsapp is True
+
+
+def test_caso_h_cuatro_resumenes(db_session, monkeypatch):
+    """H 4 resúmenes (01/10, 10/10, 20/10, 05/11) →
+    "Ojo: tenés 4 resúmenes de tarjeta sin pagar; el más viejo venció el 01/10."; las 4 marcadas."""
+    usuario = _crear_usuario_test(db_session)
+    _crear_tarjeta(db_session, usuario.id, "Tarjeta1")
+    _crear_tarjeta(db_session, usuario.id, "Tarjeta2")
+    _crear_tarjeta(db_session, usuario.id, "Tarjeta3")
+    _crear_tarjeta(db_session, usuario.id, "Tarjeta4")
+
+    n1 = _crear_notificacion_resumen(db_session, usuario.id, "Tarjeta1", "2026-10-01")
+    n2 = _crear_notificacion_resumen(db_session, usuario.id, "Tarjeta2", "2026-10-10")
+    n3 = _crear_notificacion_resumen(db_session, usuario.id, "Tarjeta3", "2026-10-20")
+    n4 = _crear_notificacion_resumen(db_session, usuario.id, "Tarjeta4", "2026-11-05")
+
+    monkeypatch.setattr(
+        "app.routers.whatsapp.recordatorio_impago_wpp.obtener_detalle_resumen_vencimiento",
+        lambda *args, **kwargs: (Decimal("10000"), "ARS", False, False),
+    )
+    mock_enviar = MagicMock(return_value=True)
+    monkeypatch.setattr(whatsapp_service, "_enviar_registrado", mock_enviar)
+
+    with buzon_de_respuesta(usuario.telefono):
+        enviar_whatsapp(usuario.telefono, "Listo.")
+        res = agregar_recordatorio_impago(db_session, usuario)
+        assert res is True
+
+    texto_saliente = mock_enviar.call_args[1].get("texto")
+    aviso_esperado = "Ojo: tenés 4 resúmenes de tarjeta sin pagar; el más viejo venció el 01/10."
+    assert texto_saliente == f"Listo.\n{aviso_esperado}"
+
+    for n in [n1, n2, n3, n4]:
+        db_session.refresh(n)
+        assert n.enviada_whatsapp is True
+
+
+def test_caso_i_obtener_detalle_lanza_excepcion(db_session, monkeypatch):
+    """I obtener_detalle_resumen_vencimiento lanza → False, sin marcar, no propaga."""
+    usuario = _crear_usuario_test(db_session)
+    _crear_tarjeta(db_session, usuario.id, "Visa")
+    notif = _crear_notificacion_resumen(db_session, usuario.id, "Visa", "2026-11-04")
+
+    def _falla(*args, **kwargs):
+        raise RuntimeError("Error en cálculo de resumen")
+
+    monkeypatch.setattr("app.routers.whatsapp.recordatorio_impago_wpp.obtener_detalle_resumen_vencimiento", _falla)
+    mock_enviar = MagicMock(return_value=True)
+    monkeypatch.setattr(whatsapp_service, "_enviar_registrado", mock_enviar)
+
+    with buzon_de_respuesta(usuario.telefono):
+        enviar_whatsapp(usuario.telefono, "Listo.")
+        res = agregar_recordatorio_impago(db_session, usuario)
         assert res is False
 
-    db.refresh(notif)
+    assert mock_enviar.call_args[1].get("texto") == "Listo."
+    db_session.refresh(notif)
     assert notif.enviada_whatsapp is False
 
 
-def test_caso_j_enviar_whatsapp_falla_notificaciones_no_se_marcan(db: Session):
-    """
-    j) enviar_whatsapp devuelve False o falla: las notificaciones no se marcan.
-    """
-    usuario = _crear_usuario(db)
-    tarjeta = _crear_tarjeta(db, usuario, nombre="Visa")
-    vencimiento = date(2026, 11, 4)
-    notif = _crear_notificacion_impago(db, usuario, tarjeta, vencimiento, d=0)
+def test_caso_j_enviar_registrado_falla_o_lanza(db_session, monkeypatch):
+    """J _enviar_registrado devuelve False → sin marcar; _enviar_registrado lanza → sin marcar y no propaga."""
+    usuario = _crear_usuario_test(db_session)
+    _crear_tarjeta(db_session, usuario.id, "Visa")
+    notif = _crear_notificacion_resumen(db_session, usuario.id, "Visa", "2026-11-04")
 
-    # Subcaso 1: enviar_whatsapp retorna False
-    with patch("app.services.tarjeta_service.obtener_detalle_resumen_vencimiento") as mock_detalle, \
-         patch("app.services.whatsapp_service.enviar_whatsapp", return_value=False):
-        mock_detalle.return_value = {"monto_deuda_restante": Decimal("50000")}
+    monkeypatch.setattr(
+        "app.routers.whatsapp.recordatorio_impago_wpp.obtener_detalle_resumen_vencimiento",
+        lambda *args, **kwargs: (Decimal("50000"), "ARS", False, False),
+    )
 
-        res = enviar_recordatorio_impago_si_corresponde(db, usuario, usuario.telefono)
-        assert res is False
+    # 1. _enviar_registrado devuelve False
+    mock_enviar_false = MagicMock(return_value=False)
+    monkeypatch.setattr(whatsapp_service, "_enviar_registrado", mock_enviar_false)
 
-    db.refresh(notif)
+    with buzon_de_respuesta(usuario.telefono):
+        enviar_whatsapp(usuario.telefono, "Listo.")
+        agregar_recordatorio_impago(db_session, usuario)
+
+    db_session.refresh(notif)
     assert notif.enviada_whatsapp is False
 
-    # Subcaso 2: enviar_whatsapp lanza una excepción
-    with patch("app.services.tarjeta_service.obtener_detalle_resumen_vencimiento") as mock_detalle, \
-         patch("app.services.whatsapp_service.enviar_whatsapp", side_effect=Exception("Falla de red")):
-        mock_detalle.return_value = {"monto_deuda_restante": Decimal("50000")}
+    # 2. _enviar_registrado lanza
+    def _lanza(*args, **kwargs):
+        raise ConnectionError("Falla de red")
 
-        res = enviar_recordatorio_impago_si_corresponde(db, usuario, usuario.telefono)
-        assert res is False
+    monkeypatch.setattr(whatsapp_service, "_enviar_registrado", _lanza)
 
-    db.refresh(notif)
+    with buzon_de_respuesta(usuario.telefono):
+        enviar_whatsapp(usuario.telefono, "Listo.")
+        agregar_recordatorio_impago(db_session, usuario)
+
+    db_session.refresh(notif)
+    assert notif.enviada_whatsapp is False
+
+
+def test_caso_k_recorte_nombre_largo(db_session, monkeypatch):
+    """K Tarjeta "Mastercard Black Banco Galicia Platinum" con deuda 1234567.89 vence 04/11 →
+    "Ojo: el resumen de Mastercard Black… de $1.234.567,89 (venció 04/11) figura sin pagar." (86 caracteres)."""
+    usuario = _crear_usuario_test(db_session)
+    nombre_largo = "Mastercard Black Banco Galicia Platinum"
+    _crear_tarjeta(db_session, usuario.id, nombre_largo)
+    _crear_notificacion_resumen(db_session, usuario.id, nombre_largo, "2026-11-04")
+
+    monkeypatch.setattr(
+        "app.routers.whatsapp.recordatorio_impago_wpp.obtener_detalle_resumen_vencimiento",
+        lambda *args, **kwargs: (Decimal("1234567.89"), "ARS", False, False),
+    )
+    mock_enviar = MagicMock(return_value=True)
+    monkeypatch.setattr(whatsapp_service, "_enviar_registrado", mock_enviar)
+
+    with buzon_de_respuesta(usuario.telefono):
+        enviar_whatsapp(usuario.telefono, "Listo.")
+        res = agregar_recordatorio_impago(db_session, usuario)
+        assert res is True
+
+    texto_saliente = mock_enviar.call_args[1].get("texto")
+    aviso_esperado = "Ojo: el resumen de Mastercard Black… de $1.234.567,89 (venció 04/11) figura sin pagar."
+    assert len(aviso_esperado) == 86
+    assert texto_saliente == f"Listo.\n{aviso_esperado}"
+
+
+def test_caso_l_sin_buzon_abierto(db_session, monkeypatch):
+    """L Sin buzón abierto → False y nada se manda ni se marca."""
+    usuario = _crear_usuario_test(db_session)
+    _crear_tarjeta(db_session, usuario.id, "Visa")
+    notif = _crear_notificacion_resumen(db_session, usuario.id, "Visa", "2026-11-04")
+
+    monkeypatch.setattr(
+        "app.routers.whatsapp.recordatorio_impago_wpp.obtener_detalle_resumen_vencimiento",
+        lambda *args, **kwargs: (Decimal("50000"), "ARS", False, False),
+    )
+    mock_enviar = MagicMock(return_value=True)
+    monkeypatch.setattr(whatsapp_service, "_enviar_registrado", mock_enviar)
+
+    res = agregar_recordatorio_impago(db_session, usuario)
+    assert res is False
+    assert mock_enviar.call_count == 0
+
+    db_session.refresh(notif)
+    assert notif.enviada_whatsapp is False
+
+
+def test_caso_m_buzon_sin_respuesta_no_manda_ni_marca(db_session, monkeypatch):
+    """M Buzón sin respuesta → no se manda nada y no se marca."""
+    usuario = _crear_usuario_test(db_session)
+    _crear_tarjeta(db_session, usuario.id, "Visa")
+    notif = _crear_notificacion_resumen(db_session, usuario.id, "Visa", "2026-11-04")
+
+    monkeypatch.setattr(
+        "app.routers.whatsapp.recordatorio_impago_wpp.obtener_detalle_resumen_vencimiento",
+        lambda *args, **kwargs: (Decimal("50000"), "ARS", False, False),
+    )
+    mock_enviar = MagicMock(return_value=True)
+    monkeypatch.setattr(whatsapp_service, "_enviar_registrado", mock_enviar)
+
+    with buzon_de_respuesta(usuario.telefono):
+        # NO se llama a enviar_whatsapp -> buzon no tiene partes
+        agregar_recordatorio_impago(db_session, usuario)
+
+    assert mock_enviar.call_count == 0
+    db_session.refresh(notif)
     assert notif.enviada_whatsapp is False

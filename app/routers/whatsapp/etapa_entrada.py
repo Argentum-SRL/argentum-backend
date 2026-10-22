@@ -6,7 +6,7 @@ Etapa de entrada para WhatsApp:
 from __future__ import annotations
 
 from decimal import Decimal
-import logging
+from datetime import datetime, timedelta
 import time
 from uuid import UUID
 from sqlalchemy import select
@@ -22,6 +22,8 @@ from app.routers.whatsapp.media import _descargar_medio_meta, _transcribir_audio
 from app.services import whatsapp_service
 from app.services.ai_service import obtener_categorias_permitidas
 from app.services.evento_service import emitir_evento_actualizacion
+from app.services.rate_limit_service import avisar_una_vez
+from app.utils.fecha import TZ_ARGENTINA
 from app.utils.telefono import normalizar_telefono_ar
 
 logger = structlog.get_logger(__name__)
@@ -158,6 +160,10 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
     Procesa el medio de entrada (texto, audio o imagen) y realiza las validaciones tempranas de longitud.
     Si ocurre un error o se excede el límite, envía la respuesta de fallback y marca ctx.terminado = True.
     """
+    ahora_ar = datetime.now(TZ_ARGENTINA)
+    medianoche_ar = (ahora_ar + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    segundos_medianoche = max(60, int((medianoche_ar - ahora_ar).total_seconds()))
+
     if ctx.msg_type == "text":
         ctx.mensaje_texto = ctx.msg.get("text", {}).get("body", "").strip()
 
@@ -170,7 +176,9 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
             from app.services.uso_ia_service import verificar_cupo_ia
             permitido, texto_cupo = verificar_cupo_ia(ctx.db, ctx.usuario, "audio")
             if not permitido:
-                whatsapp_service.enviar_whatsapp(ctx.from_number, texto_cupo)
+                id_usr = str(ctx.usuario.id) if ctx.usuario else ctx.from_number
+                if avisar_una_vez("aviso_tope_ia", id_usr, segundos_medianoche):
+                    whatsapp_service.enviar_whatsapp(ctx.from_number, texto_cupo)
                 if ctx.usuario:
                     from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
                     nueva_conv = ConversacionWpp(
@@ -260,7 +268,9 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
             from app.services.uso_ia_service import verificar_cupo_ia
             permitido, texto_cupo = verificar_cupo_ia(ctx.db, ctx.usuario, "archivo")
             if not permitido:
-                whatsapp_service.enviar_whatsapp(ctx.from_number, texto_cupo)
+                id_usr = str(ctx.usuario.id) if ctx.usuario else ctx.from_number
+                if avisar_una_vez("aviso_tope_ia", id_usr, segundos_medianoche):
+                    whatsapp_service.enviar_whatsapp(ctx.from_number, texto_cupo)
                 if ctx.usuario:
                     from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
                     nueva_conv = ConversacionWpp(
@@ -411,7 +421,9 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
         from app.services.uso_ia_service import verificar_cupo_ia
         permitido, texto_cupo = verificar_cupo_ia(ctx.db, ctx.usuario, "archivo")
         if not permitido:
-            whatsapp_service.enviar_whatsapp(ctx.from_number, texto_cupo)
+            id_usr = str(ctx.usuario.id) if ctx.usuario else ctx.from_number
+            if avisar_una_vez("aviso_tope_ia", id_usr, segundos_medianoche):
+                whatsapp_service.enviar_whatsapp(ctx.from_number, texto_cupo)
             if ctx.usuario:
                 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
                 nueva_conv = ConversacionWpp(

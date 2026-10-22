@@ -405,6 +405,34 @@ def _mock_buscar_usuario_testingadmin(from_number, db_session):
     return u
 
 
+_lock_metricas_envio = threading.Lock()
+_conteo_envios_por_entrante: dict[str, int] = {}
+_conteo_sin_entrante: int = 0
+_escenarios_con_partes_multiples: list[str] = []
+
+
+reiniciar_metricas_envio = lambda: (
+    _lock_metricas_envio.acquire(),
+    _conteo_envios_por_entrante.clear(),
+    globals().__setitem__("_conteo_sin_entrante", 0),
+    _escenarios_con_partes_multiples.clear(),
+    _lock_metricas_envio.release(),
+    None
+)[-1]
+
+
+obtener_metricas_envio = lambda: (
+    _lock_metricas_envio.acquire(),
+    (
+        max(_conteo_envios_por_entrante.values()) if _conteo_envios_por_entrante else 0,
+        len(_conteo_envios_por_entrante),
+        _conteo_sin_entrante,
+        list(_escenarios_con_partes_multiples),
+    ),
+    _lock_metricas_envio.release(),
+)[1]
+
+
 def run_isolated(fn):
     """Ejecuta una función en una transacción aislada que siempre termina en rollback."""
     conn = engine.connect()
@@ -415,19 +443,41 @@ def run_isolated(fn):
     tx_ids_antes = set(conn.execute(select(Transaccion.id)).scalars().all())
     conv_ids_antes = set(conn.execute(select(ConversacionWpp.id)).scalars().all())
 
-    def _mock_envio(t, m):
-        respuestas.append((t, m))
+    def _mock_envio(numero, payload, **kwargs):
+        texto = kwargs.get("texto", "")
+        respuestas.append((numero, texto))
         if _colector_salidas is not None:
-            _colector_salidas.registrar_mensaje(m)
+            _colector_salidas.registrar_mensaje(texto)
+
+        wamid_ent = kwargs.get("wamid_entrante")
+        partes = kwargs.get("partes", 1)
+
+        with _lock_metricas_envio:
+            if wamid_ent is not None:
+                _conteo_envios_por_entrante[wamid_ent] = _conteo_envios_por_entrante.get(wamid_ent, 0) + 1
+            else:
+                global _conteo_sin_entrante
+                _conteo_sin_entrante += 1
+
+            if partes > 1:
+                esc_id = None
+                if _colector_salidas and _colector_salidas.escenario_actual:
+                    esc_id = _colector_salidas.escenario_actual
+                elif _gestor_actual and _gestor_actual._escenario_actual:
+                    esc_id = _gestor_actual._escenario_actual
+                if esc_id and esc_id not in _escenarios_con_partes_multiples:
+                    _escenarios_con_partes_multiples.append(esc_id)
+
+        return True
 
     try:
-        # Modularización WhatsApp: Un solo camino de envío vía whatsapp_service.enviar_whatsapp.
+        # Modularización WhatsApp: Un solo camino de envío vía whatsapp_service._enviar_registrado.
         with patch("app.routers.whatsapp_ia.SessionLocal", BoundSession), \
              patch("app.routers.whatsapp_ia._buscar_usuario_por_telefono", side_effect=_mock_buscar_usuario_testingadmin), \
-             patch("app.services.whatsapp_service.enviar_whatsapp", side_effect=_mock_envio), \
+             patch("app.services.whatsapp_service._enviar_registrado", side_effect=_mock_envio), \
              patch("app.routers.whatsapp_ia._verificar_rate_limit_registrado", return_value=(True, None)), \
              patch("app.services.uso_ia_service.verificar_cupo_ia", return_value=(True, None)), \
-             patch("app.routers.whatsapp_ia.enviar_recordatorio_impago_si_corresponde", return_value=False):
+             patch("app.routers.whatsapp_ia.agregar_recordatorio_impago", return_value=False):
             res = fn(conn, BoundSession, respuestas)
 
             if _colector_salidas is not None and _colector_salidas.escenario_actual:

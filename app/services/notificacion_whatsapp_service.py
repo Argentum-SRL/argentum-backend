@@ -1,19 +1,9 @@
 import logging
 from typing import Union
-from app.services.whatsapp_service import enviar_mensaje_whatsapp
 from app.utils.formato import formatear_monto
 from app.models.usuario import Moneda
 
 logger = logging.getLogger(__name__)
-
-
-def enviar_whatsapp_notificacion(numero_telefono: str, mensaje: str) -> bool:
-    """
-    Envía un mensaje de WhatsApp.
-    numero_telefono debe tener formato internacional: +54911xxxxxxxx
-    Retorna True si exitoso, False si falla.
-    """
-    return enviar_mensaje_whatsapp(numero_telefono, mensaje)
 
 
 def formatear_cuota_vence(descripcion: str, monto: float, fecha_str: str, dias: int, moneda: Union[Moneda, str] = Moneda.ARS) -> str:

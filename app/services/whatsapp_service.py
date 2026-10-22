@@ -10,6 +10,10 @@ from dataclasses import dataclass
 
 import httpx
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+from uuid import UUID
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -256,103 +260,352 @@ def formatear_numero_whatsapp(telefono: str) -> str:
     return digitos
 
 
-def enviar_whatsapp(numero: str, mensaje: str) -> bool:
-    """
-    Envía un mensaje por WhatsApp usando Meta WhatsApp Cloud API (Graph API).
-    Incluye 3 reintentos con backoff exponencial ante timeouts o errores 5xx de Meta.
-    """
-    to_whatsapp = formatear_numero_whatsapp(numero)
+@dataclass
+class ResultadoMeta:
+    ok: bool
+    http_status: int | None = None
+    wamid_meta: str | None = None
+    codigo_error_meta: int | None = None
+    motivo: str | None = None
+    intentos: int = 1
 
+
+def _post_meta(
+    payload: dict,
+    max_intentos: int = 3,
+    timeout: httpx.Timeout | float | int | None = None,
+) -> ResultadoMeta:
+    """
+    Único lugar con client.post a .../messages.
+    Aplica la regla de reintentos de la decisión 3:
+    Reintentos solo ante httpx.ConnectError, httpx.ConnectTimeout y httpx.PoolTimeout
+    (esperas 0.5s y 1.0s).
+    Nunca ante ReadTimeout, WriteTimeout, TimeoutException genérico, ReadError,
+    RemoteProtocolError, 5xx ni 4xx.
+    Timeout del cliente: httpx.Timeout(15.0, connect=5.0) por defecto.
+    """
     if not settings.WHATSAPP_ACCESS_TOKEN or not settings.WHATSAPP_PHONE_NUMBER_ID:
-        logger.warning(
-            "WhatsApp / Meta API no configurado; mensaje simulado para %s",
-            _enmascarar_telefono(numero),
-        )
-        if settings.ENVIRONMENT == "development":
-            mensaje_log = _enmascarar_otp_en_mensaje(mensaje)
-            logger.info("[WHATSAPP-DEV] to=%s body=%s", _enmascarar_telefono(to_whatsapp), mensaje_log)
-        return True
+        logger.warning("WhatsApp / Meta API no configurado; mensaje simulado")
+        return ResultadoMeta(ok=True, motivo="sin_configuracion", intentos=0)
 
     url = f"https://graph.facebook.com/v21.0/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
     headers = {
         "Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}",
         "Content-Type": "application/json",
     }
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to_whatsapp,
-        "type": "text",
-        "text": {"body": mensaje},
-    }
-
-    max_intentos = 3
-    backoff = 0.5
+    client_timeout = timeout if timeout is not None else httpx.Timeout(15.0, connect=5.0)
 
     for intento in range(1, max_intentos + 1):
         try:
-            logger.debug(
-                "Enviando WhatsApp vía Meta (intento %d/%d) a %s",
-                intento,
-                max_intentos,
-                _enmascarar_telefono(to_whatsapp),
-            )
             client = get_meta_http_client()
-            response = client.post(url, headers=headers, json=payload, timeout=15)
+            response = client.post(url, headers=headers, json=payload, timeout=client_timeout)
 
             if response.is_success:
                 res_json = response.json()
                 msg_id = (
-                    res_json.get("messages", [{}])[0].get("id", "N/A")
+                    res_json.get("messages", [{}])[0].get("id")
                     if res_json.get("messages")
-                    else "N/A"
+                    else None
                 )
-                logger.info(
-                    "WhatsApp enviado exitosamente a %s vía Meta. Message ID: %s",
-                    _enmascarar_telefono(to_whatsapp),
-                    msg_id,
+                return ResultadoMeta(
+                    ok=True,
+                    http_status=response.status_code,
+                    wamid_meta=msg_id,
+                    intentos=intento,
                 )
-                return True
 
-            # Si es error 4xx de cliente (bad request, auth error, etc.), no reintentar
+            # Error 4xx de cliente
             if 400 <= response.status_code < 500:
-                logger.error(
-                    "Error de cliente al enviar WhatsApp a %s (HTTP %d): %s",
-                    _enmascarar_telefono(to_whatsapp),
-                    response.status_code,
-                    response.text,
+                codigo_error = None
+                try:
+                    err_json = response.json()
+                    if isinstance(err_json, dict):
+                        err_obj = err_json.get("error", {})
+                        if isinstance(err_obj, dict):
+                            codigo_error = err_obj.get("code")
+                except Exception:
+                    pass
+                return ResultadoMeta(
+                    ok=False,
+                    http_status=response.status_code,
+                    codigo_error_meta=codigo_error,
+                    motivo="rechazado_meta",
+                    intentos=intento,
+                )
+
+            # Error 5xx de servidor de Meta
+            if response.status_code >= 500:
+                return ResultadoMeta(
+                    ok=False,
+                    http_status=response.status_code,
+                    motivo="error_meta_5xx",
+                    intentos=intento,
+                )
+
+            return ResultadoMeta(
+                ok=False,
+                http_status=response.status_code,
+                motivo="error_inesperado",
+                intentos=intento,
+            )
+
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout):
+            if intento < max_intentos:
+                time.sleep(0.5 if intento == 1 else 1.0)
+                continue
+            return ResultadoMeta(
+                ok=False,
+                motivo="error_conexion",
+                intentos=intento,
+            )
+        except (httpx.ReadTimeout, httpx.WriteTimeout, httpx.TimeoutException, httpx.ReadError, httpx.RemoteProtocolError):
+            return ResultadoMeta(
+                ok=False,
+                motivo="sin_respuesta_meta",
+                intentos=intento,
+            )
+        except Exception:
+            return ResultadoMeta(
+                ok=False,
+                motivo="error_inesperado",
+                intentos=intento,
+            )
+
+    return ResultadoMeta(ok=False, motivo="error_conexion", intentos=max_intentos)
+
+
+def _enviar_registrado(
+    numero: str,
+    payload: dict,
+    *,
+    texto: str,
+    tipo: str,
+    usuario_id: UUID | None = None,
+    wamid_entrante: str | None = None,
+    partes: int = 1,
+    aviso_tipo: str | None = None,
+    exento_tope: bool = False,
+    max_intentos: int = 3,
+) -> bool:
+    """
+    Envía y registra un mensaje saliente. Controla el tope diario de salientes (150).
+    Nunca lanza excepciones hacia el llamador.
+    """
+    try:
+        from app.services import salientes_wpp_service
+
+        tel_hash = salientes_wpp_service.hash_telefono(numero)
+        es_plantilla = payload.get("type") == "template"
+
+        es_seguridad = exento_tope or tipo in (
+            "seguridad_texto",
+            "plantilla:alerta_cambio_email",
+            "plantilla:alerta_cambio_contrasena",
+        )
+
+        if not es_seguridad and tel_hash:
+            salientes = salientes_wpp_service.salientes_hoy(tel_hash)
+            if salientes >= settings.WHATSAPP_MAX_SALIENTES_DIA:
+                salientes_wpp_service.registrar_saliente(
+                    usuario_id=usuario_id,
+                    telefono_hash=tel_hash,
+                    tipo=tipo,
+                    es_plantilla=es_plantilla,
+                    partes=partes,
+                    aviso_tipo=aviso_tipo,
+                    wamid_entrante=wamid_entrante,
+                    enviado=False,
+                    motivo_no_enviado="tope_diario_salientes",
+                    http_status=None,
+                    codigo_error_meta=None,
+                    wamid_meta=None,
                 )
                 return False
 
-            # Error 5xx del servidor de Meta
-            logger.warning(
-                "Error de servidor de Meta al enviar WhatsApp a %s (HTTP %d): %s. Reintentando...",
-                _enmascarar_telefono(to_whatsapp),
-                response.status_code,
-                response.text,
+        res = _post_meta(payload, max_intentos=max_intentos)
+
+        salientes_wpp_service.registrar_saliente(
+            usuario_id=usuario_id,
+            telefono_hash=tel_hash,
+            tipo=tipo,
+            es_plantilla=es_plantilla,
+            partes=partes,
+            aviso_tipo=aviso_tipo,
+            wamid_entrante=wamid_entrante,
+            enviado=res.ok,
+            motivo_no_enviado=res.motivo,
+            http_status=res.http_status,
+            codigo_error_meta=res.codigo_error_meta,
+            wamid_meta=res.wamid_meta,
+            estado_meta="sent" if res.ok and res.wamid_meta else None,
+        )
+        return res.ok
+
+    except Exception as exc:
+        logger.error("Error crítico en _enviar_registrado: %s", exc)
+        return False
+
+
+class BuzonSalida:
+    def __init__(self, numero: str, wamid_entrante: str | None = None):
+        self.numero = numero
+        self.numero_norm = formatear_numero_whatsapp(numero)
+        self.wamid_entrante = wamid_entrante
+        self.partes: list[str] = []
+        self.usuario_id: UUID | None = None
+        self.tipo: str = "respuesta"
+        self._aviso_texto: str | None = None
+        self._aviso_tipo: str | None = None
+        self._aviso_al_enviar = None
+
+    def agregar_aviso(self, texto: str, tipo: str, al_enviar=None) -> None:
+        if self._aviso_texto is not None:
+            return
+        if "\n" in texto or len(texto) > 90:
+            logger.warning("Aviso rechazado: contiene salto de línea o supera 90 caracteres: %s", texto)
+            return
+        self._aviso_texto = texto
+        self._aviso_tipo = tipo
+        self._aviso_al_enviar = al_enviar
+
+
+_buzon_actual_cv: ContextVar[BuzonSalida | None] = ContextVar("_buzon_actual_cv", default=None)
+
+
+def buzon_actual() -> BuzonSalida | None:
+    return _buzon_actual_cv.get()
+
+
+def _despachar_partido_4096(buzon: BuzonSalida, texto_completo: str) -> bool:
+    trozos = []
+    resto = texto_completo
+    while len(resto) > 4096:
+        corte = resto.rfind("\n", 0, 4096)
+        if corte == -1:
+            corte = 4096
+        trozos.append(resto[:corte])
+        resto = resto[corte:].lstrip("\n")
+    if resto:
+        trozos.append(resto)
+
+    todos_ok = True
+    for t in trozos:
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": buzon.numero_norm,
+            "type": "text",
+            "text": {"body": t},
+        }
+        ok = _enviar_registrado(
+            buzon.numero,
+            payload,
+            texto=t,
+            tipo=buzon.tipo,
+            usuario_id=buzon.usuario_id,
+            wamid_entrante=buzon.wamid_entrante,
+            partes=1,
+            aviso_tipo="partido_4096",
+        )
+        if not ok:
+            todos_ok = False
+
+    if todos_ok and buzon._aviso_al_enviar:
+        try:
+            buzon._aviso_al_enviar()
+        except Exception as exc_al_enviar:
+            logger.error("Error en callback al_enviar partido_4096: %s", exc_al_enviar)
+
+    return todos_ok
+
+
+@contextmanager
+def buzon_de_respuesta(numero: str, wamid_entrante: str | None = None):
+    buzon = BuzonSalida(numero, wamid_entrante)
+    token = _buzon_actual_cv.set(buzon)
+    try:
+        yield buzon
+    finally:
+        _buzon_actual_cv.reset(token)
+        try:
+            if buzon.partes:
+                cuerpo = "\n\n".join(buzon.partes)
+                texto_completo = cuerpo + (f"\n{buzon._aviso_texto}" if buzon._aviso_texto else "")
+                if len(texto_completo) <= 4096:
+                    payload = {
+                        "messaging_product": "whatsapp",
+                        "to": buzon.numero_norm,
+                        "type": "text",
+                        "text": {"body": texto_completo},
+                    }
+                    enviado = _enviar_registrado(
+                        buzon.numero,
+                        payload,
+                        texto=texto_completo,
+                        tipo=buzon.tipo,
+                        usuario_id=buzon.usuario_id,
+                        wamid_entrante=buzon.wamid_entrante,
+                        partes=len(buzon.partes),
+                        aviso_tipo=buzon._aviso_tipo,
+                    )
+                    if enviado and buzon._aviso_al_enviar:
+                        try:
+                            buzon._aviso_al_enviar()
+                        except Exception as exc_al_enviar:
+                            logger.error("Error en callback al_enviar de aviso: %s", exc_al_enviar)
+                else:
+                    _despachar_partido_4096(buzon, texto_completo)
+        except Exception as exc_despacho:
+            logger.error("Error al despachar buzon_de_respuesta: %s", exc_despacho)
+
+
+def enviar_whatsapp(numero: str, mensaje: str, tipo: str = "respuesta", exento_tope: bool = False) -> bool:
+    """
+    Envía o encola un mensaje de texto por WhatsApp.
+    Si hay un buzón abierto para ese mismo número, agrega el texto como parte y devuelve True sin mandar.
+    Si no, o si el buzón es para otro número, envía en el momento por _enviar_registrado.
+    """
+    buzon = buzon_actual()
+    num_norm = formatear_numero_whatsapp(numero)
+
+    if buzon is not None:
+        if buzon.numero_norm == num_norm:
+            buzon.partes.append(mensaje)
+            return True
+        else:
+            tipo_envio = "otro_numero" if tipo == "respuesta" else tipo
+            payload = {
+                "messaging_product": "whatsapp",
+                "to": num_norm,
+                "type": "text",
+                "text": {"body": mensaje},
+            }
+            return _enviar_registrado(
+                numero,
+                payload,
+                texto=mensaje,
+                tipo=tipo_envio,
+                usuario_id=None,
+                wamid_entrante=None,
+                partes=1,
+                exento_tope=exento_tope,
             )
-        except (httpx.TimeoutException, httpx.NetworkError) as exc:
-            logger.warning(
-                "Timeout o error de red al enviar WhatsApp a %s (intento %d/%d): %s",
-                _enmascarar_telefono(to_whatsapp),
-                intento,
-                max_intentos,
-                exc,
-            )
-        except Exception as exc:
-            logger.error("Error inesperado al enviar WhatsApp a %s: %s", _enmascarar_telefono(to_whatsapp), exc)
-            return False
 
-        if intento < max_intentos:
-            time.sleep(backoff)
-            backoff *= 2
-
-    logger.error("Fallaron todos los intentos (%d) para enviar WhatsApp a %s", max_intentos, _enmascarar_telefono(to_whatsapp))
-    return False
-
-
-def enviar_mensaje_whatsapp(telefono: str, mensaje: str) -> bool:
-    """Alias de compatibilidad."""
-    return enviar_whatsapp(telefono, mensaje)
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": num_norm,
+        "type": "text",
+        "text": {"body": mensaje},
+    }
+    return _enviar_registrado(
+        numero,
+        payload,
+        texto=mensaje,
+        tipo=tipo,
+        usuario_id=None,
+        wamid_entrante=None,
+        partes=1,
+        exento_tope=exento_tope,
+    )
 
 
 def enviar_whatsapp_template(
@@ -363,30 +616,31 @@ def enviar_whatsapp_template(
     max_intentos: int = 3,
 ) -> bool:
     """
-    Envía un mensaje de plantilla por WhatsApp usando Meta WhatsApp Cloud API (Graph API).
-    Incluye reintentos con backoff exponencial ante timeouts o errores 5xx de Meta.
+    Envía un mensaje de plantilla por WhatsApp usando Meta WhatsApp Cloud API.
+    Si hay un buzón abierto para ese número, no se manda (devuelve False y registra motivo 'plantilla_con_buzon').
     """
     to_whatsapp = formatear_numero_whatsapp(numero)
+    buzon = buzon_actual()
 
-    if not settings.WHATSAPP_ACCESS_TOKEN or not settings.WHATSAPP_PHONE_NUMBER_ID:
-        logger.warning(
-            "WhatsApp / Meta API no configurado; mensaje template simulado para %s",
-            _enmascarar_telefono(numero),
+    if buzon is not None and buzon.numero_norm == to_whatsapp:
+        from app.services import salientes_wpp_service
+        tel_hash = salientes_wpp_service.hash_telefono(numero)
+        salientes_wpp_service.registrar_saliente(
+            usuario_id=buzon.usuario_id,
+            telefono_hash=tel_hash,
+            tipo=f"plantilla:{template_name}",
+            es_plantilla=True,
+            partes=1,
+            aviso_tipo=None,
+            wamid_entrante=buzon.wamid_entrante,
+            enviado=False,
+            motivo_no_enviado="plantilla_con_buzon",
+            http_status=None,
+            codigo_error_meta=None,
+            wamid_meta=None,
         )
-        if settings.ENVIRONMENT == "development":
-            logger.info(
-                "[WHATSAPP-DEV] to=%s template=%s lang=%s",
-                _enmascarar_telefono(to_whatsapp),
-                template_name,
-                language_code,
-            )
-        return True
+        return False
 
-    url = f"https://graph.facebook.com/v21.0/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
-    headers = {
-        "Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}",
-        "Content-Type": "application/json",
-    }
     payload = {
         "messaging_product": "whatsapp",
         "to": to_whatsapp,
@@ -398,78 +652,19 @@ def enviar_whatsapp_template(
         },
     }
 
-    backoff = 0.5
+    exento_seguridad = template_name in ("alerta_cambio_email", "alerta_cambio_contrasena")
 
-    for intento in range(1, max_intentos + 1):
-        try:
-            logger.debug(
-                "Enviando WhatsApp template vía Meta (intento %d/%d) a %s (template: %s)",
-                intento,
-                max_intentos,
-                _enmascarar_telefono(to_whatsapp),
-                template_name,
-            )
-            client = get_meta_http_client()
-            response = client.post(url, headers=headers, json=payload, timeout=15)
-
-            if response.is_success:
-                res_json = response.json()
-                msg_id = (
-                    res_json.get("messages", [{}])[0].get("id", "N/A")
-                    if res_json.get("messages")
-                    else "N/A"
-                )
-                logger.info(
-                    "WhatsApp template enviado exitosamente a %s vía Meta. Message ID: %s",
-                    _enmascarar_telefono(to_whatsapp),
-                    msg_id,
-                )
-                return True
-
-            # Si es error 4xx de cliente (bad request, auth error, template no aprobado, etc.), no reintentar
-            if 400 <= response.status_code < 500:
-                logger.error(
-                    "Error de cliente al enviar WhatsApp template a %s (HTTP %d): %s",
-                    _enmascarar_telefono(to_whatsapp),
-                    response.status_code,
-                    response.text,
-                )
-                return False
-
-            # Error 5xx del servidor de Meta
-            logger.warning(
-                "Error de servidor de Meta al enviar WhatsApp template a %s (HTTP %d): %s. Reintentando...",
-                _enmascarar_telefono(to_whatsapp),
-                response.status_code,
-                response.text,
-            )
-        except (httpx.TimeoutException, httpx.NetworkError) as exc:
-            logger.warning(
-                "Timeout o error de red al enviar WhatsApp template a %s (intento %d/%d): %s",
-                _enmascarar_telefono(to_whatsapp),
-                intento,
-                max_intentos,
-                exc,
-            )
-        except Exception as exc:
-            logger.error(
-                "Error inesperado al enviar WhatsApp template a %s: %s",
-                _enmascarar_telefono(to_whatsapp),
-                exc,
-            )
-            return False
-
-        if intento < max_intentos:
-            time.sleep(backoff)
-            backoff *= 2
-
-    logger.error(
-        "Fallaron todos los intentos (%d) para enviar WhatsApp template a %s",
-        max_intentos,
-        _enmascarar_telefono(to_whatsapp),
+    return _enviar_registrado(
+        numero,
+        payload,
+        texto=f"[plantilla:{template_name}]",
+        tipo=f"plantilla:{template_name}",
+        usuario_id=None,
+        wamid_entrante=None,
+        partes=1,
+        exento_tope=exento_seguridad,
+        max_intentos=max_intentos,
     )
-    return False
-
 
 
 def marcar_leido_y_escribiendo(wamid: str) -> bool:
@@ -481,11 +676,6 @@ def marcar_leido_y_escribiendo(wamid: str) -> bool:
     if not settings.WHATSAPP_ACCESS_TOKEN or not settings.WHATSAPP_PHONE_NUMBER_ID:
         return False
 
-    url = f"https://graph.facebook.com/v21.0/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
-    headers = {
-        "Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}",
-        "Content-Type": "application/json",
-    }
     payload = {
         "messaging_product": "whatsapp",
         "status": "read",
@@ -493,11 +683,7 @@ def marcar_leido_y_escribiendo(wamid: str) -> bool:
         "typing_indicator": {"type": "text"},
     }
 
-    try:
-        client = get_meta_http_client()
-        res = client.post(url, headers=headers, json=payload, timeout=3)
-        return res.is_success
-    except Exception as exc:
-        logger.warning("Error al marcar mensaje %s como leído y escribiendo: %s", wamid, exc)
-        return False
+    res = _post_meta(payload, max_intentos=1, timeout=3)
+    return res.ok
+
 

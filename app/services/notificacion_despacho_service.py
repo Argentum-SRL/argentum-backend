@@ -75,7 +75,12 @@ def despachar_inmediata(db: Session, notif_id: UUID | Any) -> bool:
             max_intentos=1,
         )
         if not enviado and notif.tipo == TipoNotificacion.CAMBIO_CONTRASENA:
-            enviado = enviar_whatsapp(usuario.telefono, MENSAJE_CAMBIO_CONTRASENA_WPP)
+            enviado = enviar_whatsapp(
+                usuario.telefono,
+                MENSAJE_CAMBIO_CONTRASENA_WPP,
+                tipo="seguridad_texto",
+                exento_tope=True,
+            )
 
         if enviado:
             notif.enviada_whatsapp = True

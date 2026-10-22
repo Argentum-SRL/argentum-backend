@@ -522,6 +522,13 @@ def eliminar_usuario(db: Session, usuario: Usuario, commit: bool = True) -> dict
             .values(usuario_id=None)
         )
 
+        from app.models.mensaje_saliente_wpp import MensajeSalienteWpp
+        db.execute(
+            update(MensajeSalienteWpp)
+            .where(MensajeSalienteWpp.usuario_id == usuario_id)
+            .values(usuario_id=None, telefono_hash=None)
+        )
+
         for modelo in modelos_usuario:
             db.execute(delete(modelo).where(modelo.usuario_id == usuario_id))
         

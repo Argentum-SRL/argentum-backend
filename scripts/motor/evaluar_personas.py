@@ -8,7 +8,6 @@ import sys
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal
-from pathlib import Path
 from typing import Any
 
 # Asegurar raíz del backend en sys.path

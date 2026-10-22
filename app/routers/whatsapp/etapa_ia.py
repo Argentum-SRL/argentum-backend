@@ -73,9 +73,19 @@ def procesar_llamada_ia_y_normalizacion(ctx: ContextoMensaje) -> None:
     from app.services.uso_ia_service import verificar_cupo_ia
     permitido, texto_cupo = verificar_cupo_ia(db, usuario, "mensaje")
     if not permitido:
+        from datetime import datetime, timedelta
         from app.services import whatsapp_service
+        from app.services.rate_limit_service import avisar_una_vez
         from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
-        whatsapp_service.enviar_whatsapp(ctx.from_number, texto_cupo)
+        from app.utils.fecha import TZ_ARGENTINA
+
+        ahora_ar = datetime.now(TZ_ARGENTINA)
+        medianoche_ar = (ahora_ar + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        segundos_tope = max(60, int((medianoche_ar - ahora_ar).total_seconds()))
+        id_usr = str(usuario.id) if usuario else ctx.from_number
+
+        if avisar_una_vez("aviso_tope_ia", id_usr, segundos_tope):
+            whatsapp_service.enviar_whatsapp(ctx.from_number, texto_cupo)
         if usuario:
             nueva_conv = ConversacionWpp(
                 usuario_id=usuario.id,

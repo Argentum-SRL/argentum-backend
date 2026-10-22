@@ -105,6 +105,24 @@ def verificar_rate_limit(
             db.close()
 
 
+def avisar_una_vez(accion: str, identificador: str, ventana_segundos: int) -> bool:
+    """
+    Controla que un aviso se envíe una sola vez dentro de la ventana de tiempo.
+    Retorna True la primera vez dentro de la ventana; si falla el control o la base, retorna True.
+    """
+    try:
+        permitido, _, _ = verificar_rate_limit(
+            accion=accion,
+            identificador=identificador,
+            max_intentos=1,
+            ventana_segundos=ventana_segundos,
+        )
+        return permitido
+    except Exception as exc:
+        logger.warning("Fallo al verificar avisar_una_vez (%s, %s): %s", accion, identificador, exc)
+        return True
+
+
 def limpiar_codigos_y_rate_limits_expirados(db: Session) -> dict[str, int]:
     """
     Elimina registros vencidos en Postgres:

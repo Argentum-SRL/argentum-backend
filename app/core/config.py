@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     WHATSAPP_VERIFY_TOKEN: str = ""
     WHATSAPP_BOT_NUMBER: str = ""
     WHATSAPP_PLANTILLAS_ACTIVAS: str = "resumen_ciclo,alerta_cambio_email,alerta_cambio_contrasena"
+    WHATSAPP_MAX_SALIENTES_DIA: int = 150
+    WHATSAPP_CUPO_GRATIS_MES: int = 1000
 
     # Google
     GOOGLE_CLIENT_ID: str = ""

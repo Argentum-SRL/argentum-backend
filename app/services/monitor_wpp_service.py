@@ -18,6 +18,7 @@ from app.models.notificacion import Notificacion
 from app.models.rate_limit import RateLimit
 from app.models.uso_ia import UsoIA
 from app.models.usuario import Usuario
+from app.services import salientes_wpp_service
 from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
 
 
@@ -316,6 +317,7 @@ def obtener_resumen_monitor(db: Session, dias: int) -> dict[str, Any]:
         "costo": costo_dict,
         "topes_hoy": topes_hoy_dict,
         "salud": salud_dict,
+        "whatsapp_salientes": salientes_wpp_service.resumen_salientes(db, dias),
     }
 
 

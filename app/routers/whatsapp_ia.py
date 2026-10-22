@@ -179,7 +179,7 @@ from app.routers.whatsapp.propuestas import (
     _resolver_mencion_tarjeta_en_texto,
 )
 from app.routers.whatsapp.registro import _registrar_directo_si_corresponde
-from app.routers.whatsapp.recordatorio_impago_wpp import enviar_recordatorio_impago_si_corresponde
+from app.routers.whatsapp.recordatorio_impago_wpp import agregar_recordatorio_impago
 from app.routers.whatsapp.resolvers_cascada import (
     ALIAS_BANCOS_ARGENTINOS,
     ALIAS_BILLETERAS,
@@ -201,6 +201,8 @@ from app.schemas.transferencia_interna import TransferenciaInternaCreate
 from app.services import (
     meta_service,
     presupuesto_service,
+    rate_limit_service,
+    salientes_wpp_service,
     suscripcion_service,
     tarjeta_service,
     transaccion_service,
@@ -302,22 +304,34 @@ def _preprocesar_webhook_whatsapp_sync(
     if not entries:
         return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK), None
 
-    changes = entries[0].get("changes", [])
-    if not changes:
-        return PlainTextResponse(content="OK", status_code=status.HTTP_200_OK), None
+    messages = []
+    for entry in entries:
+        for change in entry.get("changes", []):
+            val = change.get("value", {})
+            msgs = val.get("messages", [])
+            if msgs and isinstance(msgs, list):
+                messages = msgs
+                break
+        if messages:
+            break
 
-    value = changes[0].get("value", {})
-    messages = value.get("messages", [])
     if not messages:
         # Eventos de estado (sent, delivered, read, failed, etc.)
-        statuses = value.get("statuses")
+        all_statuses = []
+        for entry in entries:
+            for change in entry.get("changes", []):
+                val = change.get("value", {})
+                st_list = val.get("statuses", [])
+                if isinstance(st_list, list):
+                    all_statuses.extend(st_list)
+
         logger.info(
             "whatsapp_webhook_status_event",
-            statuses=statuses,
-            value=value,
+            statuses=all_statuses,
         )
-        if statuses and isinstance(statuses, list):
-            for st in statuses:
+        if all_statuses:
+            salientes_wpp_service.registrar_estados_meta(all_statuses)
+            for st in all_statuses:
                 if isinstance(st, dict) and st.get("status") == "failed":
                     errors = st.get("errors", [])
                     if errors and isinstance(errors, list):
@@ -408,14 +422,18 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
     msg_type = datos_mensaje.get("msg_type", "text")
     t_inicio = datos_mensaje.get("t_inicio") or time.perf_counter()
 
-    # Feedback visual temprano: marcar como leído y mostrar escribiendo
-    if wamid:
-        marcar_leido_y_escribiendo(wamid)
+    with whatsapp_service.buzon_de_respuesta(from_number, wamid_entrante=wamid) as buzon:
+        # Feedback visual temprano: marcar como leído y mostrar escribiendo
+        if wamid:
+            marcar_leido_y_escribiendo(wamid)
 
-    db = SessionLocal()
-    try:
+        db = SessionLocal()
         try:
             usuario = _buscar_usuario_por_telefono(from_number, db)
+            if usuario:
+                buzon.usuario_id = usuario.id
+            else:
+                buzon.tipo = "no_registrado"
 
             ctx = ContextoMensaje(
                 datos_mensaje=datos_mensaje,
@@ -444,10 +462,11 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                     telefono=from_number,
                     motivo=motivo_rate_limit,
                 )
-                whatsapp_service.enviar_whatsapp(
-                    from_number,
-                    motivo_rate_limit,
-                )
+                if rate_limit_service.avisar_una_vez("aviso_rafaga_wpp", tel_usuario, 60):
+                    whatsapp_service.enviar_whatsapp(
+                        from_number,
+                        motivo_rate_limit,
+                    )
                 return
 
             logger.info(
@@ -593,7 +612,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                 whatsapp_service.enviar_whatsapp(from_number, ctx.resultado_ia["respuesta_usuario"])
                 t_envio_end = time.perf_counter()
                 logger.info("[LATENCIA][ENVIO_META] Envío de mensaje: %.2fs", t_envio_end - t_envio_start)
-                enviar_recordatorio_impago_si_corresponde(db, usuario, from_number)
+                agregar_recordatorio_impago(db, usuario)
 
             t_total = time.perf_counter() - t_inicio
             logger.info(
@@ -615,8 +634,8 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                 logger.exception("Error al enviar mensaje de fallback")
             return
 
-    finally:
-        db.close()
+        finally:
+            db.close()
 
 
 def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> PlainTextResponse:

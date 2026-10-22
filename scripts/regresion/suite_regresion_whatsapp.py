@@ -48,6 +48,7 @@ from scripts.regresion.suite.catalogo import obtener_catalogo
 
 
 def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False, solo_escenario: str | None = None, volcar_salidas: str | None = None):
+    comun.reiniciar_metricas_envio()
     if volcar_salidas:
         colector = ColectorSalidas(volcar_salidas)
     else:
@@ -221,6 +222,10 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             return em or "testingadmin@argentum.com"
         return mapa_anon.get(em, "Usuario_XX")
 
+    m, e, s, esc_partes_mult = comun.obtener_metricas_envio()
+    if m > 1:
+        fallidos += 1
+
     if verbose:
         print("\n=== RESUMEN DE EJECUCION ===")
         print(f"Total: {total} | Aprobados: {aprobados} | Omitidos: {omitidos} | Fallidos: {fallidos} | Tiempo: {dur_total:.2f}s")
@@ -261,6 +266,11 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
                 print(f"  - {u_label} ({desv['billetera']} {desv['moneda']}): antes={desv['referencia']}, después={desv['actual']}, diferencia={desv['diff']}")
         print(f"Actividad en otras cuentas: {movs_otros_nuevos} movimientos nuevos, {billeteras_ajenas_cambiadas} billeteras con saldo distinto")
         print(f"Guarda graph.facebook.com: {disparos_guarda} disparos")
+        print(f"Envíos por mensaje entrante: máximo {m} ({e} entrantes, {s} sin entrante)")
+        if esc_partes_mult:
+            print(f"Escenarios con partes > 1: {', '.join(esc_partes_mult)}")
+        if m > 1:
+            print(f"FALLO: Control de envíos por mensaje entrante falló (máximo {m} > 1)")
 
         print(f"\n=== VERIFICACION DE RECONCILIACION ({total_billeteras} BILLETERAS) ===")
         for d in detalles_rec:
@@ -291,6 +301,11 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
                 print(f"  - {u_label} ({desv['billetera']} {desv['moneda']}): antes={desv['referencia']}, después={desv['actual']}, diferencia={desv['diff']}")
         print(f"Actividad en otras cuentas: {movs_otros_nuevos} movimientos nuevos, {billeteras_ajenas_cambiadas} billeteras con saldo distinto")
         print(f"Guarda graph.facebook.com: {'OK (0 disparos)' if disparos_guarda == 0 else f'DISPARADA ({disparos_guarda})'}")
+        print(f"Envíos por mensaje entrante: máximo {m} ({e} entrantes, {s} sin entrante)")
+        if esc_partes_mult:
+            print(f"Escenarios con partes > 1: {', '.join(esc_partes_mult)}")
+        if m > 1:
+            print(f"FALLO: Control de envíos por mensaje entrante falló (máximo {m} > 1)")
         if rec_ok:
             print(f"Reconciliación {total_billeteras} billeteras: OK (todas dentro del baseline)")
         else:
