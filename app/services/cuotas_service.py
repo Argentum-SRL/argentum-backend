@@ -7,6 +7,7 @@ from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificac
 from app.models.grupo_cuotas import GrupoCuotas
 from app.schemas.grupos_cuotas import GrupoCuotasUpdate
 from app.services import presupuesto_service
+from app.services.saldo_billetera_service import aplicar_impacto_saldo
 from app.utils.fecha import hoy_argentina
 from app.core.constants import IVA_INTERESES
 
@@ -159,6 +160,29 @@ def crear_cuotas(
     return cuotas
 
 
+def _marcar_pagadas_las_aplicadas(db: Session, grupo: GrupoCuotas) -> None:
+    """
+    Toda cuota no pagada cuya hija movió el saldo (transaccion_service._afecta_saldo y saldo_aplicado True)
+    pasa a pagada=True y monto_real = monto de la hija.
+    """
+    from sqlalchemy.orm import joinedload
+    from sqlalchemy import select
+    from app.services import transaccion_service
+
+    cuotas = db.execute(
+        select(Cuota).options(joinedload(Cuota.transaccion)).where(Cuota.grupo_id == grupo.id)
+    ).scalars().all()
+
+    for c in cuotas:
+        if not c.pagada:
+            tx_hija = c.transaccion
+            if tx_hija and transaccion_service._afecta_saldo(tx_hija) and tx_hija.saldo_aplicado:
+                c.pagada = True
+                c.monto_real = tx_hija.monto
+
+    db.flush()
+
+
 def cancelar_grupo(
     db: Session,
     grupo_id: any,
@@ -176,6 +200,9 @@ def cancelar_grupo(
 
     if not grupo:
         raise HTTPException(status_code=404, detail="No encontramos ese grupo de cuotas.")
+
+    # Marcar pagadas las cuotas cuya hija ya movió el saldo
+    _marcar_pagadas_las_aplicadas(db, grupo)
 
     # 2. Si el grupo ya está COMPLETADO o CANCELADO, fallar con 400
     if grupo.estado == EstadoGrupoCuotas.CANCELADO:
@@ -242,6 +269,9 @@ def prepagar_grupo(
     if grupo.estado != EstadoGrupoCuotas.ACTIVO:
         raise HTTPException(status_code=400, detail="El grupo no está activo")
 
+    # Marcar pagadas las cuotas cuya hija ya movió el saldo
+    _marcar_pagadas_las_aplicadas(db, grupo)
+
     # 3. Obtener todas las cuotas con pagada == False
     cuotas_pendientes = db.execute(
         select(Cuota).where(Cuota.grupo_id == grupo.id, Cuota.pagada == False)
@@ -290,8 +320,8 @@ def prepagar_grupo(
         estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA
     )
 
-    # Debitar billetera.saldo_actual -= monto_total_pendiente
-    billetera.saldo_actual -= monto_total_pendiente
+    # Debitar billetera mediante la puerta única
+    aplicar_impacto_saldo(billetera, -monto_total_pendiente, hoy_argentina())
 
     # Chequeo de saldo cero manualmente después de debitar
     if billetera.saldo_actual <= 0:
@@ -424,13 +454,6 @@ def eliminar_cuota_individual(
     if not cuota:
         raise HTTPException(status_code=404, detail="No encontramos esa cuota.")
 
-    # 2. Validación estricta: Solo se puede borrar con pagada=False
-    if cuota.pagada:
-        raise HTTPException(
-            status_code=400,
-            detail="No se puede borrar una cuota que ya fue pagada."
-        )
-
     grupo = db.execute(
         select(GrupoCuotas).where(
             GrupoCuotas.id == cuota.grupo_id,
@@ -440,6 +463,16 @@ def eliminar_cuota_individual(
 
     if not grupo:
         raise HTTPException(status_code=404, detail="No encontramos el grupo de cuotas.")
+
+    # Marcar pagadas las cuotas cuya hija ya movió el saldo
+    _marcar_pagadas_las_aplicadas(db, grupo)
+
+    # 2. Validación estricta: Solo se puede borrar con pagada=False
+    if cuota.pagada:
+        raise HTTPException(
+            status_code=400,
+            detail="No se puede borrar una cuota que ya fue pagada."
+        )
 
     # 3. Borrar la cuota pendiente puntual y su transacción hija reusando la función existente
     _eliminar_cuota_pendiente(db, cuota)
@@ -470,10 +503,12 @@ def actualizar_grupo(
     from sqlalchemy import select
     from app.models.billetera import Billetera
     from app.models.tarjeta_credito import TarjetaCredito
-    from app.models.transaccion import MetodoPago, EstadoVerificacionTransaccion, TipoTransaccion
 
     hoy = hoy_argentina()
     usuario_id = grupo.usuario_id
+
+    # Marcar pagadas las cuotas cuya hija ya movió el saldo
+    _marcar_pagadas_las_aplicadas(db, grupo)
 
     cambia_tarjeta_o_fecha = (
         data.tarjeta_id is not None or
@@ -659,14 +694,13 @@ def actualizar_grupo(
 
             tx_hija = c.transaccion
             if tx_hija:
-                if tx_hija.metodo_pago != MetodoPago.CREDITO:
-                    if tx_hija.fecha <= hoy and tx_hija.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE:
-                        billetera = db.get(Billetera, tx_hija.billetera_id)
-                        if billetera:
-                            if tx_hija.tipo == TipoTransaccion.INGRESO:
-                                billetera.saldo_actual = billetera.saldo_actual - old_monto + monto_actual_cuota
-                            else:
-                                billetera.saldo_actual = billetera.saldo_actual + old_monto - monto_actual_cuota
+                from app.services import transaccion_service
+                if transaccion_service._afecta_saldo(tx_hija) and tx_hija.saldo_aplicado:
+                    billetera = db.get(Billetera, tx_hija.billetera_id)
+                    if billetera:
+                        delta = monto_actual_cuota - old_monto
+                        impacto = delta if tx_hija.tipo == TipoTransaccion.INGRESO else -delta
+                        aplicar_impacto_saldo(billetera, impacto, tx_hija.fecha)
 
                 tx_hija.monto = monto_actual_cuota
 

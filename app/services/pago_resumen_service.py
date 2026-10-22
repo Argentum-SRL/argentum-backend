@@ -320,19 +320,10 @@ def pagar_resumen_tarjeta(
             monto_debito = monto_convertido
             moneda_debito = Moneda.ARS
 
-    # 6. Detectar si ya existe una transacción de pago PENDIENTE para este resumen, vencimiento y moneda
-    from app.models.transaccion import TipoTransaccion, MetodoPago, OrigenTransaccion, EstadoVerificacionTransaccion
-    tx_existente = db.query(Transaccion).filter(
-        Transaccion.tarjeta_id == tarjeta.id,
-        Transaccion.pago_resumen_vencimiento == limite_vencimiento,
-        Transaccion.tipo == TipoTransaccion.EGRESO,
-        Transaccion.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE,
-        Transaccion.moneda == moneda_debito
-    ).first()
-
-    # 7. Buscar categoría "Banco" y subcategorías
+    # 6. Buscar categoría "Banco" y subcategorías
     from app.models.categoria import Categoria
     from app.models.subcategoria import Subcategoria
+    from app.models.transaccion import TipoTransaccion, MetodoPago, OrigenTransaccion, EstadoVerificacionTransaccion
 
     categoria = db.query(Categoria).filter(Categoria.nombre.ilike("Banco")).first()
     subcategoria = None
@@ -356,49 +347,28 @@ def pagar_resumen_tarjeta(
     fecha_transaccion = fecha_pago or transaccion_service._hoy_argentina()
 
     try:
-        # Reutilizar transacción pendiente si existe
-        if tx_existente:
-            tx = tx_existente
-            tx.monto = monto_debito
-            tx.fecha = fecha_transaccion
-            tx.descripcion = descripcion_pago
-            if es_pesificacion:
-                tx.monto_original = monto_pago
-                tx.moneda_original = Moneda.USD
-                tx.cotizacion_aplicada = cotizacion
-                tx.tipo_dolar_usado = tipo_dolar
-            if categoria:
-                tx.categoria_id = categoria.id
-            if subcategoria:
-                tx.subcategoria_id = subcategoria.id
-            tx.estado_verificacion = EstadoVerificacionTransaccion.CONFIRMADA
-
-            billetera = db.get(Billetera, tx.billetera_id)
-            if billetera:
-                billetera.saldo_actual -= monto_debito
-        else:
-            tx_data = TransaccionCreate(
-                tipo=TipoTransaccion.EGRESO,
-                monto=monto_debito,
-                moneda=moneda_debito,
-                fecha=fecha_transaccion,
-                descripcion=descripcion_pago,
-                categoria_id=categoria.id if categoria else None,
-                subcategoria_id=subcategoria.id if subcategoria else None,
-                metodo_pago=MetodoPago.DEBITO,
-                billetera_id=billetera_pago_id,
-                tarjeta_id=tarjeta.id,
-                es_cuota_hija=False,
-                es_padre_cuotas=False,
-                origen=OrigenTransaccion.MANUAL,
-                estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
-                pago_resumen_vencimiento=limite_vencimiento,
-                monto_original=monto_pago if es_pesificacion else None,
-                moneda_original=Moneda.USD if es_pesificacion else None,
-                cotizacion_aplicada=cotizacion if es_pesificacion else None,
-                tipo_dolar_usado=tipo_dolar if es_pesificacion else None
-            )
-            tx = transaccion_service.crear_transaccion(db, usuario_id, tx_data, commit=False)
+        tx_data = TransaccionCreate(
+            tipo=TipoTransaccion.EGRESO,
+            monto=monto_debito,
+            moneda=moneda_debito,
+            fecha=fecha_transaccion,
+            descripcion=descripcion_pago,
+            categoria_id=categoria.id if categoria else None,
+            subcategoria_id=subcategoria.id if subcategoria else None,
+            metodo_pago=MetodoPago.DEBITO,
+            billetera_id=billetera_pago_id,
+            tarjeta_id=tarjeta.id,
+            es_cuota_hija=False,
+            es_padre_cuotas=False,
+            origen=OrigenTransaccion.MANUAL,
+            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+            pago_resumen_vencimiento=limite_vencimiento,
+            monto_original=monto_pago if es_pesificacion else None,
+            moneda_original=Moneda.USD if es_pesificacion else None,
+            cotizacion_aplicada=cotizacion if es_pesificacion else None,
+            tipo_dolar_usado=tipo_dolar if es_pesificacion else None
+        )
+        tx = transaccion_service.crear_transaccion(db, usuario_id, tx_data, commit=False)
 
         # Tarea 4: Registrar percepción impositiva como gasto propio si hubo pesificación
         tx_percepcion = None

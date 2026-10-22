@@ -24,6 +24,7 @@ JOBS_MANUALES_PERMITIDOS: frozenset[str] = frozenset({
     "refresh_feriados_argentina",
     "actualizar_ipc_diario",
     "limpiar_refresh_tokens",
+    "vigilar_deriva_saldos",
 })
 
 
@@ -182,6 +183,13 @@ JOBS_CATALOGO: list[JobCatalogoItem] = [
         que_hace="Revisa el estado de todas las tareas y alerta por email si alguna falla o se atrasa.",
         periodo_esperado_minutos=60,
         puede_correr_ahora=False,
+    ),
+    JobCatalogoItem(
+        job_id="vigilar_deriva_saldos",
+        nombre="Control de saldos",
+        que_hace="Cada noche compara el saldo guardado de cada billetera con el que sale de sus movimientos y avisa por email cuántas no coinciden.",
+        periodo_esperado_minutos=1440,
+        puede_correr_ahora=True,
     ),
 ]
 

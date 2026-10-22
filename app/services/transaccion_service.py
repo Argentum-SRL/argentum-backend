@@ -18,7 +18,7 @@ from app.models.saldo_arrastrado import SaldoArrastradoTarjeta, PagoSaldoArrastr
 from app.schemas.transaccion import TransaccionCreate, TransaccionUpdate
 from app.services.resumen_tarjeta_service import _tabla_saldo_arrastrado_existe
 from app.services import calendario_tarjeta_service, cuotas_service, presupuesto_service
-from app.services.saldo_billetera_service import aplicar_impacto_saldo
+from app.services.saldo_billetera_service import aplicar_impacto_saldo, bloquear_billeteras
 from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 
@@ -229,12 +229,8 @@ def crear_transaccion(
             raise HTTPException(status_code=400, detail="Esa factura ya no está pendiente.")
 
     # 1. Validar billetera
-    billetera = db.execute(
-        select(Billetera).where(
-            Billetera.id == data.billetera_id,
-            Billetera.usuario_id == usuario_id
-        ).with_for_update()
-    ).scalar_one_or_none()
+    billeteras = bloquear_billeteras(db, [data.billetera_id], usuario_id)
+    billetera = billeteras.get(data.billetera_id)
 
     if not billetera:
         raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
@@ -589,9 +585,15 @@ def actualizar_transaccion(
     ])
     
     if impacto_saldo_cambia:
+        # Bloquear juntas la billetera vieja y la nueva antes de revertir
+        b_ids = [transaccion.billetera_id]
+        if data.billetera_id is not None:
+            b_ids.append(data.billetera_id)
+        bloqueadas = bloquear_billeteras(db, b_ids, usuario_id)
+
         # Revertir impacto anterior si existia
         if _afecta_saldo(transaccion) and transaccion.saldo_aplicado:
-            billetera_vieja = db.get(Billetera, transaccion.billetera_id)
+            billetera_vieja = bloqueadas.get(transaccion.billetera_id) or db.get(Billetera, transaccion.billetera_id)
             if billetera_vieja:
                 try:
                     _validar_moneda_coincide(transaccion.moneda, billetera_vieja)
@@ -608,7 +610,7 @@ def actualizar_transaccion(
 
         # Aplicar nuevo impacto
         if _afecta_saldo(transaccion):
-            billetera_nueva = db.get(Billetera, transaccion.billetera_id)
+            billetera_nueva = bloqueadas.get(transaccion.billetera_id) or db.get(Billetera, transaccion.billetera_id)
             if not billetera_nueva or billetera_nueva.usuario_id != usuario_id:
                 raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
 
@@ -670,6 +672,13 @@ def eliminar_transaccion(
     from app.services import factura_service
     transaccion = obtener_transaccion(db, usuario_id, transaccion_id)
     
+    # Bloquear al principio la billetera de la transacción y las de sus percepciones (pago_origen_id)
+    percepciones_billeteras = db.execute(
+        select(Transaccion.billetera_id).where(Transaccion.pago_origen_id == transaccion.id)
+    ).scalars().all()
+    billeteras_a_bloquear = [transaccion.billetera_id] + list(percepciones_billeteras)
+    bloquear_billeteras(db, billeteras_a_bloquear, usuario_id)
+
     # D6: Si se borra la compra, antes se borran sus espejos con la misma función.
     espejos_ids = db.execute(
         select(Transaccion.id).where(Transaccion.reintegro_de_id == transaccion.id)
@@ -687,22 +696,21 @@ def eliminar_transaccion(
             grupo = db.get(GrupoCuotas, transaccion.grupo_cuotas_id)
         
         if grupo:
-            # 2. Revertir saldo (solo si no es crédito, aunque las cuotas suelen serlo)
+            # 2. Revertir saldo: solo las hijas que movieron el saldo (_afecta_saldo y saldo_aplicado)
             cuotas = db.execute(
                 select(Cuota).options(joinedload(Cuota.transaccion)).where(Cuota.grupo_id == grupo.id)
             ).scalars().all()
             for c in cuotas:
-                if c.pagada or c.fecha_vencimiento <= _hoy_argentina():
-                    tx_hija = c.transaccion
-                    if tx_hija and tx_hija.metodo_pago != MetodoPago.CREDITO:
-                        b = db.get(Billetera, tx_hija.billetera_id)
-                        if b:
-                            try:
-                                _validar_moneda_coincide(tx_hija.moneda, b)
-                                impacto_hija = tx_hija.monto if tx_hija.tipo == TipoTransaccion.INGRESO else -tx_hija.monto
-                                aplicar_impacto_saldo(b, -impacto_hija, tx_hija.fecha)
-                            except Exception as e:
-                                logger.critical(f"Error crítico de inconsistencia de moneda al eliminar cuota hija {tx_hija.id}: {e}")
+                tx_hija = c.transaccion
+                if tx_hija and _afecta_saldo(tx_hija) and tx_hija.saldo_aplicado:
+                    b = db.get(Billetera, tx_hija.billetera_id)
+                    if b:
+                        try:
+                            _validar_moneda_coincide(tx_hija.moneda, b)
+                            impacto_hija = tx_hija.monto if tx_hija.tipo == TipoTransaccion.INGRESO else -tx_hija.monto
+                            aplicar_impacto_saldo(b, -impacto_hija, tx_hija.fecha)
+                        except Exception as e:
+                            logger.critical(f"Error crítico de inconsistencia de moneda al eliminar cuota hija {tx_hija.id}: {e}")
             
             # 3. Romper dependencias circulares antes de borrar
             id_hijas = [c.transaccion_id for c in cuotas]
@@ -889,10 +897,8 @@ def confirmar_transaccion_ia(
         
     transaccion.estado_verificacion = EstadoVerificacionTransaccion.CONFIRMADA
     
-    # Al confirmar, impacta el saldo si es fecha presente/pasada o si es un pago de resumen confirmado por el usuario
-    hoy = hoy_argentina()
-    debe_impactar_saldo = (transaccion.fecha <= hoy or transaccion.pago_resumen_vencimiento is not None)
-    if debe_impactar_saldo and transaccion.metodo_pago != MetodoPago.CREDITO:
+    # Al confirmar, impacta el saldo si ya confirmada _afecta_saldo da True (Decisión 7)
+    if _afecta_saldo(transaccion):
         billetera = db.get(Billetera, transaccion.billetera_id)
         if not billetera:
             raise HTTPException(status_code=404, detail="No encontramos esa billetera.")

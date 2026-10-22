@@ -351,7 +351,7 @@ def test_6_get_admin_scheduler(client, admin_user, regular_user):
     res_no_admin = client.get("/v1/admin/scheduler")
     assert res_no_admin.status_code == status.HTTP_403_FORBIDDEN
 
-    # Usuario admin -> 200 con 22 ítems, scheduler_activo false y proxima_corrida null
+    # Usuario admin -> 200 con 23 ítems, scheduler_activo false y proxima_corrida null
     current_test_admin = admin_user
     app.state.scheduler = None
 
@@ -360,10 +360,10 @@ def test_6_get_admin_scheduler(client, admin_user, regular_user):
 
     data = res_admin.json()
     assert data["scheduler_activo"] is False
-    assert len(data["jobs"]) == 22
+    assert len(data["jobs"]) == 23
     assert all(j["proxima_corrida"] is None for j in data["jobs"])
 
-    # Validar que los 22 jobs correspondan exactamente al catálogo
+    # Validar que los 23 jobs correspondan exactamente al catálogo
     job_ids_recibidos = [j["job_id"] for j in data["jobs"]]
     job_ids_esperados = [j.job_id for j in JOBS_CATALOGO]
     assert job_ids_recibidos == job_ids_esperados

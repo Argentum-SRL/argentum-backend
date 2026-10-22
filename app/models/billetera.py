@@ -63,13 +63,12 @@ class Billetera(Base):
     fecha_ultimo_rendimiento: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     fecha_saldo: Mapped[date | None] = mapped_column(Date, nullable=True)
     tiene_punto_partida: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    fecha_ultimo_control: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     @property
     def fecha_saldo_efectiva(self) -> date | None:
-        if not getattr(self, "tiene_punto_partida", True):
-            return None
-        from app.services.saldo_billetera_service import fecha_creacion_billetera
-        return fecha_creacion_billetera(self)
+        from app.services.saldo_billetera_service import fecha_punto_partida
+        return fecha_punto_partida(self)
     estado: Mapped[EstadoBilletera] = mapped_column(
         SAEnum(EstadoBilletera, values_callable=lambda obj: [e.value for e in obj], name="estado_billetera_enum"),
         nullable=False,

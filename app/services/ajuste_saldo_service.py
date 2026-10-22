@@ -28,6 +28,11 @@ from app.services.rendimiento_billetera_service import (
     calcular_rendimiento_estimado,
     confirmar_rendimiento,
 )
+from app.services.saldo_billetera_service import (
+    bloquear_billeteras,
+    registrar_control_en_saldo,
+    revertir_control_en_saldo,
+)
 from app.utils.fecha import hoy_argentina
 
 logger = logging.getLogger(__name__)
@@ -371,17 +376,15 @@ def registrar_control(
 ) -> AjusteSaldo:
     """
     Registra el control de saldo de una billetera:
-    - Lee la billetera bloqueando fila (with_for_update).
+    - Lee la billetera bloqueando fila (bloquear_billeteras).
     - Valida que pertenezca al usuario y no esté archivada.
     - Si se incluye rendimiento, lo valida y confirma.
-    - Crea la fila en ajustes_saldo con la diferencia resultante y actualiza saldo_actual.
+    - Crea la fila en ajustes_saldo con la diferencia resultante y actualiza saldo_actual y fecha_ultimo_control vía registrar_control_en_saldo.
     - Si commit=True hace commit único; con commit=False realiza flush.
     """
-    billetera = db.execute(
-        select(Billetera)
-        .where(Billetera.id == billetera_id, Billetera.usuario_id == usuario_id)
-        .with_for_update()
-    ).scalar_one_or_none()
+    b_id = UUID(str(billetera_id)) if isinstance(billetera_id, str) else billetera_id
+    billeteras = bloquear_billeteras(db, [b_id], usuario_id=usuario_id)
+    billetera = billeteras.get(b_id)
 
     if not billetera:
         raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
@@ -404,19 +407,19 @@ def registrar_control(
 
     ahora_dt = datetime.now(timezone.utc)
     saldo_anterior = billetera.saldo_actual
-    monto_ajuste = saldo_declarado - saldo_anterior
+    hoy = hoy_argentina()
+    monto_ajuste = registrar_control_en_saldo(billetera, saldo_declarado, hoy)
 
     ajuste = AjusteSaldo(
         billetera_id=billetera.id,
         monto=monto_ajuste,
         saldo_anterior=saldo_anterior,
         saldo_declarado=saldo_declarado,
-        fecha=hoy_argentina(),
+        fecha=hoy,
         fecha_creacion=ahora_dt,
     )
     db.add(ajuste)
 
-    billetera.saldo_actual = saldo_declarado
     if billetera.fecha_ultimo_rendimiento is not None:
         billetera.fecha_ultimo_rendimiento = ahora_dt
 
@@ -439,7 +442,7 @@ def eliminar_ajuste(
     """
     Revierte un ajuste de saldo:
     - Valida que el ajuste pertenezca a una billetera del usuario (y a billetera_id si se especifica).
-    - Bloquea la billetera con with_for_update, descuenta el monto del saldo_actual y elimina la fila.
+    - Bloquea la billetera con bloquear_billeteras, descuenta el monto y actualiza fecha_ultimo_control vía revertir_control_en_saldo.
     - Mantiene el esquema de atomicidad transaccional con commit/flush.
     """
     ajuste = db.get(AjusteSaldo, ajuste_id)
@@ -449,16 +452,13 @@ def eliminar_ajuste(
     if billetera_id is not None and str(ajuste.billetera_id) != str(billetera_id):
         raise HTTPException(status_code=404, detail="No encontramos ese ajuste de saldo.")
 
-    billetera = db.execute(
-        select(Billetera)
-        .where(Billetera.id == ajuste.billetera_id, Billetera.usuario_id == usuario_id)
-        .with_for_update()
-    ).scalar_one_or_none()
+    billeteras = bloquear_billeteras(db, [ajuste.billetera_id], usuario_id=usuario_id)
+    billetera = billeteras.get(ajuste.billetera_id)
 
     if not billetera:
         raise HTTPException(status_code=404, detail="No encontramos ese ajuste de saldo.")
 
-    billetera.saldo_actual -= ajuste.monto
+    revertir_control_en_saldo(db, billetera, ajuste)
     db.delete(ajuste)
 
     if commit:

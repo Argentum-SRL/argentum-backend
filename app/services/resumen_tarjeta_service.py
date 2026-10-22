@@ -47,8 +47,7 @@ logger = logging.getLogger(__name__)
 def _tabla_saldo_arrastrado_existe(db: Session) -> bool:
     try:
         from sqlalchemy import inspect
-        bind = db.get_bind()
-        return inspect(bind).has_table("saldos_arrastrados_tarjeta")
+        return inspect(db.connection()).has_table("saldos_arrastrados_tarjeta")
     except Exception:
         return False
 

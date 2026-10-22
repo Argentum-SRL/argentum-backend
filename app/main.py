@@ -73,6 +73,7 @@ from app.services.notificacion_scheduler_service import (
 from app.services.factura_avisos_service import _job_notificaciones_facturas
 from app.services.notificacion_despacho_service import _job_reintentar_inmediatas
 from app.services.saldo_programado_service import _job_aplicar_movimientos_con_fecha_llegada
+from app.services.deriva_saldo_service import _job_vigilar_deriva_saldos
 from app.core.registro_jobs import registrar_ejecucion, vigilar_tareas
 
 # ---------------------------------------------------------------------------
@@ -796,6 +797,17 @@ async def lifespan(app: FastAPI):
             "interval",
             minutes=60,
             id="vigilar_tareas",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            registrar_ejecucion("vigilar_deriva_saldos", _job_vigilar_deriva_saldos),
+            "cron",
+            hour=5,
+            minute=30,
+            timezone=TZ_ARGENTINA,
+            id="vigilar_deriva_saldos",
             misfire_grace_time=300,
             max_instances=1,
             replace_existing=True,

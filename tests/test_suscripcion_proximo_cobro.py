@@ -118,6 +118,7 @@ def datos_base(db_session):
         moneda=Moneda.ARS,
         saldo_actual=Decimal("100000.00"),
         estado=EstadoBilletera.ACTIVA,
+        fecha_creacion=datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc),
     )
     cat = Categoria(id=uuid4(), nombre="Servicios", tipo=TipoCategoria.EGRESO)
     tarjeta = TarjetaCredito(

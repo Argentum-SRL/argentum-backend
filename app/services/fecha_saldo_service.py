@@ -7,7 +7,7 @@ manteniendo invariable la diferencia con el saldo teórico.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -17,13 +17,17 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.billetera import Billetera
+from app.models.rendimiento_billetera import RendimientoBilletera
 from app.models.transaccion import Transaccion
 from app.models.transferencia_interna import TransferenciaInterna
 from app.services.conciliacion_service import calcular_saldo_teorico
 from app.services.evento_service import emitir_evento_actualizacion
-from app.services.saldo_billetera_service import fecha_creacion_billetera
+from app.services.saldo_billetera_service import (
+    fecha_creacion_billetera,
+    mover_fecha_saldo,
+)
 from app.services.transaccion_service import _afecta_saldo
-from app.utils.fecha import hoy_argentina
+from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
 
 
 def _validar_y_obtener_billetera(
@@ -60,6 +64,21 @@ def _validar_y_obtener_billetera(
                 "error": {
                     "code": "UNPROCESSABLE",
                     "message": "Esta billetera no tiene saldo inicial.",
+                },
+            },
+        )
+
+    # 1b. Control de saldo registrado (decisión 4)
+    if billetera.fecha_ultimo_control is not None:
+        fecha_ctrl_str = billetera.fecha_ultimo_control.strftime("%d/%m/%Y")
+        msg = f"Este saldo ya lo actualizaste el {fecha_ctrl_str}: los movimientos anteriores no lo cambian."
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "detail": msg,
+                "error": {
+                    "code": "UNPROCESSABLE",
+                    "message": msg,
                 },
             },
         )
@@ -170,6 +189,24 @@ def _calcular_delta_movimientos(
         if contada:
             cantidad += 1
 
+    # 3. Rendimientos (con fecha de Argentina en [fecha_nueva, fecha_actual))
+    stmt_rend = select(RendimientoBilletera).where(
+        RendimientoBilletera.billetera_id == billetera_id,
+    )
+    rends = db.execute(stmt_rend).scalars().all()
+
+    for r in rends:
+        f_dt = r.fecha
+        if isinstance(f_dt, datetime):
+            if f_dt.tzinfo is None:
+                f_dt = f_dt.replace(tzinfo=timezone.utc)
+            f_arg = f_dt.astimezone(TZ_ARGENTINA).date()
+        else:
+            f_arg = f_dt
+        if d_prime <= f_arg < d:
+            cantidad += 1
+            delta += Decimal(str(r.monto))
+
     return delta, cantidad
 
 
@@ -231,10 +268,8 @@ def cambiar_fecha_saldo(
         db, billetera.id, fecha_nueva, fecha_actual
     )
 
-    # Aplicar cambios
-    billetera.saldo_actual = (billetera.saldo_actual or Decimal("0.00")) + delta
-    billetera.saldo_inicial = (billetera.saldo_inicial or Decimal("0.00")) + delta
-    billetera.fecha_saldo = fecha_nueva
+    # Aplicar cambios vía la única puerta autorizada
+    mover_fecha_saldo(billetera, fecha_nueva, delta)
     db.flush()
 
     # Verificación de invariante

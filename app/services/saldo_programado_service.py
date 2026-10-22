@@ -11,7 +11,6 @@ import structlog
 
 from app.core.database import SessionLocal
 from app.core.job_lock import intentar_tomar_lock_job, liberar_lock_job
-from app.models.billetera import Billetera
 from app.models.notificacion import TipoNotificacion, NivelNotificacion
 from app.models.transaccion import Transaccion, TipoTransaccion, OrigenTransaccion
 from app.services.evento_service import emitir_evento_actualizacion
@@ -20,6 +19,7 @@ from app.services.notificacion_service import (
     resolver_canales_notificacion,
     crear_notificacion,
 )
+from app.services.saldo_billetera_service import aplicar_impacto_saldo, bloquear_billeteras
 from app.services.transaccion_service import _afecta_saldo, _validar_moneda_coincide
 
 logger = logging.getLogger(__name__)
@@ -39,14 +39,15 @@ def aplicar_movimientos_con_fecha_llegada(db: Session) -> int:
         .order_by(Transaccion.fecha, Transaccion.fecha_creacion)
     ).scalars().all()
 
+    txs_a_aplicar = [tx for tx in pendientes if _afecta_saldo(tx)]
+    billetera_ids = {tx.billetera_id for tx in txs_a_aplicar if tx.billetera_id is not None}
+    billeteras = bloquear_billeteras(db, billetera_ids)
+
     aplicados_count = 0
     usuarios_afectados = set()
 
-    for tx in pendientes:
-        if not _afecta_saldo(tx):
-            continue
-
-        billetera = db.get(Billetera, tx.billetera_id)
+    for tx in txs_a_aplicar:
+        billetera = billeteras.get(tx.billetera_id)
         if not billetera:
             logger.warning(
                 "Billetera no encontrada para transacción pendiente de saldo",
@@ -56,12 +57,11 @@ def aplicar_movimientos_con_fecha_llegada(db: Session) -> int:
 
         _validar_moneda_coincide(tx.moneda, billetera)
 
-        # Mover saldo igual que crear_transaccion
-        if tx.tipo == TipoTransaccion.INGRESO:
-            billetera.saldo_actual += tx.monto
-        else:
-            billetera.saldo_actual -= tx.monto
-            if billetera.saldo_actual <= 0:
+        # Mover saldo mediante la puerta única
+        impacto = tx.monto if tx.tipo == TipoTransaccion.INGRESO else -tx.monto
+        aplicar_impacto_saldo(billetera, impacto, tx.fecha)
+
+        if tx.tipo != TipoTransaccion.INGRESO and billetera.saldo_actual <= 0:
                 try:
                     config = obtener_configuracion(db, tx.usuario_id, commit=False)
                     canales = resolver_canales_notificacion(config, TipoNotificacion.SALDO_CERO)

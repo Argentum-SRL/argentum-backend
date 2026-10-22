@@ -23,6 +23,7 @@ from app.services.suscripcion_service import (
 )
 from app.services.dolar_service import obtener_cotizacion_por_fecha
 from app.services import calendario_tarjeta_service, cuotas_service
+from app.services.saldo_billetera_service import aplicar_impacto_saldo
 from app.utils.fecha import hoy_argentina, TZ_ARGENTINA
 
 logger = logging.getLogger(__name__)
@@ -155,8 +156,8 @@ def _cobrar_suscripcion(db: Session, suscripcion: Suscripcion, hoy: date, primer
             tipo_dolar_usado=tipo_dolar_usado,
         )
         db.add(tx)
-        # Debitar el saldo inmediatamente — es un cobro automático confirmado
-        billetera.saldo_actual -= monto_final
+        # Debitar el saldo mediante la puerta única respetando la foto
+        aplicar_impacto_saldo(billetera, -monto_final, fecha_periodo_a_cobrar)
 
     elif suscripcion.tarjeta_id:
         tarjeta = db.query(TarjetaCredito).filter(TarjetaCredito.id == suscripcion.tarjeta_id).first()

@@ -10,9 +10,12 @@ from fastapi import HTTPException
 from app.models.meta import Meta, EstadoMeta
 from app.models.movimiento_meta import MovimientoMeta, TipoMovimientoMeta
 from app.models.billetera import Billetera
+from app.models.transaccion import TipoTransaccion
 from app.models.usuario import Moneda
 from app.schemas.meta import MetaCreate, MetaUpdate
 from app.schemas.movimiento_meta import MovimientoMetaCreate
+from app.services.saldo_billetera_service import aplicar_impacto_saldo, bloquear_billeteras
+from app.services import presupuesto_service
 from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 
@@ -237,6 +240,9 @@ def registrar_movimiento(
     db.flush()
     
     if data.tipo == TipoMovimientoMeta.APORTE:
+        # Bloquear billetera antes de validar saldo suficiente
+        bloquear_billeteras(db, [billetera.id], usuario_id)
+
         # Validar saldo suficiente en billetera
         if billetera.saldo_actual < data.monto:
             raise HTTPException(
@@ -361,7 +367,6 @@ def eliminar_movimiento(
 
     # Revertir impacto en saldo / transacciones
     from app.models.transaccion import Transaccion
-    from app.services.transaccion_service import eliminar_transaccion
     
     # 1. Búsqueda directa y precisa por identificador de movimiento de meta
     tx = db.query(Transaccion).filter(
@@ -391,17 +396,20 @@ def eliminar_movimiento(
                 Transaccion.descripcion.like(desc_patron)
             ).first()
 
-    # Revertir saldo de billetera
-    if billetera:
-        try:
-            from app.services.transaccion_service import _validar_moneda_coincide
-            _validar_moneda_coincide(movimiento.moneda_movimiento, billetera)
-            if movimiento.tipo == TipoMovimientoMeta.APORTE:
-                billetera.saldo_actual += movimiento.monto
-            else:
-                billetera.saldo_actual -= movimiento.monto
-        except Exception as e:
-            logger.critical(f"Error crítico de inconsistencia de moneda al revertir movimiento de meta {movimiento.id}: {e}")
+    # Revertir impacto en saldo / transacciones
+    if tx:
+        from app.services.transaccion_service import _afecta_saldo, _validar_moneda_coincide
+        if _afecta_saldo(tx) and tx.saldo_aplicado and billetera:
+            try:
+                _validar_moneda_coincide(movimiento.moneda_movimiento, billetera)
+                impacto_tx = tx.monto if tx.tipo == TipoTransaccion.INGRESO else -tx.monto
+                aplicar_impacto_saldo(billetera, -impacto_tx, tx.fecha)
+            except Exception as e:
+                logger.critical(f"Error crítico al revertir saldo de meta {movimiento.id}: {e}")
+        presupuesto_service.registrar_impacto_presupuesto(db, tx, revertir=True, commit=False)
+        db.delete(tx)
+    else:
+        logger.warning(f"Movimiento de meta {movimiento.id} no tiene transacción vinculada: no se toca el saldo.")
 
     # Revertir en la meta
     if movimiento.tipo == TipoMovimientoMeta.APORTE:
@@ -414,9 +422,6 @@ def eliminar_movimiento(
         meta.estado = EstadoMeta.COMPLETADA
     else:
         meta.estado = EstadoMeta.ACTIVA
-
-    if tx:
-        db.delete(tx)
 
     db.delete(movimiento)
     if commit:

@@ -50,8 +50,8 @@ def calcular_saldo_teorico(
        - Se excluyen consumos directos o cuotas con tarjeta de crédito (metodo_pago == 'credito'),
          ya que el crédito no debita fondos de la billetera en la compra, sino vía el pago
          consolidado del resumen (que se registra como débito/egreso normal en cuenta).
-       - Se excluyen transacciones con es_padre_cuotas = true (registros agrupadores) y
-         es_cuota_hija = true (las cuotas de resumen ya se consolidan en el pago de tarjeta).
+       - Se excluyen transacciones con es_padre_cuotas = true (registros agrupadores).
+         Las cuotas hijas no crédito computan cuando no son pendientes ni crédito.
        - Se excluyen transacciones en estado de verificación 'pendiente', ya que no han sido
          confirmadas y por tanto transaccion_service._afecta_saldo no las impacta en saldo_actual.
        - Filtro de fecha (fecha <= hasta):
@@ -99,7 +99,6 @@ def calcular_saldo_teorico(
             WHERE billetera_id = :bid
               AND (metodo_pago != 'credito' OR metodo_pago IS NULL)
               AND es_padre_cuotas = false
-              AND es_cuota_hija = false
               AND (estado_verificacion IS NULL OR estado_verificacion != 'pendiente')
               AND fecha <= :hasta
         """),
@@ -193,7 +192,6 @@ def movimientos_por_dia(
             Transaccion.billetera_id == billetera_id,
             (Transaccion.metodo_pago != MetodoPago.CREDITO) | (Transaccion.metodo_pago.is_(None)),
             Transaccion.es_padre_cuotas.is_(False),
-            Transaccion.es_cuota_hija.is_(False),
             (Transaccion.estado_verificacion.is_(None)) | (Transaccion.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE),
         )
     )

@@ -43,7 +43,10 @@ from app.services.definiciones_service import (
     etiqueta_movimiento,
     visible_en_historial,
 )
-from app.services.saldo_billetera_service import fecha_creacion_billetera, fecha_punto_partida
+from app.services.saldo_billetera_service import (
+    fecha_punto_partida,
+    movimiento_anterior_al_saldo,
+)
 from app.services.transaccion_service import _normalizar_texto_busqueda
 from app.utils.fecha import hoy_argentina
 
@@ -248,7 +251,10 @@ def listar_movimientos(
             if hasattr(tx.estado_verificacion, "value")
             else (str(tx.estado_verificacion) if tx.estado_verificacion is not None else None)
         )
-        cuenta_en_saldo = (est_val != "pendiente") and (tx.fecha <= ref_hoy)
+        aplicado = (est_val != "pendiente") and (tx.fecha <= ref_hoy)
+        es_credito = (tx.metodo_pago == MetodoPago.CREDITO or str(tx.metodo_pago).lower() == "credito")
+        ant = movimiento_anterior_al_saldo(b_obj, tx.fecha, tx.metodo_pago) if b_obj else False
+        cuenta_en_saldo = aplicado and not es_credito and not ant
 
         reintegro_info = None
         if not es_espejo and getattr(tx, "reintegro", None):
@@ -266,6 +272,7 @@ def listar_movimientos(
             "etiqueta": etiqueta,
             "cuenta_como": cuenta_como,
             "aclaracion": aclaracion,
+            "aplicado": aplicado,
             "cuenta_en_saldo": cuenta_en_saldo,
             "saldo_despues": None,
             "cuota_texto": cuota_texto,
@@ -370,9 +377,11 @@ def listar_movimientos(
             )
 
             etiqueta, cuenta_como, aclaracion = ETIQUETA_TRANSFERENCIA
-            cuenta_en_saldo = tr.fecha <= ref_hoy
+            aplicado = tr.fecha <= ref_hoy
 
             if modo == "general":
+                ant = movimiento_anterior_al_saldo(orig, tr.fecha, None) if orig else False
+                cuenta_en_saldo = aplicado and not ant
                 raw_movimientos.append({
                     "id": f"transferencia:{tr.id}",
                     "clase": "transferencia",
@@ -385,6 +394,7 @@ def listar_movimientos(
                     "etiqueta": etiqueta,
                     "cuenta_como": cuenta_como,
                     "aclaracion": aclaracion,
+                    "aplicado": aplicado,
                     "cuenta_en_saldo": cuenta_en_saldo,
                     "saldo_despues": None,
                     "cuota_texto": None,
@@ -405,6 +415,8 @@ def listar_movimientos(
                 monto_tr = m_orig if es_saliente else m_dest
                 moneda_tr = mon_orig if es_saliente else mon_dest
                 sentido_tr = "sale" if es_saliente else "entra"
+                ant = movimiento_anterior_al_saldo(billetera_actual, tr.fecha, None) if billetera_actual else False
+                cuenta_en_saldo = aplicado and not ant
 
                 raw_movimientos.append({
                     "id": f"transferencia:{tr.id}",
@@ -418,6 +430,7 @@ def listar_movimientos(
                     "etiqueta": etiqueta,
                     "cuenta_como": cuenta_como,
                     "aclaracion": aclaracion,
+                    "aplicado": aplicado,
                     "cuenta_en_saldo": cuenta_en_saldo,
                     "saldo_despues": None,
                     "cuota_texto": None,
@@ -473,7 +486,9 @@ def listar_movimientos(
             )
             r_fecha_date = r.fecha.date() if isinstance(r.fecha, datetime) else r.fecha
             etiqueta, cuenta_como, aclaracion = ETIQUETA_RENDIMIENTO
-            cuenta_en_saldo = r_fecha_date <= ref_hoy
+            aplicado = r_fecha_date <= ref_hoy
+            ant = movimiento_anterior_al_saldo(b_obj, r_fecha_date, None) if b_obj else False
+            cuenta_en_saldo = aplicado and not ant
 
             raw_movimientos.append({
                 "id": f"rendimiento:{r.id}",
@@ -487,6 +502,7 @@ def listar_movimientos(
                 "etiqueta": etiqueta,
                 "cuenta_como": cuenta_como,
                 "aclaracion": aclaracion,
+                "aplicado": aplicado,
                 "cuenta_en_saldo": cuenta_en_saldo,
                 "saldo_despues": None,
                 "cuota_texto": None,
@@ -535,7 +551,8 @@ def listar_movimientos(
             )
             etiqueta, cuenta_como, aclaracion = ETIQUETA_AJUSTE_SALDO
             sentido = "entra" if aj.monto >= 0 else "sale"
-            cuenta_en_saldo = aj.fecha <= ref_hoy
+            aplicado = aj.fecha <= ref_hoy
+            cuenta_en_saldo = aplicado
 
             raw_movimientos.append({
                 "id": f"ajuste:{aj.id}",
@@ -549,6 +566,7 @@ def listar_movimientos(
                 "etiqueta": etiqueta,
                 "cuenta_como": cuenta_como,
                 "aclaracion": aclaracion,
+                "aplicado": aplicado,
                 "cuenta_en_saldo": cuenta_en_saldo,
                 "saldo_despues": None,
                 "cuota_texto": None,
@@ -602,7 +620,7 @@ def listar_movimientos(
         if f_pp is not None:
             fc_arg = f_pp
             fechas_movs_saldo = [
-                m["fecha"] for m in raw_movimientos if m.get("cuenta_en_saldo")
+                m["fecha"] for m in raw_movimientos if m.get("aplicado")
             ]
             if fechas_movs_saldo:
                 fecha_saldo_inicial = min(fc_arg, min(fechas_movs_saldo))
@@ -632,6 +650,7 @@ def listar_movimientos(
                     "etiqueta": ETIQUETA_SALDO_INICIAL[0],
                     "cuenta_como": ETIQUETA_SALDO_INICIAL[1],
                     "aclaracion": ETIQUETA_SALDO_INICIAL[2],
+                    "aplicado": True,
                     "cuenta_en_saldo": True,
                     "saldo_despues": saldo_ini_dec,
                     "cuota_texto": None,
@@ -667,7 +686,7 @@ def listar_movimientos(
                 m["saldo_despues"] = running_saldo
                 m["cuenta_en_saldo"] = True
             elif clase == "transaccion":
-                if m["cuenta_en_saldo"]:
+                if m["aplicado"]:
                     if m["sentido"] == "entra":
                         running_saldo += m["monto"]
                     else:
@@ -676,7 +695,7 @@ def listar_movimientos(
                 else:
                     m["saldo_despues"] = None
             elif clase == "transferencia":
-                if m["cuenta_en_saldo"]:
+                if m["aplicado"]:
                     if m.get("es_saliente", False):
                         running_saldo -= m["monto"]
                     else:
@@ -685,13 +704,13 @@ def listar_movimientos(
                 else:
                     m["saldo_despues"] = None
             elif clase == "rendimiento":
-                if m["cuenta_en_saldo"]:
+                if m["aplicado"]:
                     running_saldo += m["monto"]
                     m["saldo_despues"] = running_saldo
                 else:
                     m["saldo_despues"] = None
             elif clase == "ajuste":
-                if m["cuenta_en_saldo"]:
+                if m["aplicado"]:
                     aj_monto = m["entity"].monto
                     running_saldo += Decimal(str(aj_monto))
                     m["saldo_despues"] = running_saldo

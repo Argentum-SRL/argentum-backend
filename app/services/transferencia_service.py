@@ -5,11 +5,11 @@ from fastapi import HTTPException
 from sqlalchemy import select, desc
 from sqlalchemy.orm import Session
 
-from app.models.billetera import Billetera, EstadoBilletera
+from app.models.billetera import EstadoBilletera
 from app.models.transferencia_interna import TransferenciaInterna
 from app.schemas.transferencia_interna import TransferenciaInternaCreate
 from app.models.usuario import Moneda
-from app.services.saldo_billetera_service import aplicar_impacto_saldo
+from app.services.saldo_billetera_service import aplicar_impacto_saldo, bloquear_billeteras
 
 logger = logging.getLogger(__name__)
 
@@ -41,14 +41,10 @@ def crear_transferencia(
     data: TransferenciaInternaCreate,
     commit: bool = True,  # commit=False: la operación de afuera hace el único commit
 ) -> TransferenciaInterna:
-    # 1. Validar billeteras
-    b_origen = db.execute(
-        select(Billetera).where(Billetera.id == data.billetera_origen_id, Billetera.usuario_id == usuario_id)
-    ).scalar_one_or_none()
-    
-    b_destino = db.execute(
-        select(Billetera).where(Billetera.id == data.billetera_destino_id, Billetera.usuario_id == usuario_id)
-    ).scalar_one_or_none()
+    # 1. Validar billeteras bloqueándolas juntas ordenadas por id
+    billeteras = bloquear_billeteras(db, [data.billetera_origen_id, data.billetera_destino_id], usuario_id)
+    b_origen = billeteras.get(data.billetera_origen_id)
+    b_destino = billeteras.get(data.billetera_destino_id)
 
     if not b_origen:
         raise HTTPException(status_code=404, detail="No encontramos la billetera de origen.")
@@ -230,6 +226,11 @@ def eliminar_transferencia(
 ):
     tr = obtener_transferencia(db, usuario_id, transferencia_id)
 
+    # Revertir impactos de saldos entre las billeteras bloqueándolas juntas desde el inicio
+    billeteras = bloquear_billeteras(db, [tr.billetera_origen_id, tr.billetera_destino_id], usuario_id)
+    b_origen = billeteras.get(tr.billetera_origen_id)
+    b_destino = billeteras.get(tr.billetera_destino_id)
+
     # Si tenía comisión vinculada, revertir y eliminar la transacción de gasto de comisión
     if tr.transaccion_comision_id:
         try:
@@ -239,10 +240,6 @@ def eliminar_transferencia(
             if e.status_code != 404:
                 logger.error(f"Error al revertir comisión {tr.transaccion_comision_id} de transferencia {tr.id}: {e}")
                 raise
-
-    # Revertir impactos de saldos entre las billeteras
-    b_origen = db.get(Billetera, tr.billetera_origen_id)
-    b_destino = db.get(Billetera, tr.billetera_destino_id)
 
     if not b_origen:
         raise HTTPException(

@@ -21,6 +21,7 @@ from app.services.tasas_service import (
     tasa_efectiva,
     ultimas_tasas,
 )
+from app.services.saldo_billetera_service import aplicar_rendimiento_en_saldo
 from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
 
 logger = logging.getLogger(__name__)
@@ -173,6 +174,9 @@ def confirmar_rendimiento(
     ahora_dt = datetime.now(timezone.utc)
     fecha_operacion = fecha if fecha is not None else ahora_dt
 
+    # Aplicar rendimiento en saldo primero; si la fecha es futura lanza 400 y nada se crea
+    aplicar_rendimiento_en_saldo(billetera, monto, fecha_operacion)
+
     rendimiento = RendimientoBilletera(
         billetera_id=billetera.id,
         monto=monto,
@@ -181,7 +185,6 @@ def confirmar_rendimiento(
     )
     db.add(rendimiento)
 
-    billetera.saldo_actual += monto
     billetera.fecha_ultimo_rendimiento = ahora_dt
 
     if commit:
