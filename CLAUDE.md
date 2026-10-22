@@ -1,8 +1,9 @@
 # Argentum backend
 
-## Estructura vigente (actualizada el 02/10/2026; Fase 4 en curso)
+## Estructura vigente (actualizada el 21/10/2026)
 
 Esta sección manda: si otra parte de este archivo dice algo distinto, vale lo que dice acá.
+Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_21-10.md (versión 3), con claude/DIAGNOSTICO_21-10.md, claude/DECISIONES_21-10.md y claude/MATRIZ_PRUEBAS_21-10.md. Ante una contradicción entre este archivo y el plan, vale el plan.
 
 ### Reglas del motor
 - Qué es gasto y qué es ingreso lo decide solo app/services/definiciones_service.py. Ningún otro archivo filtra gastos o ingresos por su cuenta.
@@ -10,6 +11,7 @@ Esta sección manda: si otra parte de este archivo dice algo distinto, vale lo q
 - Los ajustes de "Actualizar saldo" (solo web) viven en la tabla ajustes_saldo (app/services/ajuste_saldo_service.py): mueven el saldo y nunca son gasto ni ingreso. Cada control queda guardado, aunque no haya diferencia, y su historia mide la cobertura.
 - Las billeteras de inversión (es_inversion) quedan fuera de todo número: lo cargado en ellas no es gasto ni ingreso.
 - Las cuentas las hace siempre el sistema; la IA solo entiende y redacta.
+- Deuda conocida que no hay que copiar (se corrige en los bloques D y E del plan): siete caminos en seis servicios escriben saldo_actual sin aplicar_impacto_saldo (cobro_suscripcion_service, cuotas_service en dos lugares, meta_service, pago_resumen_service, rendimiento_billetera_service, saldo_programado_service); PeriodoPresupuesto.monto_usado y Meta.monto_actual son acumulados aparte del cálculo y no coinciden siempre con él (las compras con crédito no tocan monto_usado). Código nuevo: mover saldo solo con saldo_billetera_service.aplicar_impacto_saldo y leer lo usado de un presupuesto con calcular_gasto_en_periodo.
 - "Hoy" se calcula con app/utils/fecha.py (hoy_argentina). Todo monto que ve el usuario pasa por app/utils/formato.py (formatear_monto).
 
 ### Punto de partida del saldo y tipos de números (fase_saldo_punto_partida)
@@ -56,7 +58,16 @@ Esta sección manda: si otra parte de este archivo dice algo distinto, vale lo q
 - La página "Lo que se repite" se apoya en app/services/patrones_service.py y la tabla `decisiones_patrones` (app/models/decision_patron.py). Agrupa gastos en fijos, costumbre y día a día (usando app/utils/patrones.py) e ingresos habituales (app/services/ingreso_habitual_service.py). El usuario puede confirmar, descartar o mover ítems entre cajas sin alterar las transacciones originales.
 
 ### Dashboard y Disponible libre (fase_dash_ciclo)
-- Las cards del dashboard web muestran lo que pasa en el ciclo actual del usuario (del inicio al fin del ciclo). "Disponible libre" resta exactamente los compromisos impagos de "Próximos pagos" sin recortar (app/services/pagos_proximos_service.py). WhatsApp y "¿Me lo puedo permitir?" todavía usan _calcular_saldo_disponible_sync (migran en la Fase 5).
+- Las cards del dashboard web muestran lo que pasa en el ciclo actual del usuario (del inicio al fin del ciclo). "Disponible libre" resta exactamente los compromisos impagos de "Próximos pagos" sin recortar (app/services/pagos_proximos_service.py). El disponible es uno solo: pagos_proximos_service.calcular_disponible_libre. contexto_financiero_service._calcular_saldo_disponible_sync lo envuelve para WhatsApp, el contexto de la IA, tools y "¿Me lo puedo permitir?". dashboard_service.calcular_saldo_disponible_ciclo_actual no tiene llamadas (código muerto, se borra en el Bloque E).
+
+### Reintegros (fase5c, 21/10/2026)
+- Un reintegro recibido es una transacción espejo: EGRESO con monto NEGATIVO, misma categoría, subcategoría, billetera, medio de pago y tarjeta que la compra, fecha = día en que llegó la plata, reintegro_de_id = la compra (app/services/reintegro_service.py). Sin crédito mueve el saldo con aplicar_impacto_saldo; con crédito crea padre, grupo de 1 cuota y cuota hija negativa en el primer resumen sin pago confirmado desde esa fecha.
+- Pendiente = reintegro_esperado sin espejo: no suma en ningún número. Aviso web a los 30 días (notificar_reintegros_pendientes, dentro de _job_vencimientos_tarjetas).
+- El reintegro cuenta en el mes en que llega (como YNAB): si llega en otro período que la compra, ese período puede quedar con usado negativo en un presupuesto.
+- Los espejos no cuentan para patrones ni para el clasificador; el historial junta compra y espejo cuando están en el mismo rango. Borrar la compra borra sus espejos. WhatsApp todavía no maneja reintegros.
+
+### WhatsApp: costo por mensaje (desde el 01/10/2026)
+- Meta cobra cada mensaje que manda el bot dentro de la ventana de 24 horas (1.000 gratis por número por mes). Cada mensaje que llega produce como máximo un mensaje saliente; un aviso nuevo va como una línea de 90 caracteres o menos al final de la misma respuesta. Deuda conocida: el recordatorio del resumen impago sale como mensaje aparte y enviar_whatsapp reintenta ante timeouts (Bloque C del plan).
 
 ### Base de datos
 - Las migraciones se aplican a mano a producción antes del push; Railway corre "alembic upgrade head" al deployar.
@@ -68,6 +79,8 @@ Esta sección manda: si otra parte de este archivo dice algo distinto, vale lo q
 ### Pruebas
 - Tests que cuidan reglas (nunca se les agregan excepciones): test_atomicidad_operaciones, test_cobros_suscripciones_aislados, test_formato_montos, test_whatsapp_motor_unico, test_verificacion_texto_ia, test_permitirse_whatsapp, test_herramienta_paso, test_ajustes_saldo, test_whatsapp_webhook_http.
 - El .env apunta a PRODUCCIÓN. Suite, foto, personas y verificador se corren sobre la copia local con scripts/local/con_base_local.py <comando> o con scripts/local/verificar_todo.py. Cada paso de trabajo empieza y termina con scripts/local/paso.py inicio|cierre <paso>.
+- Carpeta de auditorías (crudos, copias, fotos): D:\Argentum\auditorias, desde el paso fase_a_rutas (la ruta sale de scripts/local/rutas.py y de la variable ARGENTUM_AUDITORIAS_DIR). Nunca C:\...\GitHub\auditorias.
+- La CI hoy hace alembic stamp head (no ejecuta las migraciones); se corrige en el Bloque D.
 - Suite de WhatsApp: scripts/regresion/suite_regresion_whatsapp.py (escenarios en scripts/regresion/suite/). Las grabaciones de la IA en scripts/regresion/grabaciones_ia/ nunca se editan a mano. Comparación de salidas: scripts/regresion/comparar_salidas.py. Paridad web/WhatsApp: scripts/regresion/paridad_web_whatsapp.py.
 - Foto del motor: scripts/motor/foto_motor.py. Personas: scripts/motor/evaluar_personas.py. Verificador: scripts/testingadmin/verificar_testingadmin.py.
 - Ningún archivo de más de 1.300 líneas. Nunca se juntan líneas para cumplirlo: si un archivo se pasa, se parte en archivos.

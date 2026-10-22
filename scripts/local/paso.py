@@ -24,10 +24,15 @@ from datetime import datetime, timedelta, timezone
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 WORKSPACE_DIR = BACKEND_DIR.parent
 FRONTEND_DIR = WORKSPACE_DIR / "argentum-frontend"
-AUDITORIAS_DIR = WORKSPACE_DIR / "auditorias"
-RAW_DIR_BASE = AUDITORIAS_DIR / "raw"
-BACKUPS_DIR_BASE = AUDITORIAS_DIR / "backups"
-FOTOS_DIR = AUDITORIAS_DIR / "fotos"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+from scripts.local.rutas import (
+    auditorias_dir,
+    raw_dir as rutas_raw_dir,
+    backups_dir as rutas_backups_dir,
+    fotos_dir as rutas_fotos_dir,
+    poda_pasos,
+)
 PYTHON_EXE = BACKEND_DIR / "venv" / "Scripts" / "python.exe"
 if not PYTHON_EXE.exists():
     PYTHON_EXE = Path(sys.executable)
@@ -69,6 +74,95 @@ def obtener_fecha_hora_argentina() -> tuple[str, str]:
 def verificar_misma_fecha(fecha_inicio: str, fecha_cierre: str) -> bool:
     """Verifica que la fecha de Argentina sea la misma."""
     return fecha_inicio.strip() == fecha_cierre.strip()
+
+
+class ResultadoDuracion(tuple):
+    """Resultado de verificar_duracion que se comporta como tupla (bool, str) y como booleano."""
+    def __new__(cls, ok: bool, mensaje: str = ""):
+        return super().__new__(cls, (ok, mensaje))
+
+    @property
+    def ok(self) -> bool:
+        return self[0]
+
+    @property
+    def mensaje(self) -> str:
+        return self[1]
+
+    def __bool__(self) -> bool:
+        return self[0]
+
+    def __eq__(self, other):
+        if isinstance(other, bool):
+            return self[0] == other
+        return super().__eq__(other)
+
+
+def parsear_fecha_hora(fecha_hora_str: str) -> datetime:
+    """Parsea una cadena de fecha y hora con o sin huso horario."""
+    s = fecha_hora_str.strip()
+    formatos = [
+        "%Y-%m-%d %H:%M:%S %z",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+    ]
+    for fmt in formatos:
+        try:
+            dt = datetime.strptime(s, fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone(timedelta(hours=-3)))
+            return dt
+        except ValueError:
+            continue
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone(timedelta(hours=-3)))
+        return dt
+    except ValueError:
+        raise ValueError(f"Formato de fecha y hora no reconocido: {fecha_hora_str}")
+
+
+def verificar_duracion(
+    fecha_hora_inicio: str | datetime,
+    ahora: datetime | str | None = None,
+    max_horas: float = 12.0,
+) -> ResultadoDuracion:
+    """
+    Verifica que no hayan pasado más de 12 horas desde fecha_hora_inicio hasta ahora.
+    Retorna ResultadoDuracion(True, "") si la duración es <= 12 horas.
+    Retorna ResultadoDuracion(False, "Pasaron más de 12 horas desde el inicio del paso.") si supera el límite.
+    """
+    if not fecha_hora_inicio:
+        return ResultadoDuracion(False, "Pasaron más de 12 horas desde el inicio del paso.")
+
+    try:
+        if isinstance(fecha_hora_inicio, datetime):
+            dt_ini = fecha_hora_inicio
+            if dt_ini.tzinfo is None:
+                dt_ini = dt_ini.replace(tzinfo=timezone(timedelta(hours=-3)))
+        else:
+            dt_ini = parsear_fecha_hora(str(fecha_hora_inicio))
+
+        if ahora is None:
+            dt_ahora = datetime.now(timezone(timedelta(hours=-3)))
+        elif isinstance(ahora, datetime):
+            dt_ahora = ahora
+            if dt_ahora.tzinfo is None:
+                dt_ahora = dt_ahora.replace(tzinfo=dt_ini.tzinfo)
+        else:
+            dt_ahora = parsear_fecha_hora(str(ahora))
+
+        segundos_transcurridos = (dt_ahora - dt_ini).total_seconds()
+        limite_segundos = max_horas * 3600.0
+
+        if 0 <= segundos_transcurridos <= limite_segundos:
+            return ResultadoDuracion(True, "")
+        else:
+            return ResultadoDuracion(False, "Pasaron más de 12 horas desde el inicio del paso.")
+    except Exception:
+        return ResultadoDuracion(False, "Pasaron más de 12 horas desde el inicio del paso.")
 
 
 def verificar_resultado_refresco(out_ref: str, rc_ref: int = 0) -> tuple[bool, str, int]:
@@ -438,13 +532,31 @@ def verificar_canario_bd(emails: list[str] | None = None) -> tuple[bool, str]:
     return True, f"Canario OK: {len(emails)} usuarios y todos los 7 emails obligatorios presentes ({len(emails)} usuarios)."
 
 
+MAX_TAMANIO_COPIA = 1_048_576  # 1 MB
+
+
 def realizar_copia_segura(origen_base: Path, destino_base: Path, subcarpetas: list[str]) -> None:
-    """Copia carpetas excluyendo __pycache__, .pyc y node_modules."""
+    """Copia carpetas excluyendo __pycache__, .pyc, node_modules, carpetas assets y archivos > 1.048.576 bytes."""
     def _ignore(directory, contents):
         ign = set()
+        dir_path = Path(directory)
         for c in contents:
-            if c == "__pycache__" or c == "node_modules" or c.endswith(".pyc"):
+            if c in ("__pycache__", "node_modules"):
                 ign.add(c)
+                continue
+            if c.endswith(".pyc"):
+                ign.add(c)
+                continue
+            item_path = dir_path / c
+            try:
+                # Excluir cualquier carpeta llamada assets en cualquier nivel
+                if c == "assets" and item_path.is_dir():
+                    ign.add(c)
+                    continue
+                if item_path.is_file() and item_path.stat().st_size > MAX_TAMANIO_COPIA:
+                    ign.add(c)
+            except OSError:
+                pass
         return ign
 
     for sub in subcarpetas:
@@ -457,21 +569,88 @@ def realizar_copia_segura(origen_base: Path, destino_base: Path, subcarpetas: li
 
 
 def escanear_archivos_monitoreados(base_dir: Path, subcarpetas: list[str]) -> dict[str, Path]:
-    """Retorna {ruta_relativa: ruta_absoluta} de archivos en las subcarpetas monitoreadas."""
+    """Retorna {ruta_relativa: ruta_absoluta} de archivos en las subcarpetas monitoreadas (excluyendo assets y > 1 MB)."""
     archivos = {}
     for sub in subcarpetas:
         dir_path = base_dir / sub
         if not dir_path.exists():
             continue
         for root, dirs, files in os.walk(dir_path):
-            dirs[:] = [d for d in dirs if d not in ("__pycache__", "node_modules")]
+            # Excluir __pycache__, node_modules y cualquier carpeta assets en cualquier nivel
+            dirs[:] = [d for d in dirs if d not in ("__pycache__", "node_modules", "assets")]
             for f in files:
                 if f.endswith(".pyc"):
                     continue
                 p = Path(root) / f
+                try:
+                    if p.stat().st_size > MAX_TAMANIO_COPIA:
+                        continue
+                except OSError:
+                    continue
                 rel = p.relative_to(base_dir).as_posix()
                 archivos[rel] = p
     return archivos
+
+
+class ResultadoPoda(int):
+    """Resultado numérico de copias podadas que expone también la lista de pasos podados."""
+    def __new__(cls, cantidad: int, pasos_podados: list[str]):
+        obj = super().__new__(cls, cantidad)
+        obj.pasos_podados = pasos_podados
+        return obj
+
+    def __iter__(self):
+        return iter((int(self), self.pasos_podados))
+
+
+def podar_backups(backups_dir_path: Path, limite_poda: int = 20) -> ResultadoPoda:
+    """
+    Si limite_poda > 0, busca carpetas backups/<paso>/ que tengan subcarpeta 'antes' o 'despues'.
+    Las ordena por fecha de modificación (st_mtime) más reciente de esas subcarpetas.
+    Conserva las limite_poda más recientes y en las demás borra exclusivamente 'antes' y 'despues'.
+    Nunca borra otros archivos dentro de backups ni nada de raw.
+    Retorna ResultadoPoda(cantidad_podadas, lista_pasos_podados).
+    """
+    if limite_poda <= 0 or not backups_dir_path.exists():
+        return ResultadoPoda(0, [])
+
+    candidatos = []
+    for p in backups_dir_path.iterdir():
+        if not p.is_dir():
+            continue
+        antes_path = p / "antes"
+        desp_path = p / "despues"
+        tiene_antes = antes_path.is_dir()
+        tiene_desp = desp_path.is_dir()
+        if not tiene_antes and not tiene_desp:
+            continue
+
+        mtime_antes = antes_path.stat().st_mtime if tiene_antes else 0.0
+        mtime_desp = desp_path.stat().st_mtime if tiene_desp else 0.0
+        mtime_mas_reciente = max(mtime_antes, mtime_desp)
+        candidatos.append((mtime_mas_reciente, p))
+
+    # Ordenar de más reciente a más antiguo
+    candidatos.sort(key=lambda x: x[0], reverse=True)
+
+    # Si hay más carpetas que el límite, las excedentes se podan
+    a_podar = candidatos[limite_poda:]
+    pasos_podados = []
+
+    for _, p in a_podar:
+        antes_path = p / "antes"
+        desp_path = p / "despues"
+        borrado_algo = False
+        if antes_path.is_dir():
+            shutil.rmtree(antes_path, ignore_errors=True)
+            borrado_algo = True
+        if desp_path.is_dir():
+            shutil.rmtree(desp_path, ignore_errors=True)
+            borrado_algo = True
+        if borrado_algo:
+            pasos_podados.append(p.name)
+
+    return ResultadoPoda(len(pasos_podados), pasos_podados)
 
 
 # =============================================================================
@@ -479,8 +658,8 @@ def escanear_archivos_monitoreados(base_dir: Path, subcarpetas: list[str]) -> di
 # =============================================================================
 
 def ejecutar_inicio(paso: str) -> int:
-    raw_dir = RAW_DIR_BASE / paso
-    backup_antes_dir = BACKUPS_DIR_BASE / paso / "antes"
+    raw_dir = rutas_raw_dir(paso)
+    backup_antes_dir = rutas_backups_dir(paso) / "antes"
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     header = generar_encabezado_crudo()
@@ -609,9 +788,9 @@ def ejecutar_inicio(paso: str) -> int:
 
 
 def ejecutar_cierre(paso: str) -> int:
-    raw_dir = RAW_DIR_BASE / paso
-    backup_antes_dir = BACKUPS_DIR_BASE / paso / "antes"
-    backup_desp_dir = BACKUPS_DIR_BASE / paso / "despues"
+    raw_dir = rutas_raw_dir(paso)
+    backup_antes_dir = rutas_backups_dir(paso) / "antes"
+    backup_desp_dir = rutas_backups_dir(paso) / "despues"
     header = generar_encabezado_crudo()
 
     print(f"=== INICIANDO CIERRE DE PASO: {paso} ===")
@@ -749,7 +928,7 @@ def ejecutar_cierre(paso: str) -> int:
     # git diff completo contra HEAD y untracked
     buf_02.write("\n--- GIT DIFF COMPLETO CONTRA HEAD Y NUEVOS SIN SEGUIMIENTO ---\n")
     buf_02.write("\n[BACKEND DIFF]:\n")
-    diff_be, _, _ = run_cmd(["git", "diff", "HEAD"], cwd=BACKEND_DIR)
+    diff_be, _, _ = run_cmd(["git", "diff", "HEAD", "--", ".", ":!**/assets/**"], cwd=BACKEND_DIR)
     buf_02.write(diff_be + "\n" if diff_be else "(sin diff contra HEAD)\n")
 
     st_be, _, _ = run_cmd(["git", "status", "--porcelain"], cwd=BACKEND_DIR)
@@ -757,12 +936,12 @@ def ejecutar_cierre(paso: str) -> int:
         if line.startswith("??"):
             untr_file = line[2:].strip()
             p_untr = BACKEND_DIR / untr_file
-            if p_untr.is_file():
+            if p_untr.is_file() and p_untr.stat().st_size <= MAX_TAMANIO_COPIA and "assets" not in p_untr.parts:
                 buf_02.write(f"\n[BACKEND NUEVO SIN SEGUIMIENTO: {untr_file}]\n")
                 buf_02.write(p_untr.read_text(encoding="utf-8", errors="replace") + "\n")
 
     buf_02.write("\n[FRONTEND DIFF]:\n")
-    diff_fe, _, _ = run_cmd(["git", "diff", "HEAD"], cwd=FRONTEND_DIR)
+    diff_fe, _, _ = run_cmd(["git", "diff", "HEAD", "--", ".", ":!src/assets", ":!**/assets/**"], cwd=FRONTEND_DIR)
     buf_02.write(diff_fe + "\n" if diff_fe else "(sin diff contra HEAD)\n")
 
     st_fe, _, _ = run_cmd(["git", "status", "--porcelain"], cwd=FRONTEND_DIR)
@@ -770,7 +949,7 @@ def ejecutar_cierre(paso: str) -> int:
         if line.startswith("??"):
             untr_file = line[2:].strip()
             p_untr = FRONTEND_DIR / untr_file
-            if p_untr.is_file():
+            if p_untr.is_file() and p_untr.stat().st_size <= MAX_TAMANIO_COPIA and "assets" not in p_untr.parts:
                 buf_02.write(f"\n[FRONTEND NUEVO SIN SEGUIMIENTO: {untr_file}]\n")
                 buf_02.write(p_untr.read_text(encoding="utf-8", errors="replace") + "\n")
 
@@ -789,24 +968,24 @@ def ejecutar_cierre(paso: str) -> int:
     buf_03.write(header)
     buf_03.write(f"=== 2. EJECUCIÓN Y COMPARACIÓN 'DESPUÉS': {paso} ===\n\n")
 
-    # Verificar fecha de Argentina
+    # Verificar duración del paso (hasta 12 horas)
     estado_ini_file = raw_dir / "estado_inicio.json"
-    fecha_ini = ""
+    fecha_hora_ini = ""
     if estado_ini_file.exists():
         try:
             data_ini = json.loads(estado_ini_file.read_text(encoding="utf-8"))
-            fecha_ini = data_ini.get("fecha_argentina", "")
+            fecha_hora_ini = data_ini.get("fecha_hora", "")
         except Exception:
             pass
 
-    fecha_cierre_ar, fecha_cierre_hora_ar = obtener_fecha_hora_argentina()
-    if not verificar_misma_fecha(fecha_ini, fecha_cierre_ar):
-        buf_03.write(f"FECHA DISTINTA: Inicio={fecha_ini}, Cierre={fecha_cierre_ar}. No se realizan comparaciones.\n")
+    duracion_ok, msg_duracion = verificar_duracion(fecha_hora_ini)
+    if not duracion_ok:
+        buf_03.write(f"{msg_duracion}\n")
         (raw_dir / f"{paso}_03_despues.txt").write_text(buf_03.getvalue(), encoding="utf-8")
-        print("FECHA DISTINTA: El cierre cae en otra fecha de Argentina que el inicio.")
+        print(msg_duracion)
         return 1
 
-    buf_03.write(f"Fecha de Argentina verificada (misma del inicio): {fecha_cierre_ar}\n\n")
+    buf_03.write(f"Duración verificada (<= 12 horas desde {fecha_hora_ini}): OK\n\n")
 
     # Foto despues
     print("Tomando foto del motor (después)...")
@@ -848,8 +1027,9 @@ def ejecutar_cierre(paso: str) -> int:
     buf_03.write("\n--- COMPARACIONES (ANTES vs DESPUÉS) ---\n")
 
     # Comparar fotos
-    fotos_antes = sorted(FOTOS_DIR.glob(f"foto_*antes_{paso}.json"))
-    fotos_desp = sorted(FOTOS_DIR.glob(f"foto_*despues_{paso}.json"))
+    dir_fotos = rutas_fotos_dir()
+    fotos_antes = sorted(dir_fotos.glob(f"foto_*antes_{paso}.json"))
+    fotos_desp = sorted(dir_fotos.glob(f"foto_*despues_{paso}.json"))
     out_cf = ""
     rc_cf = 0
     if fotos_antes and fotos_desp:
@@ -860,8 +1040,8 @@ def ejecutar_cierre(paso: str) -> int:
         buf_03.write(f"AVISO: No se encontraron fotos para comparar antes_{paso} y despues_{paso}\n")
 
     # Comparar personas
-    personas_antes_file = FOTOS_DIR / f"personas_antes_{paso}.json"
-    personas_desp_file = FOTOS_DIR / f"personas_despues_{paso}.json"
+    personas_antes_file = dir_fotos / f"personas_antes_{paso}.json"
+    personas_desp_file = dir_fotos / f"personas_despues_{paso}.json"
     personas_iguales = False
     if personas_antes_file.exists() and personas_desp_file.exists():
         data_pa = json.loads(personas_antes_file.read_text(encoding="utf-8"))
@@ -944,7 +1124,7 @@ def ejecutar_cierre(paso: str) -> int:
 
     # Controles OK o FALLO
     control_git = "OK"  # Git se registra y sigue
-    control_fecha = "OK" if verificar_misma_fecha(fecha_ini, fecha_cierre_ar) else "FALLO"
+    control_duracion = "OK" if duracion_ok else "FALLO"
     control_permitidas = "OK" if permitidas_ok else "FALLO"
     control_pyflakes = "FALLO" if pyflakes_mensajes_undefined else "OK"
     control_tamanio = "OK" if tamanio_ok else "FALLO"
@@ -961,7 +1141,7 @@ def ejecutar_cierre(paso: str) -> int:
     else:
         control_build = "OMITIDO (sin cambios frontend)"
 
-    buf_05.write(f"[CONTROL] Fecha de Argentina: {control_fecha}\n")
+    buf_05.write(f"[CONTROL] Duración del paso (<= 12 horas): {control_duracion}\n")
     buf_05.write(f"[CONTROL] permitidas.txt y elementos fuera de lista: {control_permitidas}\n")
     buf_05.write(f"[CONTROL] pyflakes (nombres sin definir): {control_pyflakes}\n")
     buf_05.write(f"[CONTROL] Tamaño de archivos (<= 1.300 líneas): {control_tamanio}\n")
@@ -1038,6 +1218,14 @@ def ejecutar_cierre(paso: str) -> int:
             buf_05.write(f"  - {a}\n")
     else:
         buf_05.write("  Ninguna\n")
+
+    # Poda de respaldos antiguos si poda_pasos() > 0
+    limite_poda = poda_pasos()
+    res_poda = podar_backups(rutas_backups_dir(), limite_poda=limite_poda)
+    buf_05.write(f"\nPODA: {int(res_poda)} copias borradas\n")
+    if res_poda.pasos_podados:
+        for p_pod in res_poda.pasos_podados:
+            buf_05.write(f"  - {p_pod}\n")
 
     # Última línea obligatoria
     cambio_app = any(f.startswith("app/") for f in archivos_tocados)

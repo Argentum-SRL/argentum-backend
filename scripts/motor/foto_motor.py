@@ -39,6 +39,7 @@ from app.core.database import SessionLocal
 from app.models.usuario import Usuario
 from app.services import dashboard_service
 from app.utils.fecha import hoy_argentina
+from scripts.local.rutas import fotos_dir
 from scripts.motor.mediciones import (
     medir_bloque_b,
     medir_bloque_c,
@@ -159,9 +160,8 @@ def ejecutar_foto_motor(
     )
     frontend_dir = os.path.abspath(os.path.join(backend_dir, "..", "argentum-frontend"))
     if output_dir is None:
-        output_dir = os.path.abspath(
-            os.path.join(backend_dir, "..", "auditorias", "fotos")
-        )
+        # Se obtiene el directorio de fotos desde rutas.py
+        output_dir = str(fotos_dir())
     os.makedirs(output_dir, exist_ok=True)
 
     db = crear_sesion_segura()

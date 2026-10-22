@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 # Deteccion y visualizacion de base actual (local o produccion)
 from scripts.local.base_actual import imprimir_base_actual
 imprimir_base_actual()
+from scripts.local.rutas import fotos_dir, raw_dir
 
 
 from app.models.transaccion import TipoTransaccion
@@ -488,9 +489,8 @@ def main():
 
     reporte_txt = formatear_reporte_legible(resultado, etiqueta=etiqueta)
 
-    # Rutas de salida en auditorias/ del workspace raíz
-    dir_workspace = Path(__file__).resolve().parent.parent.parent.parent
-    dir_fotos = dir_workspace / "auditorias" / "fotos"
+    # Rutas de salida obtenidas desde scripts.local.rutas
+    dir_fotos = fotos_dir()
     dir_fotos.mkdir(parents=True, exist_ok=True)
 
     ruta_json = dir_fotos / f"personas_{etiqueta}.json"
@@ -502,8 +502,8 @@ def main():
     with open(ruta_txt, "w", encoding="utf-8") as f:
         f.write(reporte_txt)
 
-    # También guardar reporte crudo en auditorias/raw/paso03/Q5.txt
-    ruta_q5 = dir_workspace / "auditorias" / "raw" / "paso03" / "Q5.txt"
+    # También guardar reporte crudo en raw/paso03/Q5.txt
+    ruta_q5 = raw_dir("paso03") / "Q5.txt"
     ruta_q5.parent.mkdir(parents=True, exist_ok=True)
     with open(ruta_q5, "w", encoding="utf-8") as f:
         f.write(reporte_txt)

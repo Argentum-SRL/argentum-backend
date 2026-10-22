@@ -29,7 +29,7 @@ Desde la raíz del repositorio backend (`argentum-backend/`):
 python scripts/motor/foto_motor.py --etiqueta actual_1
 ```
 
-Genera dos archivos en `auditorias/fotos/`:
+Genera dos archivos en el directorio de fotos de auditorías (`D:\Argentum\auditorias\fotos\` por defecto, configurable mediante la variable de entorno `ARGENTUM_AUDITORIAS_DIR`):
 - `foto_<AAAAMMDD_HHMM>_<etiqueta>.json`: Formato plano clave → valor ordenado alfabéticamente.
 - `foto_<AAAAMMDD_HHMM>_<etiqueta>.txt`: Formato legible con sangría y valores alineados.
 
@@ -44,16 +44,16 @@ Debe imprimir en consola:
 `CORRECTO: Commit interceptado y bloqueado con éxito: BLOQUEO DE SEGURIDAD...`
 
 ### 3. Comparar dos fotos
-Para comparar una foto previa con una posterior a cambios:
+Para comparar una foto previa con una posterior a cambios (las rutas salen de `D:\Argentum\auditorias\fotos` o la variable `ARGENTUM_AUDITORIAS_DIR`):
 
 ```bash
-python scripts/motor/comparar_fotos.py ../auditorias/fotos/foto_A.json ../auditorias/fotos/foto_B.json
+python scripts/motor/comparar_fotos.py D:\Argentum\auditorias\fotos\foto_A.json D:\Argentum\auditorias\fotos\foto_B.json
 ```
 
 Para omitir las diferencias triviales de fecha, hora y nombres de archivo de la foto:
 
 ```bash
-python scripts/motor/comparar_fotos.py ../auditorias/fotos/foto_A.json ../auditorias/fotos/foto_B.json --ignorar-metadatos
+python scripts/motor/comparar_fotos.py D:\Argentum\auditorias\fotos\foto_A.json D:\Argentum\auditorias\fotos\foto_B.json --ignorar-metadatos
 ```
 
 **Códigos de salida:**
