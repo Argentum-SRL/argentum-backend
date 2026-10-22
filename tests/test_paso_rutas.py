@@ -7,6 +7,7 @@ from __future__ import annotations
 import importlib
 import os
 from pathlib import Path
+import shutil
 import subprocess
 from datetime import datetime, timezone, timedelta
 import pytest
@@ -141,6 +142,21 @@ def test_ta4_verificar_duracion():
     assert msg_3 == "Pasaron más de 12 horas desde el inicio del paso."
 
 
+def _obtener_rutas_repos() -> tuple[Path, Path | None]:
+    """Obtiene la ruta a backend y frontend de forma portable (CI o local)."""
+    backend_dir = Path(__file__).resolve().parent.parent
+    candidatos_frontend = [
+        backend_dir.parent / "argentum-frontend",
+        Path(r"C:\Users\sebas\OneDrive\Documentos\GitHub\argentum-frontend"),
+    ]
+    frontend_dir = None
+    for cand in candidatos_frontend:
+        if cand.exists():
+            frontend_dir = cand
+            break
+    return backend_dir, frontend_dir
+
+
 def test_ta5_estatica_sin_rutas_viejas_auditorias():
     """TA.5 (estática): en los .py y .mjs de los dos repos (sin venv, node_modules ni graphify-out) no aparece 'GitHub\\auditorias', 'GitHub/auditorias' ni '../auditorias'."""
     patron_1 = "Git" + r"Hub\auditorias"
@@ -148,10 +164,10 @@ def test_ta5_estatica_sin_rutas_viejas_auditorias():
     patron_3 = ".." + "/auditorias"
     patrones_prohibidos = [patron_1, patron_2, patron_3]
 
-    repos = [
-        Path(r"C:\Users\sebas\OneDrive\Documentos\GitHub\argentum-backend"),
-        Path(r"C:\Users\sebas\OneDrive\Documentos\GitHub\argentum-frontend"),
-    ]
+    backend_dir, frontend_dir = _obtener_rutas_repos()
+    repos = [backend_dir]
+    if frontend_dir is not None and frontend_dir.exists():
+        repos.append(frontend_dir)
 
     ignorar = {".git", "venv", "node_modules", "graphify-out", "__pycache__", ".pytest_cache", "dist"}
     archivo_propio = Path(__file__).resolve()
@@ -178,11 +194,18 @@ def test_ta5_estatica_sin_rutas_viejas_auditorias():
 
 def test_ta6_audit_design_system_falla_si_no_existe_auditorias(tmp_path):
     """TA.6: correr node scripts/audit-design-system.mjs con ARGENTUM_AUDITORIAS_DIR apuntando a una carpeta que no existe termina con código 1, stderr empieza con 'No existe la carpeta de auditorías: ' y la carpeta sigue sin existir."""
+    backend_dir, frontend_dir = _obtener_rutas_repos()
+    if frontend_dir is None or not (frontend_dir / "scripts" / "audit-design-system.mjs").exists():
+        pytest.skip("argentum-frontend no está presente en este entorno")
+
+    import shutil
+    if shutil.which("node") is None:
+        pytest.skip("node no está disponible en este entorno")
+
     carpeta_inexistente = tmp_path / "auditorias_no_existe"
     env = os.environ.copy()
     env["ARGENTUM_AUDITORIAS_DIR"] = str(carpeta_inexistente)
 
-    frontend_dir = Path(r"C:\Users\sebas\OneDrive\Documentos\GitHub\argentum-frontend")
     res = subprocess.run(
         ["node", "scripts/audit-design-system.mjs"],
         cwd=str(frontend_dir),
@@ -190,7 +213,7 @@ def test_ta6_audit_design_system_falla_si_no_existe_auditorias(tmp_path):
         text=True,
         encoding="utf-8",
         env=env,
-        shell=True,
+        shell=(os.name == "nt"),
     )
 
     assert res.returncode == 1
@@ -200,11 +223,11 @@ def test_ta6_audit_design_system_falla_si_no_existe_auditorias(tmp_path):
 
 def test_ta7_archivos_eliminados():
     """TA.7: Path('app/schemas/tarjeta_credito 2.py') no existe y src/assets/icons/categorias_raw no existe."""
-    backend_dir = Path(r"C:\Users\sebas\OneDrive\Documentos\GitHub\argentum-backend")
-    frontend_dir = Path(r"C:\Users\sebas\OneDrive\Documentos\GitHub\argentum-frontend")
+    backend_dir, frontend_dir = _obtener_rutas_repos()
 
     p_schema = backend_dir / "app" / "schemas" / "tarjeta_credito 2.py"
-    p_categorias = frontend_dir / "src" / "assets" / "icons" / "categorias_raw"
-
     assert not p_schema.exists()
-    assert not p_categorias.exists()
+
+    if frontend_dir is not None and frontend_dir.exists():
+        p_categorias = frontend_dir / "src" / "assets" / "icons" / "categorias_raw"
+        assert not p_categorias.exists()
