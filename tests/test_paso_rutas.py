@@ -145,13 +145,15 @@ def test_ta4_verificar_duracion():
 def _obtener_rutas_repos() -> tuple[Path, Path | None]:
     """Obtiene la ruta a backend y frontend de forma portable (CI o local)."""
     backend_dir = Path(__file__).resolve().parent.parent
+    env_frontend = os.environ.get("ARGENTUM_FRONTEND_DIR")
     candidatos_frontend = [
+        Path(env_frontend) if env_frontend else None,
         backend_dir.parent / "argentum-frontend",
         Path(r"C:\Users\sebas\OneDrive\Documentos\GitHub\argentum-frontend"),
     ]
     frontend_dir = None
     for cand in candidatos_frontend:
-        if cand.exists():
+        if cand is not None and cand.exists():
             frontend_dir = cand
             break
     return backend_dir, frontend_dir
@@ -169,7 +171,7 @@ def test_ta5_estatica_sin_rutas_viejas_auditorias():
     if frontend_dir is not None and frontend_dir.exists():
         repos.append(frontend_dir)
 
-    ignorar = {".git", "venv", "node_modules", "graphify-out", "__pycache__", ".pytest_cache", "dist"}
+    ignorar = {".git", "venv", ".venv", "node_modules", "graphify-out", "__pycache__", ".pytest_cache", "dist"}
     archivo_propio = Path(__file__).resolve()
 
     fallos = []
@@ -198,8 +200,8 @@ def test_ta6_audit_design_system_falla_si_no_existe_auditorias(tmp_path):
     if frontend_dir is None or not (frontend_dir / "scripts" / "audit-design-system.mjs").exists():
         pytest.skip("argentum-frontend no está presente en este entorno")
 
-    import shutil
-    if shutil.which("node") is None:
+    node_bin = shutil.which("node")
+    if node_bin is None:
         pytest.skip("node no está disponible en este entorno")
 
     carpeta_inexistente = tmp_path / "auditorias_no_existe"
@@ -207,7 +209,7 @@ def test_ta6_audit_design_system_falla_si_no_existe_auditorias(tmp_path):
     env["ARGENTUM_AUDITORIAS_DIR"] = str(carpeta_inexistente)
 
     res = subprocess.run(
-        ["node", "scripts/audit-design-system.mjs"],
+        [node_bin, "scripts/audit-design-system.mjs"],
         cwd=str(frontend_dir),
         capture_output=True,
         text=True,
