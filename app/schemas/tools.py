@@ -16,6 +16,7 @@ class InstallmentConvenienceRequest(BaseModel):
     inflacion_mensual: float
     tiene_interes: bool = False
     tna: float | None = None
+    tna_billetera_inversion: float | None = None
 
     @field_validator('precio_contado')
     @classmethod
@@ -57,6 +58,13 @@ class InstallmentConvenienceRequest(BaseModel):
             raise ValueError('La TNA debe estar entre 0.1% y 3000%')
         return v
 
+    @field_validator('tna_billetera_inversion')
+    @classmethod
+    def tna_billetera_valida(cls, v):
+        if v is not None and (v < 0.1 or v > 3000):
+            raise ValueError('La TNA de la billetera debe estar entre 0.1% y 3000%')
+        return v
+
     @model_validator(mode='after')
     def validar_interes_y_total(self) -> InstallmentConvenienceRequest:
         if not self.tiene_interes:
@@ -89,6 +97,9 @@ class InstallmentConvenienceResponseData(BaseModel):
     tna_usada: float | None = None
     interes_total: float | None = None
     precio_total_cuotas_con_interes: float | None = None
+    tna_billetera_inversion_usada: float | None = None
+    saldo_final_inversion: float | None = None
+    remanente_vpn: float | None = None
 
 
 class IPCData(BaseModel):

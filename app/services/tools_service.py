@@ -378,13 +378,29 @@ def calcular_conveniencia_cuotas(req: InstallmentConvenienceRequest) -> dict:
         resultado = "conviene_cuotas"  # El costo real en cuotas es menor al contado
     else:
         resultado = "conviene_contado"  # El costo real en cuotas es mayor al contado
-    
+
+    # Costo de oportunidad / Flujo de caja invertido en billetera remunerada
+    remanente_vpn = None
+    saldo_final_inversion = None
+    if req.tna_billetera_inversion is not None and req.tna_billetera_inversion > 0:
+        r_b = (req.tna_billetera_inversion / 100) / 12  # tasa mensual de rendimiento
+        s_k = float(req.precio_contado)  # Saldo inicial S_0
+        for _ in range(req.cantidad_cuotas):
+            s_k = s_k * (1 + r_b) - monto_cuota
+        saldo_final_inversion = round(s_k, 2)
+        # Remanente descontado a valor presente por la inflación mensual estimada
+        remanente_vpn = round(s_k / ((1 + tasa) ** req.cantidad_cuotas), 2)
+        if s_k > 0:
+            resultado = "conviene_cuotas"
+            ahorro_real = remanente_vpn
+            porcentaje_diferencia = round((remanente_vpn / req.precio_contado) * 100, 2)
+
     return {
         "resultado": resultado,
         "precio_contado": round(req.precio_contado, 2),
         "precio_total_cuotas_nominal": round(precio_total_cuotas, 2),
         "costo_real_cuotas": round(costo_real_total, 2),
-        "ahorro_real": round(abs(diferencia), 2),
+        "ahorro_real": round(abs(ahorro_real if (req.tna_billetera_inversion and remanente_vpn and remanente_vpn > 0) else diferencia), 2),
         "porcentaje_ahorro": round(porcentaje_diferencia, 2),
         "monto_cuota": round(monto_cuota, 2),
         "cantidad_cuotas": req.cantidad_cuotas,
@@ -393,7 +409,10 @@ def calcular_conveniencia_cuotas(req: InstallmentConvenienceRequest) -> dict:
         "tiene_interes": req.tiene_interes,
         "tna_usada": req.tna if req.tiene_interes else None,
         "interes_total": round(interes_total, 2) if req.tiene_interes else None,
-        "precio_total_cuotas_con_interes": round(precio_total_cuotas, 2) if req.tiene_interes else None
+        "precio_total_cuotas_con_interes": round(precio_total_cuotas, 2) if req.tiene_interes else None,
+        "tna_billetera_inversion_usada": req.tna_billetera_inversion,
+        "saldo_final_inversion": saldo_final_inversion,
+        "remanente_vpn": remanente_vpn
     }
 
 
