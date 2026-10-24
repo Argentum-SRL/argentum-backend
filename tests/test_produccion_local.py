@@ -484,8 +484,8 @@ def test_p13_rutas(monkeypatch):
 
     assert rutas.base_local_dir() == Path(r"E:\Custom\base")
     assert rutas.secretos_dir() == Path(r"E:\Custom\secretos")
-    assert rutas.pgsql_dir() == Path(r"E:\Custom\base\pgsql")
-    assert rutas.dumps_dir() == Path(r"E:\Custom\base\dumps")
+    assert rutas.pgsql_dir() == Path(r"E:\Custom\base") / "pgsql"
+    assert rutas.dumps_dir() == Path(r"E:\Custom\base") / "dumps"
 
 
 def test_p14_mensaje_migraciones():
