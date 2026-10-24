@@ -52,6 +52,7 @@ from app.services.rate_limit_service import (
 )
 from app.services.uso_ia_service import purgar_uso_ia_antiguo
 from app.services.salientes_wpp_service import purgar_salientes_antiguos
+from app.services.idempotencia_service import purgar_claves_idempotencia
 from app.core.job_lock import intentar_tomar_lock_job, liberar_lock_job
 import structlog
 
@@ -253,6 +254,10 @@ def _job_limpiar_tokens():
         salientes_eliminados = purgar_salientes_antiguos(db)
         if salientes_eliminados:
             logger.info("Registros de mensajes_salientes_wpp antiguos eliminados: %s", salientes_eliminados)
+
+        claves_eliminadas = purgar_claves_idempotencia(db)
+        if claves_eliminadas:
+            logger.info("Registros de claves_idempotencia antiguos eliminados: %s", claves_eliminadas)
     except Exception:
         logger.exception("Error en job limpiar_tokens")
     finally:

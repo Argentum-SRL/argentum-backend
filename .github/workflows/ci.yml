@@ -33,6 +33,7 @@ jobs:
 
     # Variables de entorno para pruebas (aisladas de produccion, sin secretos)
     env:
+      ARGENTUM_PG_TESTS_CI: "1"
       DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/argentum_ci
       SECRET_KEY: ci-test-secret-key-para-ejecucion-automatizada-1234567890
       ENVIRONMENT: development
@@ -68,14 +69,26 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
 
-      # Crear el esquema completo de tablas a partir de los modelos SQLAlchemy
-      - name: Crear el esquema desde los modelos
-        run: python scripts/init_db.py
+      # Cargar esquema de produccion en la revision a3d4e5f6a7b8 sin datos
+      - name: Cargar esquema de produccion
+        run: python scripts/ci/cargar_esquema.py
 
-      # Marcar la base de datos en la ultima revision de migraciones de Alembic
-      - name: Marcar la base en la ultima migracion
-        run: python -m alembic stamp head
+      # Marcar la base de datos en la revision inicial de produccion
+      - name: Marcar la base en la revision inicial
+        run: python -m alembic stamp a3d4e5f6a7b8
 
-      # Ejecucion de pruebas con pytest
+      # Aplicar migraciones hacia adelante hasta head
+      - name: Aplicar migraciones
+        run: python -m alembic upgrade head
+
+      # Probar rollback de migraciones
+      - name: Probar rollback de migracion
+        run: python -m alembic downgrade -1
+
+      # Reaplicar migraciones hasta head
+      - name: Reaplicar migraciones
+        run: python -m alembic upgrade head
+
+      # Ejecucion de pruebas con pytest (incluyendo tests/pg)
       - name: Ejecutar pruebas con pytest
         run: python -m pytest

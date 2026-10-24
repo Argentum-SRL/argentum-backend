@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -20,7 +20,7 @@ from app.schemas.tarjeta_credito import (
     FechasResumenBody,
 )
 from app.schemas.transaccion import TransaccionRead
-from app.services import calendario_tarjeta_service, pago_resumen_service, resumen_tarjeta_service, tarjeta_service
+from app.services import calendario_tarjeta_service, pago_resumen_service, resumen_tarjeta_service, tarjeta_service, idempotencia_service
 
 router = APIRouter()
 
@@ -160,6 +160,7 @@ def actualizar_fechas_resumen(
 @router.post("/{tarjeta_id}/pagar", response_model=ResultadoPagoTarjeta)
 def pagar_tarjeta(
     tarjeta_id: UUID,
+    request: Request,
     body: PagarTarjetaBody | None = None,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
@@ -177,22 +178,32 @@ def pagar_tarjeta(
     diferencia_categoria_id = body.diferencia_categoria_id if body else None
     diferencia_subcategoria_id = body.diferencia_subcategoria_id if body else None
 
-    return pago_resumen_service.pagar_resumen_tarjeta(
-        db,
-        current_user.id,
-        tarjeta_id,
-        fecha_pago=fecha_pago,
-        fecha_resumen=fecha_resumen,
-        monto=monto,
-        moneda=moneda,
-        billetera_id=billetera_id,
-        pesificar=pesificar,
-        cotizacion_personalizada=cotizacion_personalizada,
-        monto_pesos_personalizado=monto_pesos_personalizado,
-        monto_percepcion_personalizado=monto_percepcion_personalizado,
-        diferencia_tipo=diferencia_tipo,
-        diferencia_categoria_id=diferencia_categoria_id,
-        diferencia_subcategoria_id=diferencia_subcategoria_id,
+    cuerpo = body.model_dump(mode="json") if body is not None else None
+    return idempotencia_service.ejecutar(
+        db=db,
+        request=request,
+        usuario_id=current_user.id,
+        cuerpo=cuerpo,
+        operar=lambda: pago_resumen_service.pagar_resumen_tarjeta(
+            db,
+            current_user.id,
+            tarjeta_id,
+            fecha_pago=fecha_pago,
+            fecha_resumen=fecha_resumen,
+            monto=monto,
+            moneda=moneda,
+            billetera_id=billetera_id,
+            pesificar=pesificar,
+            cotizacion_personalizada=cotizacion_personalizada,
+            monto_pesos_personalizado=monto_pesos_personalizado,
+            monto_percepcion_personalizado=monto_percepcion_personalizado,
+            diferencia_tipo=diferencia_tipo,
+            diferencia_categoria_id=diferencia_categoria_id,
+            diferencia_subcategoria_id=diferencia_subcategoria_id,
+            commit=False,
+        ),
+        serializar=lambda obj: ResultadoPagoTarjeta.model_validate(obj).model_dump(mode="json"),
+        codigo=status.HTTP_200_OK,
     )
 
 

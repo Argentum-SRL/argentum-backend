@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, update, delete, exists, or_
 from sqlalchemy.orm import Session
@@ -33,7 +33,7 @@ from app.schemas.ajuste_saldo import (
     CoberturaRead,
     ControlSaldoPreview,
 )
-from app.services import usuario_service, rendimiento_billetera_service, ajuste_saldo_service
+from app.services import usuario_service, rendimiento_billetera_service, ajuste_saldo_service, idempotencia_service
 from app.services.tasas_service import ultimas_tasas, tasa_efectiva, rendimiento_por_saldos
 from app.utils.fecha import hoy_argentina
 
@@ -280,25 +280,32 @@ def get_rendimiento_estimado(
 @router.post("/{billetera_id}/rendimiento", response_model=BilleteraRead)
 def registrar_rendimiento(
     billetera_id: str,
+    request: Request,
     body: ConfirmarRendimientoRequest,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
     """Registra y acredita un rendimiento manual en una billetera de inversión."""
-    billetera = rendimiento_billetera_service.confirmar_rendimiento(
-        db, current_user.id, billetera_id, monto=body.monto, fecha=body.fecha
-    )
-    has_tx = db.query(exists().where(Transaccion.billetera_id == billetera.id)).scalar()
-    has_tr = db.query(exists().where(or_(
-        TransferenciaInterna.billetera_origen_id == billetera.id,
-        TransferenciaInterna.billetera_destino_id == billetera.id
-    ))).scalar()
-    has_rend = db.query(exists().where(RendimientoBilletera.billetera_id == billetera.id)).scalar()
-    has_ajuste = db.query(exists().where(AjusteSaldo.billetera_id == billetera.id)).scalar()
+    cuerpo = body.model_dump(mode="json")
 
-    b_read = BilleteraRead.model_validate(billetera)
-    b_read.tiene_transacciones = bool(has_tx or has_tr or has_rend or has_ajuste)
-    return b_read
+    return idempotencia_service.ejecutar(
+        db=db,
+        request=request,
+        usuario_id=current_user.id,
+        cuerpo=cuerpo,
+        operar=lambda: rendimiento_billetera_service.confirmar_rendimiento(
+            db, current_user.id, billetera_id, monto=body.monto, fecha=body.fecha, commit=False
+        ),
+        serializar=lambda b: BilleteraRead.model_validate(b).model_copy(update={
+            "tiene_transacciones": bool(
+                db.query(exists().where(Transaccion.billetera_id == b.id)).scalar()
+                or db.query(exists().where(or_(TransferenciaInterna.billetera_origen_id == b.id, TransferenciaInterna.billetera_destino_id == b.id))).scalar()
+                or db.query(exists().where(RendimientoBilletera.billetera_id == b.id)).scalar()
+                or db.query(exists().where(AjusteSaldo.billetera_id == b.id)).scalar()
+            )
+        }).model_dump(mode="json"),
+        codigo=status.HTTP_200_OK,
+    )
 
 
 @router.post("", response_model=BilleteraRead, status_code=status.HTTP_201_CREATED)
@@ -624,31 +631,40 @@ def previsualizar_control_saldo(
 @router.post("/{billetera_id}/ajustes", response_model=BilleteraRead)
 def actualizar_saldo(
     billetera_id: str,
+    request: Request,
     body: ActualizarSaldoRequest,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
     """Registra un control de saldo ("Actualizar saldo") en la billetera."""
-    ajuste_saldo_service.registrar_control(
-        db,
-        current_user.id,
-        billetera_id,
-        saldo_declarado=body.saldo_declarado,
-        rendimiento=body.rendimiento,
-        commit=True,
-    )
-    billetera = db.get(Billetera, billetera_id)
-    has_tx = db.query(exists().where(Transaccion.billetera_id == billetera.id)).scalar()
-    has_tr = db.query(exists().where(or_(
-        TransferenciaInterna.billetera_origen_id == billetera.id,
-        TransferenciaInterna.billetera_destino_id == billetera.id
-    ))).scalar()
-    has_rend = db.query(exists().where(RendimientoBilletera.billetera_id == billetera.id)).scalar()
-    has_ajuste = db.query(exists().where(AjusteSaldo.billetera_id == billetera.id)).scalar()
+    cuerpo = body.model_dump(mode="json")
 
-    b_read = BilleteraRead.model_validate(billetera)
-    b_read.tiene_transacciones = bool(has_tx or has_tr or has_rend or has_ajuste)
-    return b_read
+    return idempotencia_service.ejecutar(
+        db=db,
+        request=request,
+        usuario_id=current_user.id,
+        cuerpo=cuerpo,
+        operar=lambda: (
+            ajuste_saldo_service.registrar_control(
+                db,
+                current_user.id,
+                billetera_id,
+                saldo_declarado=body.saldo_declarado,
+                rendimiento=body.rendimiento,
+                commit=False,
+            ),
+            db.get(Billetera, billetera_id)
+        )[1],
+        serializar=lambda b: BilleteraRead.model_validate(b).model_copy(update={
+            "tiene_transacciones": bool(
+                db.query(exists().where(Transaccion.billetera_id == b.id)).scalar()
+                or db.query(exists().where(or_(TransferenciaInterna.billetera_origen_id == b.id, TransferenciaInterna.billetera_destino_id == b.id))).scalar()
+                or db.query(exists().where(RendimientoBilletera.billetera_id == b.id)).scalar()
+                or db.query(exists().where(AjusteSaldo.billetera_id == b.id)).scalar()
+            )
+        }).model_dump(mode="json"),
+        codigo=status.HTTP_200_OK,
+    )
 
 
 @router.get("/{billetera_id}/ajustes", response_model=AjustesBilleteraResponse)

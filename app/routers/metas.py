@@ -1,6 +1,6 @@
 from uuid import UUID
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -15,7 +15,7 @@ from app.schemas.movimiento_meta import (
     MovimientoMetaCreate,
     MovimientoMetaRead
 )
-from app.services import meta_service
+from app.services import meta_service, idempotencia_service
 
 router = APIRouter(tags=["metas"])
 
@@ -66,11 +66,21 @@ def eliminar_meta(
 @router.post("/{id}/movimientos", response_model=MovimientoMetaRead)
 def registrar_movimiento(
     id: UUID,
+    request: Request,
     data: MovimientoMetaCreate,
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user)
 ):
-    return meta_service.registrar_movimiento(db, usuario.id, id, data)
+    cuerpo = data.model_dump(mode="json")
+    return idempotencia_service.ejecutar(
+        db=db,
+        request=request,
+        usuario_id=usuario.id,
+        cuerpo=cuerpo,
+        operar=lambda: meta_service.registrar_movimiento(db, usuario.id, id, data, commit=False),
+        serializar=lambda obj: MovimientoMetaRead.model_validate(obj).model_dump(mode="json"),
+        codigo=status.HTTP_200_OK,
+    )
 
 @router.delete("/{id}/movimientos/{movimiento_id}")
 def eliminar_movimiento(

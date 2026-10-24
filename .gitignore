@@ -54,3 +54,6 @@ graphify-out/
 .agents/
 .graphifyignore
 .gitattributes
+
+# Permitir esquema SQL de CI para pruebas de migraciones
+!scripts/ci/esquema_a3d4e5f6a7b8.sql

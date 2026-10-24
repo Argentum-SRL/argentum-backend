@@ -1,10 +1,11 @@
 """
 tests/pg/conftest.py — Configuración y fixtures para pruebas en PostgreSQL.
 
-- Si DATABASE_URL no contiene "@localhost:5433/argentum_local", todos los tests de tests/pg se saltean.
+- Si DATABASE_URL no contiene "@localhost:5433/argentum_local" ni cumple la condición de CI
+  (ARGENTUM_PG_TESTS_CI == "1" y "@localhost:5432/argentum_ci"), todos los tests de tests/pg se saltean.
 - Si lo contiene, usa esa misma URL con la base argentum_pruebas_saldo (la crea si no existe conectándose a postgres con autocommit).
 - Al empezar la sesión: DROP SCHEMA public CASCADE, CREATE SCHEMA public, Base.metadata.create_all.
-- Nunca escribe en argentum_local.
+- Nunca escribe en argentum_local ni en argentum_ci.
 - Ayuda fijar_hoy(monkeypatch, fecha).
 - Fixtures A y B.
 """
@@ -30,10 +31,29 @@ def _get_base_postgres_url() -> str:
     return db_url
 
 
-def pytest_collection_modifyitems(config, items):
+def _info_conexion_pg() -> tuple[bool, str]:
+    """Retorna (es_valido, nombre_base_origen).
+
+    Acepta:
+    - Entorno local: DATABASE_URL contiene '@localhost:5433/argentum_local'
+    - Entorno CI: ARGENTUM_PG_TESTS_CI == '1' y DATABASE_URL contiene '@localhost:5432/argentum_ci'
+    """
     db_url = _get_base_postgres_url()
-    if "@localhost:5433/argentum_local" not in db_url:
-        skip_pg = pytest.mark.skip(reason="solo con con_base_local.py")
+    if "@localhost:5433/argentum_local" in db_url:
+        return True, "argentum_local"
+    if os.environ.get("ARGENTUM_PG_TESTS_CI") == "1" and "@localhost:5432/argentum_ci" in db_url:
+        return True, "argentum_ci"
+    return False, ""
+
+
+if _get_base_postgres_url().startswith(("postgresql", "postgres")) and _info_conexion_pg() == (False, ""):
+    raise RuntimeError("tests/pg solo corre contra la copia local o la base de la CI.")
+
+
+def pytest_collection_modifyitems(config, items):
+    valido, _ = _info_conexion_pg()
+    if not valido:
+        skip_pg = pytest.mark.skip(reason="solo con con_base_local.py o en CI con argentum_ci")
         for item in items:
             if "tests/pg" in str(item.fspath).replace("\\", "/"):
                 item.add_marker(skip_pg)
@@ -41,19 +61,20 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture(scope="session", autouse=True)
 def check_pg_env():
-    db_url = _get_base_postgres_url()
-    if "@localhost:5433/argentum_local" not in db_url:
-        pytest.skip("solo con con_base_local.py", allow_module_level=True)
+    valido, _ = _info_conexion_pg()
+    if not valido:
+        pytest.skip("solo con con_base_local.py o en CI con argentum_ci", allow_module_level=True)
 
 
 @pytest.fixture(scope="session")
 def pg_engine():
-    db_url = _get_base_postgres_url()
-    if "@localhost:5433/argentum_local" not in db_url:
-        pytest.skip("solo con con_base_local.py")
+    valido, nombre_base = _info_conexion_pg()
+    if not valido:
+        pytest.skip("solo con con_base_local.py o en CI con argentum_ci")
 
+    db_url = _get_base_postgres_url()
     # URL conectando a la base administrativa postgres para asegurar existencia de argentum_pruebas_saldo
-    postgres_admin_url = db_url.replace("/argentum_local", "/postgres")
+    postgres_admin_url = db_url.replace(f"/{nombre_base}", "/postgres")
     admin_engine = create_engine(postgres_admin_url, isolation_level="AUTOCOMMIT")
 
     with admin_engine.connect() as conn:
@@ -64,8 +85,8 @@ def pg_engine():
             conn.execute(text("CREATE DATABASE argentum_pruebas_saldo"))
     admin_engine.dispose()
 
-    # Engine para argentum_pruebas_saldo
-    test_db_url = db_url.replace("/argentum_local", "/argentum_pruebas_saldo")
+    # Engine para argentum_pruebas_saldo (mismo servidor, nunca escribe en argentum_local ni argentum_ci)
+    test_db_url = db_url.replace(f"/{nombre_base}", "/argentum_pruebas_saldo")
     engine = create_engine(test_db_url, pool_pre_ping=True)
 
     # Recrear esquema public limpio al inicio de la sesión

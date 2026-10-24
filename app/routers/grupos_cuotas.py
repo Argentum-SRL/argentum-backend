@@ -1,7 +1,7 @@
 from uuid import UUID
 from datetime import date
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, joinedload
 
@@ -16,6 +16,7 @@ from app.models.billetera import Billetera
 from app.schemas.grupos_cuotas import GrupoCuotasResumen, GrupoCuotasUpdate
 from app.services.transaccion_service import _hoy_argentina
 from app.services.cuotas_service import calcular_tasas_cuotas
+from app.services import idempotencia_service
 
 router = APIRouter(prefix="/grupos-cuotas", tags=["grupos_cuotas"])
 
@@ -235,12 +236,23 @@ def cancelar_grupo_cuotas(
 @router.post("/{grupo_id}/prepagar", response_model=GrupoCuotasResumen)
 def prepagar_grupo_cuotas(
     grupo_id: UUID,
+    request: Request,
     datos: PrepagoDatos,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    grupo = prepagar_grupo(db, grupo_id, current_user.id, datos.billetera_id, datos.categoria_id)
-    return mapear_grupo_resumen(db, grupo)
+    cuerpo = datos.model_dump(mode="json")
+    return idempotencia_service.ejecutar(
+        db=db,
+        request=request,
+        usuario_id=current_user.id,
+        cuerpo=cuerpo,
+        operar=lambda: prepagar_grupo(
+            db, grupo_id, current_user.id, datos.billetera_id, datos.categoria_id, commit=False
+        ),
+        serializar=lambda g: GrupoCuotasResumen.model_validate(mapear_grupo_resumen(db, g)).model_dump(mode="json"),
+        codigo=status.HTTP_200_OK,
+    )
 
 @router.post("/{grupo_id}/adelantar", response_model=GrupoCuotasResumen)
 def adelantar_grupo_cuotas(

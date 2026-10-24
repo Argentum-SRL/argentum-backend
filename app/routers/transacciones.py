@@ -3,7 +3,7 @@ from uuid import UUID
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
@@ -12,7 +12,7 @@ from app.core.database import get_db
 from app.models.usuario import Usuario
 from app.models.transaccion import TipoTransaccion
 from app.schemas.transaccion import TransaccionCreate, TransaccionUpdate, TransaccionRead, ReintegroPayload
-from app.services import transaccion_service, dolar_service
+from app.services import transaccion_service, dolar_service, idempotencia_service
 from app.utils.fecha import hoy_argentina
 
 router = APIRouter(prefix="/transacciones", tags=["transacciones"])
@@ -128,6 +128,7 @@ def get_transaccion(
 
 @router.post("", response_model=TransaccionRead, status_code=status.HTTP_201_CREATED)
 def create_transaccion(
+    request: Request,
     data: TransaccionCreate,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
@@ -135,7 +136,16 @@ def create_transaccion(
     """
     Crea una nueva transacción (normal o padre de cuotas).
     """
-    return transaccion_service.crear_transaccion(db, current_user.id, data)
+    cuerpo = data.model_dump(mode="json")
+    return idempotencia_service.ejecutar(
+        db=db,
+        request=request,
+        usuario_id=current_user.id,
+        cuerpo=cuerpo,
+        operar=lambda: transaccion_service.crear_transaccion(db, current_user.id, data, commit=False),
+        serializar=lambda obj: TransaccionRead.model_validate(obj).model_dump(mode="json"),
+        codigo=status.HTTP_201_CREATED,
+    )
 
 
 @router.patch("/{transaccion_id}", response_model=TransaccionRead)

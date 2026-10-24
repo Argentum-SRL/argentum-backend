@@ -1,14 +1,14 @@
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.models.usuario import Usuario
 from app.schemas.transferencia_interna import TransferenciaInternaCreate, TransferenciaInternaRead
-from app.services import transferencia_service
+from app.services import transferencia_service, idempotencia_service
 
 router = APIRouter(prefix="/transferencias", tags=["transferencias"])
 
@@ -38,6 +38,7 @@ def get_transferencia(
 
 @router.post("", response_model=TransferenciaInternaRead, status_code=status.HTTP_201_CREATED)
 def create_transferencia(
+    request: Request,
     data: TransferenciaInternaCreate,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
@@ -45,7 +46,16 @@ def create_transferencia(
     """
     Crea una transferencia interna entre dos billeteras.
     """
-    return transferencia_service.crear_transferencia(db, current_user.id, data)
+    cuerpo = data.model_dump(mode="json")
+    return idempotencia_service.ejecutar(
+        db=db,
+        request=request,
+        usuario_id=current_user.id,
+        cuerpo=cuerpo,
+        operar=lambda: transferencia_service.crear_transferencia(db, current_user.id, data, commit=False),
+        serializar=lambda obj: TransferenciaInternaRead.model_validate(obj).model_dump(mode="json"),
+        codigo=status.HTTP_201_CREATED,
+    )
 
 
 @router.delete("/{transferencia_id}", status_code=status.HTTP_204_NO_CONTENT)

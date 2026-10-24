@@ -42,8 +42,10 @@ from app.models.rate_limit import RateLimit
 from app.models.ejecucion_job import EjecucionJob
 from app.models.uso_ia import UsoIA
 from app.models.mensaje_saliente_wpp import MensajeSalienteWpp
+from app.models.clave_idempotencia import ClaveIdempotencia
 
 __all__ = [
+    "ClaveIdempotencia",
     "EjecucionJob",
     "UsoIA",
     "MensajeSalienteWpp",
