@@ -64,3 +64,54 @@ def poda_pasos() -> int:
         except ValueError:
             return 20
     return 20
+
+
+def secretos_dir() -> Path:
+    """
+    Retorna la ruta al directorio de secretos de Argentum.
+    Lee la variable de entorno ARGENTUM_SECRETOS_DIR; si no está definida o está vacía,
+    utiliza por defecto D:\\Argentum\\secretos.
+    No crea carpetas en disco.
+    """
+    val = os.environ.get("ARGENTUM_SECRETOS_DIR")
+    if val and val.strip():
+        return Path(val.strip())
+    return Path(r"D:\Argentum\secretos")
+
+
+def base_local_dir() -> Path:
+    """
+    Retorna la ruta raíz del directorio de la base de datos local de PostgreSQL.
+    Lee la variable de entorno ARGENTUM_BASE_LOCAL_DIR; si no está definida o está vacía,
+    utiliza por defecto D:\\Argentum\\base_local.
+    No crea carpetas en disco.
+    """
+    val = os.environ.get("ARGENTUM_BASE_LOCAL_DIR")
+    if val and val.strip():
+        return Path(val.strip())
+    return Path(r"D:\Argentum\base_local")
+
+
+def pgsql_dir() -> Path:
+    """Retorna la ruta al directorio de binarios de PostgreSQL local."""
+    return base_local_dir() / "pgsql"
+
+
+def data_dir() -> Path:
+    """Retorna la ruta al directorio de datos (data) de PostgreSQL local."""
+    return base_local_dir() / "data"
+
+
+def log_pg() -> Path:
+    """Retorna la ruta al archivo de log de PostgreSQL local."""
+    return base_local_dir() / "pg.log"
+
+
+def pg_local_env() -> Path:
+    """Retorna la ruta al archivo de variables de entorno de PostgreSQL local (pg_local.env)."""
+    return base_local_dir() / "pg_local.env"
+
+
+def dumps_dir() -> Path:
+    """Retorna la ruta al directorio de volcados (dumps) de PostgreSQL local."""
+    return base_local_dir() / "dumps"

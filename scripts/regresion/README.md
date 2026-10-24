@@ -87,7 +87,7 @@ python scripts/local/refrescar_base_local.py
 
 Flujo automatizado de refresco:
 1. Valida que el servidor local esté activo y que el comando apunte inequívocamente a `localhost:5433/argentum_local` (protección contra sobreescritura accidental).
-2. Genera un volcado limpio (`pg_dump -Fc`) de producción hacia `C:\argentum_local\dumps\argentum_prod.dump`.
+2. Genera un volcado limpio (`pg_dump -Fc`) de producción hacia `D:\Argentum\base_local\dumps\argentum_prod.dump`.
 3. Reinicia las conexiones activas, elimina y recrea la base `argentum_local`.
 4. Restaura el esquema y datos completos con `pg_restore`.
 5. Ejecuta un control de integridad comparando el conteo exacto de filas en las 38 tablas entre producción y local.

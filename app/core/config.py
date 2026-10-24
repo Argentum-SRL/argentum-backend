@@ -1,5 +1,8 @@
+import os
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
+
+from app.core.entorno import es_servidor_produccion, es_base_local
 
 
 class Settings(BaseSettings):
@@ -63,6 +66,25 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
     ENABLE_SCHEDULER: bool = True
+    ES_MODO_PC: bool = True
+
+    @model_validator(mode="after")
+    def validate_modo_pc(self):
+        if es_servidor_produccion():
+            self.ES_MODO_PC = False
+        else:
+            self.ES_MODO_PC = True
+            is_local = es_base_local(self.DATABASE_URL)
+            produccion_confirmada = os.environ.get("ARGENTUM_PRODUCCION_CONFIRMADA") == "1"
+            if not is_local and not produccion_confirmada:
+                raise ValueError(
+                    r"En esta PC la app usa solo la copia local. Para tocar producción usá scripts\local\con_produccion.py."
+                )
+            self.WHATSAPP_ACCESS_TOKEN = ""
+            self.RESEND_API_KEY = ""
+            self.SMTP_PASSWORD = ""
+            self.ENABLE_SCHEDULER = False
+        return self
 
     @model_validator(mode="after")
     def validate_urls(self):

@@ -573,6 +573,13 @@ def _job_actualizar_tasas():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if settings.ES_MODO_PC:
+        from app.core.entorno import es_base_local
+        if es_base_local(settings.DATABASE_URL):
+            logger.info("Modo PC: base local, sin WhatsApp ni mails reales y sin tareas automáticas.")
+        else:
+            logger.info("Modo PC: PRODUCCIÓN CONFIRMADA, sin WhatsApp ni mails reales y sin tareas automáticas.")
+
     # Crear el scheduler y registrar jobs aquí para evitar que se
     # añadan en tiempo de import (evita duplicados con --reload)
     loop = asyncio.get_running_loop()

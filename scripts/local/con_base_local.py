@@ -11,18 +11,23 @@ import sys
 import time
 from pathlib import Path
 
-PGSQL_DIR = Path(r"C:\argentum_local\pgsql")
-DATA_DIR = Path(r"C:\argentum_local\data")
-LOG_FILE = Path(r"C:\argentum_local\pg.log")
-ENV_FILE = Path(r"C:\argentum_local\pg_local.env")
-PG_CTL = PGSQL_DIR / "bin" / "pg_ctl.exe"
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from scripts.local import rutas
+
 
 def asegurar_servidor_levantado():
-    if not PG_CTL.exists():
-        raise FileNotFoundError(f"No existe pg_ctl en {PG_CTL}")
+    pg_ctl = rutas.pgsql_dir() / "bin" / "pg_ctl.exe"
+    data_dir = rutas.data_dir()
+    log_file = rutas.log_pg()
+
+    if not pg_ctl.exists():
+        raise FileNotFoundError(f"No existe pg_ctl en {pg_ctl}")
 
     res = subprocess.run(
-        [str(PG_CTL), "-D", str(DATA_DIR), "status"],
+        [str(pg_ctl), "-D", str(data_dir), "status"],
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -30,7 +35,7 @@ def asegurar_servidor_levantado():
     if res.returncode != 0:
         print("[con_base_local] Servidor PostgreSQL local apagado. Arrancando con pg_ctl...")
         start_res = subprocess.run(
-            [str(PG_CTL), "-D", str(DATA_DIR), "-l", str(LOG_FILE), "-w", "start"],
+            [str(pg_ctl), "-D", str(data_dir), "-l", str(log_file), "-w", "start"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -41,16 +46,19 @@ def asegurar_servidor_levantado():
             sys.exit(1)
         time.sleep(1)
 
+
 def obtener_credenciales_locales():
-    if not ENV_FILE.exists():
-        raise FileNotFoundError(f"No existe {ENV_FILE}")
+    env_file = rutas.pg_local_env()
+    if not env_file.exists():
+        raise FileNotFoundError(f"No existe {env_file}")
     env_vars = {}
-    for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+    for line in env_file.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if "=" in line and not line.startswith("#"):
             k, v = line.split("=", 1)
             env_vars[k.strip()] = v.strip().strip('"').strip("'")
     return env_vars
+
 
 def main():
     if len(sys.argv) < 2:
@@ -75,6 +83,7 @@ def main():
     cmd = sys.argv[1:]
     proc = subprocess.run(cmd, env=env)
     sys.exit(proc.returncode)
+
 
 if __name__ == "__main__":
     main()

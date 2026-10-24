@@ -78,13 +78,21 @@ Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_21-10.md (versi
 ### Base de datos
 - Las migraciones se aplican a mano a producción antes del push; Railway corre "alembic upgrade head" al deployar.
 
+### PC, copia local y producción (fase_v3_entorno_local)
+- **Modo PC (app/core/entorno.py)**: Fuera de Railway, Settings rechaza bases que no sean locales salvo ARGENTUM_PRODUCCION_CONFIRMADA=1; apaga envíos reales (WhatsApp, Resend, SMTP) y tareas automáticas (ENABLE_SCHEDULER=False); fija ES_MODO_PC=True.
+- **Secretos y producción**: La URL de producción vive en D:\Argentum\secretos\produccion.env (separar_produccion.py); solo scripts/local/produccion.py la lee.
+- **Acceso a producción**: Solo con scripts/local/con_produccion.py [--solo-lectura] <cmd>, interactivo desde terminal con confirmación explícita y registro en registro_produccion.log.
+- **Opciones de conexión**: opciones_conexion aplica -csearch_path=public y, con ARGENTUM_PRODUCCION_SOLO_LECTURA=1, -cdefault_transaction_read_only=on.
+- **Refresco y migraciones**: refrescar_base_local.py vuelca a D:\Argentum\base_local\dumps\ y corre alembic upgrade head en la copia local. Las migraciones pendientes en producción las aplica el usuario con con_produccion.py antes del push.
+- **Base local en D**: scripts/local/rutas.py centraliza base_local_dir (D:\Argentum\base_local), pgsql_dir, data_dir, log_pg, pg_local_env y dumps_dir.
+
 ### Ya no existen (no los busques ni los vuelvas a crear)
 - analisis_financiero_service.py, el handlers.py de WhatsApp, el módulo de transacciones recurrentes, la columna es_recurrente, la rama de transacción pendiente de IA en WhatsApp.
 - El cálculo de gasto inusual (se rehace en la Fase 7). Siguen sin uso el tipo de notificación GASTO_INUSUAL y los campos gasto_inusual_* de la configuración.
 
 ### Pruebas
 - Tests que cuidan reglas (nunca se les agregan excepciones): test_atomicidad_operaciones, test_cobros_suscripciones_aislados, test_formato_montos, test_whatsapp_motor_unico, test_verificacion_texto_ia, test_permitirse_whatsapp, test_herramienta_paso, test_ajustes_saldo, test_whatsapp_webhook_http.
-- El .env apunta a PRODUCCIÓN. Suite, foto, personas y verificador se corren sobre la copia local con scripts/local/con_base_local.py <comando> o con scripts/local/verificar_todo.py. Cada paso de trabajo empieza y termina con scripts/local/paso.py inicio|cierre <paso>.
+- Después de separar_produccion.py, el .env apunta a la copia local. Producción va solo con scripts/local/con_produccion.py y las migraciones nuevas se aplican solo en la copia local. Suite, foto, personas y verificador se corren sobre la copia local con scripts/local/con_base_local.py <comando> o con scripts/local/verificar_todo.py. Cada paso de trabajo empieza y termina con scripts/local/paso.py inicio|cierre <paso>.
 - Carpeta de auditorías (crudos, copias, fotos): D:\Argentum\auditorias, desde el paso fase_a_rutas (la ruta sale de scripts/local/rutas.py y de la variable ARGENTUM_AUDITORIAS_DIR). Nunca C:\...\GitHub\auditorias.
 - CI (.github/workflows/ci.yml): carga el esquema real de producción en a3d4e5f6a7b8 (scripts/ci/esquema_a3d4e5f6a7b8.sql, sin datos; scripts/ci/cargar_esquema.py solo corre contra argentum_ci o argentum_ci_prueba en localhost), hace stamp a3d4e5f6a7b8, upgrade head, downgrade -1, upgrade head y corre pytest con tests/pg (ARGENTUM_PG_TESTS_CI=1). alembic check queda afuera a propósito: hay diferencias conocidas entre los modelos y producción (tabla analisis_ia, columna transacciones.es_reintegro, varios índices) que se arreglan en un paso propio.
 - Pruebas de saldo en PostgreSQL: tests/pg (corren con con_base_local.py o en la CI; usan la base aparte argentum_pruebas_saldo del mismo servidor y nunca argentum_local ni argentum_ci). Importar tests/pg/conftest.py con una URL de PostgreSQL que no sea la local ni la de la CI da RuntimeError: nunca se importan tests desde scripts propios. TD.7 es el generador de invariantes con oráculo (ARGENTUM_INVARIANTES_COMPLETO=1 para la corrida larga).

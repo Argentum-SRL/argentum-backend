@@ -8,9 +8,9 @@ from app.core.config import settings
 db_query_duration_var: contextvars.ContextVar[list[float] | None] = contextvars.ContextVar("db_query_duration_var", default=None)
 db_logger = structlog.get_logger("database")
 
-connect_args = {}
-if settings.DATABASE_URL.lower().startswith("postgres"):
-    connect_args["options"] = "-csearch_path=public"
+from app.core.entorno import opciones_conexion
+
+connect_args = opciones_conexion(settings.DATABASE_URL)
 
 engine = create_engine(
     settings.DATABASE_URL,

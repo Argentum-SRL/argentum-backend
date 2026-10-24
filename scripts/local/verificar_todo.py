@@ -22,20 +22,23 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 LOCAL_SCRIPTS_DIR = BACKEND_DIR / "scripts" / "local"
 PYTHON_EXE = Path(sys.executable)
 
-PGSQL_DIR = Path(r"C:\argentum_local\pgsql")
-DATA_DIR = Path(r"C:\argentum_local\data")
-LOG_FILE = Path(r"C:\argentum_local\pg.log")
-PG_CTL = PGSQL_DIR / "bin" / "pg_ctl.exe"
+from scripts.local import rutas
 
 def asegurar_servidor_levantado():
-    if not PG_CTL.exists():
-        raise FileNotFoundError(f"No existe pg_ctl en {PG_CTL}")
+    pg_ctl = rutas.pgsql_dir() / "bin" / "pg_ctl.exe"
+    data_dir = rutas.data_dir()
+    log_file = rutas.log_pg()
+
+    if not pg_ctl.exists():
+        raise FileNotFoundError(f"No existe pg_ctl en {pg_ctl}")
 
     res = subprocess.run(
-        [str(PG_CTL), "-D", str(DATA_DIR), "status"],
+        [str(pg_ctl), "-D", str(data_dir), "status"],
         stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
@@ -43,7 +46,7 @@ def asegurar_servidor_levantado():
     if res.returncode != 0:
         print("[verificar_todo] Servidor local apagado. Arrancando con pg_ctl...")
         start_res = subprocess.run(
-            [str(PG_CTL), "-D", str(DATA_DIR), "-l", str(LOG_FILE), "-w", "start"],
+            [str(pg_ctl), "-D", str(data_dir), "-l", str(log_file), "-w", "start"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

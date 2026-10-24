@@ -31,6 +31,7 @@ from scripts.local.rutas import (
     backups_dir as rutas_backups_dir,
     fotos_dir as rutas_fotos_dir,
     poda_pasos,
+    pg_local_env,
 )
 PYTHON_EXE = BACKEND_DIR / "venv" / "Scripts" / "python.exe"
 if not PYTHON_EXE.exists():
@@ -503,7 +504,7 @@ def verificar_canario_bd(emails: list[str] | None = None) -> tuple[bool, str]:
         from sqlalchemy import create_engine, text
 
         # Obtener credenciales desde pg_local.env si existe
-        env_file = Path(r"C:\argentum_local\pg_local.env")
+        env_file = pg_local_env()
         password = ""
         if env_file.exists():
             for line in env_file.read_text(encoding="utf-8").splitlines():
