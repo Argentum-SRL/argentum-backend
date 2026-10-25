@@ -8,6 +8,7 @@ from app.core.entorno import es_servidor_produccion, es_base_local
 class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
+    ARGENTUM_PRODUCCION_CONFIRMADA: str = "0"
 
     # Supabase (API / client)
     SUPABASE_URL: str = ""
@@ -75,7 +76,10 @@ class Settings(BaseSettings):
         else:
             self.ES_MODO_PC = True
             is_local = es_base_local(self.DATABASE_URL)
-            produccion_confirmada = os.environ.get("ARGENTUM_PRODUCCION_CONFIRMADA") == "1"
+            produccion_confirmada = (
+                os.environ.get("ARGENTUM_PRODUCCION_CONFIRMADA") == "1"
+                or self.ARGENTUM_PRODUCCION_CONFIRMADA == "1"
+            )
             if not is_local and not produccion_confirmada:
                 raise ValueError(
                     r"En esta PC la app usa solo la copia local. Para tocar producción usá scripts\local\con_produccion.py."
