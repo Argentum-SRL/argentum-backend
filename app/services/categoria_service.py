@@ -76,10 +76,10 @@ def obtener_categorias_globales(db: Session) -> Tuple[List[Dict[str, Any]], List
     if cached is not None:
         return cached
 
-    # 1. Consultar categorías globales activas con orden determinístico
+    # 1. Consultar categorías globales activas ordenadas por tipo, orden y nombre
     categorias_stmt = select(Categoria).where(
         Categoria.estado == EstadoCategoria.ACTIVA,
-    ).order_by(Categoria.nombre.asc(), Categoria.id.asc())
+    ).order_by(Categoria.tipo.asc(), Categoria.orden.asc(), Categoria.nombre.asc(), Categoria.id.asc())
     categorias = db.execute(categorias_stmt).scalars().all()
 
     # 2. Consultar subcategorías globales activas con orden determinístico
@@ -93,6 +93,7 @@ def obtener_categorias_globales(db: Session) -> Tuple[List[Dict[str, Any]], List
             "id": c.id,
             "nombre": c.nombre,
             "tipo": c.tipo,
+            "orden": c.orden,
             "icono": c.icono,
             "color": c.color,
             "estado": c.estado,
@@ -106,6 +107,7 @@ def obtener_categorias_globales(db: Session) -> Tuple[List[Dict[str, Any]], List
             "categoria_id": s.categoria_id,
             "nombre": s.nombre,
             "orden": s.orden,
+            "es_sistema": s.es_sistema,
             "estado": s.estado,
         }
         for s in subcategorias

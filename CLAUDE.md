@@ -1,5 +1,8 @@
 # Argentum backend
 
+## Cómo responderle a Sebastián (regla n.º 1, 26/10/2026)
+Sin explicaciones y sin vueltas. Solo: indicaciones, prompts, pushear o no, comandos completos y decisiones de negocio, siempre en pasos simples. Nada de causas técnicas, diagnósticos ni hallazgos.
+
 ## Estructura vigente (actualizada el 21/10/2026)
 
 Esta sección manda: si otra parte de este archivo dice algo distinto, vale lo que dice acá.
@@ -60,6 +63,14 @@ Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_21-10.md (versi
 
 ### Patrones repetidos y decisiones de usuario
 - La página "Lo que se repite" se apoya en app/services/patrones_service.py y la tabla `decisiones_patrones` (app/models/decision_patron.py). Agrupa gastos en fijos, costumbre y día a día (usando app/utils/patrones.py) e ingresos habituales (app/services/ingreso_habitual_service.py). El usuario puede confirmar, descartar o mover ítems entre cajas sin alterar las transacciones originales.
+
+### Categorías (fase_categorias)
+- **Árbol y catálogo**: 20 categorías activas (15 egreso, 5 ingreso), 68 subcategorías visibles y 2 de sistema (Banco > Tarjeta de crédito e Impuestos). Centralizado en app/core/catalogo_categorias.py (fuente única de verdad con ALIAS_NOMBRES y divisiones IPC).
+- **Semilla con guardas**: scripts/seed_categorias.py inicializa el catálogo; si detecta categorías viejas sin migración previa (a5f6a7b8c9d0) aborta con log de advertencia. Categorías activas fuera de catálogo solo se archivan si ninguna fila en las 6 tablas las utiliza.
+- **Rescate y vocabulario**: app/core/vocabulario_categorias.py rescata determinísticamente categorías/subcategorías por vocabulario local ante "Otros" de la IA.
+- **WhatsApp y Personas**: aviso_personas_wpp agrega recordatorio contextual en una línea (<90 caracteres) ante Pagos a personas ("decime «era el súper»") o Cobros de personas ("decime «era un regalo»").
+- **Otros = subcategoría vacía**: la subcategoría NULL se muestra como "Otros".
+- **Regla de integridad**: cada vez que una subcategoría cambia de categoría, todas las filas que la usan en las 6 tablas cambian de categoría en la misma transacción.
 
 ### Dashboard y Disponible libre (fase_dash_ciclo)
 - Las cards del dashboard web muestran lo que pasa en el ciclo actual del usuario (del inicio al fin del ciclo). "Disponible libre" resta exactamente los compromisos impagos de "Próximos pagos" sin recortar (app/services/pagos_proximos_service.py). El disponible es uno solo: pagos_proximos_service.calcular_disponible_libre. contexto_financiero_service._calcular_saldo_disponible_sync lo envuelve para WhatsApp, el contexto de la IA, tools y "¿Me lo puedo permitir?". dashboard_service.calcular_saldo_disponible_ciclo_actual no tiene llamadas (código muerto, se borra en el Bloque E).

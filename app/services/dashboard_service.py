@@ -763,7 +763,7 @@ def get_subcategorias_gasto(
     if general_total["ars"] > 0 or general_total["usd"] > 0:
         desglose.append({
             "subcategoria_id": "general",
-            "subcategoria_nombre": "General",
+            "subcategoria_nombre": "Otros",
             "gasto_actual_ciclo": {
                 "ars": float(general_total["ars"]),
                 "usd": float(general_total["usd"])

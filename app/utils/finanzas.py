@@ -97,21 +97,31 @@ SUBCATEGORIAS_COMPROMISO_ELEGIBLES: frozenset[str] = frozenset({
     "gas",
     "agua",
     "internet y cable",
+    "internet",
     "celular",
     "seguros",
     "impuestos",
     "cuotas",
     "obra social / prepaga",
+    "prepaga y obra social",
+    "colegio y facultad",
     "prestamos",
     "préstamos",
     "tarjeta de credito",
     "tarjeta de crédito",
+    "abl e inmobiliario",
+    "patente",
+    "monotributo",
+    "servicio domestico",
+    "servicio doméstico",
 })
 
 CATEGORIAS_COMPROMISO_DIRECTAS: frozenset[str] = frozenset({
     "servicios",
     "comunicacion",
     "comunicación",
+    "vivienda",
+    "impuestos",
 })
 
 
@@ -138,7 +148,8 @@ def es_categoria_elegible_compromiso(
     desc_norm = _normalizar_descripcion(descripcion)
 
     if sub_norm:
-        if sub_norm in SUBCATEGORIAS_COMPROMISO_ELEGIBLES:
+        sub_candidatas_norm = {_normalizar_descripcion(s) for s in SUBCATEGORIAS_COMPROMISO_ELEGIBLES}
+        if sub_norm in SUBCATEGORIAS_COMPROMISO_ELEGIBLES or sub_norm in sub_candidatas_norm:
             if sub_norm == "impuestos" and cat_norm == "banco":
                 return False
             return True

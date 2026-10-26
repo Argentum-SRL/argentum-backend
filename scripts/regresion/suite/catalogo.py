@@ -653,7 +653,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P10.2", "punto": "Punto 10", "match": "contiene",
             "nombre": "gasté 5000 en Disney+: sigue siendo un gasto suelto",
             "ejecutar": lambda: p10_caso_2(datos),
-            "esperado": "Listo. $5.000 en Otros desde Galicia — registrado.\nSi fue con otra, decime cuál.",
+            "esperado": "Listo. $5.000 en Streaming desde Galicia — registrado.\nSi fue con otra, decime cuál.",
         },
         {
             "id": "P10.3", "punto": "Punto 10", "match": "exacto",
@@ -1043,7 +1043,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P10.13", "punto": "Punto 10", "match": "exacto",
             "nombre": "alta de gimnasio por WhatsApp con categoría sugerida",
             "ejecutar": lambda: p10_caso_13(datos),
-            "esperado": "Cat: Salud / Deportes y gimnasio | Conf: True",
+            "esperado": "Cat: Ocio / Deportes y gimnasio | Conf: True",
         },
         {
             "id": "P17.1", "punto": "Punto 17", "match": "exacto",

@@ -508,6 +508,6 @@ def test_pago_con_excedente_intereses(db: Session):
     assert tx_intereses.categoria is not None
     assert tx_intereses.categoria.nombre.lower() == "banco"
     assert tx_intereses.subcategoria is not None
-    assert tx_intereses.subcategoria.nombre == "Intereses pagados"
+    assert tx_intereses.subcategoria.nombre == "Intereses"
     assert tx_intereses.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA
 

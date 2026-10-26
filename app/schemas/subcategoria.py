@@ -11,6 +11,7 @@ class SubcategoriaBase(BaseModel):
     categoria_id: UUID
     nombre: str
     orden: int = 0
+    es_sistema: bool = False
     estado: EstadoSubcategoria = EstadoSubcategoria.ACTIVA
 
 

@@ -13,6 +13,7 @@ from decimal import Decimal
 import time
 import structlog
 
+from app.core.vocabulario_categorias import aplicar_rescate_si_corresponde
 from app.models.usuario import Moneda
 from app.routers.whatsapp.contexto import ContextoMensaje
 from app.routers.whatsapp.db_lookups import _obtener_historial_reciente
@@ -178,6 +179,7 @@ def procesar_llamada_ia_y_normalizacion(ctx: ContextoMensaje) -> None:
     # Ajuste determinístico de categorías según marcas comerciales y propagación de fechas
     if isinstance(resultado_ia.get("entidades"), dict):
         aplicar_marcas_y_memoria(db, usuario.id, resultado_ia["entidades"])
+        aplicar_rescate_si_corresponde(resultado_ia, mensaje_texto)
 
     intent_ia_raw = resultado_ia.get("intent")
     confianza_ia_raw = float(resultado_ia.get("confianza", 1.0))

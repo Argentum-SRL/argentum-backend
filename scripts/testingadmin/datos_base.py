@@ -113,13 +113,13 @@ class CatalogoEntidades:
             return s
 
         # Ingresos
-        self.cat_empleo = find_cat("Empleo", "ingreso")
+        self.cat_empleo = find_cat("Trabajo", "ingreso")
         self.sub_sueldo = find_sub(self.cat_empleo, "Sueldo")
         self.sub_aguinaldo = find_sub(self.cat_empleo, "Aguinaldo")
 
-        self.cat_indep = find_cat("Trabajo independiente", "ingreso")
-        self.sub_honorarios = find_sub(self.cat_indep, "Honorarios")
-        self.sub_venta = find_sub(self.cat_indep, "Venta de productos/servicios")
+        self.cat_indep = self.cat_empleo
+        self.sub_honorarios = find_sub(self.cat_indep, "Freelance y changas")
+        self.sub_venta = find_sub(self.cat_indep, "Ventas")
 
         # Egresos Fijos y Servicios
         self.cat_vivienda = find_cat("Vivienda", "egreso")
@@ -129,13 +129,12 @@ class CatalogoEntidades:
         self.sub_gas = find_sub(self.cat_vivienda, "Gas")
         self.sub_agua = find_sub(self.cat_vivienda, "Agua")
 
-        self.cat_comun = find_cat("Comunicación", "egreso")
+        self.cat_comun = find_cat("Tecnología", "egreso")
         self.sub_celular = find_sub(self.cat_comun, "Celular")
-        self.sub_internet = find_sub(self.cat_comun, "Internet y cable")
+        self.sub_internet = find_sub(self.cat_comun, "Internet")
 
         self.cat_salud = find_cat("Salud", "egreso")
         self.sub_farmacia = find_sub(self.cat_salud, "Farmacia")
-        self.sub_gimnasio = find_sub(self.cat_salud, "Deportes y gimnasio")
 
         # Egresos Variables y Día a Día
         self.cat_alim = find_cat("Alimentación", "egreso")
@@ -152,22 +151,24 @@ class CatalogoEntidades:
         self.cat_transp = find_cat("Transporte", "egreso")
         self.sub_comb = find_sub(self.cat_transp, "Combustible")
         self.sub_transp_pub = find_sub(self.cat_transp, "Transporte público")
-        self.sub_taxi = find_sub(self.cat_transp, "Taxi / Apps")
+        self.sub_taxi = find_sub(self.cat_transp, "Taxi y apps")
 
         self.cat_indum = find_cat("Indumentaria", "egreso")
         self.sub_ropa = find_sub(self.cat_indum, "Ropa")
         self.sub_calzado = find_sub(self.cat_indum, "Calzado")
 
-        self.cat_recreo = find_cat("Recreativo", "egreso")
+        self.cat_recreo = find_cat("Ocio", "egreso")
         self.sub_salidas = find_sub(self.cat_recreo, "Salidas")
         self.sub_hobbies = find_sub(self.cat_recreo, "Hobbies y juegos")
+        self.sub_gimnasio = find_sub(self.cat_recreo, "Deportes y gimnasio")
 
-        self.cat_hogar_eq = find_cat("Equipamiento del hogar", "egreso")
-        self.sub_muebles = find_sub(self.cat_hogar_eq, "Muebles y electrodomésticos")
+        self.cat_hogar_eq = find_cat("Hogar", "egreso")
+        self.sub_muebles = find_sub(self.cat_hogar_eq, "Muebles y electro")
         self.sub_limpieza = find_sub(self.cat_hogar_eq, "Limpieza")
 
+        self.cat_cuidado = find_cat("Cuidado personal", "egreso")
+        self.sub_cuidado = find_sub(self.cat_cuidado, "Peluquería y belleza")
         self.cat_otros_egr = find_cat("Otros", "egreso")
-        self.sub_cuidado = find_sub(self.cat_otros_egr, "Cuidado personal")
 
     def _cargar_ipc(self):
         rows = self.db.query(IPCCache).all()

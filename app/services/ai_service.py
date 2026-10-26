@@ -154,86 +154,12 @@ JERGA Y REGLAS DE TARJETAS DE CRÉDITO Y CUOTAS EN ARGENTINA:
   * Si el usuario dice "con tarjeta" o "en un pago" / "en 1 pago": cantidad_cuotas = 1.
 - PAGO DE RESUMEN: El pago del resumen de la tarjeta no se hace por WhatsApp. Si el usuario pide pagar el resumen de la tarjeta, explicá que se hace desde la web de Argentum.
 
-MAPEO DE JERGA ARGENTINA A CATEGORÍAS Y SUBCATEGORÍAS REALES (OBLIGATORIO):
-Al categorizar, debés mapear la jerga rioplatense al nombre exacto de la categoría o subcategoría más específica del listado (sin prefijo "Categoría > "):
-- Kiosco y golosinas -> Kiosco:
-  kiosco, maxikiosco, golosinas, caramelos, alfajor, alfajores, chocolates, chicles, galletitas, pastillas, puchos, cigarrillos, tabaco, kiosquero.
-- Verdulería -> Verdulería:
-  verdulería, verduleria, verduras, verdura, frutas, fruta, papas, tomate, cebolla, palta, lechuga, bananas, manzanas, verdulero.
-- Carnicería -> Carnicería:
-  carnicería, carniceria, carne, asado, asadito, vacío, vacio, colita de cuadril, entraña, matambre, milanesas, milas, picada (de carne), pollo, granja, achuras, chorizo, choris, mollejas, carnicero.
-- Supermercado, almacén, chino -> Supermercado:
-  supermercado, súper, super, coto, carrefour, dia, jumbo, changomas, vea, almacén, almacen, chino, súper chino, despensa, fiambrería, fiambreria, fiambre, quesos, embutidos, minimarket, compras del mes.
-- Panadería y facturas -> Panadería:
-  panadería, panaderia, pan, facturas, medialunas, chipá, panadero.
-- Delivery y pedidos de comida -> Delivery:
-  delivery, pedidos ya, pedidosya, peya, rappi, pedir comida, pedí pizza, empanadas, sushi, hamburguesa, hamburguesas, lomito, lomo.
-- Restaurantes y comer afuera -> Restaurantes:
-  restaurante, resto, bodegón, bodegon, pizzería, pizzeria, parrilla, cenar afuera, cena, almuerzo en restaurante, tenedor libre.
-- Café y cafeterías -> Cafetería:
-  café, cafe, cafecito, cafetería, cafeteria, starbucks, cortado, merienda, desayunar afuera, café con leche, tostadas, cafetín.
-- Bar, boliche y birra -> Salidas:
-  bar, boliche, birra, birras, cerveza, cervecería, cerveceria, trago, tragos, previas, joda, joda bailable, entradas al cine, cine, recital, teatro, show, fiesta, after, after office.
-- Gimnasio y deportes -> Deportes y gimnasio:
-  gimnasio, gym, crossfit, pilates, yoga, natación, natacion, fútbol, futbol 5, pádel, padel, tenis, cancha, entrenamiento, cuota del club.
-- Streaming, videojuegos y hobbies -> Hobbies y juegos:
-  streaming, netflix, spotify, hbo, disney, prime video, crunchyroll, youtube premium, videojuegos, playstation, steam, juegos, hobby.
-- Viajes y turismo -> Viajes:
-  viaje, pasajes, vuelo, hotel, hostel, excursión, vacaciones, escapada.
-- Remis, taxi y apps de viaje -> Taxi / Apps:
-  remis, remís, taxi, tacho, uber, cabify, didi, viajecito en app.
-- Colectivo, subte, tren y bondi -> Transporte público (NUNCA "Transporte"):
-  bondi, bondis, colectivo, colectivos, micro, micros, cole, subte, tren, sube, carga de sube, tarjeta sube, boleto.
-- Nafta, combustible y carga -> Combustible:
-  nafta, combustible, cargar nafta, nafta súper, infinia, premium, v-power, gasoil, diesel, gnc, tanque lleno, cargar gas, ypf, shell, axion, puma.
-- Peaje -> Peajes:
-  peaje, peajes, telepase, pase.
-- Estacionamiento -> Estacionamiento:
-  estacionamiento, cochera, parquímetro, parquimetro, garaje, trapito, cuidar el auto, parking.
-- Mantenimiento y seguro del auto -> Mantenimiento y seguro del auto:
-  mecánico, mecanico, taller, service, cambio de aceite, cubiertas, gomería, gomeria, repuestos del auto, vtv, seguro del auto.
-- Farmacia y remedios -> Farmacia:
-  farmacia, remedios, medicamentos, pastillas, aspirinas, ibuprofeno, farmacity, protector solar, curitas, gasas, botiquín.
-- Obra social y prepaga -> Obra social / Prepaga (NUNCA "Salud"):
-  prepaga, obra social, osde, swiss medical, galeno, sancor salud, ioma, osecac, medifé, cuota médica, cuota de la prepaga.
-- Médico y consultas -> Médico / Consulta:
-  médico, medico, doctor, consulta médica, pediatra, clínico, especialista, copago.
-- Dentista -> Odontología:
-  dentista, odontólogo, odontologo, muela, brackets, ortodoncia.
-- Peluquería y cuidado personal -> Cuidado personal:
-  peluquería, peluqueria, corte de pelo, me corté el pelo, me corte el pelo, corté el pelo, corte el pelo, pelo, peluquero, barbero, barbería, barberia, depilación, depilacion, uñas, manicura, pedicura, spa, perfume, cosméticos, cremas, shampoo, estética, estetica, pelu.
-- Mascotas y veterinaria -> Mascotas:
-  veterinaria, vet, alimento de perro, alimento de gato, piedras sanitarias, pipeta, vacunas de la mascota, paseador de perros.
-- Regalos -> Regalos:
-  regalo, obsequio, presente, regalo de cumpleaños.
-- Alquiler y expensas -> Alquiler / Expensas:
-  alquiler, pago de alquiler, pagar el alquiler, expensas, expensas del depto, administración.
-- Luz, gas y agua -> Luz / Gas / Agua:
-  luz, edenor, edesur, epec, boleta de luz, metrogas, naturgy, camuzzi, boleta de gas, aysa, aguas cordobesas.
-- Impuestos -> Impuestos:
-  abl, rentas, municipalidad, arba, agip, monotributo.
-- Celular -> Celular:
-  celular, abono celular, recarga celular, personal, claro, movistar, pack de datos, línea telefónica.
-- Internet y cable -> Internet y cable:
-  internet, wifi, cable, fibertel, telecentro, flow, claro fibra, movistar fibra, iplan.
-- Ropa e indumentaria -> Ropa:
-  ropa, remera, remeras, pantalón, pantalon, jean, jeans, campera, buzo, buzos, camisa, medias, ropa interior, pilcha, pilchas, sweater.
-- Calzado y zapatillas -> Calzado:
-  calzado, zapatillas, zapas, zapatos, botas, sandalias, ojotas, pantuflas, crocs.
-- Útiles y librería -> Materiales y libros:
-  útiles, utiles, librería, libreria, fotocopias, cuadernos, hojas, biromes, lapiceras, carpetas, libros escolares.
-- Cuotas educativas -> Cuotas:
-  cuota del colegio, cuota de la facultad, cuota de la universidad, mensualidad escolar.
-- Tarjeta de crédito -> Tarjeta de crédito:
-  tarjeta, resumen de la tarjeta, pago de tarjeta, visa, mastercard, amex, resumen mensual, cuotas de la tarjeta.
-- Sueldo -> Sueldo (NUNCA "Empleo"):
-  sueldo, quincena, cobré el mes, cobré el sueldo, cobré sueldo, salario, recibo de haberes. Toda mención de sueldo o cobrar sueldo SIEMPRE tiene categoria "Sueldo", jamás la categoría padre "Empleo".
-- Aguinaldo -> Aguinaldo:
-  aguinaldo, sac, medio aguinaldo.
-- Bono y horas extras -> Bonos y horas extras:
-  bono, premio, gratificación, horas extras, plus, comisión.
-- Freelance y changas -> Honorarios:
-  changa, changas, laburo particular, trabajo freelance, honorarios, facturé un trabajo, cliente particular.
+REGLAS DE CATEGORÍA (OBLIGATORIAS):
+- El concepto decide la categoría, nunca la forma de pago: tarjeta, visa, master, débito, transferencia o Mercado Pago no son categorías.
+- Plata que el usuario le pasa a una persona sin decir para qué ("le transferí 3000 a Manuel"): egreso con categoría "Pagos a personas". Si dice para qué ("le transferí 3000 a Manuel por el budín"), va la categoría del concepto.
+- Plata que una persona le pasa al usuario sin decir para qué ("Manuel me pasó 3000"): ingreso con categoría "Cobros de personas".
+- Si es de la familia (mamá, papá, mi vieja, mi viejo, mis viejos, abuela, abuelo, hijo, hija), la categoría es "Ayuda familiar", en egreso o en ingreso.
+- Si sabés el rubro pero no la subcategoría, devolvé el nombre de la categoría (ej: "Alimentación"), nunca "Otros".
 
 CONCEPTOS RAROS O DESCONOCIDOS:
 Si el usuario menciona un gasto o ingreso con un concepto que no conocés, no existe o no tiene sentido financiero conocido (ej: 'un coso cuántico intergaláctico', 'la mar en coche', 'sarasa', etc.), clasificalo SIEMPRE como "Otros". NUNCA inventes categorías o subcategorías inexistentes.
@@ -334,8 +260,8 @@ MÚLTIPLES OPERACIONES EN UN SOLO MENSAJE:
 FLUJO DE SLOT FILLING Y CATEGORIZACIÓN AUTOMÁTICA:
 1. CATEGORIZACIÓN SIEMPRE AUTOMÁTICA (NUNCA PREGUNTAR CATEGORÍA):
    - La categoría NUNCA se pregunta al usuario bajo ninguna circunstancia.
-   - REGLA DE ESPECIFICIDAD ESTRICTA: Debés devolver SIEMPRE la subcategoría más específica (ej: "Kiosco", "Verdulería", "Combustible", "Obra social / Prepaga", "Transporte público", "Cuidado personal", "Farmacia", "Supermercado", "Sueldo"). NUNCA elijas la categoría padre general ("Alimentación", "Salud", "Transporte", "Vivienda", "Empleo", etc.) cuando exista una subcategoría aplicable al concepto (por ejemplo, para golosinas/alfajores/kiosco usá SIEMPRE "Kiosco", NUNCA "Alimentación"; para verdulería usá SIEMPRE "Verdulería", NUNCA "Alimentación"; para bondi/colectivo usá SIEMPRE "Transporte público", NUNCA "Transporte"; para sueldo usá SIEMPRE "Sueldo", NUNCA "Empleo"; para prepaga u obra social usá SIEMPRE "Obra social / Prepaga", NUNCA "Salud").
-   - NUNCA uses el formato "Categoría > Subcategoría", devolvé únicamente el nombre exacto de la subcategoría o categoría seleccionada (ej: "Verdulería", "Obra social / Prepaga", "Kiosco").
+   - REGLA DE ESPECIFICIDAD ESTRICTA: Debés devolver SIEMPRE la subcategoría más específica (ej: "Kiosco", "Verdulería", "Combustible", "Prepaga y obra social", "Transporte público", "Peluquería y belleza", "Farmacia", "Supermercado", "Sueldo"). NUNCA elijas la categoría padre general ("Alimentación", "Salud", "Transporte", "Vivienda", "Trabajo", etc.) cuando exista una subcategoría aplicable al concepto (por ejemplo, para golosinas/alfajores/kiosco usá SIEMPRE "Kiosco", NUNCA "Alimentación"; para verdulería usá SIEMPRE "Verdulería", NUNCA "Alimentación"; para bondi/colectivo usá SIEMPRE "Transporte público", NUNCA "Transporte"; para sueldo usá SIEMPRE "Sueldo", NUNCA "Trabajo"; para prepaga u obra social usá SIEMPRE "Prepaga y obra social", NUNCA "Salud").
+   - NUNCA uses el formato "Categoría > Subcategoría", devolvé únicamente el nombre exacto de la subcategoría o categoría seleccionada (ej: "Verdulería", "Prepaga y obra social", "Kiosco").
    - Si no hay ninguna subcategoría aplicable pero sí una categoría general que aplique, usá la categoría general.
    - Si el mensaje NO contiene ninguna pista (ej: monto pelado como "gasté 500", "pagué 2000", "me entraron 10000"), o si es un concepto desconocido o raro (ej: "un coso cuántico intergaláctico"), devolvé SIEMPRE: "Otros".
    - Nunca inventes nombres de categorías o subcategorías que no estén en la lista provista.
@@ -582,14 +508,28 @@ def _construir_system_prompt_completo(db: Session) -> str:
         return _SYSTEM_PROMPT_CACHE
 
     from app.core.constants import CATEGORIAS_SISTEMA
+    from app.core.catalogo_categorias import ARBOL_CATEGORIAS
     cats_globales, subs_globales = categoria_service.obtener_categorias_globales(db)
 
-    subcats_por_cat: dict[str, list[str]] = {}
+    # Mapeo de descripciones desde el catálogo
+    desc_sub_map: dict[tuple[str, str, str], str] = {
+        (cat.nombre, cat.tipo, sub.nombre): sub.descripcion
+        for cat in ARBOL_CATEGORIAS
+        for sub in cat.subcategorias
+    }
+    desc_otros_map: dict[tuple[str, str], str | None] = {
+        (cat.nombre, cat.tipo): cat.descripcion_otros
+        for cat in ARBOL_CATEGORIAS
+    }
+
+    subcats_por_cat: dict[str, list[dict[str, Any]]] = {}
     for s in subs_globales:
+        if s.get("es_sistema"):
+            continue
         key = str(s["categoria_id"])
         if key not in subcats_por_cat:
             subcats_por_cat[key] = []
-        subcats_por_cat[key].append(s["nombre"])
+        subcats_por_cat[key].append(s)
 
     lineas = [
         SYSTEM_PROMPT.rstrip(),
@@ -602,11 +542,20 @@ def _construir_system_prompt_completo(db: Session) -> str:
         if cg["nombre"] in CATEGORIAS_SISTEMA:
             continue
         tipo_str = cg["tipo"].value if hasattr(cg["tipo"], "value") else str(cg["tipo"])
-        subs = sorted(subcats_por_cat.get(str(cg["id"]), []))
-        if subs:
-            lineas.append(f"- {cg['nombre']} ({tipo_str}): {', '.join(subs)}")
+        desc_otros = desc_otros_map.get((cg["nombre"], tipo_str))
+        if desc_otros:
+            lineas.append(f"- {cg['nombre']} ({tipo_str}). Otros de esta categoría: {desc_otros}")
         else:
             lineas.append(f"- {cg['nombre']} ({tipo_str})")
+
+        subs = sorted(subcats_por_cat.get(str(cg["id"]), []), key=lambda s: s["nombre"])
+        for s in subs:
+            sub_nombre = s["nombre"]
+            sub_desc = desc_sub_map.get((cg["nombre"], tipo_str, sub_nombre), "")
+            if sub_desc:
+                lineas.append(f"  - {sub_nombre}: {sub_desc}")
+            else:
+                lineas.append(f"  - {sub_nombre}")
 
     prompt_completo = "\n".join(lineas) + "\n"
     _SYSTEM_PROMPT_CACHE = prompt_completo
@@ -625,7 +574,7 @@ def obtener_categorias_permitidas(db: Session) -> list[str]:
             permitidas.add(nombre)
     for sg in subs_globales:
         nombre = sg.get("nombre")
-        if nombre:
+        if nombre and not sg.get("es_sistema"):
             permitidas.add(nombre)
     return sorted(list(permitidas))
 
@@ -945,28 +894,6 @@ def procesar_mensaje(
                     mensaje_original=mensaje,
                     tipo=tipo_ent,
                 )
-
-            # Normalizar subcategorías específicas si el modelo devolvió categoría padre general
-            cat_actual = entidades_dict.get("categoria")
-            texto_eval = f"{mensaje} {desc_actual or ''}".lower()
-            if cat_actual == "Alimentación":
-                if re.search(r"\b(golosinas?|caramelos?|alfajor(?:es)?|chocolates?|chicles?|kiosco|maxikiosco|puchos|cigarrillos)\b", texto_eval):
-                    entidades_dict["categoria"] = "Kiosco"
-                elif re.search(r"\b(verduler[ií]a|fruter[ií]a|verduras?|frutas?)\b", texto_eval):
-                    entidades_dict["categoria"] = "Verdulería"
-                elif re.search(r"\b(supermercado|s[uú]per|coto|carrefour|dia|disco|jumbo|chango|vea)\b", texto_eval):
-                    entidades_dict["categoria"] = "Supermercado"
-            elif cat_actual == "Transporte":
-                if re.search(r"\b(nafta|combustible|gnc|gasoil|ypf|shell|axion)\b", texto_eval):
-                    entidades_dict["categoria"] = "Combustible"
-                elif re.search(r"\b(bondi|colectivo|subte|tren|transporte\s+p[uú]blico)\b", texto_eval):
-                    entidades_dict["categoria"] = "Transporte público"
-            elif cat_actual == "Salud":
-                if re.search(r"\b(prepaga|obra\s+social|osde|swiss\s+medical|galeno|omint|medif[eé])\b", texto_eval):
-                    entidades_dict["categoria"] = "Obra social / Prepaga"
-            elif cat_actual == "Empleo":
-                if re.search(r"\b(sueldo|salario|haberes|quincena)\b", texto_eval):
-                    entidades_dict["categoria"] = "Sueldo"
 
             # Sanitizar descripciones en transacciones adicionales si existen
             if isinstance(entidades_dict.get("transacciones_adicionales"), list):

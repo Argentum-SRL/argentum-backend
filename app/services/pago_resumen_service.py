@@ -59,7 +59,8 @@ def _subcategoria_impuestos_banco(db: Session, categoria_banco: Categoria | None
         subcat_impuestos = Subcategoria(
             categoria_id=categoria_banco.id,
             nombre="Impuestos",
-            orden=10
+            orden=5,
+            es_sistema=True,
         )
         db.add(subcat_impuestos)
         db.flush()
@@ -69,20 +70,21 @@ def _subcategoria_impuestos_banco(db: Session, categoria_banco: Categoria | None
 
 def _subcategoria_intereses_banco(db: Session, categoria_banco: Categoria | None) -> Subcategoria | None:
     """
-    Busca o crea la subcategoría 'Intereses pagados' dentro de la categoría Banco recibida.
+    Busca o crea la subcategoría 'Intereses' dentro de la categoría Banco recibida.
     """
     if not categoria_banco:
         return None
     subcat_intereses = db.query(Subcategoria).filter(
         Subcategoria.categoria_id == categoria_banco.id,
-        Subcategoria.nombre.ilike("Intereses pagados")
+        Subcategoria.nombre.ilike("Intereses")
     ).first()
 
     if not subcat_intereses:
         subcat_intereses = Subcategoria(
             categoria_id=categoria_banco.id,
-            nombre="Intereses pagados",
-            orden=11
+            nombre="Intereses",
+            orden=2,
+            es_sistema=False,
         )
         db.add(subcat_intereses)
         db.flush()

@@ -168,6 +168,9 @@ def condicion_ingreso(
     cat_ahorro_sq = (
         select(Categoria.id).where(func.lower(Categoria.nombre) == "ahorro")
     )
+    subcat_reintegros_sq = (
+        select(Subcategoria.id).where(func.lower(Subcategoria.nombre) == "reintegros")
+    )
 
     conds = [
         Transaccion.usuario_id == usuario_id,
@@ -178,6 +181,10 @@ def condicion_ingreso(
         or_(
             Transaccion.categoria_id.is_(None),
             Transaccion.categoria_id.not_in(cat_ahorro_sq),
+        ),
+        or_(
+            Transaccion.subcategoria_id.is_(None),
+            Transaccion.subcategoria_id.not_in(subcat_reintegros_sq),
         ),
         or_(
             Transaccion.estado_verificacion.is_(None),
@@ -212,6 +219,7 @@ class ContextoDefiniciones:
     subcategoria_tarjeta_id: Optional[UUID]
     subcategoria_tarjeta_ids: Set[UUID]
     hoy: date
+    subcategoria_reintegros_ids: Set[UUID] = frozenset()
 
 
 def cargar_contexto(
@@ -262,6 +270,11 @@ def cargar_contexto(
     subcat_tc_set = set(subcat_tc_rows)
     subcat_tc = subcat_tc_rows[0] if subcat_tc_rows else None
 
+    subcat_reintegros_rows = db.execute(
+        select(Subcategoria.id).where(func.lower(Subcategoria.nombre) == "reintegros")
+    ).scalars().all()
+    subcat_reintegros_set = set(subcat_reintegros_rows)
+
     return ContextoDefiniciones(
         grupos_cuotas_cantidades=grupos_map,
         billeteras_inversion_ids=b_inv_set,
@@ -269,6 +282,7 @@ def cargar_contexto(
         subcategoria_tarjeta_id=subcat_tc,
         subcategoria_tarjeta_ids=subcat_tc_set,
         hoy=ref_hoy,
+        subcategoria_reintegros_ids=subcat_reintegros_set,
     )
 
 
@@ -363,6 +377,11 @@ def es_ingreso(tx: Any, ctx: ContextoDefiniciones) -> bool:
     # 5. Categoría no es "Ahorro"
     cid = getattr(tx, "categoria_id", None)
     if cid in ctx.categoria_ahorro_ids:
+        return False
+
+    # 6. Subcategoría no es "Reintegros" (Decisión 14.b)
+    scid = getattr(tx, "subcategoria_id", None)
+    if scid is not None and scid in ctx.subcategoria_reintegros_ids:
         return False
 
     # 7. Estado de verificación

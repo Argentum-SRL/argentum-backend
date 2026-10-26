@@ -377,7 +377,7 @@ def p10_caso_12(datos):
 
 
 def p10_caso_13(datos):
-    """alta de gimnasio por WhatsApp con categoría sugerida Salud / Deportes y gimnasio"""
+    """alta de gimnasio por WhatsApp con categoría sugerida Ocio / Deportes y gimnasio"""
     u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         db = Session()
@@ -395,6 +395,6 @@ def p10_caso_13(datos):
         _limpiar_subs(conn, u.id)
         return (
             f"Cat: {cat.nombre if cat else ''} / {subcat.nombre if subcat else ''} | "
-            f"Conf: {'La anoté en Salud / Deportes y gimnasio' in resp_conf}"
+            f"Conf: {'La anoté en Ocio / Deportes y gimnasio' in resp_conf}"
         )
     return run_isolated(test)

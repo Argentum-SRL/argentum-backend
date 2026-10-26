@@ -4,8 +4,8 @@
       "id": "netflix",
       "nombre": "Netflix",
       "logo": "netflix.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#E50914",
       "colorTexto": "white",
@@ -15,15 +15,15 @@
         "netflis",
         "netflik"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "hbomax",
       "nombre": "HBO Max",
       "logo": "hbomax.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#5822B4",
       "colorTexto": "white",
@@ -33,15 +33,15 @@
         "max",
         "hbomax"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "primevideo",
       "nombre": "Prime Video",
       "logo": "primevideo.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#00A8E0",
       "colorTexto": "white",
@@ -51,15 +51,15 @@
         "prime",
         "amazon prime video"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "paramount",
       "nombre": "Paramount+",
       "logo": "paramount.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#0064FF",
       "colorTexto": "white",
@@ -69,15 +69,15 @@
         "paramount",
         "paramoun"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "appletv",
       "nombre": "Apple TV+",
       "logo": "appletv.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#1C1C1E",
       "colorTexto": "white",
@@ -87,15 +87,15 @@
         "apple tv plus",
         "appletv"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "crunchyroll",
       "nombre": "Crunchyroll",
       "logo": "crunchiroll.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#F47521",
       "colorTexto": "white",
@@ -104,15 +104,15 @@
         "crunchy",
         "crunchiroll"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "plutotv",
       "nombre": "Pluto TV",
       "logo": "plutotv.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#9900FF",
       "colorTexto": "white",
@@ -121,30 +121,30 @@
         "pluto",
         "plutotv"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "peacock",
       "nombre": "Peacock",
       "logo": "peacock.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#000000",
       "colorTexto": "white",
       "variantes": [
         "peacock"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "spotify",
       "nombre": "Spotify",
       "logo": "spotify.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#1DB954",
       "colorTexto": "white",
@@ -153,15 +153,15 @@
         "spoti",
         "spoty"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "applemusic",
       "nombre": "Apple Music",
       "logo": "applemusic.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#FC3C44",
       "colorTexto": "white",
@@ -169,15 +169,15 @@
         "apple music",
         "applemusic"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "youtubemusic",
       "nombre": "YT Music",
       "logo": "youtubemusic.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#FF0000",
       "colorTexto": "white",
@@ -187,30 +187,30 @@
         "youtube premium",
         "yt premium"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "tidal",
       "nombre": "Tidal",
       "logo": "tidal.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#000000",
       "colorTexto": "white",
       "variantes": [
         "tidal"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "deezer",
       "nombre": "Deezer",
       "logo": "deezer.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#A238FF",
       "colorTexto": "white",
@@ -218,15 +218,15 @@
         "deezer",
         "dezer"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "icloud",
       "nombre": "iCloud",
       "logo": "icloud.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "mensual",
       "color": "#3478F6",
       "colorTexto": "white",
@@ -236,15 +236,15 @@
         "apple storage",
         "almacenamiento apple"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "googleone",
       "nombre": "Google One",
       "logo": "googleone.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "mensual",
       "color": "#4285F4",
       "colorTexto": "white",
@@ -255,15 +255,15 @@
         "gsuite",
         "google workspace"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "microsoft365",
       "nombre": "Microsoft 365",
       "logo": "microsoft365.png",
-      "categoria": "Otros",
-      "subcategoria": "Otros",
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "anual",
       "color": "#0078D4",
       "colorTexto": "white",
@@ -274,15 +274,15 @@
         "m365",
         "office"
       ],
-      "categoria_sugerida": "Otros",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "anual"
     },
     {
       "id": "adobe",
       "nombre": "Adobe CC",
       "logo": "adobecreativecloude.png",
-      "categoria": "Otros",
-      "subcategoria": "Otros",
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "mensual",
       "color": "#FF0000",
       "colorTexto": "white",
@@ -293,15 +293,15 @@
         "photoshop",
         "illustrator"
       ],
-      "categoria_sugerida": "Otros",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "chatgpt",
       "nombre": "ChatGPT",
       "logo": "chatgpt.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "mensual",
       "color": "#000000",
       "colorTexto": "white",
@@ -311,15 +311,15 @@
         "chatgpt plus",
         "openai"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "canva",
       "nombre": "Canva",
       "logo": "canva.png",
-      "categoria": "Otros",
-      "subcategoria": "Otros",
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "mensual",
       "color": "#00C4CC",
       "colorTexto": "white",
@@ -327,15 +327,15 @@
         "canva",
         "canva pro"
       ],
-      "categoria_sugerida": "Otros",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "notion",
       "nombre": "Notion",
       "logo": "notion.png",
-      "categoria": "Otros",
-      "subcategoria": "Otros",
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "mensual",
       "color": "#000000",
       "colorTexto": "white",
@@ -344,30 +344,30 @@
         "notion plus",
         "notion ai"
       ],
-      "categoria_sugerida": "Otros",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "evernote",
       "nombre": "Evernote",
       "logo": "evernote.png",
-      "categoria": "Otros",
-      "subcategoria": "Otros",
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "mensual",
       "color": "#00A82D",
       "colorTexto": "white",
       "variantes": [
         "evernote"
       ],
-      "categoria_sugerida": "Otros",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "dropbox",
       "nombre": "Dropbox",
       "logo": "dropbox.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "mensual",
       "color": "#0061FF",
       "colorTexto": "white",
@@ -375,15 +375,15 @@
         "dropbox",
         "drop box"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "grammarly",
       "nombre": "Grammarly",
       "logo": "grammerly.png",
-      "categoria": "Otros",
-      "subcategoria": "Otros",
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "anual",
       "color": "#15C39A",
       "colorTexto": "white",
@@ -391,15 +391,15 @@
         "grammarly",
         "gramarly"
       ],
-      "categoria_sugerida": "Otros",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "anual"
     },
     {
       "id": "xbox",
       "nombre": "Xbox Pass",
       "logo": "xbox.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Hobbies y juegos",
       "frecuenciaDefault": "mensual",
       "color": "#107C10",
       "colorTexto": "white",
@@ -409,15 +409,15 @@
         "game pass",
         "xbox"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "playstation",
       "nombre": "PlayStation+",
       "logo": "playstation.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Hobbies y juegos",
       "frecuenciaDefault": "mensual",
       "color": "#003791",
       "colorTexto": "white",
@@ -428,7 +428,7 @@
         "ps+",
         "play station plus"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
@@ -471,7 +471,7 @@
       "nombre": "Duolingo",
       "logo": "duolingo.png",
       "categoria": "Educación",
-      "subcategoria": "Idiomas",
+      "subcategoria": "Cursos",
       "frecuenciaDefault": "mensual",
       "color": "#58CC02",
       "colorTexto": "white",
@@ -488,8 +488,8 @@
       "id": "claude",
       "nombre": "Claude Pro",
       "logo": "claude.png",
-      "categoria": "Otros",
-      "subcategoria": null,
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "mensual",
       "color": "#D97757",
       "colorTexto": "white",
@@ -500,15 +500,15 @@
         "claude ai",
         "anthropic claude"
       ],
-      "categoria_sugerida": "Otros",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "copilot",
       "nombre": "Microsoft Copilot",
       "logo": "copilot.png",
-      "categoria": "Otros",
-      "subcategoria": null,
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "mensual",
       "color": "#0078D4",
       "colorTexto": "white",
@@ -518,15 +518,15 @@
         "github copilot",
         "copilot pro"
       ],
-      "categoria_sugerida": "Otros",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "gemini",
       "nombre": "Google Gemini",
       "logo": "gemini.png",
-      "categoria": "Otros",
-      "subcategoria": null,
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "mensual",
       "color": "#1A73E8",
       "colorTexto": "white",
@@ -535,15 +535,15 @@
         "google gemini",
         "gemini advanced"
       ],
-      "categoria_sugerida": "Otros",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "googleworkspace",
       "nombre": "Google Workspace",
       "logo": "googleworkspace.png",
-      "categoria": "Comunicación",
-      "subcategoria": null,
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "mensual",
       "color": "#4285F4",
       "colorTexto": "white",
@@ -553,15 +553,15 @@
         "gsuite",
         "g suite"
       ],
-      "categoria_sugerida": "Comunicación",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "github",
       "nombre": "GitHub",
       "logo": "github.png",
-      "categoria": "Otros",
-      "subcategoria": null,
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "mensual",
       "color": "#181717",
       "colorTexto": "white",
@@ -571,15 +571,15 @@
         "github team",
         "git hub"
       ],
-      "categoria_sugerida": "Otros",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "linkedin",
       "nombre": "LinkedIn Premium",
       "logo": "linkedin.png",
-      "categoria": "Otros",
-      "subcategoria": null,
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "mensual",
       "color": "#0A66C2",
       "colorTexto": "white",
@@ -589,15 +589,15 @@
         "linkedin learning",
         "linked in"
       ],
-      "categoria_sugerida": "Otros",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "onedrive",
       "nombre": "OneDrive",
       "logo": "onedrive.png",
-      "categoria": "Otros",
-      "subcategoria": null,
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "mensual",
       "color": "#0078D4",
       "colorTexto": "white",
@@ -606,15 +606,15 @@
         "one drive",
         "microsoft onedrive"
       ],
-      "categoria_sugerida": "Otros",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "capcut",
       "nombre": "CapCut Pro",
       "logo": "capcut.png",
-      "categoria": "Otros",
-      "subcategoria": null,
+      "categoria": "Tecnología",
+      "subcategoria": "Apps y programas",
       "frecuenciaDefault": "mensual",
       "color": "#000000",
       "colorTexto": "white",
@@ -625,15 +625,15 @@
         "cupcut",
         "cup cut"
       ],
-      "categoria_sugerida": "Otros",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "amazonmusic",
       "nombre": "Amazon Music",
       "logo": "amazonmusic.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#25D1DA",
       "colorTexto": "#111",
@@ -641,15 +641,15 @@
         "amazon music",
         "amazon music unlimited"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "youtubepremium",
       "nombre": "YouTube Premium",
       "logo": "youtubepremium.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#FF0000",
       "colorTexto": "white",
@@ -658,15 +658,15 @@
         "yt premium",
         "youtube red"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "rakutenviki",
       "nombre": "Rakuten Viki",
       "logo": "rakutenviki.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#0099FF",
       "colorTexto": "white",
@@ -676,15 +676,15 @@
         "viki pass",
         "rakuten"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "twitch",
       "nombre": "Twitch",
       "logo": "twitch.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#9146FF",
       "colorTexto": "white",
@@ -694,15 +694,15 @@
         "twitch prime",
         "twich"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "kick",
       "nombre": "Kick",
       "logo": "kick.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#53FC18",
       "colorTexto": "#111",
@@ -711,15 +711,15 @@
         "kick.com",
         "kick sub"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "ubisoft",
       "nombre": "Ubisoft+",
       "logo": "ubisoft.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Hobbies y juegos",
       "frecuenciaDefault": "mensual",
       "color": "#0070FF",
       "colorTexto": "white",
@@ -729,15 +729,15 @@
         "ubisoft plus",
         "uplay"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "discord",
       "nombre": "Discord Nitro",
       "logo": "discord.png",
-      "categoria": "Recreativo",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Hobbies y juegos",
       "frecuenciaDefault": "mensual",
       "color": "#5865F2",
       "colorTexto": "white",
@@ -746,15 +746,15 @@
         "discord nitro",
         "nitro"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "meli",
       "nombre": "Meli+",
       "logo": "meli.png",
-      "categoria": "Otros",
-      "subcategoria": null,
+      "categoria": "Ocio",
+      "subcategoria": "Streaming",
       "frecuenciaDefault": "mensual",
       "color": "#FFE600",
       "colorTexto": "#111",
@@ -765,7 +765,7 @@
         "mercado libre nivel 6",
         "mercadolibre nivel 6"
       ],
-      "categoria_sugerida": "Otros",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
@@ -774,7 +774,7 @@
       "logo": null,
       "icono": "Dumbbell",
       "generico": true,
-      "categoria": "Salud",
+      "categoria": "Ocio",
       "subcategoria": "Deportes y gimnasio",
       "frecuenciaDefault": "mensual",
       "color": "#2563EB",
@@ -783,7 +783,7 @@
         "gimnasio",
         "gym"
       ],
-      "categoria_sugerida": "Salud",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
@@ -793,7 +793,7 @@
       "icono": "HeartPulse",
       "generico": true,
       "categoria": "Salud",
-      "subcategoria": "Obra social / Prepaga",
+      "subcategoria": "Prepaga y obra social",
       "frecuenciaDefault": "mensual",
       "color": "#059669",
       "colorTexto": "white",
@@ -810,7 +810,7 @@
       "logo": null,
       "icono": "Shield",
       "generico": true,
-      "categoria": "Vivienda",
+      "categoria": "Banco",
       "subcategoria": "Seguros",
       "frecuenciaDefault": "mensual",
       "color": "#4F46E5",
@@ -819,7 +819,7 @@
         "seguro",
         "seguros"
       ],
-      "categoria_sugerida": "Vivienda",
+      "categoria_sugerida": "Banco",
       "frecuencia_tipica": "mensual"
     },
     {
@@ -828,7 +828,7 @@
       "logo": null,
       "icono": "Users",
       "generico": true,
-      "categoria": "Recreativo",
+      "categoria": "Ocio",
       "subcategoria": null,
       "frecuenciaDefault": "mensual",
       "color": "#D97706",
@@ -837,7 +837,7 @@
         "club",
         "clases"
       ],
-      "categoria_sugerida": "Recreativo",
+      "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
@@ -847,7 +847,7 @@
       "icono": "GraduationCap",
       "generico": true,
       "categoria": "Educación",
-      "subcategoria": "Cuotas",
+      "subcategoria": "Colegio y facultad",
       "frecuenciaDefault": "mensual",
       "color": "#7C3AED",
       "colorTexto": "white",
@@ -865,8 +865,8 @@
       "logo": null,
       "icono": "Wifi",
       "generico": true,
-      "categoria": "Comunicación",
-      "subcategoria": "Internet y cable",
+      "categoria": "Tecnología",
+      "subcategoria": "Internet",
       "frecuenciaDefault": "mensual",
       "color": "#0284C7",
       "colorTexto": "white",
@@ -875,7 +875,7 @@
         "cable",
         "wifi"
       ],
-      "categoria_sugerida": "Comunicación",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     },
     {
@@ -884,7 +884,7 @@
       "logo": null,
       "icono": "Smartphone",
       "generico": true,
-      "categoria": "Comunicación",
+      "categoria": "Tecnología",
       "subcategoria": "Celular",
       "frecuenciaDefault": "mensual",
       "color": "#0D9488",
@@ -893,7 +893,7 @@
         "celular",
         "telefono movil"
       ],
-      "categoria_sugerida": "Comunicación",
+      "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
     }
   ],
@@ -917,8 +917,8 @@
           "cable"
         ]
       ],
-      "categoria": "Comunicación",
-      "subcategoria": "Internet y cable"
+      "categoria": "Tecnología",
+      "subcategoria": "Internet"
     },
     {
       "id": 2,
@@ -938,8 +938,8 @@
           "starlink"
         ]
       ],
-      "categoria": "Comunicación",
-      "subcategoria": "Internet y cable"
+      "categoria": "Tecnología",
+      "subcategoria": "Internet"
     },
     {
       "id": 3,
@@ -970,7 +970,7 @@
         ]
       ],
       "categoria": "Transporte",
-      "subcategoria": "Mantenimiento y seguro del auto"
+      "subcategoria": "Auto"
     },
     {
       "id": 4,
@@ -994,7 +994,7 @@
         ]
       ],
       "categoria": "Salud",
-      "subcategoria": "Obra social / Prepaga"
+      "subcategoria": "Prepaga y obra social"
     },
     {
       "id": 5,
@@ -1014,7 +1014,7 @@
           "mercantil andina"
         ]
       ],
-      "categoria": "Vivienda",
+      "categoria": "Banco",
       "subcategoria": "Seguros"
     },
     {
@@ -1034,7 +1034,7 @@
           "musculacion"
         ]
       ],
-      "categoria": "Salud",
+      "categoria": "Ocio",
       "subcategoria": "Deportes y gimnasio"
     },
     {
@@ -1055,7 +1055,7 @@
           "escuelita"
         ]
       ],
-      "categoria": "Salud",
+      "categoria": "Ocio",
       "subcategoria": "Deportes y gimnasio"
     },
     {
@@ -1074,7 +1074,7 @@
         ]
       ],
       "categoria": "Educación",
-      "subcategoria": "Idiomas"
+      "subcategoria": "Cursos"
     },
     {
       "id": 9,
@@ -1093,7 +1093,7 @@
         ]
       ],
       "categoria": "Educación",
-      "subcategoria": "Cuotas"
+      "subcategoria": "Colegio y facultad"
     },
     {
       "id": 10,
@@ -1113,7 +1113,7 @@
           "dibujo"
         ]
       ],
-      "categoria": "Recreativo",
+      "categoria": "Ocio",
       "subcategoria": "Hobbies y juegos"
     },
     {
@@ -1129,7 +1129,7 @@
           "tuenti"
         ]
       ],
-      "categoria": "Comunicación",
+      "categoria": "Tecnología",
       "subcategoria": "Celular"
     }
   ]

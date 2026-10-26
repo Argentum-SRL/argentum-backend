@@ -180,6 +180,7 @@ from app.routers.whatsapp.propuestas import (
 )
 from app.routers.whatsapp.registro import _registrar_directo_si_corresponde
 from app.routers.whatsapp.recordatorio_impago_wpp import agregar_recordatorio_impago
+from app.routers.whatsapp.aviso_personas_wpp import agregar_aviso_personas
 from app.routers.whatsapp.resolvers_cascada import (
     ALIAS_BANCOS_ARGENTINOS,
     ALIAS_BILLETERAS,
@@ -421,6 +422,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
     from_number = datos_mensaje.get("from_number", "")
     msg_type = datos_mensaje.get("msg_type", "text")
     t_inicio = datos_mensaje.get("t_inicio") or time.perf_counter()
+    dt_inicio_mensaje = datetime.now(timezone.utc)
 
     with whatsapp_service.buzon_de_respuesta(from_number, wamid_entrante=wamid) as buzon:
         # Feedback visual temprano: marcar como leído y mostrar escribiendo
@@ -613,6 +615,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                 t_envio_end = time.perf_counter()
                 logger.info("[LATENCIA][ENVIO_META] Envío de mensaje: %.2fs", t_envio_end - t_envio_start)
                 agregar_recordatorio_impago(db, usuario)
+                agregar_aviso_personas(db, usuario, dt_inicio_mensaje)
 
             t_total = time.perf_counter() - t_inicio
             logger.info(

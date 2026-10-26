@@ -10,6 +10,7 @@ from app.models.categoria import EstadoCategoria, TipoCategoria
 class CategoriaBase(BaseModel):
     nombre: str
     tipo: TipoCategoria
+    orden: int = 0
     icono: str | None = None
     color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
     estado: EstadoCategoria = EstadoCategoria.ACTIVA

@@ -182,7 +182,8 @@ def _resolver_categoria_y_subcategoria(
         select(Subcategoria)
         .where(
             Subcategoria.estado == EstadoSubcategoria.ACTIVA,
-            Subcategoria.categoria_id.in_(cat_ids_validas)
+            Subcategoria.categoria_id.in_(cat_ids_validas),
+            Subcategoria.es_sistema.is_(False),
         )
         .order_by(Subcategoria.orden.asc(), Subcategoria.nombre.asc(), Subcategoria.id.asc())
     )
@@ -192,6 +193,14 @@ def _resolver_categoria_y_subcategoria(
         cat_id, _ = _obtener_fallback_otros(tipo, categorias_candidatas, db)
         logger.debug("[CATEGORIZACION] Fallback por nombre vacío -> (%s, None), confianza=fallback", cat_id)
         return cat_id, None
+
+    # Resolución previa por ALIAS_NOMBRES (Decisión 13)
+    from app.core.catalogo_categorias import resolver_alias
+    if ">" in nombre:
+        partes = [p.strip() for p in nombre.split(">", 1)]
+        nombre = f"{resolver_alias(partes[0])} > {resolver_alias(partes[1])}"
+    else:
+        nombre = resolver_alias(nombre)
 
     # 2. Separar por '>' si viene con formato 'Cat > Subcat'
     if ">" in nombre:

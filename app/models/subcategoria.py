@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.categoria import Categoria
 
-from sqlalchemy import Enum as SAEnum, ForeignKey, Integer, String, Index
+from sqlalchemy import Boolean, Enum as SAEnum, ForeignKey, Integer, String, Index
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,6 +32,7 @@ class Subcategoria(Base):
     )
     nombre: Mapped[str] = mapped_column(String(100), nullable=False)
     orden: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    es_sistema: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     estado: Mapped[EstadoSubcategoria] = mapped_column(
         SAEnum(EstadoSubcategoria, values_callable=lambda obj: [e.value for e in obj], name="estado_subcategoria_enum"),
         nullable=False,

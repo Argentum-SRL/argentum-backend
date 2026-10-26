@@ -21,25 +21,25 @@ from app.core.catalogo_suscripciones import (
 )
 
 CASOS_PRUEBA = [
-    ("Movistar Fibra", ("Comunicación", "Internet y cable")),
-    ("Claro Hogar", ("Comunicación", "Internet y cable")),
-    ("Claro", ("Comunicación", "Celular")),
-    ("Personal", ("Comunicación", "Celular")),
-    ("Entrenador personal", ("Salud", "Deportes y gimnasio")),
-    ("Megatlon", ("Salud", "Deportes y gimnasio")),
-    ("Seguro del auto La Caja", ("Transporte", "Mantenimiento y seguro del auto")),
-    ("Seguro hogar Mapfre", ("Vivienda", "Seguros")),
-    ("Sancor Seguros", ("Vivienda", "Seguros")),
-    ("OSDE 210", ("Salud", "Obra social / Prepaga")),
-    ("Sancor Salud", ("Salud", "Obra social / Prepaga")),
-    ("Hospital Italiano", ("Salud", "Obra social / Prepaga")),
-    ("Clases de inglés", ("Educación", "Idiomas")),
-    ("Clases de natación", ("Salud", "Deportes y gimnasio")),
-    ("Club Atlético", ("Salud", "Deportes y gimnasio")),
-    ("Clases de piano", ("Recreativo", "Hobbies y juegos")),
-    ("Colegio San José", ("Educación", "Cuotas")),
-    ("Jardín maternal", ("Educación", "Cuotas")),
-    ("Netflix Premium", ("Recreativo", None)),
+    ("Movistar Fibra", ("Tecnología", "Internet")),
+    ("Claro Hogar", ("Tecnología", "Internet")),
+    ("Claro", ("Tecnología", "Celular")),
+    ("Personal", ("Tecnología", "Celular")),
+    ("Entrenador personal", ("Ocio", "Deportes y gimnasio")),
+    ("Megatlon", ("Ocio", "Deportes y gimnasio")),
+    ("Seguro del auto La Caja", ("Transporte", "Auto")),
+    ("Seguro hogar Mapfre", ("Banco", "Seguros")),
+    ("Sancor Seguros", ("Banco", "Seguros")),
+    ("OSDE 210", ("Salud", "Prepaga y obra social")),
+    ("Sancor Salud", ("Salud", "Prepaga y obra social")),
+    ("Hospital Italiano", ("Salud", "Prepaga y obra social")),
+    ("Clases de inglés", ("Educación", "Cursos")),
+    ("Clases de natación", ("Ocio", "Deportes y gimnasio")),
+    ("Club Atlético", ("Ocio", "Deportes y gimnasio")),
+    ("Clases de piano", ("Ocio", "Hobbies y juegos")),
+    ("Colegio San José", ("Educación", "Colegio y facultad")),
+    ("Jardín maternal", ("Educación", "Colegio y facultad")),
+    ("Netflix Premium", ("Ocio", "Streaming")),
     ("Cosa rara que no existe", ("Otros", None)),
     ("", ("Otros", None)),
 ]
@@ -62,12 +62,12 @@ def db_session_fixture():
     session = TestingSession()
 
     categorias_data = [
-        ("Comunicación", ["Internet y cable", "Celular"]),
-        ("Salud", ["Deportes y gimnasio", "Obra social / Prepaga"]),
-        ("Transporte", ["Mantenimiento y seguro del auto"]),
-        ("Vivienda", ["Seguros"]),
-        ("Educación", ["Idiomas", "Cuotas"]),
-        ("Recreativo", ["Hobbies y juegos"]),
+        ("Tecnología", ["Internet", "Celular"]),
+        ("Salud", ["Prepaga y obra social"]),
+        ("Transporte", ["Auto"]),
+        ("Banco", ["Seguros"]),
+        ("Educación", ["Cursos", "Colegio y facultad"]),
+        ("Ocio", ["Deportes y gimnasio", "Hobbies y juegos", "Streaming"]),
         ("Otros", []),
     ]
 
@@ -92,16 +92,18 @@ def test_resolver_categoria_sugerida_con_subcategoria(db_session):
     assert sub_id is not None
     cat = db_session.get(Categoria, cat_id)
     sub = db_session.get(Subcategoria, sub_id)
-    assert cat.nombre == "Comunicación"
-    assert sub.nombre == "Internet y cable"
+    assert cat.nombre == "Tecnología"
+    assert sub.nombre == "Internet"
 
 
 def test_resolver_categoria_sugerida_sin_subcategoria(db_session):
     cat_id, sub_id = resolver_categoria_sugerida(db_session, "Netflix Premium")
     assert cat_id is not None
-    assert sub_id is None
+    assert sub_id is not None
     cat = db_session.get(Categoria, cat_id)
-    assert cat.nombre == "Recreativo"
+    sub = db_session.get(Subcategoria, sub_id)
+    assert cat.nombre == "Ocio"
+    assert sub.nombre == "Streaming"
 
 
 def test_resolver_categoria_sugerida_no_coincidente(db_session):

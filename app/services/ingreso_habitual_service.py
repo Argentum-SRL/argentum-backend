@@ -259,6 +259,10 @@ def _calcular_ingreso_habitual_moneda_pura(
     fuentes_candidatas_series: List[Dict[str, Any]] = []
 
     for (cat_nom, subcat_nom), txs_fuente in grupos_txs.items():
+        # Cobros de personas nunca es fuente de ingreso habitual (Decisión 14.c)
+        if subcat_nom.strip().lower() == "cobros de personas":
+            continue
+
         # Evaluar si la fuente tiene 2 o más cobros por ciclo y se debe desdoblar
         cobros_por_ciclo: Dict[int, List[Decimal]] = {}
         for idx, (c_ini, c_fin) in enumerate(ventana_ciclos):
@@ -419,10 +423,10 @@ def _calcular_ingreso_habitual_moneda_pura(
     proximo_aguinaldo_monto = None
 
     if tiene_aguinaldo:
-        # 50% del ingreso regular actual de su fuente "Empleo / Sueldo"
+        # 50% del ingreso regular actual de su fuente "Empleo / Sueldo" o "Trabajo / Sueldo"
         fuente_sueldo = next(
             (f for f in fuentes_habituales if f.tipo == "regular" and (
-                "sueldo" in f.subcategoria_nombre.lower() or "empleo" in f.categoria_nombre.lower()
+                "sueldo" in f.subcategoria_nombre.lower() or "empleo" in f.categoria_nombre.lower() or "trabajo" in f.categoria_nombre.lower()
             )),
             None
         )

@@ -75,7 +75,7 @@ def p17_caso_1(datos):
         no_propuesta_corregir = "corregir" not in resp1.lower()
         monto_ok = nuevo is not None and nuevo.monto == Decimal("5456")
         subcat = db.get(Subcategoria, nuevo.subcategoria_id) if nuevo and nuevo.subcategoria_id else None
-        subcat_ok = subcat is not None and subcat.nombre == "Taxi / Apps"
+        subcat_ok = subcat is not None and subcat.nombre == "Taxi y apps"
         fecha_ok = nuevo is not None and nuevo.fecha.day == 23 and nuevo.fecha.month == 9
         anterior_intacto = prev_actual is not None and prev_actual.monto == prev_monto and len(txs) >= 2
 
@@ -254,7 +254,7 @@ def p17_caso_7(datos):
         subcat = db.get(Subcategoria, tx.subcategoria_id) if tx and tx.subcategoria_id else None
         cat = db.get(Categoria, tx.categoria_id) if tx and tx.categoria_id else None
 
-        subcat_ok = subcat is not None and subcat.nombre == "Taxi / Apps"
+        subcat_ok = subcat is not None and subcat.nombre == "Taxi y apps"
         cat_ok = cat is not None and cat.nombre == "Transporte"
 
         return f"Subcategoria Taxi/Apps: {subcat_ok} | Categoria Transporte: {cat_ok}"
@@ -288,7 +288,7 @@ def p17_caso_8(datos):
         s_rappi = db.get(Subcategoria, t_rappi.subcategoria_id) if t_rappi and t_rappi.subcategoria_id else None
         s_food = db.get(Subcategoria, t_food.subcategoria_id) if t_food and t_food.subcategoria_id else None
 
-        ok_didi = s_didi is not None and s_didi.nombre == "Taxi / Apps"
+        ok_didi = s_didi is not None and s_didi.nombre == "Taxi y apps"
         ok_rappi = s_rappi is not None and s_rappi.nombre == "Delivery"
         ok_food = s_food is not None and s_food.nombre == "Delivery"
 
@@ -352,7 +352,7 @@ def p17_caso_10(datos):
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "son dos ingresos distintos"), time.perf_counter())
         resp_conf = respuestas[-1][1] if respuestas else ""
 
-        signos_ok = ("+" in resp_conf or "-" in resp_conf) and ("Taxi / Apps" in resp_conf or "Uber" in resp_conf or "Otros" in resp_conf)
+        signos_ok = ("+" in resp_conf or "-" in resp_conf) and ("Taxi y apps" in resp_conf or "Taxi / Apps" in resp_conf or "Uber" in resp_conf or "Otros" in resp_conf)
 
         return f"Pregunta duplicado ok: {pregunta_ok} | Confirmacion con signos: {signos_ok}"
     return run_isolated(test)

@@ -460,7 +460,7 @@ def p19_caso_7(datos):
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
-        esperado_resp2 = "Listo. $14.200 en Otros desde Galicia — registrado."
+        esperado_resp2 = "Listo. $14.200 en Vivienda desde Galicia — registrado."
 
         fac_ids_desp = set(conn.execute(select(Factura.id).where(Factura.usuario_id == u.id)).scalars().all())
         facs_creadas = len(fac_ids_desp - fac_ids_antes)

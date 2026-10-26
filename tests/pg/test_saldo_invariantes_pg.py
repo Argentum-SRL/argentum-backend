@@ -106,7 +106,8 @@ OP_TIPOS = [
 
 
 def test_td7_invariantes_oraculo(db: Session, monkeypatch):
-    hoy_base = hoy_argentina()
+    # Fecha fija: con la fecha real el test depende del día del mes (la tarjeta cierra el 20) y falla del 26 a fin de mes
+    hoy_base = date(2026, 10, 12)
     num_secuencias = 200 if os.environ.get("ARGENTUM_INVARIANTES_COMPLETO") == "1" else 20
     semillas = [2026, 2027, 2028]
 

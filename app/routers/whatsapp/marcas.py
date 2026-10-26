@@ -13,14 +13,14 @@ _PATRON_DELIVERY_MIXTO = re.compile(r"\b(eats|food|comida|pedido|delivery)\b", r
 # Marcas de gastronomía pura (Delivery)
 _PATRON_DELIVERY_PURO = re.compile(r"\b(rappi|pedidosya|pedidos\s+ya|peya)\b", re.IGNORECASE)
 
-CAT_TAXI_APPS = "Transporte > Taxi / Apps"
+CAT_TAXI_APPS = "Transporte > Taxi y apps"
 CAT_DELIVERY = "Gastronomía > Delivery"
 
 
 def ajustar_categoria_marcas(movimiento: dict) -> dict:
     """
     Ajusta la categoría de un movimiento según su descripción y el texto del ítem:
-    - uber, didi, cabify, taxi, remis -> "Transporte > Taxi / Apps";
+    - uber, didi, cabify, taxi, remis -> "Transporte > Taxi y apps";
       salvo que el ítem diga eats, food, comida, pedido o delivery -> "Gastronomía > Delivery".
     - rappi, pedidosya, pedidos ya, peya -> "Gastronomía > Delivery".
     Modifica el diccionario en su lugar y lo retorna.
