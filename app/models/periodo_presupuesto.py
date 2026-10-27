@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,6 +13,9 @@ from app.core.database import Base
 
 class PeriodoPresupuesto(Base):
     __tablename__ = "periodos_presupuesto"
+    __table_args__ = (
+        UniqueConstraint("presupuesto_id", "fecha_inicio", name="uq_periodos_presupuesto_presupuesto_inicio"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     presupuesto_id: Mapped[UUID] = mapped_column(
@@ -34,8 +37,6 @@ class PeriodoPresupuesto(Base):
             f"presupuesto_id={self.presupuesto_id!r}, "
             f"fecha_inicio={self.fecha_inicio!r}, "
             f"fecha_fin={self.fecha_fin!r}, "
-            f"monto_limite={self.monto_limite!r}, "
-            f"monto_usado={self.monto_usado!r}, "
-            f"superado={self.superado!r}"
+            f"monto_limite={self.monto_limite!r}"
             ")"
         )

@@ -651,11 +651,10 @@ def test_14_presupuesto_plantilla_por_defecto_no_despacha(db_session, monkeypatc
     )
     periodo = SimpleNamespace(
         id=uuid.uuid4(),
-        monto_usado=Decimal("120"),
         monto_limite=Decimal("100"),
     )
 
-    verificar_alertas_presupuesto(db_session, presupuesto, periodo)
+    verificar_alertas_presupuesto(db_session, presupuesto, periodo, usado=Decimal("120"))
 
     # 1 notificación PRESUPUESTO_AGOTADO con canal_whatsapp=True y enviada_whatsapp=False
     notifs = db_session.query(Notificacion).filter(
@@ -699,11 +698,10 @@ def test_15_presupuesto_plantilla_activa_despacha(db_session, monkeypatch):
     )
     periodo = SimpleNamespace(
         id=uuid.uuid4(),
-        monto_usado=Decimal("120"),
         monto_limite=Decimal("100"),
     )
 
-    verificar_alertas_presupuesto(db_session, presupuesto, periodo)
+    verificar_alertas_presupuesto(db_session, presupuesto, periodo, usado=Decimal("120"))
 
     # 1 llamada a la plantilla con 'alerta_presupuesto_agotado'
     assert mock_presu_tpl.call_count == 1

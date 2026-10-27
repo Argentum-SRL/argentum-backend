@@ -48,7 +48,7 @@ from app.models.usuario import AuthProvider, EstadoUsuario, Moneda, RolUsuario, 
 from app.schemas.transaccion import TransaccionCreate
 from app.services import reintegro_service, transaccion_service
 from app.services.definiciones_service import condicion_gasto
-from app.services.presupuesto_service import calcular_gasto_en_periodo
+from app.services.presupuesto_service import calcular_gasto_en_periodo, uso_actual
 from app.utils.fecha import hoy_argentina
 
 
@@ -314,7 +314,6 @@ def test_m1_presupuesto_por_medio_de_pago(
     para cada medio de pago (débito, efectivo, transferencia).
     Usado inicial tras compra 100k: 100.000. Tras reintegro 25k: 75.000."""
     hoy = hoy_argentina()
-    periodo = presupuesto_supermercado.periodos[0]
 
     # Compra de $100.000
     compra = transaccion_service.crear_transaccion(
@@ -331,8 +330,7 @@ def test_m1_presupuesto_por_medio_de_pago(
             metodo_pago=metodo,
         ),
     )
-    db.refresh(periodo)
-    assert periodo.monto_usado == Decimal("100000.00"), "Tras compra de 100k, monto_usado debe ser 100.000"
+    assert uso_actual(db, presupuesto_supermercado, hoy=hoy)[1].mostrado == Decimal("100000.00"), "Tras compra de 100k, monto_usado debe ser 100.000"
 
     # Reintegro recibido de $25.000
     reintegro_service.registrar_o_actualizar_reintegro(
@@ -343,8 +341,7 @@ def test_m1_presupuesto_por_medio_de_pago(
         recibido=True,
         fecha_recibido=hoy,
     )
-    db.refresh(periodo)
-    assert periodo.monto_usado == Decimal("75000.00"), "Tras reintegro de 25k, monto_usado debe ser 75.000"
+    assert uso_actual(db, presupuesto_supermercado, hoy=hoy)[1].mostrado == Decimal("75000.00"), "Tras reintegro de 25k, monto_usado debe ser 75.000"
 
 
 # ==============================================================================

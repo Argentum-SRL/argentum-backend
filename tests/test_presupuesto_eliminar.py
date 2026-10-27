@@ -493,9 +493,16 @@ def test_8_impacto_presupuesto_eliminado(db_session, usuario_principal, categori
 
     registrar_impacto_presupuesto(db_session, tx)
 
-    db_session.expire_all()
-    periodo_db = db_session.get(PeriodoPresupuesto, periodo.id)
-    assert periodo_db.monto_usado == Decimal("0.00")
+    from app.models.notificacion import Notificacion, TipoNotificacion
+    notifs = (
+        db_session.query(Notificacion)
+        .filter(
+            Notificacion.usuario_id == usuario_principal.id,
+            Notificacion.tipo.in_([TipoNotificacion.PRESUPUESTO_LIMITE, TipoNotificacion.PRESUPUESTO_AGOTADO]),
+        )
+        .all()
+    )
+    assert len(notifs) == 0
 
 
 def test_9_presupuesto_otro_usuario(client, db_session, usuario_principal, usuario_otro):

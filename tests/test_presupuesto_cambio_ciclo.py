@@ -32,6 +32,7 @@ from app.services.presupuesto_service import (
     reajustar_periodos_por_cambio_de_ciclo,
     renovar_presupuestos,
     obtener_periodo_activo,
+    uso_periodo,
 )
 
 # Base de datos SQLite en memoria
@@ -215,8 +216,9 @@ def test_caso_1_cambio_dia_1_a_dia_28(db_session, monkeypatch):
     # Validaciones caso 1
     assert periodo_activo.fecha_inicio == date(2026, 10, 1)
     assert periodo_activo.fecha_fin == date(2026, 10, 27)
-    assert periodo_activo.monto_usado == Decimal("5000.00")
-    assert not periodo_activo.superado
+    uso_1 = uso_periodo(db_session, presu, periodo_activo, hoy=date(2026, 10, 9), usuario=usuario)
+    assert uso_1.mostrado == Decimal("5000.00")
+    assert uso_1.supera_limite is False
 
     # Período anterior no cambia
     assert periodo_anterior.fecha_inicio == date(2026, 9, 1)
@@ -281,8 +283,9 @@ def test_caso_2_cambio_dia_28_a_dia_1(db_session, monkeypatch):
     # Validaciones caso 2
     assert periodo_activo.fecha_inicio == date(2026, 9, 28)
     assert periodo_activo.fecha_fin == date(2026, 10, 31)
-    assert periodo_activo.monto_usado == Decimal("5000.00")
-    assert not periodo_activo.superado
+    uso_2 = uso_periodo(db_session, presu, periodo_activo, hoy=date(2026, 10, 9), usuario=usuario)
+    assert uso_2.mostrado == Decimal("5000.00")
+    assert uso_2.supera_limite is False
 
     # Período anterior no cambia
     assert periodo_anterior.fecha_inicio == date(2026, 8, 28)

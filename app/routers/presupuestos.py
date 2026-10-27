@@ -20,13 +20,12 @@ from app.utils.fecha import hoy_argentina
 
 router = APIRouter(tags=["presupuestos"])
 
-def _map_presupuesto_response(p) -> PresupuestoResponse:
-    periodo_actual = presupuesto_service.obtener_periodo_activo(None, p)
+def _map_presupuesto_response(db: Session, p) -> PresupuestoResponse:
+    periodo_actual, uso = presupuesto_service.uso_actual(db, p)
     
     periodo_actual_resp = None
-    if periodo_actual:
+    if periodo_actual and uso:
         dias_restantes = max(0, (periodo_actual.fecha_fin - hoy_argentina()).days)
-        porcentaje_usado = float((periodo_actual.monto_usado / periodo_actual.monto_limite) * 100) if periodo_actual.monto_limite > 0 else 0
         
         periodo_actual_resp = PeriodoPresupuestoResponse(
             id=periodo_actual.id,
@@ -34,9 +33,9 @@ def _map_presupuesto_response(p) -> PresupuestoResponse:
             fecha_inicio=periodo_actual.fecha_inicio,
             fecha_fin=periodo_actual.fecha_fin,
             monto_limite=periodo_actual.monto_limite,
-            monto_usado=periodo_actual.monto_usado,
-            superado=periodo_actual.superado,
-            porcentaje_usado=porcentaje_usado,
+            monto_usado=uso.mostrado,
+            superado=uso.supera_limite,
+            porcentaje_usado=uso.porcentaje,
             dias_restantes=dias_restantes
         )
 
@@ -81,7 +80,7 @@ def listar_presupuestos(
     usuario: Usuario = Depends(get_current_user)
 ):
     presupuestos = presupuesto_service.obtener_presupuestos(db, usuario.id, estado)
-    return [_map_presupuesto_response(p) for p in presupuestos]
+    return [_map_presupuesto_response(db, p) for p in presupuestos]
 
 @router.post("", response_model=PresupuestoResponse)
 def crear_presupuesto(
@@ -90,7 +89,7 @@ def crear_presupuesto(
     usuario: Usuario = Depends(get_current_user)
 ):
     p = presupuesto_service.crear_presupuesto(db, usuario.id, data)
-    return _map_presupuesto_response(p)
+    return _map_presupuesto_response(db, p)
 
 @router.get("/{id}", response_model=PresupuestoResponse)
 def obtener_presupuesto(
@@ -99,7 +98,7 @@ def obtener_presupuesto(
     usuario: Usuario = Depends(get_current_user)
 ):
     p = presupuesto_service.obtener_presupuesto(db, usuario.id, id)
-    return _map_presupuesto_response(p)
+    return _map_presupuesto_response(db, p)
 
 @router.put("/{id}", response_model=PresupuestoResponse)
 def actualizar_presupuesto(
@@ -109,7 +108,7 @@ def actualizar_presupuesto(
     usuario: Usuario = Depends(get_current_user)
 ):
     p = presupuesto_service.actualizar_presupuesto(db, usuario.id, id, data)
-    return _map_presupuesto_response(p)
+    return _map_presupuesto_response(db, p)
 
 @router.post("/{id}/pausar", response_model=PresupuestoResponse)
 def pausar_presupuesto(
@@ -118,7 +117,7 @@ def pausar_presupuesto(
     usuario: Usuario = Depends(get_current_user)
 ):
     p = presupuesto_service.pausar_presupuesto(db, usuario.id, id)
-    return _map_presupuesto_response(p)
+    return _map_presupuesto_response(db, p)
 
 @router.post("/{id}/reanudar", response_model=PresupuestoResponse)
 def reanudar_presupuesto(
@@ -127,7 +126,7 @@ def reanudar_presupuesto(
     usuario: Usuario = Depends(get_current_user)
 ):
     p = presupuesto_service.reanudar_presupuesto(db, usuario.id, id)
-    return _map_presupuesto_response(p)
+    return _map_presupuesto_response(db, p)
 
 @router.post("/{id}/renovar", response_model=PresupuestoResponse)
 def renovar_presupuesto(
@@ -136,7 +135,7 @@ def renovar_presupuesto(
     usuario: Usuario = Depends(get_current_user)
 ):
     p = presupuesto_service.renovar_presupuesto_manual(db, usuario.id, id)
-    return _map_presupuesto_response(p)
+    return _map_presupuesto_response(db, p)
 
 @router.delete("/{id}")
 def eliminar_presupuesto(
@@ -155,7 +154,7 @@ def restaurar_presupuesto(
     usuario: Usuario = Depends(get_current_user)
 ):
     p = presupuesto_service.restaurar_presupuesto(db, usuario.id, id, data.estado)
-    return _map_presupuesto_response(p)
+    return _map_presupuesto_response(db, p)
 
 @router.get("/{id}/historial", response_model=List[PeriodoPresupuestoResponse])
 def obtener_historial(
@@ -163,21 +162,22 @@ def obtener_historial(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(get_current_user)
 ):
-    presupuesto_service.obtener_presupuesto(db, usuario.id, id)
+    presu = presupuesto_service.obtener_presupuesto(db, usuario.id, id)
     periodos = presupuesto_service.obtener_historial(db, usuario.id, id)
+    hoy = hoy_argentina()
     resp = []
     for p in periodos:
-        dias_restantes = max(0, (p.fecha_fin - hoy_argentina()).days)
-        porcentaje_usado = float((p.monto_usado / p.monto_limite) * 100) if p.monto_limite > 0 else 0
+        dias_restantes = max(0, (p.fecha_fin - hoy).days)
+        uso = presupuesto_service.uso_periodo(db, presu, p, hoy=hoy, usuario=presu.usuario)
         resp.append(PeriodoPresupuestoResponse(
             id=p.id,
             presupuesto_id=p.presupuesto_id,
             fecha_inicio=p.fecha_inicio,
             fecha_fin=p.fecha_fin,
             monto_limite=p.monto_limite,
-            monto_usado=p.monto_usado,
-            superado=p.superado,
-            porcentaje_usado=porcentaje_usado,
+            monto_usado=uso.mostrado,
+            superado=uso.supera_limite,
+            porcentaje_usado=uso.porcentaje,
             dias_restantes=dias_restantes
         ))
     return resp

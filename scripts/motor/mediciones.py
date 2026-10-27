@@ -46,6 +46,7 @@ from app.services import (
     dashboard_service,
     gastos_consulta_service,
     perfil_financiero_service,
+    presupuesto_service,
     proyeccion_service,
     suscripcion_service,
     tools_service,
@@ -238,7 +239,7 @@ def medir_bloque_d(
     res[f"gasto_ciclo.{_egc}.usd_total"] = _fmt_monto(tot_cons_usd)
     res[f"gasto_ciclo.{_egc}.cantidad"] = str(len(txs_consumo))
 
-    # 6. Gasto de presupuestos activos
+    # 6. Gasto de presupuestos activos (vía uso_actual en _resumen_presupuestos_activos_sync)
     pres_list = contexto_financiero_service._resumen_presupuestos_activos_sync(
         db, usuario.id
     )
@@ -951,7 +952,11 @@ def medir_bloque_o(db: Session, usuario: Usuario) -> dict[str, str]:
     res = {}
     presupuestos = (
         db.query(Presupuesto)
-        .options(selectinload(Presupuesto.periodos))
+        .options(
+            selectinload(Presupuesto.periodos),
+            selectinload(Presupuesto.categorias),
+            joinedload(Presupuesto.usuario),
+        )
         .filter(Presupuesto.usuario_id == usuario.id)
         .order_by(Presupuesto.nombre.asc())
         .all()
@@ -966,11 +971,8 @@ def medir_bloque_o(db: Session, usuario: Usuario) -> dict[str, str]:
         res[f"{prefix}.limite"] = _fmt_monto(p.monto)
         res[f"{prefix}.moneda"] = _fmt_val(p.moneda)
         res[f"{prefix}.periodo"] = _fmt_val(p.periodo)
-        usado = (
-            float(p.monto_usado_actual)
-            if getattr(p, "monto_usado_actual", None) is not None
-            else 0.0
-        )
+        _per, uso = presupuesto_service.uso_actual(db, p)
+        usado = float(uso.mostrado) if uso is not None else 0.0
         res[f"{prefix}.monto_usado"] = _fmt_monto(usado)
         res[f"{prefix}.monto_disponible"] = _fmt_monto(max(0.0, float(p.monto) - usado))
 

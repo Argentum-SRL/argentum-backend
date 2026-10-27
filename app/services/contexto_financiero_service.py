@@ -91,21 +91,26 @@ def _resumen_metas_activas_sync(db: Session, usuario_id: UUID) -> list[dict]:
 
 def _resumen_presupuestos_activos_sync(db: Session, usuario_id: UUID) -> list[dict]:
     from sqlalchemy import select
-    from sqlalchemy.orm import selectinload
+    from sqlalchemy.orm import selectinload, joinedload
     from app.models.presupuesto import Presupuesto, EstadoPresupuesto
     from app.services import presupuesto_service
     presupuestos = db.execute(
         select(Presupuesto)
-        .options(selectinload(Presupuesto.periodos))
-        .where(Presupuesto.usuario_id == usuario_id, Presupuesto.estado == EstadoPresupuesto.ACTIVO)
+        .options(
+            selectinload(Presupuesto.periodos),
+            selectinload(Presupuesto.categorias),
+            joinedload(Presupuesto.usuario),
+        )
+        .where(
+            Presupuesto.usuario_id == usuario_id,
+            Presupuesto.estado == EstadoPresupuesto.ACTIVO,
+            Presupuesto.eliminado_en.is_(None),
+        )
         .order_by(Presupuesto.nombre)
     ).scalars().all()
     res = []
     for p in presupuestos:
-        if getattr(p, "monto_usado_actual", None) is not None:
-            usado = float(p.monto_usado_actual)
-        else:
-            periodo_activo = presupuesto_service.obtener_periodo_activo(None, p)
-            usado = float(periodo_activo.monto_usado) if periodo_activo else 0.0
+        _periodo, uso = presupuesto_service.uso_actual(db, p)
+        usado = float(uso.mostrado) if uso is not None else 0.0
         res.append({"nombre": p.nombre, "limite": float(p.monto), "usado": usado, "moneda": p.moneda.value})
     return res

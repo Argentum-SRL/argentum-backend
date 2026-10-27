@@ -278,7 +278,9 @@ def p16_caso_3(datos):
 def p16_caso_4(datos):
     """P16.4 Monto que completa o supera el objetivo: confirma y felicita"""
     from app.models.meta import Meta
+    from app.models.movimiento_meta import MovimientoMeta, TipoMovimientoMeta
     u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
+    b_gal = datos[USUARIO_PRUEBAS_EMAIL]["billeteras"]["Galicia"]
     def test(conn, Session, respuestas):
         db = Session()
         conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
@@ -286,6 +288,16 @@ def p16_caso_4(datos):
 
         m_curso = Meta(usuario_id=u.id, nombre="Curso de Inglés", monto_objetivo=10000, moneda="ARS", monto_actual=8000, estado="activa")
         db.add(m_curso)
+        db.flush()
+        mov_ini = MovimientoMeta(
+            meta_id=m_curso.id,
+            tipo=TipoMovimientoMeta.APORTE,
+            monto=Decimal("8000"),
+            moneda_movimiento="ARS",
+            billetera_id=b_gal.id,
+            fecha=hoy_argentina(),
+        )
+        db.add(mov_ini)
         db.commit()
 
         respuestas.clear()

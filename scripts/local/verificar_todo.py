@@ -27,35 +27,7 @@ if str(BACKEND_DIR) not in sys.path:
 LOCAL_SCRIPTS_DIR = BACKEND_DIR / "scripts" / "local"
 PYTHON_EXE = Path(sys.executable)
 
-from scripts.local import rutas
-
-def asegurar_servidor_levantado():
-    pg_ctl = rutas.pgsql_dir() / "bin" / "pg_ctl.exe"
-    data_dir = rutas.data_dir()
-    log_file = rutas.log_pg()
-
-    if not pg_ctl.exists():
-        raise FileNotFoundError(f"No existe pg_ctl en {pg_ctl}")
-
-    res = subprocess.run(
-        [str(pg_ctl), "-D", str(data_dir), "status"],
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-    )
-    if res.returncode != 0:
-        print("[verificar_todo] Servidor local apagado. Arrancando con pg_ctl...")
-        start_res = subprocess.run(
-            [str(pg_ctl), "-D", str(data_dir), "-l", str(log_file), "-w", "start"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=30,
-        )
-        if start_res.returncode != 0:
-            print(f"[verificar_todo] ERROR: pg_ctl start retorno {start_res.returncode}")
-            sys.exit(1)
-        time.sleep(1)
+from scripts.local.servidor_local import asegurar_servidor_levantado
 
 def run_step(nombre: str, cmd_list: list[str]) -> tuple[bool, float]:
     print(f"\n{'='*20} PASO: {nombre} {'='*20}")
@@ -74,7 +46,7 @@ def main():
     t_total_0 = time.time()
     print("=== INICIANDO VERIFICACION INTEGRAL (BASE LOCAL) ===")
 
-    asegurar_servidor_levantado()
+    asegurar_servidor_levantado("verificar_todo")
 
     con_base_local_py = LOCAL_SCRIPTS_DIR / "con_base_local.py"
     refrescar_py = LOCAL_SCRIPTS_DIR / "refrescar_base_local.py"

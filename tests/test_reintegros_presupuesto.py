@@ -234,7 +234,6 @@ def test_p1_compra_y_reintegro_recibido(
     presupuesto_supermercado: Presupuesto,
 ):
     hoy = hoy_argentina()
-    periodo = presupuesto_supermercado.periodos[0]
 
     # Compra de $100.000
     compra = transaccion_service.crear_transaccion(
@@ -251,8 +250,10 @@ def test_p1_compra_y_reintegro_recibido(
             metodo_pago=MetodoPago.DEBITO,
         ),
     )
-    db.refresh(periodo)
-    assert periodo.monto_usado == Decimal("100000.00"), "Tras compra de $100.000, monto_usado debe ser 100.000"
+    from app.services import presupuesto_service
+    _, uso_compra = presupuesto_service.uso_actual(db, presupuesto_supermercado, hoy=hoy)
+    assert uso_compra is not None
+    assert uso_compra.mostrado == Decimal("100000.00"), "Tras compra de $100.000, monto_usado debe ser 100.000"
 
     # Reintegro recibido de $25.000 el mismo día
     reintegro_service.registrar_o_actualizar_reintegro(
@@ -263,8 +264,9 @@ def test_p1_compra_y_reintegro_recibido(
         recibido=True,
         fecha_recibido=hoy,
     )
-    db.refresh(periodo)
-    assert periodo.monto_usado == Decimal("75000.00"), "Tras reintegro de $25.000, monto_usado debe ser 75.000"
+    _, uso_reint = presupuesto_service.uso_actual(db, presupuesto_supermercado, hoy=hoy)
+    assert uso_reint is not None
+    assert uso_reint.mostrado == Decimal("75000.00"), "Tras reintegro de $25.000, monto_usado debe ser 75.000"
 
 
 # ==============================================================================
@@ -278,7 +280,6 @@ def test_p2_quitar_reintegro(
     presupuesto_supermercado: Presupuesto,
 ):
     hoy = hoy_argentina()
-    periodo = presupuesto_supermercado.periodos[0]
 
     # Compra y reintegro recibido
     compra = transaccion_service.crear_transaccion(
@@ -305,9 +306,11 @@ def test_p2_quitar_reintegro(
     )
 
     # Quitar el reintegro
+    from app.services import presupuesto_service
     reintegro_service.eliminar_reintegro(db, usuario.id, compra.id)
-    db.refresh(periodo)
-    assert periodo.monto_usado == Decimal("100000.00"), "Al quitar el reintegro, monto_usado debe volver a 100.000"
+    _, uso_p2 = presupuesto_service.uso_actual(db, presupuesto_supermercado, hoy=hoy)
+    assert uso_p2 is not None
+    assert uso_p2.mostrado == Decimal("100000.00"), "Al quitar el reintegro, monto_usado debe volver a 100.000"
 
 
 # ==============================================================================
@@ -321,7 +324,6 @@ def test_p3_editar_reintegro(
     presupuesto_supermercado: Presupuesto,
 ):
     hoy = hoy_argentina()
-    periodo = presupuesto_supermercado.periodos[0]
 
     # Compra de $100.000 con reintegro recibido de $25.000
     compra = transaccion_service.crear_transaccion(
@@ -348,6 +350,7 @@ def test_p3_editar_reintegro(
     )
 
     # Editar el reintegro a $30.000
+    from app.services import presupuesto_service
     reintegro_service.registrar_o_actualizar_reintegro(
         db,
         usuario.id,
@@ -356,8 +359,9 @@ def test_p3_editar_reintegro(
         recibido=True,
         fecha_recibido=hoy,
     )
-    db.refresh(periodo)
-    assert periodo.monto_usado == Decimal("70000.00"), "Al editar reintegro a 30.000, monto_usado debe ser 70.000"
+    _, uso_p3 = presupuesto_service.uso_actual(db, presupuesto_supermercado, hoy=hoy)
+    assert uso_p3 is not None
+    assert uso_p3.mostrado == Decimal("70000.00"), "Al editar reintegro a 30.000, monto_usado debe ser 70.000"
 
 
 # ==============================================================================
@@ -414,7 +418,6 @@ def test_p5_reintegro_pendiente(
     presupuesto_supermercado: Presupuesto,
 ):
     hoy = hoy_argentina()
-    periodo = presupuesto_supermercado.periodos[0]
 
     # Compra de $100.000
     compra = transaccion_service.crear_transaccion(
@@ -433,6 +436,7 @@ def test_p5_reintegro_pendiente(
     )
 
     # Reintegro pendiente ("todavía no")
+    from app.services import presupuesto_service
     reintegro_service.registrar_o_actualizar_reintegro(
         db,
         usuario.id,
@@ -440,8 +444,9 @@ def test_p5_reintegro_pendiente(
         monto=Decimal("25000.00"),
         recibido=False,
     )
-    db.refresh(periodo)
-    assert periodo.monto_usado == Decimal("100000.00"), "Con reintegro pendiente, monto_usado debe ser 100.000"
+    _, uso_p5 = presupuesto_service.uso_actual(db, presupuesto_supermercado, hoy=hoy)
+    assert uso_p5 is not None
+    assert uso_p5.mostrado == Decimal("100000.00"), "Con reintegro pendiente, monto_usado debe ser 100.000"
 
 
 # ==============================================================================
@@ -505,8 +510,10 @@ def test_p6_presupuesto_limite_100k_alerta(
             metodo_pago=MetodoPago.DEBITO,
         ),
     )
-    db.refresh(periodo)
-    assert periodo.monto_usado == Decimal("100000.00")
+    from app.services import presupuesto_service
+    _, uso_p6 = presupuesto_service.uso_actual(db, presu, hoy=hoy)
+    assert uso_p6 is not None
+    assert uso_p6.mostrado == Decimal("100000.00")
 
     notifs_iniciales = db.execute(
         select(Notificacion).where(Notificacion.usuario_id == usuario.id)
@@ -579,9 +586,8 @@ def test_p7_credito(
     )
     db.refresh(periodo)
 
-    # Paridad con cuota hija normal según crudo _10:
-    # 1. En BD (columna cruda), no se llama registrar_impacto_presupuesto en crédito
-    assert periodo.monto_usado == Decimal("0.00"), "Paridad crudo _10: periodo.monto_usado directo en BD permanece 0.00"
+    from app.services.presupuesto_service import uso_actual
+    assert uso_actual(db, presupuesto_supermercado, hoy=hoy)[1].mostrado == Decimal("75000.00")
 
     # 2. En cálculo dinámico (gasto en período del mes actual)
     presu_cat = presupuesto_supermercado.categorias[0]
@@ -597,8 +603,7 @@ def test_p7_credito(
 
 
 # ==============================================================================
-# P8: Compra el 28 de un mes y reintegro recibido el 2 del mes siguiente, con presupuesto mensual:
-#     CRUDO SOLAMENTE de monto_usado del mes siguiente (sin esperado, sin cambiar código; ver CUÁNDO FRENAR).
+# P8: Períodos distintos (D-P8 / TE.3)
 # ==============================================================================
 def test_p8_periodos_distintos(
     db: Session,
@@ -607,14 +612,20 @@ def test_p8_periodos_distintos(
     billetera_ars: Billetera,
     presupuesto_supermercado: Presupuesto,
 ):
-    """P8: Compra el 28 de un mes y reintegro recibido el 2 del mes siguiente.
-    Sin valor esperado fijo, solo registra / informa el valor de monto_usado del mes siguiente."""
-    # Mes 1: Septiembre 2026. Mes 2: Octubre 2026.
+    """P8 (TE.3): compra el 28/09 y reintegro recibido el 02/10."""
+    from app.services.presupuesto_service import uso_periodo
+
+    # Limpiar períodos creados por el fixture para definir explícitamente septiembre y octubre 2026
+    for p_old in list(presupuesto_supermercado.periodos):
+        db.delete(p_old)
+    db.flush()
+    presupuesto_supermercado.monto = Decimal("120000.00")
+
     periodo_sep = PeriodoPresupuesto(
         presupuesto_id=presupuesto_supermercado.id,
         fecha_inicio=date(2026, 9, 1),
         fecha_fin=date(2026, 9, 30),
-        monto_limite=Decimal("200000.00"),
+        monto_limite=Decimal("120000.00"),
         monto_usado=Decimal("0.00"),
         superado=False,
     )
@@ -624,12 +635,15 @@ def test_p8_periodos_distintos(
         presupuesto_id=presupuesto_supermercado.id,
         fecha_inicio=date(2026, 10, 1),
         fecha_fin=date(2026, 10, 31),
-        monto_limite=Decimal("200000.00"),
+        monto_limite=Decimal("120000.00"),
         monto_usado=Decimal("0.00"),
         superado=False,
     )
     db.add(periodo_oct)
     db.commit()
+    db.refresh(presupuesto_supermercado)
+
+    hoy_ref = date(2026, 10, 15)
 
     # Compra el 28 de septiembre
     compra = transaccion_service.crear_transaccion(
@@ -657,19 +671,12 @@ def test_p8_periodos_distintos(
         fecha_recibido=date(2026, 10, 2),
     )
 
-    db.refresh(periodo_oct)
-    presu_cat = presupuesto_supermercado.categorias[0]
-    gasto_oct = calcular_gasto_en_periodo(
-        db,
-        usuario.id,
-        [presu_cat],
-        date(2026, 10, 1),
-        date(2026, 10, 31),
-        Moneda.ARS,
-    )
+    uso_sep = uso_periodo(db, presupuesto_supermercado, periodo_sep, hoy=hoy_ref, usuario=usuario)
+    uso_oct = uso_periodo(db, presupuesto_supermercado, periodo_oct, hoy=hoy_ref, usuario=usuario)
 
-    # Registro en salida del crudo (sin esperado, sin cambiar código)
-    print(f"\n[P8 REGISTRO CRUDO]")
-    print(f"  Periodo Octubre monto_usado (columna cruda): {periodo_oct.monto_usado}")
-    print(f"  Periodo Octubre calcular_gasto_en_periodo: {gasto_oct}")
-    assert True
+    assert uso_sep.calculado == Decimal("100000.00")
+    assert uso_sep.mostrado == Decimal("100000.00")
+    assert uso_oct.calculado == Decimal("-25000.00")
+    assert uso_oct.mostrado == Decimal("0.00")
+    assert uso_oct.supera_limite is False
+    assert uso_oct.porcentaje == 0.0

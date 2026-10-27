@@ -365,10 +365,15 @@ def _construir_contexto_financiero_uncached(usuario: Usuario, db: Session) -> di
     from sqlalchemy.orm import selectinload
     presupuestos = db.execute(
         select(Presupuesto)
-        .options(selectinload(Presupuesto.periodos))
+        .options(
+            selectinload(Presupuesto.periodos),
+            selectinload(Presupuesto.categorias),
+            joinedload(Presupuesto.usuario),
+        )
         .where(
             Presupuesto.usuario_id == usuario.id,
-            Presupuesto.estado == EstadoPresupuesto.ACTIVO
+            Presupuesto.estado == EstadoPresupuesto.ACTIVO,
+            Presupuesto.eliminado_en.is_(None),
         )
     ).scalars().all()
 
@@ -386,12 +391,8 @@ def _construir_contexto_financiero_uncached(usuario: Usuario, db: Session) -> di
         logger.exception("Error al obtener disponible real en ai_service")
 
     def _obtener_monto_usado_presupuesto(p: Presupuesto) -> float:
-        if getattr(p, "monto_usado_actual", None) is not None:
-            return float(p.monto_usado_actual)
-        periodo_activo = presupuesto_service.obtener_periodo_activo(None, p)
-        if periodo_activo:
-            return float(periodo_activo.monto_usado)
-        return 0.0
+        _per, uso = presupuesto_service.uso_actual(db, p)
+        return float(uso.mostrado) if uso is not None else 0.0
 
     res = {
         "usuario": {

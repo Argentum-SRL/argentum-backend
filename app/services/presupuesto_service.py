@@ -1,5 +1,6 @@
 import logging
-from uuid import UUID
+from dataclasses import dataclass
+from uuid import UUID, uuid4
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import calendar
@@ -139,7 +140,8 @@ def calcular_gasto_en_periodo(
     fecha_inicio: date, 
     fecha_fin: date,
     moneda: Optional[Moneda | str] = None,
-    usuario: Optional[Usuario] = None
+    usuario: Optional[Usuario] = None,
+    hoy: Optional[date] = None
 ) -> GastoPresupuesto:
     # categorías_input puede ser PresupuestoCategoriaInput (schema) o PresupuestoCategoria (modelo)
     # Regla: Si tiene subcategoria_id especificado, aplica solo a esa subcategoría.
@@ -168,8 +170,8 @@ def calcular_gasto_en_periodo(
         presu_moneda_str = moneda_enum.value if hasattr(moneda_enum, "value") else str(moneda_enum)
 
     # 1. Consultar transacciones en TODAS las monedas en una única consulta
-    hoy = hoy_argentina()
-    cond = condicion_gasto(usuario_id, desde=fecha_inicio, hasta=fecha_fin, hoy=hoy)
+    ref_hoy = hoy or hoy_argentina()
+    cond = condicion_gasto(usuario_id, desde=fecha_inicio, hasta=fecha_fin, hoy=ref_hoy)
     query = select(
         Transaccion.monto,
         Transaccion.moneda,
@@ -253,14 +255,128 @@ def calcular_gasto_en_periodo(
         moneda_sin_cotizacion=moneda_sin_cotizacion
     )
 
-def obtener_periodo_activo(db: Optional[Session], presupuesto: Presupuesto) -> Optional[PeriodoPresupuesto]:
-    hoy = hoy_argentina()
+@dataclass(frozen=True)
+class UsoPeriodo:
+    # Resultado inmutable del cálculo de uso de un período de presupuesto (Decisión 1.b).
+    calculado: GastoPresupuesto
+    mostrado: GastoPresupuesto
+    supera_limite: bool
+    porcentaje: float
+
+
+def uso_periodo(
+    db: Session,
+    presupuesto: Presupuesto,
+    periodo: PeriodoPresupuesto,
+    hoy: Optional[date] = None,
+    usuario: Optional[Usuario] = None,
+) -> UsoPeriodo:
+    # Calcula el uso de un período específico aplicando la regla única de gasto (Decisión 1.c).
+    ref_hoy = hoy or hoy_argentina()
+    usr = usuario or getattr(presupuesto, "usuario", None)
+    calculado = calcular_gasto_en_periodo(
+        db,
+        presupuesto.usuario_id,
+        presupuesto.categorias,
+        periodo.fecha_inicio,
+        periodo.fecha_fin,
+        moneda=presupuesto.moneda,
+        usuario=usr,
+        hoy=ref_hoy,
+    )
+    mostrado = calculado if calculado >= Decimal("0") else GastoPresupuesto(Decimal("0"))
+    limite = Decimal(str(periodo.monto_limite))
+    supera_limite = bool(calculado > limite)
+    porcentaje = float((mostrado / limite) * Decimal("100")) if limite > Decimal("0") else 0.0
+    return UsoPeriodo(
+        calculado=calculado,
+        mostrado=mostrado,
+        supera_limite=supera_limite,
+        porcentaje=porcentaje,
+    )
+
+
+def obtener_periodo_activo(
+    db: Optional[Session],
+    presupuesto: Presupuesto,
+    hoy: Optional[date] = None,
+) -> Optional[PeriodoPresupuesto]:
+    ref_hoy = hoy or hoy_argentina()
     if not presupuesto.periodos:
         return None
     return next(
-        (p for p in presupuesto.periodos if p.fecha_inicio <= hoy <= p.fecha_fin),
-        None
+        (p for p in presupuesto.periodos if p.fecha_inicio <= ref_hoy <= p.fecha_fin),
+        None,
     )
+
+
+def uso_actual(
+    db: Session,
+    presupuesto: Presupuesto,
+    hoy: Optional[date] = None,
+) -> tuple[Optional[PeriodoPresupuesto], Optional[UsoPeriodo]]:
+    # Devuelve el período que contiene hoy (sin crearlo) y su UsoPeriodo (Decisión 1.c).
+    ref_hoy = hoy or hoy_argentina()
+    periodo = obtener_periodo_activo(db, presupuesto, hoy=ref_hoy)
+    if periodo is None:
+        return None, None
+    return periodo, uso_periodo(db, presupuesto, periodo, hoy=ref_hoy, usuario=getattr(presupuesto, "usuario", None))
+
+
+def asegurar_periodo(
+    db: Session,
+    presupuesto: Presupuesto,
+    hoy: date,
+    usuario: Optional[Usuario] = None,
+    crear_siempre: bool = False,
+) -> Optional[PeriodoPresupuesto]:
+    # Devuelve el período que contiene hoy; si no existe y corresponde crearlo,
+    # inserta con on_conflict_do_nothing sobre (presupuesto_id, fecha_inicio) (Decisión 4.c).
+    periodo = obtener_periodo_activo(db, presupuesto, hoy=hoy)
+    if periodo is not None:
+        return periodo
+
+    debe_crear = crear_siempre or (
+        presupuesto.estado == EstadoPresupuesto.ACTIVO
+        and presupuesto.renovacion == RenovacionPresupuesto.AUTOMATICA
+    )
+    if not debe_crear:
+        return None
+
+    usr = usuario or getattr(presupuesto, "usuario", None) or db.get(Usuario, presupuesto.usuario_id)
+    nueva_inicio, nueva_fin = calcular_fechas_periodo(presupuesto.periodo, hoy, usuario=usr)
+
+    dialect_name = db.bind.dialect.name if db.bind is not None else "postgresql"
+    if dialect_name == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as dialect_insert
+    else:
+        from sqlalchemy.dialects.postgresql import insert as dialect_insert
+
+    valores = {
+        "id": uuid4(),
+        "presupuesto_id": presupuesto.id,
+        "fecha_inicio": nueva_inicio,
+        "fecha_fin": nueva_fin,
+        "monto_limite": presupuesto.monto,
+        "fecha_creacion": datetime.now(timezone.utc),
+    }
+    stmt = dialect_insert(PeriodoPresupuesto).values(**valores).on_conflict_do_nothing(
+        index_elements=["presupuesto_id", "fecha_inicio"]
+    )
+    db.execute(stmt)
+    db.flush()
+
+    fila = db.execute(
+        select(PeriodoPresupuesto).where(
+            PeriodoPresupuesto.presupuesto_id == presupuesto.id,
+            PeriodoPresupuesto.fecha_inicio == nueva_inicio,
+        )
+    ).scalar_one_or_none()
+    db.refresh(presupuesto, attribute_names=["periodos"])
+    if fila is not None and fila.fecha_inicio <= hoy <= fila.fecha_fin:
+        return fila
+    return obtener_periodo_activo(db, presupuesto, hoy=hoy)
+
 
 def obtener_presupuestos(db: Session, usuario_id: UUID, estado: Optional[str] = None) -> List[Presupuesto]:
     if estado == "finalizado":
@@ -289,34 +405,11 @@ def obtener_presupuestos(db: Session, usuario_id: UUID, estado: Optional[str] = 
     for presu in presupuestos:
         if presu.estado != EstadoPresupuesto.ACTIVO:
             continue
-        periodo_activo = obtener_periodo_activo(db, presu)
-        if not periodo_activo and presu.renovacion == RenovacionPresupuesto.AUTOMATICA:
-            nueva_inicio, nueva_fin = calcular_fechas_periodo(presu.periodo, hoy, usuario=presu.usuario)
-            ya_existe = any(p.fecha_inicio == nueva_inicio for p in presu.periodos)
-            if not ya_existe:
-                gasto = calcular_gasto_en_periodo(
-                    db, usuario_id, presu.categorias, nueva_inicio, nueva_fin, moneda=presu.moneda, usuario=presu.usuario
-                )
-                periodo_activo = PeriodoPresupuesto(
-                    presupuesto_id=presu.id,
-                    fecha_inicio=nueva_inicio,
-                    fecha_fin=nueva_fin,
-                    monto_limite=presu.monto,
-                    monto_usado=gasto,
-                    superado=gasto > presu.monto
-                )
-                db.add(periodo_activo)
-                presu.periodos.append(periodo_activo)
+        antes = obtener_periodo_activo(db, presu, hoy=hoy)
+        if antes is None and presu.renovacion == RenovacionPresupuesto.AUTOMATICA:
+            creado = asegurar_periodo(db, presu, hoy, usuario=presu.usuario)
+            if creado is not None:
                 hubo_cambios = True
-
-        if periodo_activo:
-            gasto = calcular_gasto_en_periodo(
-                db, usuario_id, presu.categorias,
-                periodo_activo.fecha_inicio, periodo_activo.fecha_fin,
-                moneda=presu.moneda, usuario=presu.usuario
-            )
-            periodo_activo.monto_usado = gasto
-            periodo_activo.superado = gasto > periodo_activo.monto_limite
 
     if hubo_cambios:
         db.commit()
@@ -378,34 +471,24 @@ def crear_presupuesto(db: Session, usuario_id: UUID, data: PresupuestoCreate) ->
         )
         db.add(pc)
     
-    # 3. Calcular fechas del primer periodo
+    db.flush()
+
+    # 3. Asegurar primer período con restricción única
     usuario = db.get(Usuario, usuario_id)
-    fecha_inicio, fecha_fin = calcular_fechas_periodo(data.periodo, hoy_argentina(), usuario=usuario)
-    
-    # 4. Calcular monto_usado inicial
-    monto_usado = calcular_gasto_en_periodo(
-        db, usuario_id, data.categorias, fecha_inicio, fecha_fin, moneda=moneda_enum
-    )
-    
-    # 5. Crear PeriodoPresupuesto
-    periodo = PeriodoPresupuesto(
-        presupuesto_id=nuevo_presupuesto.id,
-        fecha_inicio=fecha_inicio,
-        fecha_fin=fecha_fin,
-        monto_limite=data.monto,
-        monto_usado=monto_usado,
-        superado=monto_usado > data.monto
-    )
-    db.add(periodo)
+    hoy = hoy_argentina()
+    asegurar_periodo(db, nuevo_presupuesto, hoy, usuario=usuario, crear_siempre=True)
     db.commit()
-    
-    # 6. Cargar presupuesto completo con relaciones
+
+    # 4. Cargar presupuesto completo con relaciones
     presupuesto_cargado = obtener_presupuesto(db, usuario_id, nuevo_presupuesto.id)
 
-    # 7. Verificar alertas iniciales
-    if monto_usado > 0:
-        verificar_alertas_presupuesto(db, presupuesto_cargado, periodo)
-        
+    # 5. Verificar alertas iniciales con uso_periodo del período actual
+    periodo_act = obtener_periodo_activo(db, presupuesto_cargado, hoy=hoy)
+    if periodo_act is not None:
+        uso = uso_periodo(db, presupuesto_cargado, periodo_act, hoy=hoy, usuario=presupuesto_cargado.usuario)
+        if uso.mostrado > Decimal("0"):
+            verificar_alertas_presupuesto(db, presupuesto_cargado, periodo_act, uso.mostrado)
+
     return presupuesto_cargado
 
 def obtener_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto:
@@ -426,35 +509,13 @@ def obtener_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto:
     presupuesto = db.execute(query).scalar_one_or_none()
     if not presupuesto:
         raise HTTPException(status_code=404, detail="No encontramos ese presupuesto.")
-    pa = obtener_periodo_activo(db, presupuesto)
+    hoy = hoy_argentina()
+    pa = obtener_periodo_activo(db, presupuesto, hoy=hoy)
     if not pa and presupuesto.estado == EstadoPresupuesto.ACTIVO and presupuesto.renovacion == RenovacionPresupuesto.AUTOMATICA:
-        hoy = hoy_argentina()
-        nueva_inicio, nueva_fin = calcular_fechas_periodo(presupuesto.periodo, hoy, usuario=presupuesto.usuario)
-        ya_existe = any(p.fecha_inicio == nueva_inicio for p in presupuesto.periodos)
-        if not ya_existe:
-            gasto = calcular_gasto_en_periodo(
-                db, usuario_id, presupuesto.categorias, nueva_inicio, nueva_fin, moneda=presupuesto.moneda, usuario=presupuesto.usuario
-            )
-            pa = PeriodoPresupuesto(
-                presupuesto_id=presupuesto.id,
-                fecha_inicio=nueva_inicio,
-                fecha_fin=nueva_fin,
-                monto_limite=presupuesto.monto,
-                monto_usado=gasto,
-                superado=gasto > presupuesto.monto
-            )
-            db.add(pa)
-            presupuesto.periodos.append(pa)
+        creado = asegurar_periodo(db, presupuesto, hoy, usuario=presupuesto.usuario)
+        if creado is not None:
             db.commit()
 
-    if pa:
-        gasto = calcular_gasto_en_periodo(
-            db, usuario_id, presupuesto.categorias,
-            pa.fecha_inicio, pa.fecha_fin,
-            moneda=presupuesto.moneda, usuario=presupuesto.usuario
-        )
-        pa.monto_usado = gasto
-        pa.superado = gasto > pa.monto_limite
     return presupuesto
 
 def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: PresupuestoUpdate) -> Presupuesto:
@@ -495,8 +556,6 @@ def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: Presup
         except ValueError:
             raise HTTPException(status_code=400, detail="Periodo inválido")
 
-    recalcular_monto = data.moneda is not None or periodo_cambio
-
     if data.categorias is not None:
         _validar_categorias_presupuesto(db, data.categorias, usuario_id)
         presupuesto.categorias.clear()
@@ -507,9 +566,9 @@ def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: Presup
                 subcategoria_id=cat_data.subcategoria_id
             )
             presupuesto.categorias.append(pc)
-        recalcular_monto = True
-        
-    periodo_actual = obtener_periodo_activo(db, presupuesto)
+
+    hoy = hoy_argentina()
+    periodo_actual = obtener_periodo_activo(db, presupuesto, hoy=hoy)
 
     if data.monto is not None:
         if data.monto <= 0:
@@ -517,41 +576,37 @@ def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: Presup
         presupuesto.monto = data.monto
         if periodo_actual:
             periodo_actual.monto_limite = data.monto
-            periodo_actual.superado = periodo_actual.monto_usado > data.monto
-            
-    if periodo_cambio and periodo_actual:
-        fecha_inicio, fecha_fin = calcular_fechas_periodo(presupuesto.periodo, hoy_argentina(), usuario=presupuesto.usuario)
-        periodo_actual.fecha_inicio = fecha_inicio
-        periodo_actual.fecha_fin = fecha_fin
 
-    if recalcular_monto and periodo_actual:
-        periodo_actual.monto_usado = calcular_gasto_en_periodo(
-            db, usuario_id, presupuesto.categorias, periodo_actual.fecha_inicio, periodo_actual.fecha_fin, moneda=presupuesto.moneda
+    if periodo_cambio and periodo_actual:
+        fecha_inicio, fecha_fin = calcular_fechas_periodo(presupuesto.periodo, hoy, usuario=presupuesto.usuario)
+        existente_mismo_inicio = next(
+            (p for p in presupuesto.periodos if p.id != periodo_actual.id and p.fecha_inicio == fecha_inicio),
+            None,
         )
-        periodo_actual.superado = periodo_actual.monto_usado > periodo_actual.monto_limite
+        if existente_mismo_inicio is not None:
+            # QUÉ HACER SI: si la fecha de inicio nueva ya la tiene otro período del mismo presupuesto,
+            # se borra el período activo y queda el existente con la fecha_fin y el límite nuevos.
+            db.delete(periodo_actual)
+            db.flush()
+            existente_mismo_inicio.fecha_fin = fecha_fin
+            existente_mismo_inicio.monto_limite = presupuesto.monto
+            periodo_actual = existente_mismo_inicio
+        else:
+            periodo_actual.fecha_inicio = fecha_inicio
+            periodo_actual.fecha_fin = fecha_fin
 
     if not periodo_actual and presupuesto.estado == EstadoPresupuesto.ACTIVO and presupuesto.renovacion == RenovacionPresupuesto.AUTOMATICA:
-        fecha_inicio, fecha_fin = calcular_fechas_periodo(presupuesto.periodo, hoy_argentina(), usuario=presupuesto.usuario)
-        monto_usado = calcular_gasto_en_periodo(
-            db, usuario_id, presupuesto.categorias, fecha_inicio, fecha_fin, moneda=presupuesto.moneda, usuario=presupuesto.usuario
-        )
-        periodo_actual = PeriodoPresupuesto(
-            presupuesto_id=presupuesto.id,
-            fecha_inicio=fecha_inicio,
-            fecha_fin=fecha_fin,
-            monto_limite=presupuesto.monto,
-            monto_usado=monto_usado,
-            superado=monto_usado > presupuesto.monto
-        )
-        db.add(periodo_actual)
-        presupuesto.periodos.append(periodo_actual)
+        periodo_actual = asegurar_periodo(db, presupuesto, hoy, usuario=presupuesto.usuario)
 
     db.commit()
-    
+
     presupuesto_cargado = obtener_presupuesto(db, usuario_id, id)
-    if periodo_actual and periodo_actual.monto_usado > 0:
-        verificar_alertas_presupuesto(db, presupuesto_cargado, periodo_actual)
-            
+    periodo_act = obtener_periodo_activo(db, presupuesto_cargado, hoy=hoy)
+    if periodo_act is not None:
+        uso = uso_periodo(db, presupuesto_cargado, periodo_act, hoy=hoy, usuario=presupuesto_cargado.usuario)
+        if uso.mostrado > Decimal("0"):
+            verificar_alertas_presupuesto(db, presupuesto_cargado, periodo_act, uso.mostrado)
+
     return presupuesto_cargado
 
 def pausar_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto:
@@ -563,25 +618,12 @@ def pausar_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto:
 def reanudar_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto:
     presupuesto = obtener_presupuesto(db, usuario_id, id)
     presupuesto.estado = EstadoPresupuesto.ACTIVO
-    
+
     hoy = hoy_argentina()
-    periodo_actual = obtener_periodo_activo(db, presupuesto)
-    
+    periodo_actual = obtener_periodo_activo(db, presupuesto, hoy=hoy)
     if not periodo_actual:
-        fecha_inicio, fecha_fin = calcular_fechas_periodo(presupuesto.periodo, hoy, usuario=presupuesto.usuario)
-        monto_usado = calcular_gasto_en_periodo(
-            db, usuario_id, presupuesto.categorias, fecha_inicio, fecha_fin, moneda=presupuesto.moneda
-        )
-        nuevo_periodo = PeriodoPresupuesto(
-            presupuesto_id=presupuesto.id,
-            fecha_inicio=fecha_inicio,
-            fecha_fin=fecha_fin,
-            monto_limite=presupuesto.monto,
-            monto_usado=monto_usado,
-            superado=monto_usado > presupuesto.monto
-        )
-        db.add(nuevo_periodo)
-        
+        asegurar_periodo(db, presupuesto, hoy, usuario=presupuesto.usuario, crear_siempre=True)
+
     db.commit()
     return obtener_presupuesto(db, usuario_id, id)
 
@@ -676,13 +718,27 @@ def registrar_impacto_presupuesto(
     revertir: bool = False,
     commit: bool = True,  # commit=False: la operación de afuera hace el único commit
 ):
+    # Calcula el uso del período activo tras una transacción de egreso y verifica alertas (Decisión 3).
+    # No escribe ninguna columna en periodos_presupuesto.
+    # La transacción tiene que estar en la base para que el usado derivado la cuente
+    # (crear_transaccion y otros llamadores la agregan a la sesión después de esta llamada).
+    if not revertir and transaccion not in db:
+        db.add(transaccion)
+    db.flush()
+
+    if revertir:
+        return
     if transaccion.tipo != TipoTransaccion.EGRESO:
         return
-    if transaccion.estado_verificacion not in [EstadoVerificacionTransaccion.CONFIRMADA, None]:
-        return
-    if transaccion.es_padre_cuotas:
-        return
     if transaccion.movimiento_meta_id is not None:
+        return
+    hoy = hoy_argentina()
+    if transaccion.fecha > hoy:
+        return
+    if not transaccion.es_cuota_hija and transaccion.estado_verificacion not in [
+        EstadoVerificacionTransaccion.CONFIRMADA,
+        None,
+    ]:
         return
 
     presupuestos = db.execute(
@@ -694,10 +750,11 @@ def registrar_impacto_presupuesto(
         )
         .where(
             Presupuesto.usuario_id == transaccion.usuario_id,
-            Presupuesto.estado == EstadoPresupuesto.ACTIVO
+            Presupuesto.estado == EstadoPresupuesto.ACTIVO,
+            Presupuesto.eliminado_en.is_(None),
         )
     ).scalars().all()
-    
+
     # Resolver categoría si solo tiene subcategoría
     tx_cat_id = transaccion.categoria_id
     if not tx_cat_id and transaccion.subcategoria_id:
@@ -716,146 +773,88 @@ def registrar_impacto_presupuesto(
                 if tx_cat_id == c.categoria_id:
                     aplica = True
                     break
-        
+
         if not aplica:
             continue
-            
-        periodo_activo = obtener_periodo_activo(db, presu)
-        if not periodo_activo and presu.renovacion == RenovacionPresupuesto.AUTOMATICA:
-            hoy = hoy_argentina()
-            nueva_inicio, nueva_fin = calcular_fechas_periodo(presu.periodo, hoy, usuario=presu.usuario)
-            if nueva_inicio <= transaccion.fecha <= nueva_fin:
-                # Calculamos el gasto previo en este ciclo (excluyendo la transacción actual si aún no se guardó o considerándola)
-                # Al recalcular el gasto completo con calcular_gasto_en_periodo, ya refleja todas las tx
-                gasto = calcular_gasto_en_periodo(
-                    db, transaccion.usuario_id, presu.categorias, nueva_inicio, nueva_fin, moneda=presu.moneda, usuario=presu.usuario
-                )
-                periodo_activo = PeriodoPresupuesto(
-                    presupuesto_id=presu.id,
-                    fecha_inicio=nueva_inicio,
-                    fecha_fin=nueva_fin,
-                    monto_limite=presu.monto,
-                    monto_usado=gasto,
-                    superado=gasto > presu.monto
-                )
-                db.add(periodo_activo)
-                db.flush()
-                presu.periodos.append(periodo_activo)
-                # Como ya se calculó el gasto total con la transacción incluida, saltamos el incremento manual
-                continue
 
+        periodo_activo = asegurar_periodo(db, presu, hoy, usuario=presu.usuario)
         if not periodo_activo:
             continue
-            
+
         if not (periodo_activo.fecha_inicio <= transaccion.fecha <= periodo_activo.fecha_fin):
             continue
 
-        presu_moneda_str = presu.moneda.value if hasattr(presu.moneda, "value") else str(presu.moneda)
-        tx_moneda_str = transaccion.moneda.value if hasattr(transaccion.moneda, "value") else str(transaccion.moneda)
+        uso = uso_periodo(db, presu, periodo_activo, hoy=hoy, usuario=presu.usuario)
+        verificar_alertas_presupuesto(
+            db,
+            presu,
+            periodo_activo,
+            uso.mostrado,
+            commit=commit,
+            enviar_whatsapp_ya=True,
+        )
 
-        if tx_moneda_str == presu_moneda_str:
-            monto_impacto = transaccion.monto
-        else:
-            cotizacion = None
-            if transaccion.cotizacion_aplicada and transaccion.cotizacion_aplicada > 0:
-                cotizacion = Decimal(str(transaccion.cotizacion_aplicada))
-            else:
-                from app.services.dolar_service import obtener_cotizacion_por_fecha
-                usuario_presu = presu.usuario or db.get(Usuario, presu.usuario_id)
-                tipo_dolar = getattr(usuario_presu, "tipo_dolar", "blue") or "blue"
-                cot_obj = obtener_cotizacion_por_fecha(db, tipo_dolar, transaccion.fecha)
-                if cot_obj:
-                    cot_val = cot_obj.promedio or cot_obj.venta or cot_obj.compra
-                    if cot_val and cot_val > Decimal("0"):
-                        cotizacion = Decimal(str(cot_val))
-
-            if not cotizacion or cotizacion <= Decimal("0"):
-                continue
-
-            if presu_moneda_str == "ARS" and tx_moneda_str == "USD":
-                monto_impacto = (transaccion.monto * cotizacion).quantize(Decimal("0.01"))
-            elif presu_moneda_str == "USD" and tx_moneda_str == "ARS":
-                monto_impacto = (transaccion.monto / cotizacion).quantize(Decimal("0.01"))
-            else:
-                monto_impacto = transaccion.monto
-            
-        if not revertir:
-            periodo_activo.monto_usado += monto_impacto
-        else:
-            periodo_activo.monto_usado -= monto_impacto
-            periodo_activo.monto_usado = max(Decimal("0"), periodo_activo.monto_usado)
-            
-        periodo_activo.superado = periodo_activo.monto_usado > periodo_activo.monto_limite
-        db.flush()
-        
-        if not revertir:
-            verificar_alertas_presupuesto(db, presu, periodo_activo, commit=commit)
 
 def verificar_alertas_presupuesto(
     db: Session,
     presupuesto: Presupuesto,
     periodo: PeriodoPresupuesto,
+    usado: Decimal,
     commit: bool = True,  # commit=False: la operación de afuera hace el único commit
+    enviar_whatsapp_ya: bool = True,
 ):
-    if periodo.monto_limite == 0:
+    # Camino único de aviso de presupuesto (Decisión 2).
+    limite = Decimal(str(periodo.monto_limite))
+    if limite <= Decimal("0"):
         return
-        
-    porcentaje = (periodo.monto_usado / periodo.monto_limite) * 100
-    
-    tipo = None
-    if porcentaje >= 100:
-        tipo = TipoNotificacion.PRESUPUESTO_AGOTADO
-    elif porcentaje >= 80:
-        tipo = TipoNotificacion.PRESUPUESTO_LIMITE
-        
-    if not tipo:
-        return
-        
-    # 1. Obtener la configuración del usuario
+
+    usado_dec = Decimal(str(usado))
+    porcentaje = (usado_dec / limite) * Decimal("100")
+
     from app.services.notificacion_service import obtener_configuracion, crear_notificacion
     config = obtener_configuracion(db, presupuesto.usuario_id, commit=commit)
 
-    # 2. Verificar si el canal/tipo está activo en la configuración del usuario
+    tipo = None
+    nivel = None
     canal_web = True
     canal_whatsapp = False
+    nombre = presupuesto.nombre
+    gastado_fmt = formatear_monto(usado_dec, presupuesto.moneda)
+    limite_fmt = formatear_monto(limite, presupuesto.moneda)
 
-    if tipo == TipoNotificacion.PRESUPUESTO_AGOTADO:
+    if porcentaje >= Decimal("100"):
+        tipo = TipoNotificacion.PRESUPUESTO_AGOTADO
+        nivel = NivelNotificacion.FINANCIERA_IMPORTANTE
         canal_web = config.presupuesto_umbral_2_web
         canal_whatsapp = config.presupuesto_umbral_2_whatsapp
-    elif tipo == TipoNotificacion.PRESUPUESTO_LIMITE:
-        if not config.presupuesto_umbral_1_activo:
-            return  # Alerta 80% desactivada por completo
+        mensaje = f"Gastaste {gastado_fmt} de {limite_fmt} en {nombre}. Superaste el límite que te pusiste."
+        datos_template = {
+            "nombre_pres": nombre,
+            "gastado_fmt": gastado_fmt,
+            "limite_fmt": limite_fmt,
+        }
+    elif config.presupuesto_umbral_1_activo and porcentaje >= Decimal(str(config.presupuesto_umbral_1)):
+        tipo = TipoNotificacion.PRESUPUESTO_LIMITE
+        nivel = NivelNotificacion.FINANCIERA_INFORMATIVA
         canal_web = config.presupuesto_umbral_1_web
         canal_whatsapp = config.presupuesto_umbral_1_whatsapp
+        mensaje = f"Llevás gastado el {int(porcentaje)}% de tu presupuesto '{nombre}' ({gastado_fmt} de {limite_fmt})."
+        datos_template = {
+            "gastado_fmt": gastado_fmt,
+            "limite_fmt": limite_fmt,
+            "nombre_pres": nombre,
+        }
+    else:
+        return
 
-    # Si ambos canales están desactivados, no hacemos nada
     if not canal_web and not canal_whatsapp:
         return
 
-    # 3. Formatear nombres de las categorías para el mensaje
-    nombres_cats = ", ".join(set([c.subcategoria.nombre if c.subcategoria else (c.categoria.nombre if c.categoria else "") for c in presupuesto.categorias]))
-    
-    if tipo == TipoNotificacion.PRESUPUESTO_AGOTADO:
-        mensaje = f"Llevás {formatear_monto(periodo.monto_usado, presupuesto.moneda)} de {formatear_monto(periodo.monto_limite, presupuesto.moneda)} en {nombres_cats}. Ya superaste el límite."
-        datos_template = {
-            "nombre_pres": presupuesto.nombre,
-            "gastado_fmt": formatear_monto(periodo.monto_usado, presupuesto.moneda),
-            "limite_fmt": formatear_monto(periodo.monto_limite, presupuesto.moneda),
-        }
-    else:
-        mensaje = f"Llevás {formatear_monto(periodo.monto_usado, presupuesto.moneda)} de {formatear_monto(periodo.monto_limite, presupuesto.moneda)}."
-        datos_template = {
-            "gastado_fmt": formatear_monto(periodo.monto_usado, presupuesto.moneda),
-            "limite_fmt": formatear_monto(periodo.monto_limite, presupuesto.moneda),
-            "nombre_pres": presupuesto.nombre,
-        }
-
-    # 4. Crear la notificación utilizando el servicio común (se encarga del commit/db.add/deduplicación)
     notif = crear_notificacion(
         db=db,
         usuario_id=presupuesto.usuario_id,
         tipo=tipo,
-        nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+        nivel=nivel,
         mensaje=mensaje,
         entidad_tipo="presupuesto",
         entidad_id=presupuesto.id,
@@ -867,9 +866,7 @@ def verificar_alertas_presupuesto(
         commit=commit,
         datos_template=datos_template,
     )
-    
-    # 5. Enviar mensaje de WhatsApp inmediato si corresponde
-    if notif and canal_whatsapp and puede_salir_por_whatsapp(notif):
+    if enviar_whatsapp_ya and notif and canal_whatsapp and puede_salir_por_whatsapp(notif):
         usuario = db.get(Usuario, presupuesto.usuario_id)
         if usuario and usuario.telefono:
             try:
@@ -920,7 +917,7 @@ def renovar_presupuestos(db: Session):
     ).scalars().all()
     
     for presu in presupuestos:
-        periodo_actual = obtener_periodo_activo(db, presu)
+        periodo_actual = obtener_periodo_activo(db, presu, hoy=hoy)
         if not periodo_actual:
             ultimo_periodo = max(presu.periodos, key=lambda p: p.fecha_fin) if presu.periodos else None
             
@@ -932,41 +929,31 @@ def renovar_presupuestos(db: Session):
                     .limit(3)
                 ).scalars().all()
                 
-                if len(ultimos_3) == 3 and all(p.superado for p in ultimos_3):
-                    promedio = sum(p.monto_usado for p in ultimos_3) / 3
-                    from app.services.notificacion_service import crear_notificacion
-                    mensaje_sug = f"Superaste el límite del presupuesto '{presu.nombre}' por 3 períodos seguidos. El gasto promedio real fue de {formatear_monto(promedio, presu.moneda)}. Considerá ajustar el límite."
-                    crear_notificacion(
-                        db=db,
-                        usuario_id=presu.usuario_id,
-                        tipo=TipoNotificacion.PRESUPUESTO_LIMITE,
-                        nivel=NivelNotificacion.SOFT,
-                        mensaje=mensaje_sug,
-                        entidad_tipo="presupuesto",
-                        entidad_id=presu.id,
-                        deep_link="/app/presupuestos",
-                        canal_web=True,
-                        canal_whatsapp=False,
-                        canal_email=False,
-                        grupo_agrupacion_override=f"presupuestos/sugerencia/{presu.id}/{hoy.strftime('%Y%m%d')}"
-                    )
-                
-                nueva_inicio, nueva_fin = calcular_fechas_periodo(presu.periodo, hoy, usuario=presu.usuario)
-                ya_existe = any(p.fecha_inicio == nueva_inicio for p in presu.periodos)
-                if not ya_existe:
-                    monto_usado = calcular_gasto_en_periodo(
-                        db, presu.usuario_id, presu.categorias, nueva_inicio, nueva_fin, moneda=presu.moneda
-                    )
-                    nuevo_periodo = PeriodoPresupuesto(
-                        presupuesto_id=presu.id,
-                        fecha_inicio=nueva_inicio,
-                        fecha_fin=nueva_fin,
-                        monto_limite=presu.monto,
-                        monto_usado=monto_usado,
-                        superado=monto_usado > presu.monto
-                    )
-                    db.add(nuevo_periodo)
-                    presu.periodos.append(nuevo_periodo)
+                if len(ultimos_3) == 3:
+                    usos_3 = [
+                        uso_periodo(db, presu, p, hoy=hoy, usuario=presu.usuario)
+                        for p in ultimos_3
+                    ]
+                    if all(u.supera_limite for u in usos_3):
+                        promedio = sum((u.calculado for u in usos_3), Decimal("0")) / Decimal("3")
+                        from app.services.notificacion_service import crear_notificacion
+                        mensaje_sug = f"Superaste el límite del presupuesto '{presu.nombre}' por 3 períodos seguidos. El gasto promedio real fue de {formatear_monto(promedio, presu.moneda)}. Considerá ajustar el límite."
+                        crear_notificacion(
+                            db=db,
+                            usuario_id=presu.usuario_id,
+                            tipo=TipoNotificacion.PRESUPUESTO_LIMITE,
+                            nivel=NivelNotificacion.SOFT,
+                            mensaje=mensaje_sug,
+                            entidad_tipo="presupuesto",
+                            entidad_id=presu.id,
+                            deep_link="/app/presupuestos",
+                            canal_web=True,
+                            canal_whatsapp=False,
+                            canal_email=False,
+                            grupo_agrupacion_override=f"presupuestos/sugerencia/{presu.id}/{hoy.strftime('%Y%m%d')}"
+                        )
+
+                asegurar_periodo(db, presu, hoy, usuario=presu.usuario)
     
     db.commit()
 
@@ -977,23 +964,11 @@ def renovar_presupuesto_manual(db: Session, usuario_id: UUID, id: UUID) -> Presu
         raise HTTPException(status_code=400, detail="Solo se pueden renovar presupuestos activos")
 
     hoy = hoy_argentina()
-    periodo_actual = obtener_periodo_activo(db, presupuesto)
+    periodo_actual = obtener_periodo_activo(db, presupuesto, hoy=hoy)
     if periodo_actual:
         raise HTTPException(status_code=400, detail="El presupuesto ya tiene un período activo vigente")
 
-    fecha_inicio, fecha_fin = calcular_fechas_periodo(presupuesto.periodo, hoy, usuario=presupuesto.usuario)
-    monto_usado = calcular_gasto_en_periodo(
-        db, usuario_id, presupuesto.categorias, fecha_inicio, fecha_fin, moneda=presupuesto.moneda, usuario=presupuesto.usuario
-    )
-    nuevo_periodo = PeriodoPresupuesto(
-        presupuesto_id=presupuesto.id,
-        fecha_inicio=fecha_inicio,
-        fecha_fin=fecha_fin,
-        monto_limite=presupuesto.monto,
-        monto_usado=monto_usado,
-        superado=monto_usado > presupuesto.monto
-    )
-    db.add(nuevo_periodo)
+    asegurar_periodo(db, presupuesto, hoy, usuario=presupuesto.usuario, crear_siempre=True)
     db.commit()
     return obtener_presupuesto(db, usuario_id, id)
 
@@ -1010,7 +985,6 @@ def reajustar_periodos_por_cambio_de_ciclo(
     - nuevo fin: fecha_fin de get_ciclo_fechas(usuario con el nuevo ciclo, hoy).
     - nuevo inicio: (fecha_fin del período anterior) + 1 día; si no tiene período anterior,
       el fecha_inicio del nuevo ciclo que contiene hoy.
-    - Recalcula monto_usado y superado para el período activo.
     - No crea notificaciones, no toca períodos cerrados ni presupuestos semanales/quincenales.
     """
     if hoy is None:
@@ -1060,22 +1034,20 @@ def reajustar_periodos_por_cambio_de_ciclo(
 
         nuevo_fin = ciclo_fin
 
-        periodo_activo.fecha_inicio = nuevo_inicio
-        periodo_activo.fecha_fin = nuevo_fin
-
-        monto_usado = calcular_gasto_en_periodo(
-            db,
-            usuario.id,
-            presu.categorias,
-            nuevo_inicio,
-            nuevo_fin,
-            moneda=presu.moneda,
-            usuario=usuario,
+        existente_mismo_inicio = next(
+            (p for p in presu.periodos if p.id != periodo_activo.id and p.fecha_inicio == nuevo_inicio),
+            None,
         )
-        periodo_activo.monto_usado = monto_usado
-        periodo_activo.superado = bool(monto_usado > periodo_activo.monto_limite)
+        if existente_mismo_inicio is not None:
+            db.delete(periodo_activo)
+            db.flush()
+            existente_mismo_inicio.fecha_fin = nuevo_fin
+        else:
+            periodo_activo.fecha_inicio = nuevo_inicio
+            periodo_activo.fecha_fin = nuevo_fin
 
     if commit:
         db.commit()
     else:
         db.flush()
+

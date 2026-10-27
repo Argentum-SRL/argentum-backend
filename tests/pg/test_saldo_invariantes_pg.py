@@ -773,6 +773,38 @@ def test_td7_invariantes_oraculo(db: Session, monkeypatch):
                         assert b_chk.saldo_actual == teorico
                         assert b_chk.saldo_actual == esperado
 
+                # TD.7 (Decisión 5): después de cada operación, cada meta tiene monto_actual igual a la suma de la decisión 5
+                for m_chk in metas_activas:
+                    db.refresh(m_chk)
+                    from app.models.movimiento_meta import MovimientoMeta
+                    from decimal import ROUND_HALF_UP
+                    movs_m = db.execute(
+                        select(MovimientoMeta).where(MovimientoMeta.meta_id == m_chk.id)
+                    ).scalars().all()
+                    m_mon = m_chk.moneda.value if hasattr(m_chk.moneda, "value") else str(m_chk.moneda)
+                    suma_m = Decimal("0.00")
+                    for mv in movs_m:
+                        mv_mon = mv.moneda_movimiento.value if hasattr(mv.moneda_movimiento, "value") else str(mv.moneda_movimiento)
+                        mv_val = Decimal(str(mv.monto))
+                        if mv_mon == m_mon:
+                            imp_m = mv_val.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        else:
+                            cot_m = Decimal(str(mv.cotizacion_usada))
+                            if m_mon == "USD":
+                                imp_m = (mv_val / cot_m).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                            else:
+                                imp_m = (mv_val * cot_m).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        t_m = mv.tipo.value if hasattr(mv.tipo, "value") else str(mv.tipo)
+                        if t_m == TipoMovimientoMeta.APORTE.value:
+                            suma_m += imp_m
+                        else:
+                            suma_m -= imp_m
+                    suma_m = suma_m.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    diff_meta = Decimal(str(m_chk.monto_actual)) - suma_m
+                    assert diff_meta == Decimal("0.00"), (
+                        f"Meta {m_chk.nombre}: monto_actual={m_chk.monto_actual} != suma={suma_m} (diff={diff_meta})"
+                    )
+
         dur = time_mod.time() - t0
         print(f"\nSemilla {semilla} completada ({num_secuencias} secuencias) en {dur:.2f}s")
         print("Tabla operaciones por semilla:")

@@ -180,84 +180,46 @@ def _job_notificaciones_presupuestos(db_session_factory):
             )
             return
         lock_adquirido = True
-        from app.services.presupuesto_service import calcular_gasto_en_periodo, obtener_periodo_activo
-        from app.models.presupuesto import Presupuesto
+        from app.services.presupuesto_service import (
+            obtener_periodo_activo,
+            uso_periodo,
+            verificar_alertas_presupuesto,
+        )
+        from app.models.presupuesto import Presupuesto, EstadoPresupuesto
 
-        configs = db.query(
-            ConfiguracionNotificacion.usuario_id,
-            ConfiguracionNotificacion.presupuesto_umbral_1,
-            ConfiguracionNotificacion.presupuesto_umbral_1_activo,
-            ConfiguracionNotificacion.presupuesto_umbral_1_web,
-            ConfiguracionNotificacion.presupuesto_umbral_1_whatsapp,
-            ConfiguracionNotificacion.presupuesto_umbral_2_web,
-            ConfiguracionNotificacion.presupuesto_umbral_2_whatsapp,
-        ).all()
+        hoy = hoy_argentina()
+        presupuestos = (
+            db.query(Presupuesto)
+            .options(
+                selectinload(Presupuesto.periodos),
+                selectinload(Presupuesto.categorias),
+                joinedload(Presupuesto.usuario),
+            )
+            .filter(
+                Presupuesto.estado == EstadoPresupuesto.ACTIVO,
+                Presupuesto.eliminado_en.is_(None),
+            )
+            .all()
+        )
 
-        for config in configs:
-            usuario_id = config.usuario_id
-
-            presupuestos = db.query(Presupuesto).filter(
-                Presupuesto.usuario_id == usuario_id,
-                Presupuesto.estado == "activo",
-            ).all()
-
-            for pres in presupuestos:
-                limite = float(getattr(pres, 'monto', 0))
-                if limite <= 0:
+        for pres in presupuestos:
+            try:
+                periodo_activo = obtener_periodo_activo(db, pres, hoy=hoy)
+                if not periodo_activo:
                     continue
-
-                try:
-                    periodo_activo = obtener_periodo_activo(db, pres)
-                    if not periodo_activo:
-                        continue
-                    gastado = float(calcular_gasto_en_periodo(db, pres.usuario_id, pres.categorias, periodo_activo.fecha_inicio, periodo_activo.fecha_fin, moneda=pres.moneda))
-                except Exception as e:
-                    logger.warning("No se pudo calcular gasto del presupuesto %s: %s", pres.id, e)
-                    continue
-
-                if gastado <= 0:
-                    continue
-
-                porcentaje = int((gastado / limite) * 100)
-                nombre_pres = pres.nombre
-
-                # Alertas del umbral 1 (configurable, ej: 80%)
-                if config.presupuesto_umbral_1_activo and porcentaje >= config.presupuesto_umbral_1 and porcentaje < 100:
-                    gastado_fmt = formatear_monto(gastado, pres.moneda)
-                    limite_fmt = formatear_monto(limite, pres.moneda)
-                    mensaje = f"Llevás gastado el {porcentaje}% de tu presupuesto '{nombre_pres}' ({gastado_fmt} de {limite_fmt})"
-                    crear_notificacion(
-                        db=db,
-                        usuario_id=usuario_id,
-                        tipo=TipoNotificacion.PRESUPUESTO_LIMITE,
-                        nivel=NivelNotificacion.FINANCIERA_INFORMATIVA,
-                        mensaje=mensaje,
-                        entidad_tipo="presupuesto",
-                        entidad_id=pres.id,
-                        deep_link="/app/presupuestos",
-                        canal_web=config.presupuesto_umbral_1_web,
-                        canal_whatsapp=config.presupuesto_umbral_1_whatsapp,
-                        datos_template={"gastado_fmt": gastado_fmt, "limite_fmt": limite_fmt, "nombre_pres": nombre_pres},
-                    )
-
-                # Alertas del umbral 2 (100% agotado)
-                if porcentaje >= 100:
-                    gastado_fmt = formatear_monto(gastado, pres.moneda)
-                    limite_fmt = formatear_monto(limite, pres.moneda)
-                    mensaje = f"Gastaste {gastado_fmt} de {limite_fmt} en {nombre_pres}. Superaste el límite que te pusiste."
-                    crear_notificacion(
-                        db=db,
-                        usuario_id=usuario_id,
-                        tipo=TipoNotificacion.PRESUPUESTO_AGOTADO,
-                        nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                        mensaje=mensaje,
-                        entidad_tipo="presupuesto",
-                        entidad_id=pres.id,
-                        deep_link="/app/presupuestos",
-                        canal_web=config.presupuesto_umbral_2_web,
-                        canal_whatsapp=config.presupuesto_umbral_2_whatsapp,
-                        datos_template={"nombre_pres": nombre_pres, "gastado_fmt": gastado_fmt, "limite_fmt": limite_fmt},
-                    )
+                uso = uso_periodo(db, pres, periodo_activo, hoy=hoy, usuario=pres.usuario)
+                verificar_alertas_presupuesto(
+                    db,
+                    pres,
+                    periodo_activo,
+                    uso.mostrado,
+                    commit=True,
+                    enviar_whatsapp_ya=False,
+                )
+            except Exception as e:
+                logger.warning("No se pudo evaluar alertas del presupuesto %s: %s", pres.id, e)
+                db.rollback()
+                continue
 
         logger.info("Job notificaciones_presupuestos completado")
 

@@ -217,8 +217,8 @@ def ejecutar_verificaciones_paridad(db, usuario: Usuario, log_func=print) -> Dic
     pres_web = presupuesto_service.obtener_presupuestos(db, usuario.id, estado="activo")
     web_num_pres = []
     for p in pres_web:
-        per = presupuesto_service.obtener_periodo_activo(None, p)
-        usado_val = per.monto_usado if per else Decimal("0")
+        _per, uso = presupuesto_service.uso_actual(db, p)
+        usado_val = uso.mostrado if uso is not None else Decimal("0")
         limite_val = p.monto
         web_num_pres.append(normalizar_monto_str(formatear_monto(usado_val, p.moneda)))
         web_num_pres.append(normalizar_monto_str(formatear_monto(limite_val, p.moneda)))

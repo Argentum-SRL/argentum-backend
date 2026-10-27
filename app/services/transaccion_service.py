@@ -392,6 +392,9 @@ def crear_transaccion(
         # Actualizar la transaccion padre con el link al grupo (opcional pero util)
         nueva_transaccion.grupo_cuotas_id = grupo.id
 
+        # Aviso de presupuesto también para compras con crédito o en cuotas (fase_ea_presupuestos, decisión 3)
+        presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False, commit=False)
+
         # Marcar factura específica si vino en cuotas
         if factura_a_marcar:
             from app.services import factura_service
@@ -781,31 +784,18 @@ def eliminar_transaccion(
             ).first()
 
     if movimiento:
-        from app.models.meta import Meta, EstadoMeta
-        from app.models.movimiento_meta import TipoMovimientoMeta
-        from app.models.usuario import Moneda
+        from app.models.meta import Meta
+        from app.services import meta_service
         meta = db.get(Meta, movimiento.meta_id)
-        if meta:
-            monto_impacto_meta = movimiento.monto
-            if movimiento.moneda_movimiento != meta.moneda:
-                cotiz = movimiento.cotizacion_usada or Decimal("1")
-                if meta.moneda == Moneda.USD and movimiento.moneda_movimiento == Moneda.ARS:
-                    monto_impacto_meta = movimiento.monto / cotiz
-                elif meta.moneda == Moneda.ARS and movimiento.moneda_movimiento == Moneda.USD:
-                    monto_impacto_meta = movimiento.monto * cotiz
-
-            if movimiento.tipo == TipoMovimientoMeta.APORTE:
-                meta.monto_actual -= monto_impacto_meta
-            else:
-                meta.monto_actual += monto_impacto_meta
-                
-            # Ajustar estado de la meta
-            if meta.monto_actual >= meta.monto_objetivo:
-                meta.estado = EstadoMeta.COMPLETADA
-            else:
-                meta.estado = EstadoMeta.ACTIVA
-                
         db.delete(movimiento)
+        db.flush()
+        if meta:
+            try:
+                meta_service.recalcular_acumulado(db, meta)
+            except HTTPException:
+                if commit:
+                    db.rollback()
+                raise
 
     # Reversión de pago de resumen de tarjeta (Etapa 3A y 3B):
     if _tabla_saldo_arrastrado_existe(db):

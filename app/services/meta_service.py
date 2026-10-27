@@ -47,6 +47,56 @@ def obtener_meta(db: Session, usuario_id: UUID, meta_id: UUID) -> Meta:
         raise HTTPException(status_code=404, detail="No encontramos esa meta.")
     return meta
 
+def recalcular_acumulado(db: Session, meta: Meta) -> Decimal:
+    # Único punto que escribe meta.monto_actual a partir de la suma de sus movimientos (Decisión 5).
+    db.flush()
+    movimientos = (
+        db.execute(
+            select(MovimientoMeta).where(MovimientoMeta.meta_id == meta.id)
+        )
+        .scalars()
+        .all()
+    )
+    meta_moneda = meta.moneda.value if hasattr(meta.moneda, "value") else str(meta.moneda)
+    acumulado = Decimal("0.00")
+    for mov in sorted(movimientos, key=lambda m: (m.fecha, str(m.id))):
+        mov_moneda = mov.moneda_movimiento.value if hasattr(mov.moneda_movimiento, "value") else str(mov.moneda_movimiento)
+        monto_mov = Decimal(str(mov.monto))
+        if mov_moneda == meta_moneda:
+            impacto = monto_mov.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        else:
+            if mov.cotizacion_usada is None or Decimal(str(mov.cotizacion_usada)) <= Decimal("0"):
+                raise ValueError("Movimiento de meta entre monedas sin cotización válida.")
+            cot = Decimal(str(mov.cotizacion_usada))
+            if meta_moneda == "USD":
+                impacto = (monto_mov / cot).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            else:
+                impacto = (monto_mov * cot).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        tipo_str = mov.tipo.value if hasattr(mov.tipo, "value") else str(mov.tipo)
+        if tipo_str == TipoMovimientoMeta.APORTE.value:
+            acumulado += impacto
+        else:
+            acumulado -= impacto
+
+    acumulado = acumulado.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if acumulado < Decimal("0.00"):
+        raise HTTPException(
+            status_code=400,
+            detail="No se puede borrar este aporte porque la meta quedaría en negativo. Borrá primero el retiro.",
+        )
+
+    meta.monto_actual = acumulado
+    estado_actual = meta.estado.value if hasattr(meta.estado, "value") else str(meta.estado)
+    if estado_actual != EstadoMeta.PAUSADA.value:
+        if acumulado >= Decimal(str(meta.monto_objetivo)):
+            meta.estado = EstadoMeta.COMPLETADA
+        elif estado_actual == EstadoMeta.COMPLETADA.value and acumulado < Decimal(str(meta.monto_objetivo)):
+            meta.estado = EstadoMeta.ACTIVA
+
+    db.flush()
+    return acumulado
+
+
 def crear_meta(db: Session, usuario_id: UUID, data: MetaCreate) -> Meta:
     nombre_limpio = data.nombre.strip()
     if not nombre_limpio:
@@ -54,6 +104,12 @@ def crear_meta(db: Session, usuario_id: UUID, data: MetaCreate) -> Meta:
 
     if data.monto_objetivo <= Decimal("0"):
         raise HTTPException(status_code=400, detail="El monto objetivo tiene que ser mayor a cero.")
+
+    if data.monto_actual is not None and Decimal(str(data.monto_actual)) > Decimal("0"):
+        raise HTTPException(
+            status_code=400,
+            detail="Una meta nueva arranca en cero: cargá un aporte para sumarle plata.",
+        )
 
     if data.fecha_limite and data.fecha_limite < hoy_argentina():
         raise HTTPException(status_code=400, detail="La fecha límite no puede ser en el pasado.")
@@ -63,7 +119,7 @@ def crear_meta(db: Session, usuario_id: UUID, data: MetaCreate) -> Meta:
         nombre=nombre_limpio,
         monto_objetivo=data.monto_objetivo,
         moneda=data.moneda,
-        monto_actual=data.monto_actual,
+        monto_actual=Decimal("0.00"),
         fecha_limite=data.fecha_limite,
         color=data.color,
         nota=data.nota.strip() if data.nota else None,
@@ -272,7 +328,6 @@ def registrar_movimiento(
         )
         tx = crear_transaccion(db, usuario_id, tx_create, commit=False)
         tx.movimiento_meta_id = nuevo_movimiento.id
-        meta.monto_actual += monto_impacto_meta
     else:
         # Validar que no se retire más de lo que hay
         if meta.monto_actual < monto_impacto_meta:
@@ -301,38 +356,35 @@ def registrar_movimiento(
         )
         tx = crear_transaccion(db, usuario_id, tx_create, commit=False)
         tx.movimiento_meta_id = nuevo_movimiento.id
-        meta.monto_actual -= monto_impacto_meta
-    
-    # Actualizar estado si se completó (Lógica automática)
-    if meta.monto_actual >= meta.monto_objetivo:
-        estado_anterior = meta.estado  # capturar ANTES de cambiar
-        meta.estado = EstadoMeta.COMPLETADA
-        if estado_anterior != EstadoMeta.COMPLETADA:  # solo si recién se completó
-            try:
-                from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
-                from app.models.notificacion import TipoNotificacion, NivelNotificacion
-                config = obtener_configuracion(db, usuario_id, commit=False)
-                canales = resolver_canales_notificacion(config, TipoNotificacion.META_ALCANZADA)
-                if canales is not None:
-                    canal_web, canal_whatsapp = canales
-                    crear_notificacion(
-                        db=db,
-                        usuario_id=usuario_id,
-                        tipo=TipoNotificacion.META_ALCANZADA,
-                        nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                        mensaje=f"¡Completaste tu meta '{meta.nombre}'! Ahorraste {formatear_monto(meta.monto_objetivo, meta.moneda)}.",
-                        entidad_tipo="meta",
-                        entidad_id=meta.id,
-                        deep_link="/app/metas",
-                        canal_web=canal_web,
-                        canal_whatsapp=canal_whatsapp,
-                        commit=False,
-                        datos_template={"nombre": meta.nombre, "monto_fmt": formatear_monto(meta.monto_objetivo, meta.moneda)},
-                    )
-            except Exception:
-                pass
-    elif meta.estado == EstadoMeta.COMPLETADA and meta.monto_actual < meta.monto_objetivo:
-        meta.estado = EstadoMeta.ACTIVA
+
+    estado_anterior = meta.estado
+    db.flush()
+    recalcular_acumulado(db, meta)
+
+    if meta.estado == EstadoMeta.COMPLETADA and estado_anterior != EstadoMeta.COMPLETADA:
+        try:
+            from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion, crear_notificacion
+            from app.models.notificacion import TipoNotificacion, NivelNotificacion
+            config = obtener_configuracion(db, usuario_id, commit=False)
+            canales = resolver_canales_notificacion(config, TipoNotificacion.META_ALCANZADA)
+            if canales is not None:
+                canal_web, canal_whatsapp = canales
+                crear_notificacion(
+                    db=db,
+                    usuario_id=usuario_id,
+                    tipo=TipoNotificacion.META_ALCANZADA,
+                    nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
+                    mensaje=f"¡Completaste tu meta '{meta.nombre}'! Ahorraste {formatear_monto(meta.monto_objetivo, meta.moneda)}.",
+                    entidad_tipo="meta",
+                    entidad_id=meta.id,
+                    deep_link="/app/metas",
+                    canal_web=canal_web,
+                    canal_whatsapp=canal_whatsapp,
+                    commit=False,
+                    datos_template={"nombre": meta.nombre, "monto_fmt": formatear_monto(meta.monto_objetivo, meta.moneda)},
+                )
+        except Exception:
+            pass
 
     if commit:
         db.commit()
@@ -356,14 +408,6 @@ def eliminar_movimiento(
         
     # Revertir impacto
     billetera = db.get(Billetera, movimiento.billetera_id)
-    
-    monto_impacto_meta = movimiento.monto
-    if movimiento.moneda_movimiento != meta.moneda:
-        cotiz = movimiento.cotizacion_usada or Decimal("1")
-        if meta.moneda == Moneda.USD and movimiento.moneda_movimiento == Moneda.ARS:
-            monto_impacto_meta = (movimiento.monto / cotiz).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        elif meta.moneda == Moneda.ARS and movimiento.moneda_movimiento == Moneda.USD:
-            monto_impacto_meta = (movimiento.monto * cotiz).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     # Revertir impacto en saldo / transacciones
     from app.models.transaccion import Transaccion
@@ -396,34 +440,30 @@ def eliminar_movimiento(
                 Transaccion.descripcion.like(desc_patron)
             ).first()
 
+    mov_moneda = movimiento.moneda_movimiento
+    db.delete(movimiento)
+    db.flush()
+    try:
+        recalcular_acumulado(db, meta)
+    except HTTPException:
+        if commit:
+            db.rollback()
+        raise
+
     # Revertir impacto en saldo / transacciones
     if tx:
         from app.services.transaccion_service import _afecta_saldo, _validar_moneda_coincide
         if _afecta_saldo(tx) and tx.saldo_aplicado and billetera:
             try:
-                _validar_moneda_coincide(movimiento.moneda_movimiento, billetera)
+                _validar_moneda_coincide(mov_moneda, billetera)
                 impacto_tx = tx.monto if tx.tipo == TipoTransaccion.INGRESO else -tx.monto
                 aplicar_impacto_saldo(billetera, -impacto_tx, tx.fecha)
             except Exception as e:
-                logger.critical(f"Error crítico al revertir saldo de meta {movimiento.id}: {e}")
+                logger.critical(f"Error crítico al revertir saldo de meta {movimiento_id}: {e}")
         presupuesto_service.registrar_impacto_presupuesto(db, tx, revertir=True, commit=False)
         db.delete(tx)
     else:
-        logger.warning(f"Movimiento de meta {movimiento.id} no tiene transacción vinculada: no se toca el saldo.")
-
-    # Revertir en la meta
-    if movimiento.tipo == TipoMovimientoMeta.APORTE:
-        meta.monto_actual = max(Decimal("0"), meta.monto_actual - monto_impacto_meta)
-    else:
-        meta.monto_actual += monto_impacto_meta
-
-    # Actualizar estado
-    if meta.monto_actual >= meta.monto_objetivo:
-        meta.estado = EstadoMeta.COMPLETADA
-    else:
-        meta.estado = EstadoMeta.ACTIVA
-
-    db.delete(movimiento)
+        logger.warning(f"Movimiento de meta {movimiento_id} no tiene transacción vinculada: no se toca el saldo.")
     if commit:
         db.commit()
     else:

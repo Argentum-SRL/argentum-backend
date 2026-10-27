@@ -26,6 +26,8 @@ WORKSPACE_DIR = BACKEND_DIR.parent
 FRONTEND_DIR = WORKSPACE_DIR / "argentum-frontend"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
+from scripts.local.poda import ResultadoPoda, podar_backups  # noqa: F401
+_ = ResultadoPoda
 from scripts.local.rutas import (
     raw_dir as rutas_raw_dir,
     backups_dir as rutas_backups_dir,
@@ -592,65 +594,7 @@ def escanear_archivos_monitoreados(base_dir: Path, subcarpetas: list[str]) -> di
     return archivos
 
 
-class ResultadoPoda(int):
-    """Resultado numérico de copias podadas que expone también la lista de pasos podados."""
-    def __new__(cls, cantidad: int, pasos_podados: list[str]):
-        obj = super().__new__(cls, cantidad)
-        obj.pasos_podados = pasos_podados
-        return obj
 
-    def __iter__(self):
-        return iter((int(self), self.pasos_podados))
-
-
-def podar_backups(backups_dir_path: Path, limite_poda: int = 20) -> ResultadoPoda:
-    """
-    Si limite_poda > 0, busca carpetas backups/<paso>/ que tengan subcarpeta 'antes' o 'despues'.
-    Las ordena por fecha de modificación (st_mtime) más reciente de esas subcarpetas.
-    Conserva las limite_poda más recientes y en las demás borra exclusivamente 'antes' y 'despues'.
-    Nunca borra otros archivos dentro de backups ni nada de raw.
-    Retorna ResultadoPoda(cantidad_podadas, lista_pasos_podados).
-    """
-    if limite_poda <= 0 or not backups_dir_path.exists():
-        return ResultadoPoda(0, [])
-
-    candidatos = []
-    for p in backups_dir_path.iterdir():
-        if not p.is_dir():
-            continue
-        antes_path = p / "antes"
-        desp_path = p / "despues"
-        tiene_antes = antes_path.is_dir()
-        tiene_desp = desp_path.is_dir()
-        if not tiene_antes and not tiene_desp:
-            continue
-
-        mtime_antes = antes_path.stat().st_mtime if tiene_antes else 0.0
-        mtime_desp = desp_path.stat().st_mtime if tiene_desp else 0.0
-        mtime_mas_reciente = max(mtime_antes, mtime_desp)
-        candidatos.append((mtime_mas_reciente, p))
-
-    # Ordenar de más reciente a más antiguo
-    candidatos.sort(key=lambda x: x[0], reverse=True)
-
-    # Si hay más carpetas que el límite, las excedentes se podan
-    a_podar = candidatos[limite_poda:]
-    pasos_podados = []
-
-    for _, p in a_podar:
-        antes_path = p / "antes"
-        desp_path = p / "despues"
-        borrado_algo = False
-        if antes_path.is_dir():
-            shutil.rmtree(antes_path, ignore_errors=True)
-            borrado_algo = True
-        if desp_path.is_dir():
-            shutil.rmtree(desp_path, ignore_errors=True)
-            borrado_algo = True
-        if borrado_algo:
-            pasos_podados.append(p.name)
-
-    return ResultadoPoda(len(pasos_podados), pasos_podados)
 
 
 def hubo_cambio_frontend(porcelain_fe: str, head_inicio_fe: str, head_actual_fe: str) -> bool:
@@ -1239,6 +1183,10 @@ def ejecutar_cierre(paso: str) -> int:
     if res_poda.pasos_podados:
         for p_pod in res_poda.pasos_podados:
             buf_05.write(f"  - {p_pod}\n")
+    if getattr(res_poda, "no_podados", None):
+        buf_05.write(f"No podados ({len(res_poda.no_podados)}):\n")
+        for p_nopod, err_nopod in res_poda.no_podados:
+            buf_05.write(f"  - {p_nopod}: {err_nopod}\n")
 
     # Última línea obligatoria
     cambio_app = any(f.startswith("app/") for f in archivos_tocados)
