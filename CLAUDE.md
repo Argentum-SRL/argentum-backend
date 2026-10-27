@@ -90,6 +90,11 @@ Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_21-10.md (versi
 - **Excepts sin tragar en silencio**: en los servicios de plata, todo `except` lanza, registra con `logger` o lleva comentario `# Se ignora:`.
 - **Gastos hormiga y calculadora**: `_gastos_hormiga` en `notificacion_scheduler_service` excluye espejos de reintegro (`reintegro_de_id` nulo) del conteo manteniendo el total neto; `calcular_conveniencia_cuotas` usa `tna_a_mensual` (`app/utils/tasas.py`) y aplica el umbral del 1% y el signo del saldo final invertido cuando hay billetera de inversión.
 
+### Cuotas y tasas (fase_ec1_cuotas_tna)
+- `grupos_cuotas.tasa_interes` es TNA en % (migración `e7f8a9b0c1d2`). La conversión a mensual se hace únicamente con `tna_a_mensual` (`app/utils/tasas.py`).
+- La cuenta de cuotas (valor de cuota, total financiado, última cuota y amortización francesa) se realiza exclusivamente en `calcular_plan_cuotas` (`app/utils/cuotas.py`).
+- Endpoint GET `/grupos-cuotas/simular` para la simulación unificada de cuotas requerida por el front.
+
 ### Reintegros (fase5c, 21/10/2026)
 - Un reintegro recibido es una transacción espejo: EGRESO con monto NEGATIVO, misma categoría, subcategoría, billetera, medio de pago y tarjeta que la compra, fecha = día en que llegó la plata, reintegro_de_id = la compra (app/services/reintegro_service.py). Sin crédito mueve el saldo con aplicar_impacto_saldo; con crédito crea padre, grupo de 1 cuota y cuota hija negativa en el primer resumen sin pago confirmado desde esa fecha.
 - Pendiente = reintegro_esperado sin espejo: no suma en ningún número. Aviso web a los 30 días (notificar_reintegros_pendientes, dentro de _job_vencimientos_tarjetas).

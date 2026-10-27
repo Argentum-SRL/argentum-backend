@@ -347,7 +347,7 @@ def calcular_conveniencia_cuotas(req: InstallmentConvenienceRequest) -> dict:
     tasa = req.inflacion_mensual / 100  # Convertir a decimal
     
     if req.tiene_interes and req.tna is not None:
-        i = tna_a_mensual(req.tna)  # tasa mensual decimal
+        i = float(tna_a_mensual(req.tna))  # tasa mensual decimal
         if i == 0:
             monto_cuota = req.precio_contado / req.cantidad_cuotas
         else:
@@ -390,7 +390,7 @@ def calcular_conveniencia_cuotas(req: InstallmentConvenienceRequest) -> dict:
     remanente_vpn = None
     saldo_final_inversion = None
     if req.tna_billetera_inversion is not None and req.tna_billetera_inversion > 0:
-        r_b = tna_a_mensual(req.tna_billetera_inversion)  # tasa mensual de rendimiento
+        r_b = float(tna_a_mensual(req.tna_billetera_inversion))  # tasa mensual de rendimiento
         s_k = float(req.precio_contado)  # Saldo inicial S_0
         for _ in range(req.cantidad_cuotas):
             s_k = s_k * (1 + r_b) - monto_cuota

@@ -22,6 +22,9 @@ from app.services.saldo_billetera_service import aplicar_impacto_saldo, bloquear
 from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 
+from app.utils.tasas import tna_a_mensual
+from app.utils.cuotas import calcular_plan_cuotas
+
 logger = logging.getLogger(__name__)
 
 # Helper de normalización a nivel módulo para búsqueda insensible a mayúsculas/acentos y escape de LIKE
@@ -319,24 +322,17 @@ def crear_transaccion(
         db.add(nueva_transaccion)
         db.flush()
 
-        # Calculo Amortizacion Francesa
+        # Calculo unificado de plan de cuotas (fase_ec1_cuotas_tna)
         monto_total = data.info_cuotas.monto_total
-        cant = data.info_cuotas.cantidad_cuotas
-        
-        # Asegurar que cant sea al menos 1 para evitar DivisionByZero
         cant = max(1, data.info_cuotas.cantidad_cuotas)
-        
-        if data.info_cuotas.tiene_interes and data.info_cuotas.tasa_interes:
-            tasa_mensual = data.info_cuotas.tasa_interes / 100
-            if tasa_mensual > 0:
-                monto_cuota = monto_total * (tasa_mensual * (1 + tasa_mensual)**cant) / ((1 + tasa_mensual)**cant - 1)
-            else:
-                monto_cuota = monto_total / cant
-        else:
-            monto_cuota = monto_total / cant
-
-        from decimal import ROUND_HALF_UP
-        total_financiado = (monto_cuota * cant).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        tasa_mensual = (
+            tna_a_mensual(data.info_cuotas.tasa_interes)
+            if data.info_cuotas.tiene_interes and data.info_cuotas.tasa_interes and data.info_cuotas.tasa_interes > 0
+            else None
+        )
+        plan_cuotas = calcular_plan_cuotas(monto_total, cant, tasa_mensual)
+        monto_cuota = plan_cuotas["monto_cuota"]
+        total_financiado = plan_cuotas["total_financiado"]
 
         if data.metodo_pago == MetodoPago.CREDITO and not data.tarjeta_id:
             raise HTTPException(

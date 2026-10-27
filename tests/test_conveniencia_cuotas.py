@@ -1,4 +1,5 @@
 import pytest
+from decimal import Decimal
 
 from app.schemas.tools import InstallmentConvenienceRequest
 from app.services.tools_service import calcular_conveniencia_cuotas
@@ -6,9 +7,9 @@ from app.utils.tasas import tna_a_mensual
 
 
 def test_tna_a_mensual():
-    """TC.1: tna_a_mensual(60) = 0.05 y tna_a_mensual(12) = 0.01."""
-    assert tna_a_mensual(60) == pytest.approx(0.05)
-    assert tna_a_mensual(12) == pytest.approx(0.01)
+    """TC.1: tna_a_mensual(60) == Decimal('0.05') y tna_a_mensual(12) == Decimal('0.01')."""
+    assert tna_a_mensual(60) == Decimal("0.05")
+    assert tna_a_mensual(12) == Decimal("0.01")
 
 
 def test_conveniencia_cuotas_con_billetera_inversion_60():

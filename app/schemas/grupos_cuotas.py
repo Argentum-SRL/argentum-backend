@@ -48,3 +48,22 @@ class GrupoCuotasUpdate(BaseModel):
         if v is not None:
             return v.strip()
         return v
+
+class PlanCuotas(BaseModel):
+    cantidad_cuotas: int
+    monto_cuota: DecimalJSON
+    total_financiado: DecimalJSON
+    ultima_cuota: DecimalJSON
+    recargo: DecimalJSON | None = None
+    recargo_porcentaje: DecimalJSON | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class SimularCuotasResponse(BaseModel):
+    tasa_tna: DecimalJSON | None = None
+    tna: DecimalJSON | None = None
+    tea: DecimalJSON | None = None
+    cft_estimado: DecimalJSON | None = None
+    planes: list[PlanCuotas]
+
+    model_config = ConfigDict(from_attributes=True)

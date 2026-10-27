@@ -16,23 +16,26 @@ from app.core.constants import IVA_INTERESES
 logger = logging.getLogger(__name__)
 
 
-def calcular_tasas_cuotas(tasa_interes: Decimal | float | None) -> dict[str, Decimal] | None:
+from app.utils.tasas import tna_a_mensual
+
+
+def calcular_tasas_cuotas(tasa_tna: Decimal | float | None) -> dict[str, Decimal] | None:
     """
-    Calcula TNA, TEA y CFT estimado a partir de la tasa_interes mensual nominal (%) de una compra en cuotas.
+    Calcula TNA, TEA y CFT estimado a partir de la tasa nominal anual (TNA %) de una compra en cuotas.
 
     Fórmulas:
-      - tasa_mensual = tasa_interes / 100
-      - TNA = tasa_mensual * 12
-      - TEA = (1 + tasa_mensual)^12 - 1
-      - CFT estimado = (1 + tasa_mensual * (1 + IVA_INTERESES))^12 - 1
+      - tasa_mensual = tna_a_mensual(tasa_tna)
+      - TNA = tasa_tna redondeada a 2 decimales (HALF_UP)
+      - TEA = ((1 + tasa_mensual)^12 - 1) * 100
+      - CFT estimado = ((1 + tasa_mensual * (1 + IVA_INTERESES))^12 - 1) * 100
 
     Los valores se expresan en porcentaje (%) redondeados a 2 decimales para compatibilidad
     con la representación financiera del sistema.
     """
-    if tasa_interes is None:
+    if tasa_tna is None:
         return None
     try:
-        ti = Decimal(str(tasa_interes))
+        ti = Decimal(str(tasa_tna))
     except Exception:
         logger.warning("No se pudo convertir la tasa de interés de las cuotas a Decimal", exc_info=True)
         return None
@@ -40,8 +43,8 @@ def calcular_tasas_cuotas(tasa_interes: Decimal | float | None) -> dict[str, Dec
     if ti <= Decimal("0"):
         return None
 
-    tasa_mensual = ti / Decimal("100")
-    tna = (tasa_mensual * Decimal("12") * Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    tasa_mensual = tna_a_mensual(ti)
+    tna = ti.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     tea = (((Decimal("1") + tasa_mensual) ** 12 - Decimal("1")) * Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     cft_estimado = (((Decimal("1") + tasa_mensual * (Decimal("1") + IVA_INTERESES)) ** 12 - Decimal("1")) * Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 

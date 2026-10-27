@@ -22,7 +22,7 @@ class InfoCuotas(BaseModel):
     cantidad_cuotas: int = Field(ge=1, le=120, description="Cantidad total de cuotas (1 a 120)")
     cuota_inicial: int = Field(default=1, ge=1, le=120, description="Número de cuota inicial")
     tiene_interes: bool = False
-    tasa_interes: DecimalJSON | None = Field(default=None, ge=0, le=1000, description="Tasa de interés mensual %")
+    tasa_interes: DecimalJSON | None = Field(default=None, ge=0, le=3000, description="Tasa nominal anual (TNA) %")
     monto_total: DecimalJSON = Field(gt=0, max_digits=15, decimal_places=2, description="Monto base total")
     proximo_resumen: bool = False
 
@@ -32,8 +32,8 @@ class InfoCuotas(BaseModel):
             raise ValueError("La cuota inicial no puede ser mayor a la cantidad total de cuotas.")
         if self.tiene_interes and self.tasa_interes is not None and self.tasa_interes < 0:
             raise ValueError("La tasa de interés no puede ser negativa.")
-        if self.tasa_interes is not None and self.tasa_interes > Decimal("1000"):
-            raise ValueError("La tasa de interés debe estar entre 0 y 1000% mensual.")
+        if self.tasa_interes is not None and (self.tasa_interes < Decimal("0") or self.tasa_interes > Decimal("3000")):
+            raise ValueError("La tasa de interés (TNA) debe estar entre 0 y 3000%.")
         return self
 
 

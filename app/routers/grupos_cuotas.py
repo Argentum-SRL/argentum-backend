@@ -1,23 +1,25 @@
 from uuid import UUID
 from datetime import date
-from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from decimal import Decimal, ROUND_HALF_UP
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, joinedload
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
+from app.core.constants import MAX_MONTO_INTEGRIDAD
 from app.models.usuario import Usuario
 from app.models.grupo_cuotas import GrupoCuotas, EstadoGrupoCuotas
 from app.models.tarjeta_credito import TarjetaCredito
 from app.models.cuota import Cuota
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion, MetodoPago
 from app.models.billetera import Billetera
-from app.schemas.grupos_cuotas import GrupoCuotasResumen, GrupoCuotasUpdate
+from app.schemas.grupos_cuotas import GrupoCuotasResumen, GrupoCuotasUpdate, PlanCuotas, SimularCuotasResponse
 from app.services.transaccion_service import _hoy_argentina
 from app.services.cuotas_service import calcular_tasas_cuotas
 from app.services import idempotencia_service
-from app.utils.cuotas import monto_efectivo_cuota
+from app.utils.cuotas import monto_efectivo_cuota, calcular_plan_cuotas
+from app.utils.tasas import tna_a_mensual
 
 router = APIRouter(prefix="/grupos-cuotas", tags=["grupos_cuotas"])
 
@@ -158,6 +160,66 @@ def get_grupos_cuotas(
         
     resumenes.sort(key=get_sort_key)
     return resumenes
+
+@router.get("/simular", response_model=SimularCuotasResponse)
+def simular_cuotas(
+    monto_total: Decimal = Query(..., gt=0, le=MAX_MONTO_INTEGRIDAD),
+    cantidades: list[int] = Query(..., min_length=1, max_length=6),
+    tasa_tna: Decimal | None = Query(None, ge=0, le=3000),
+    precio_contado: Decimal | None = Query(None, gt=0, le=MAX_MONTO_INTEGRIDAD),
+    current_user: Usuario = Depends(get_current_user),
+):
+    for c in cantidades:
+        if c < 1 or c > 120:
+            raise HTTPException(
+                status_code=422,
+                detail="Cada cantidad de cuotas debe estar entre 1 y 120."
+            )
+
+    tna = None
+    tea = None
+    cft_estimado = None
+    tasa_tna_resp = None
+    tasa_mensual = None
+
+    if tasa_tna is not None and tasa_tna > Decimal("0"):
+        tasa_tna_resp = tasa_tna
+        tasas = calcular_tasas_cuotas(tasa_tna)
+        if tasas:
+            tna = tasas["tna"]
+            tea = tasas["tea"]
+            cft_estimado = tasas["cft_estimado"]
+        tasa_mensual = tna_a_mensual(tasa_tna)
+
+    planes = []
+    for cant in cantidades:
+        plan = calcular_plan_cuotas(monto_total, cant, tasa_mensual)
+        recargo = None
+        recargo_pct = None
+        if precio_contado is not None:
+            recargo = plan["total_financiado"] - precio_contado
+            recargo_pct = ((recargo / precio_contado) * Decimal("100")).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+
+        planes.append(
+            PlanCuotas(
+                cantidad_cuotas=plan["cantidad_cuotas"],
+                monto_cuota=plan["monto_cuota"],
+                total_financiado=plan["total_financiado"],
+                ultima_cuota=plan["ultima_cuota"],
+                recargo=recargo,
+                recargo_porcentaje=recargo_pct
+            )
+        )
+
+    return SimularCuotasResponse(
+        tasa_tna=tasa_tna_resp,
+        tna=tna,
+        tea=tea,
+        cft_estimado=cft_estimado,
+        planes=planes
+    )
 
 @router.patch("/{grupo_id}", response_model=GrupoCuotasResumen)
 def update_grupo_cuotas(

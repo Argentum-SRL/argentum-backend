@@ -155,7 +155,7 @@ def test_te9_compra_12_cuotas_con_interes_5_porciento(db: Session):
             cantidad_cuotas=12,
             cuota_inicial=1,
             tiene_interes=True,
-            tasa_interes=Decimal("5"),
+            tasa_interes=Decimal("60"),
             monto_total=Decimal("120000.00"),
             proximo_resumen=False,
         ),
