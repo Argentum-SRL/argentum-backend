@@ -335,7 +335,8 @@ def crear_transaccion(
         else:
             monto_cuota = monto_total / cant
 
-        total_financiado = monto_cuota * cant
+        from decimal import ROUND_HALF_UP
+        total_financiado = (monto_cuota * cant).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
         if data.metodo_pago == MetodoPago.CREDITO and not data.tarjeta_id:
             raise HTTPException(
@@ -464,7 +465,7 @@ def crear_transaccion(
                         datos_template={"billetera_nombre": billetera.nombre},
                     )
             except Exception:
-                pass
+                logger.warning("No se pudo crear la notificación de saldo en cero al crear la transacción", exc_info=True)
 
     # Impacto en presupuestos
     presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False, commit=False)
@@ -643,7 +644,7 @@ def actualizar_transaccion(
                             datos_template={"billetera_nombre": billetera_nueva.nombre},
                         )
                 except Exception:
-                    pass
+                    logger.warning("No se pudo crear la notificación de saldo en cero al actualizar la transacción", exc_info=True)
 
         # Actualizar estado de saldo_aplicado con los datos nuevos tras aplicar cambios de saldo
         transaccion.saldo_aplicado = not _queda_pendiente_por_fecha(transaccion)
@@ -920,7 +921,7 @@ def confirmar_transaccion_ia(
                         datos_template={"billetera_nombre": billetera.nombre},
                     )
             except Exception:
-                pass
+                logger.warning("No se pudo crear la notificación de saldo en cero al confirmar la transacción", exc_info=True)
 
     # Al confirmar, después de aplicar los cambios de saldo, lo mismo con los datos nuevos
     transaccion.saldo_aplicado = not _queda_pendiente_por_fecha(transaccion)
@@ -976,7 +977,7 @@ def confirmar_transaccion_ia(
             from app.services.perfil_financiero_service import recalcular_perfil_tras_confirmacion
             recalcular_perfil_tras_confirmacion(db, usuario_id)
         except Exception:
-            pass  # No interrumpir el flujo principal si falla
+            logger.warning("No se pudo recalcular el perfil financiero tras confirmar la transacción", exc_info=True)
     else:
         db.flush()
         # con commit=False, el perfil lo recalcula quien hace el commit

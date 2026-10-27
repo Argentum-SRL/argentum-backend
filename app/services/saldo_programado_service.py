@@ -84,7 +84,7 @@ def aplicar_movimientos_con_fecha_llegada(db: Session) -> int:
                             datos_template={"billetera_nombre": billetera.nombre},
                         )
                 except Exception:
-                    pass
+                    logger.warning("No se pudo crear la notificación de saldo en cero al aplicar movimiento con fecha llegada", exc_info=True)
 
         tx.saldo_aplicado = True
         aplicados_count += 1

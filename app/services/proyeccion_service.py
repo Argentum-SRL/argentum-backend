@@ -21,6 +21,7 @@ from app.services.ingreso_habitual_service import (
     calcular_ingreso_esperado_ciclo,
     obtener_ingreso_habitual,
 )
+from app.utils.cuotas import monto_efectivo_cuota
 from app.utils.fecha import hoy_argentina
 from app.utils.finanzas import (
     ClasificacionGasto,
@@ -205,7 +206,7 @@ def calcular_proyeccion_nueva(
         # ----------------------------------------------------------------------
         # Cuotas de crédito pendientes de pago que vencen en [hoy, fin]
         cuotas_pendientes = sum(
-            (c.monto_real or c.monto_proyectado or ZERO
+            (monto_efectivo_cuota(c)
              for c, grupo in data["cuotas"]
              if grupo.moneda == moneda and not c.pagada and hoy <= c.fecha_vencimiento <= fin),
             ZERO,

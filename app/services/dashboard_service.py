@@ -1,28 +1,27 @@
 from __future__ import annotations
 
 import calendar
-from datetime import date, datetime, timedelta
+import logging
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from fastapi import HTTPException
 from dateutil.relativedelta import relativedelta
-from sqlalchemy import and_, func, select, or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_, func, select
+from sqlalchemy.orm import Session
 
 from app.utils.fecha import hoy_argentina
 from app.models.usuario import Usuario, CicloTipo, Moneda
 from app.models.billetera import Billetera, EstadoBilletera
-from app.models.transaccion import Transaccion, TipoTransaccion
+from app.models.transaccion import Transaccion
 from app.models.categoria import Categoria
 from app.models.subcategoria import Subcategoria, EstadoSubcategoria
-from app.models.suscripcion import Suscripcion, EstadoSuscripcion
-from app.models.cuota import Cuota
-from app.models.grupo_cuotas import GrupoCuotas
-from app.models.tarjeta_credito import TarjetaCredito
 from app.services.definiciones_service import condicion_gasto, condicion_ingreso
 from app.services import pagos_proximos_service
+
+logger = logging.getLogger(__name__)
 
 def get_date_by_rule(rule: str, month: int, year: int) -> date:
     """Calcula la fecha exacta segun una regla (ej: ultimo_viernes, ultimo_dia_habil, dia_habil_4)."""
@@ -46,6 +45,7 @@ def get_date_by_rule(rule: str, month: int, year: int) -> date:
             try:
                 target_n = int(rule_lower.split("_")[-1])
             except ValueError:
+                # Se ignora: si el sufijo de la regla no es un número válido, se usa el primer día hábil.
                 target_n = 1
 
         count = 0
@@ -86,6 +86,7 @@ def calcular_inicio_ciclo_para_mes_ancla(usuario: Usuario, anio: int, mes: int) 
         try:
             dia = int(usuario.ciclo_valor)
         except (ValueError, TypeError):
+            # Se ignora: si ciclo_valor no es convertible a entero, se usa el día 1 como respaldo.
             dia = 1
         
         ultimo_dia_mes = calendar.monthrange(anio, mes)[1]
@@ -158,164 +159,6 @@ def get_ciclo_fechas(usuario: Usuario, hoy: date) -> tuple[date, date]:
     ini_bot = calcular_inicio_ciclo_para_mes_ancla(usuario, m_bot.year, m_bot.month)
     ini_bot_next = calcular_inicio_ciclo_para_mes_ancla(usuario, m_bot_next.year, m_bot_next.month)
     return ini_bot, ini_bot_next - timedelta(days=1)
-
-
-def calcular_saldo_disponible_ciclo_actual(
-    db: Session,
-    usuario: Usuario,
-    fecha_fin_ciclo: Optional[date] = None,
-    fecha_inicio_ciclo: Optional[date] = None,
-    total_billeteras_override: Optional[Dict[str, Decimal]] = None,
-    billetera_ids: Optional[List[UUID]] = None
-) -> Dict[str, Any]:
-    """
-    Calcula el saldo disponible para gastar en el ciclo actual en Decimal de punta a punta:
-      saldo_total: suma de saldo_actual de las billeteras activas incluidas en el filtro (mismo criterio que el balance actual).
-      cuotas_pendientes: cuotas con pagada=False y vencimiento <= fin del ciclo actual (sin piso de fecha, incluye vencidas impagas),
-                         excluyendo las ya cubiertas por un pago de resumen.
-      suscripciones_pendientes: activas con próximo_cobro <= fin del ciclo actual (sin piso de fecha).
-      otros_compromisos: transacciones recurrentes de egreso activas, cargadas explícitamente,
-                         no ejecutadas todavía en el ciclo actual. Sin estimaciones ni montos medianos proyectados.
-      saldo_disponible = saldo_total - (cuotas_pendientes + suscripciones_pendientes + otros_compromisos), separado por moneda.
-    """
-    if fecha_fin_ciclo is None or fecha_inicio_ciclo is None:
-        ini_c, fin_c = get_ciclo_fechas(usuario, hoy_argentina())
-        if fecha_inicio_ciclo is None:
-            fecha_inicio_ciclo = ini_c
-        if fecha_fin_ciclo is None:
-            fecha_fin_ciclo = fin_c
-
-    # 1. Saldo total de billeteras activas
-    saldo_total = {"ars": Decimal("0.00"), "usd": Decimal("0.00")}
-    if total_billeteras_override is not None:
-        saldo_total["ars"] = Decimal(str(total_billeteras_override.get("ars", Decimal("0.00"))))
-        saldo_total["usd"] = Decimal(str(total_billeteras_override.get("usd", Decimal("0.00"))))
-    else:
-        b_stmt = select(Billetera.moneda, func.sum(Billetera.saldo_actual)).where(
-            Billetera.usuario_id == usuario.id,
-            Billetera.estado == EstadoBilletera.ACTIVA,
-            Billetera.es_inversion == False
-        )
-        if billetera_ids:
-            b_stmt = b_stmt.where(Billetera.id.in_(billetera_ids))
-        b_stmt = b_stmt.group_by(Billetera.moneda)
-        for m, s in db.execute(b_stmt).all():
-            m_key = m.value.lower() if hasattr(m, "value") else str(m).lower()
-            if m_key in saldo_total:
-                saldo_total[m_key] = Decimal(str(s or Decimal("0.00")))
-
-    # 2. Cuotas pendientes: pagada=False y vencimiento <= fin del ciclo actual
-    # Excluyendo aquellas ya cubiertas por un pago de resumen
-    cuotas_query = (
-        db.query(Cuota)
-        .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
-        .options(joinedload(Cuota.grupo))
-        .filter(
-            GrupoCuotas.usuario_id == usuario.id,
-            Cuota.pagada == False,
-            Cuota.fecha_vencimiento <= fecha_fin_ciclo
-        )
-    )
-    if billetera_ids:
-        tarjeta_ids_stmt = select(TarjetaCredito.id).where(TarjetaCredito.billetera_id.in_(billetera_ids))
-        parent_tx_stmt = select(Transaccion.id).where(
-            Transaccion.usuario_id == usuario.id,
-            Transaccion.billetera_id.in_(billetera_ids)
-        )
-        cuotas_query = cuotas_query.filter(
-            or_(
-                GrupoCuotas.tarjeta_id.in_(tarjeta_ids_stmt),
-                and_(
-                    GrupoCuotas.tarjeta_id == None,
-                    GrupoCuotas.transaccion_padre_id.in_(parent_tx_stmt)
-                )
-            )
-        )
-
-    # Identificar pagos de resumen para excluir cuotas ya cubiertas
-    pago_resumen_stmt = select(Transaccion.tarjeta_id, Transaccion.pago_resumen_vencimiento).where(
-        Transaccion.usuario_id == usuario.id,
-        Transaccion.tipo == TipoTransaccion.EGRESO,
-        Transaccion.tarjeta_id.isnot(None),
-        Transaccion.pago_resumen_vencimiento.isnot(None)
-    )
-    pagos_resumen = db.execute(pago_resumen_stmt).all()
-    max_pago_por_tarjeta: Dict[UUID, date] = {}
-    for tid, f_venc in pagos_resumen:
-        if f_venc:
-            if tid not in max_pago_por_tarjeta or f_venc > max_pago_por_tarjeta[tid]:
-                max_pago_por_tarjeta[tid] = f_venc
-
-    cuotas_pendientes = {"ars": Decimal("0.00"), "usd": Decimal("0.00")}
-    for c in cuotas_query.all():
-        if c.transaccion_pago_id is not None:
-            continue
-        tid = c.grupo.tarjeta_id if c.grupo else None
-        if tid and tid in max_pago_por_tarjeta and c.fecha_vencimiento <= max_pago_por_tarjeta[tid]:
-            continue
-
-        monto = c.monto_real if c.monto_real is not None else (c.monto_proyectado or Decimal("0.00"))
-        monto_dec = Decimal(str(monto))
-        moneda_key = c.grupo.moneda.value.lower() if hasattr(c.grupo.moneda, "value") else str(c.grupo.moneda).lower()
-        if moneda_key in cuotas_pendientes:
-            cuotas_pendientes[moneda_key] += monto_dec
-
-    # 3. Suscripciones pendientes: activas con próximo_cobro <= fin del ciclo actual (sin piso de fecha)
-    s_stmt_where = and_(
-        Suscripcion.usuario_id == usuario.id,
-        Suscripcion.estado == EstadoSuscripcion.ACTIVA,
-        Suscripcion.proximo_cobro <= fecha_fin_ciclo
-    )
-    if billetera_ids:
-        tarjeta_ids_stmt = select(TarjetaCredito.id).where(TarjetaCredito.billetera_id.in_(billetera_ids))
-        s_stmt_where = and_(
-            s_stmt_where,
-            or_(
-                Suscripcion.billetera_id.in_(billetera_ids),
-                Suscripcion.tarjeta_id.in_(tarjeta_ids_stmt)
-            )
-        )
-
-    suscripciones = db.query(Suscripcion).options(
-        joinedload(Suscripcion.historial)
-    ).filter(s_stmt_where).all()
-
-    suscripciones_pendientes = {"ars": Decimal("0.00"), "usd": Decimal("0.00")}
-    for s in suscripciones:
-        if s.historial:
-            hist_ordenado = sorted(
-                s.historial,
-                key=lambda h: (h.vigente_desde, getattr(h, 'fecha_creacion', datetime.min)),
-                reverse=True
-            )
-            precio_vigente = hist_ordenado[0]
-            monto = Decimal(str(precio_vigente.monto or Decimal("0.00")))
-            moneda_key = precio_vigente.moneda.value.lower() if hasattr(precio_vigente.moneda, "value") else str(precio_vigente.moneda).lower()
-            if moneda_key in suscripciones_pendientes:
-                suscripciones_pendientes[moneda_key] += monto
-
-    # 4. Saldo disponible = saldo_total - (cuotas_pendientes + suscripciones_pendientes)
-    saldo_disponible_ars = (
-        saldo_total["ars"] - cuotas_pendientes["ars"] - suscripciones_pendientes["ars"]
-    )
-    saldo_disponible_usd = (
-        saldo_total["usd"] - cuotas_pendientes["usd"] - suscripciones_pendientes["usd"]
-    )
-
-    return {
-        "ars": {
-            "saldo_total": saldo_total["ars"],
-            "cuotas_pendientes": cuotas_pendientes["ars"],
-            "suscripciones_pendientes": suscripciones_pendientes["ars"],
-            "saldo_disponible": saldo_disponible_ars,
-        },
-        "usd": {
-            "saldo_total": saldo_total["usd"],
-            "cuotas_pendientes": cuotas_pendientes["usd"],
-            "suscripciones_pendientes": suscripciones_pendientes["usd"],
-            "saldo_disponible": saldo_disponible_usd,
-        },
-    }
 
 
 def get_dashboard_resumen(
@@ -453,14 +296,6 @@ def get_dashboard_resumen(
         key=lambda x: (0 if x["dias_restantes"] < 0 else 1, x["fecha_cobro"])
     )
 
-    from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
-    disp_ctx = _calcular_saldo_disponible_sync(
-        db,
-        usuario.id,
-        billetera_ids,
-        total_billeteras_override=total_billeteras_override,
-    )
-
     # --- QUERY: Gastos Reales por Categoría en el Ciclo Actual ---
     cat_where = condicion_gasto(
         usuario_id=usuario.id,
@@ -511,16 +346,16 @@ def get_dashboard_resumen(
         "balance": balance_res,
         "disponible_real": {
             "ars": {
-                "saldo_billeteras": float(disp_ctx["ars"]["total_billeteras"]),
-                "cuotas_proximo_ciclo": float(disp_ctx["ars"]["cuotas_comprometidas"]),
-                "suscripciones_mensuales": float(disp_ctx["ars"]["suscripciones_mensuales"]),
-                "disponible": float(disp_ctx["ars"]["saldo_disponible"])
+                "saldo_billeteras": float(saldo_disp_actual["ars"]["saldo_total"]),
+                "cuotas_proximo_ciclo": float(saldo_disp_actual["ars"]["cuotas_pendientes"]),
+                "suscripciones_mensuales": float(saldo_disp_actual["ars"]["suscripciones_pendientes"]),
+                "disponible": float(saldo_disp_actual["ars"]["saldo_disponible"])
             },
             "usd": {
-                "saldo_billeteras": float(disp_ctx["usd"]["total_billeteras"]),
-                "cuotas_proximo_ciclo": float(disp_ctx["usd"]["cuotas_comprometidas"]),
-                "suscripciones_mensuales": float(disp_ctx["usd"]["suscripciones_mensuales"]),
-                "disponible": float(disp_ctx["usd"]["saldo_disponible"])
+                "saldo_billeteras": float(saldo_disp_actual["usd"]["saldo_total"]),
+                "cuotas_proximo_ciclo": float(saldo_disp_actual["usd"]["cuotas_pendientes"]),
+                "suscripciones_mensuales": float(saldo_disp_actual["usd"]["suscripciones_pendientes"]),
+                "disponible": float(saldo_disp_actual["usd"]["saldo_disponible"])
             }
         },
         "saldo_disponible": saldo_disp_actual,
@@ -617,7 +452,7 @@ def get_cotizacion_usuario(usuario: Usuario) -> Dict[str, Any]:
         if "oficial" in cots:
             return cots["oficial"]
     except Exception:
-        pass
+        logger.warning("No se pudo obtener la cotización del dólar para el usuario", exc_info=True)
 
     return {
         "tipo": tipo,

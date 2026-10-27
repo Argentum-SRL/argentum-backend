@@ -45,6 +45,7 @@ def bloquear_billeteras(
             try:
                 uuid_set.add(item if isinstance(item, UUID) else UUID(str(item)))
             except (ValueError, TypeError):
+                # Se ignora: si un identificador no tiene formato UUID válido, no puede buscarse en la tabla.
                 continue
 
     if not uuid_set:

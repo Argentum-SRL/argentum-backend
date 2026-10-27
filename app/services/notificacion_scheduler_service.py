@@ -9,6 +9,7 @@ from app.models.usuario import Usuario, Moneda
 from app.services.notificacion_service import crear_notificacion
 from app.services import notificacion_whatsapp_service as wpp_svc
 from app.services.whatsapp_service import enviar_whatsapp_template
+from app.utils.cuotas import monto_efectivo_cuota
 from app.utils.fecha import ahora_argentina, hoy_argentina
 from app.utils.formato import formatear_monto
 from app.core.job_lock import intentar_tomar_lock_job, liberar_lock_job
@@ -132,7 +133,7 @@ def _job_notificaciones_cuotas(db_session_factory):
                 descripcion = getattr(grupo, 'descripcion', 'Compra en cuotas') if grupo else 'Compra en cuotas'
                 cantidad = getattr(grupo, 'cantidad_cuotas', '?') if grupo else '?'
                 numero = getattr(cuota, 'numero_cuota', '?')
-                monto = float(getattr(cuota, 'monto_proyectado', 0) or getattr(cuota, 'monto_real', 0))
+                monto = float(monto_efectivo_cuota(cuota))
 
                 moneda_cuota = getattr(grupo, 'moneda', None) or getattr(cuota, 'moneda', None) or "ARS"
                 monto_fmt = formatear_monto(monto, moneda_cuota)
@@ -549,6 +550,45 @@ def _job_entrega_whatsapp_batched(db_session_factory):
         db.close()
 
 
+def _gastos_hormiga(
+    db: Session,
+    usuario_id: Any,
+    desde: date,
+    hasta: date,
+    moneda: Moneda | str,
+    hoy: date,
+    umbral: int = 5,
+) -> list[dict]:
+    """
+    Calcula las categorías con gastos hormiga en el período contando únicamente
+    compras reales (reintegro_de_id nulo) y manteniendo el total como suma neta.
+    """
+    from app.models.categoria import Categoria
+    from app.models.transaccion import Transaccion
+
+    conteo_compras = func.count(Transaccion.id).filter(Transaccion.reintegro_de_id.is_(None))
+    filas = (
+        db.query(
+            Categoria.nombre,
+            conteo_compras.label("cantidad"),
+            func.sum(Transaccion.monto).label("total"),
+        )
+        .join(Transaccion, Transaccion.categoria_id == Categoria.id)
+        .filter(
+            condicion_gasto(usuario_id, desde=desde, hasta=hasta, moneda=moneda, hoy=hoy),
+        )
+        .group_by(Categoria.nombre)
+        .having(conteo_compras >= umbral)
+        .order_by(conteo_compras.desc())
+        .limit(3)
+        .all()
+    )
+    return [
+        {"categoria": r.nombre, "cantidad": int(r.cantidad), "total": float(r.total)}
+        for r in filas
+    ]
+
+
 def _job_resumen_cierre_ciclo(db_session_factory):
     """
     Corre diariamente a las 07:20 UTC.
@@ -645,21 +685,10 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                 ).group_by(Categoria.nombre).order_by(func.sum(Transaccion.monto).desc()).first()
 
                 # Gastos hormiga: categorías con muchas transacciones de monto bajo
-                hormiga_threshold = 5
-                gastos_hormiga_raw = db.query(
-                    Categoria.nombre,
-                    func.count(Transaccion.id).label("cantidad"),
-                    func.sum(Transaccion.monto).label("total")
-                ).join(Transaccion, Transaccion.categoria_id == Categoria.id).filter(
-                    condicion_gasto(usuario.id, desde=fecha_inicio, hasta=fecha_fin, moneda=moneda_top, hoy=hoy),
-                ).group_by(Categoria.nombre).having(
-                    func.count(Transaccion.id) >= hormiga_threshold
-                ).order_by(func.count(Transaccion.id).desc()).limit(3).all()
-
-                gastos_hormiga = [
-                    {"categoria": r.nombre, "cantidad": r.cantidad, "total": float(r.total)}
-                    for r in gastos_hormiga_raw
-                ] if gastos_hormiga_raw else None
+                gastos_hormiga_lista = _gastos_hormiga(
+                    db, usuario.id, fecha_inicio, fecha_fin, moneda_top, hoy, umbral=5
+                )
+                gastos_hormiga = gastos_hormiga_lista if gastos_hormiga_lista else None
 
                 if hay_ars and not hay_usd:
                     signo_ars = "+" if balance_ars >= 0 else ""

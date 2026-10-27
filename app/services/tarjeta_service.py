@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 
 logger = logging.getLogger(__name__)
 
+from app.utils.cuotas import monto_efectivo_cuota
 from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 from app.models.tarjeta_credito import TarjetaCredito, EstadoTarjeta
@@ -144,7 +145,7 @@ def obtener_resumen_impago(db: Session, tarjeta: TarjetaCredito) -> dict | None:
         try:
             vencimiento = date.fromisoformat(str(notif.datos_template["vencimiento"]))
         except Exception:
-            pass
+            logger.warning("No se pudo interpretar la fecha de vencimiento en datos_template de RESUMEN_IMPAGO", exc_info=True)
 
     if not vencimiento and notif.grupo_agrupacion:
         try:
@@ -152,7 +153,7 @@ def obtener_resumen_impago(db: Session, tarjeta: TarjetaCredito) -> dict | None:
             if len(partes) >= 4 and len(partes[3]) == 8:
                 vencimiento = datetime.strptime(partes[3], "%Y%m%d").date()
         except Exception:
-            pass
+            logger.warning("No se pudo extraer la fecha de vencimiento del grupo_agrupacion de RESUMEN_IMPAGO", exc_info=True)
 
     if not vencimiento:
         return None
@@ -634,7 +635,7 @@ def obtener_detalle_resumen_vencimiento(
         .all()
     )
     monto_cuotas = sum(
-        (c.monto_real if c.monto_real is not None else c.monto_proyectado)
+        monto_efectivo_cuota(c)
         for c in cuotas
     )
 
@@ -644,7 +645,7 @@ def obtener_detalle_resumen_vencimiento(
     else:
         monto_facturado = monto_cuotas
         cuotas_impagas = sum(
-            (c.monto_real if c.monto_real is not None else c.monto_proyectado)
+            monto_efectivo_cuota(c)
             for c in cuotas if not c.pagada
         )
         monto_deuda_restante = cuotas_impagas
@@ -712,7 +713,7 @@ def calcular_presion_futura(
             continue
 
         mes_key = (cuota.fecha_vencimiento.year, cuota.fecha_vencimiento.month)
-        monto = Decimal(str(cuota.monto_real if cuota.monto_real is not None else cuota.monto_proyectado or 0))
+        monto = monto_efectivo_cuota(cuota)
         por_mes[mes_key][grupo.tarjeta_id] += monto
 
     # Construir la respuesta ordenada

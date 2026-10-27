@@ -38,6 +38,8 @@ from app.services.tarjeta_service import (
     get_info_transaccion,
 )
 from app.services import calendario_tarjeta_service
+from app.services.pesificacion_service import cotizacion_pesificacion
+from app.utils.cuotas import monto_efectivo_cuota
 from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 
@@ -177,7 +179,7 @@ def pagar_resumen_tarjeta(
             cuotas_otra_moneda.append(c)
 
     monto_cuotas = sum(
-        (c.monto_real if c.monto_real is not None else c.monto_proyectado)
+        monto_efectivo_cuota(c)
         for c in cuotas_coincidentes
     )
     monto_saldos_anteriores = sum(s.monto_restante for s in saldos_anteriores_activos)
@@ -292,20 +294,16 @@ def pagar_resumen_tarjeta(
             if billetera_pago.moneda != Moneda.ARS:
                 raise HTTPException(status_code=400, detail="Para pesificar consumos en dólares debés usar una billetera en pesos.")
 
-            # Cotización dólar oficial de la fecha de cierre (Tarea 3.5 y 3.6)
-            from app.services.dolar_service import obtener_cotizacion_por_fecha
-            fecha_cierre = calendario_tarjeta_service.cierre_de_vencimiento(tarjeta, limite_vencimiento)
-
+            # Cotización dólar oficial vendedor del día del pago (o del vencimiento si es posterior)
             if cotizacion_personalizada is not None and cotizacion_personalizada > Decimal("0"):
                 cotizacion = cotizacion_personalizada
             else:
-                cot_obj = obtener_cotizacion_por_fecha(db, "oficial", fecha_cierre)
-                if not cot_obj:
+                cotizacion, fecha_ref = cotizacion_pesificacion(db, fecha_pago, limite_vencimiento)
+                if cotizacion is None:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"No hay cotización oficial disponible para la fecha de cierre ({fecha_cierre}). Por favor, ingresá la cotización manualmente."
+                        detail=f"No hay dólar oficial cargado para el {fecha_ref:%d/%m/%Y}. Ingresá la cotización a mano."
                     )
-                cotizacion = Decimal(str(cot_obj.promedio or cot_obj.venta))
 
             tipo_dolar = "oficial"
             if monto_pesos_personalizado is not None and monto_pesos_personalizado > Decimal("0"):
@@ -523,7 +521,7 @@ def pagar_resumen_tarjeta(
                 c.grupo.moneda.value if hasattr(c.grupo.moneda, "value") else str(c.grupo.moneda)
             ) if (c.grupo and c.grupo.moneda) else "USD"
             desc_final, _ = get_info_transaccion(c)
-            m = c.monto_real if c.monto_real is not None else c.monto_proyectado
+            m = monto_efectivo_cuota(c)
             pendientes.append(CuotaPendienteOtraMoneda(
                 id=c.transaccion_id,
                 descripcion=desc_final,
@@ -571,7 +569,8 @@ def simular_pesificacion(
     usuario_id: UUID,
     tarjeta_id: UUID,
     fecha_resumen: date | None = None,
-    monto_usd: Decimal | None = None
+    monto_usd: Decimal | None = None,
+    fecha_pago: date | None = None,
 ) -> SimularPesificacionResponse:
     """
     Simula la pesificación del saldo en dólares de un resumen de tarjeta.
@@ -599,10 +598,8 @@ def simular_pesificacion(
 
     porcentaje_percep = getattr(tarjeta, "percepcion_moneda_extranjera", Decimal("30.00"))
 
-    from app.services.dolar_service import obtener_cotizacion_por_fecha
-    cot_obj = obtener_cotizacion_por_fecha(db, "oficial", fecha_cierre)
-    if cot_obj is not None:
-        cot_val = Decimal(str(cot_obj.promedio or cot_obj.venta))
+    cot_val, _ = cotizacion_pesificacion(db, fecha_pago, limite_vencimiento)
+    if cot_val is not None:
         monto_conv = (monto_usd * cot_val).quantize(Decimal("0.01"))
         monto_percep = (monto_conv * (porcentaje_percep / Decimal("100"))).quantize(Decimal("0.01"))
         total_ars = monto_conv + monto_percep

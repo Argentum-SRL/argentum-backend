@@ -17,6 +17,7 @@ from app.schemas.grupos_cuotas import GrupoCuotasResumen, GrupoCuotasUpdate
 from app.services.transaccion_service import _hoy_argentina
 from app.services.cuotas_service import calcular_tasas_cuotas
 from app.services import idempotencia_service
+from app.utils.cuotas import monto_efectivo_cuota
 
 router = APIRouter(prefix="/grupos-cuotas", tags=["grupos_cuotas"])
 
@@ -34,15 +35,15 @@ def mapear_grupo_resumen(db: Session, grupo: GrupoCuotas) -> dict:
         
     if pendientes:
         pendientes_sorted = sorted(pendientes, key=lambda c: c.numero_cuota)
-        monto_cuota = pendientes_sorted[0].monto_proyectado
+        monto_cuota = monto_efectivo_cuota(pendientes_sorted[0])
     elif pagadas:
         pagadas_sorted = sorted(pagadas, key=lambda c: c.numero_cuota)
-        monto_cuota = pagadas_sorted[-1].monto_proyectado
+        monto_cuota = monto_efectivo_cuota(pagadas_sorted[-1])
     else:
         monto_cuota = Decimal(0)
         
-    total_pagado = sum(c.monto_proyectado for c in pagadas)
-    total_pendiente = sum(c.monto_proyectado for c in pendientes)
+    total_pagado = sum(monto_efectivo_cuota(c) for c in pagadas)
+    total_pendiente = sum(monto_efectivo_cuota(c) for c in pendientes)
     
     tarjeta_nombre = grupo.tarjeta.nombre if grupo.tarjeta else None
 

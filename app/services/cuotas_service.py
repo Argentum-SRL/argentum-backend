@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import date
 from sqlalchemy.orm import Session
@@ -8,8 +9,11 @@ from app.models.grupo_cuotas import GrupoCuotas
 from app.schemas.grupos_cuotas import GrupoCuotasUpdate
 from app.services import presupuesto_service
 from app.services.saldo_billetera_service import aplicar_impacto_saldo
+from app.utils.cuotas import monto_efectivo_cuota
 from app.utils.fecha import hoy_argentina
 from app.core.constants import IVA_INTERESES
+
+logger = logging.getLogger(__name__)
 
 
 def calcular_tasas_cuotas(tasa_interes: Decimal | float | None) -> dict[str, Decimal] | None:
@@ -30,6 +34,7 @@ def calcular_tasas_cuotas(tasa_interes: Decimal | float | None) -> dict[str, Dec
     try:
         ti = Decimal(str(tasa_interes))
     except Exception:
+        logger.warning("No se pudo convertir la tasa de interés de las cuotas a Decimal", exc_info=True)
         return None
 
     if ti <= Decimal("0"):
@@ -63,7 +68,7 @@ def crear_cuotas(
     """
     cuotas = []
     
-    monto_base = round(monto_cuota, 2)
+    monto_base = monto_cuota.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     total_financiado_real = grupo.total_financiado if grupo else None
     
     if total_financiado_real is not None:
@@ -220,10 +225,7 @@ def cancelar_grupo(
         tx_hija = cuota.transaccion
         if tx_hija:
             # Revertir impacto de presupuesto si existe la tx hija antes de borrarla
-            try:
-                presupuesto_service.registrar_impacto_presupuesto(db, tx_hija, revertir=True, commit=False)
-            except Exception:
-                pass
+            presupuesto_service.registrar_impacto_presupuesto(db, tx_hija, revertir=True, commit=False)
             # Marcar la transacción hija con monto cero y descripción cancelada
             tx_hija.monto = Decimal("0.00")
             tx_hija.descripcion = f"{tx_hija.descripcion} (Cancelada)"
@@ -281,8 +283,8 @@ def prepagar_grupo(
     if not cuotas_pendientes:
         raise HTTPException(status_code=400, detail="No hay cuotas pendientes")
 
-    # 5. Calcular monto_total_pendiente = sum(cuota.monto_proyectado for cuota in cuotas_pendientes)
-    monto_total_pendiente = sum(cuota.monto_proyectado for cuota in cuotas_pendientes)
+    # 5. Calcular monto_total_pendiente = sum(monto_efectivo_cuota(cuota) for cuota in cuotas_pendientes)
+    monto_total_pendiente = sum(monto_efectivo_cuota(cuota) for cuota in cuotas_pendientes)
 
     # 6. Buscar la billetera por billetera_id y usuario_id — si no existe, raise HTTPException 404
     billetera = db.execute(
@@ -347,27 +349,21 @@ def prepagar_grupo(
                     commit=False,
                 )
         except Exception:
-            pass
+            logger.warning("No se pudo crear la notificación de saldo en cero al prepagar cuotas", exc_info=True)
 
     # Registrar impacto del prepago en el presupuesto
-    try:
-        presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False, commit=False)
-    except Exception:
-        pass
+    presupuesto_service.registrar_impacto_presupuesto(db, nueva_transaccion, revertir=False, commit=False)
 
     # 8. Para cada cuota pendiente:
     # - cuota.pagada = True
-    # - cuota.monto_real = cuota.monto_proyectado
+    # - cuota.monto_real = monto_efectivo_cuota(cuota)
     for cuota in cuotas_pendientes:
         cuota.pagada = True
-        cuota.monto_real = cuota.monto_proyectado
+        cuota.monto_real = monto_efectivo_cuota(cuota)
         # Revertimos impacto de presupuesto de la cuota futura y ponemos su monto a 0 para no duplicar
         tx_hija = cuota.transaccion
         if tx_hija:
-            try:
-                presupuesto_service.registrar_impacto_presupuesto(db, tx_hija, revertir=True, commit=False)
-            except Exception:
-                pass
+            presupuesto_service.registrar_impacto_presupuesto(db, tx_hija, revertir=True, commit=False)
             tx_hija.monto = Decimal("0.00")
             tx_hija.descripcion = f"{tx_hija.descripcion} (Prepagada)"
 
@@ -398,10 +394,7 @@ def _eliminar_cuota_pendiente(db: Session, cuota: Cuota) -> None:
 
     tx_hija = cuota.transaccion or (db.get(Transaccion, cuota.transaccion_id) if cuota.transaccion_id else None)
     if tx_hija:
-        try:
-            presupuesto_service.registrar_impacto_presupuesto(db, tx_hija, revertir=True, commit=False)
-        except Exception:
-            pass
+        presupuesto_service.registrar_impacto_presupuesto(db, tx_hija, revertir=True, commit=False)
 
     db.delete(cuota)
     db.flush()
@@ -567,7 +560,7 @@ def actualizar_grupo(
 
         # Validar monto_total_nuevo antes de mutaciones si vino junto
         if data.monto_total_nuevo is not None:
-            total_ya_pagado = sum(c.monto_proyectado for c in cuotas_pagadas)
+            total_ya_pagado = sum(monto_efectivo_cuota(c) for c in cuotas_pagadas)
             if data.monto_total_nuevo - total_ya_pagado <= 0:
                 raise HTTPException(
                     status_code=400,
@@ -663,7 +656,7 @@ def actualizar_grupo(
         pagadas = [c for c in grupo.cuotas if c.pagada]
         pendientes = [c for c in grupo.cuotas if not c.pagada]
 
-        total_ya_pagado = sum(c.monto_proyectado for c in pagadas)
+        total_ya_pagado = sum(monto_efectivo_cuota(c) for c in pagadas)
         monto_pendiente = data.monto_total_nuevo - total_ya_pagado
 
         if monto_pendiente <= 0:
@@ -689,7 +682,7 @@ def actualizar_grupo(
             is_last = (idx == len(pendientes_ordenadas) - 1)
             monto_actual_cuota = nuevo_monto_base + diferencia if is_last else nuevo_monto_base
 
-            old_monto = c.monto_proyectado
+            old_monto = monto_efectivo_cuota(c)
             c.monto_proyectado = monto_actual_cuota
 
             tx_hija = c.transaccion

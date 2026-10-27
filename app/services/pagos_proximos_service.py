@@ -31,6 +31,7 @@ from app.models.usuario import Usuario
 from app.services import factura_service
 from app.services.dolar_service import obtener_cotizacion_por_fecha
 from app.services.resumen_tarjeta_service import calcular_resumen_actual
+from app.utils.cuotas import monto_efectivo_cuota_sql
 from app.utils.fecha import hoy_argentina
 
 logger = logging.getLogger(__name__)
@@ -144,7 +145,7 @@ def listar_pagos_proximos(
                 Categoria.nombre,
                 literal("Cuota"),
             ).label("nombre"),
-            Cuota.monto_proyectado.label("monto"),
+            monto_efectivo_cuota_sql().label("monto"),
             cast(GrupoCuotas.moneda, String).label("moneda"),
             Cuota.fecha_vencimiento.label("fecha"),
         )

@@ -11,6 +11,7 @@ Integra en una única lista cronológica con etiquetas determinísticas y totale
 """
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Dict, List, Optional
@@ -18,6 +19,8 @@ from uuid import UUID
 
 from sqlalchemy import Date, String, and_, cast, func, or_, select
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.models.ajuste_saldo import AjusteSaldo
 from app.models.billetera import Billetera
@@ -773,6 +776,7 @@ def listar_movimientos(
             try:
                 tx_read = TransaccionRead.model_validate(m["entity"])
             except Exception:
+                logger.warning("No se pudo validar la entidad de transacción al listar movimientos", exc_info=True)
                 tx_read = None
 
         items.append(

@@ -38,6 +38,8 @@ from app.services.tarjeta_service import (
     get_info_transaccion,
 )
 from app.services import calendario_tarjeta_service
+from app.services.pesificacion_service import cotizacion_pesificacion
+from app.utils.cuotas import monto_efectivo_cuota
 from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 
@@ -49,6 +51,7 @@ def _tabla_saldo_arrastrado_existe(db: Session) -> bool:
         from sqlalchemy import inspect
         return inspect(db.connection()).has_table("saldos_arrastrados_tarjeta")
     except Exception:
+        # Se ignora: si la sesión o el motor de prueba no soporta inspección de tablas, se asume que no existe.
         return False
 
 
@@ -124,7 +127,7 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
             subcategoria_nombre=sub_nombre,
             numero_cuota=cuota.numero_cuota,
             total_cuotas=total_cuotas,
-            monto=cuota.monto_real if cuota.monto_real is not None else cuota.monto_proyectado,
+            monto=monto_efectivo_cuota(cuota),
             moneda=cuota_moneda,
             fecha_vencimiento=cuota.fecha_vencimiento,
             pagada=cuota.pagada,
@@ -369,11 +372,7 @@ def calcular_resumen_actual(db: Session, tarjeta: TarjetaCredito, cuotas_preload
     pago_minimo_estimado = minimo_ars if tarjeta_moneda_str == "ARS" else minimo_usd
 
     # Tarea 2.5: Cotización oficial y percepción para el total en dólares
-    from app.services.dolar_service import obtener_cotizacion_por_fecha
-    cot_oficial_obj = obtener_cotizacion_por_fecha(db, "oficial", fecha_cierre_proximo)
-    cot_oficial_val = None
-    if cot_oficial_obj:
-        cot_oficial_val = Decimal(str(cot_oficial_obj.promedio or cot_oficial_obj.venta))
+    cot_oficial_val, _ = cotizacion_pesificacion(db, hoy, fecha_vencimiento_proximo)
 
     porcentaje_percep = getattr(tarjeta, "percepcion_moneda_extranjera", Decimal("30.00"))
     total_estimado_ars = None

@@ -12,6 +12,7 @@ from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificac
 from app.services.dashboard_service import get_ciclo_fechas
 from app.services.definiciones_service import condicion_gasto, condicion_ingreso
 from app.utils.fecha import hoy_argentina
+from app.utils.tasas import tna_a_mensual
 
 
 logger = logging.getLogger("tools_service")
@@ -37,17 +38,20 @@ def _parse_month_str(date_input: str) -> str:
             if 1900 <= y <= 2100 and 1 <= m <= 12:
                 return f"{y:04d}-{m:02d}"
         except ValueError:
+            # Se ignora: si el prefijo YYYY-MM no contiene números válidos, se prueban otros formatos.
             pass
     for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d"):
         try:
             dt = datetime.strptime(val[:10], fmt)
             return dt.strftime("%Y-%m")
         except ValueError:
+            # Se ignora: si la cadena no coincide con este formato, se intenta el siguiente.
             pass
     try:
         dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
         return dt.strftime("%Y-%m")
     except ValueError:
+        # Se ignora: si tampoco es ISO válido, se lanza ValueError debajo.
         pass
     raise ValueError(f"Formato de fecha no reconocido: {date_input}")
 
@@ -343,7 +347,7 @@ def calcular_conveniencia_cuotas(req: InstallmentConvenienceRequest) -> dict:
     tasa = req.inflacion_mensual / 100  # Convertir a decimal
     
     if req.tiene_interes and req.tna is not None:
-        i = (req.tna / 100) / 12  # tasa mensual decimal
+        i = tna_a_mensual(req.tna)  # tasa mensual decimal
         if i == 0:
             monto_cuota = req.precio_contado / req.cantidad_cuotas
         else:
@@ -379,29 +383,37 @@ def calcular_conveniencia_cuotas(req: InstallmentConvenienceRequest) -> dict:
     else:
         resultado = "conviene_contado"  # El costo real en cuotas es mayor al contado
 
+    ahorro_real_final = round(abs(diferencia), 2)
+    porcentaje_ahorro_final = round(porcentaje_diferencia, 2)
+
     # Costo de oportunidad / Flujo de caja invertido en billetera remunerada
     remanente_vpn = None
     saldo_final_inversion = None
     if req.tna_billetera_inversion is not None and req.tna_billetera_inversion > 0:
-        r_b = (req.tna_billetera_inversion / 100) / 12  # tasa mensual de rendimiento
+        r_b = tna_a_mensual(req.tna_billetera_inversion)  # tasa mensual de rendimiento
         s_k = float(req.precio_contado)  # Saldo inicial S_0
         for _ in range(req.cantidad_cuotas):
             s_k = s_k * (1 + r_b) - monto_cuota
         saldo_final_inversion = round(s_k, 2)
         # Remanente descontado a valor presente por la inflación mensual estimada
         remanente_vpn = round(s_k / ((1 + tasa) ** req.cantidad_cuotas), 2)
-        if s_k > 0:
+        diferencia_pct = round((abs(remanente_vpn) / req.precio_contado) * 100, 2)
+        if diferencia_pct < UMBRAL_INDIFERENCIA:
+            resultado = "indiferente"
+        elif saldo_final_inversion > 0:
             resultado = "conviene_cuotas"
-            ahorro_real = remanente_vpn
-            porcentaje_diferencia = round((remanente_vpn / req.precio_contado) * 100, 2)
+        else:
+            resultado = "conviene_contado"
+        ahorro_real_final = round(abs(remanente_vpn), 2)
+        porcentaje_ahorro_final = diferencia_pct
 
     return {
         "resultado": resultado,
         "precio_contado": round(req.precio_contado, 2),
         "precio_total_cuotas_nominal": round(precio_total_cuotas, 2),
         "costo_real_cuotas": round(costo_real_total, 2),
-        "ahorro_real": round(abs(ahorro_real if (req.tna_billetera_inversion and remanente_vpn and remanente_vpn > 0) else diferencia), 2),
-        "porcentaje_ahorro": round(porcentaje_diferencia, 2),
+        "ahorro_real": ahorro_real_final,
+        "porcentaje_ahorro": porcentaje_ahorro_final,
         "monto_cuota": round(monto_cuota, 2),
         "cantidad_cuotas": req.cantidad_cuotas,
         "inflacion_mensual_usada": req.inflacion_mensual,

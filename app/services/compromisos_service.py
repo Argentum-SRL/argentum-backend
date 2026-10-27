@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models.cuota import Cuota
 from app.models.grupo_cuotas import GrupoCuotas
+from app.utils.cuotas import monto_efectivo_cuota
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion
 from app.models.historial_suscripcion import HistorialSuscripcion
 from app.models.transaccion import Transaccion
@@ -165,6 +166,7 @@ def calcular_compromisos_memoria(
             try:
                 cuota, grupo = item[0], item[1]
             except (IndexError, TypeError):
+                # Se ignora: si el ítem no tiene formato de par (cuota, grupo), se omite.
                 continue
         elif hasattr(item, "grupo"):
             cuota, grupo = item, getattr(item, "grupo")
@@ -212,11 +214,7 @@ def calcular_compromisos_memoria(
             )
         )
         prox_cuota = c_lista[0]
-        monto_val = (
-            getattr(prox_cuota, "monto_real", None)
-            or getattr(prox_cuota, "monto_proyectado", None)
-            or ZERO
-        )
+        monto_val = monto_efectivo_cuota(prox_cuota)
         monto_dec = Decimal(str(monto_val)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         total_cuotas += monto_dec
 

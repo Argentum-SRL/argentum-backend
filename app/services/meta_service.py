@@ -384,7 +384,7 @@ def registrar_movimiento(
                     datos_template={"nombre": meta.nombre, "monto_fmt": formatear_monto(meta.monto_objetivo, meta.moneda)},
                 )
         except Exception:
-            pass
+            logger.warning("No se pudo crear la notificación de meta alcanzada", exc_info=True)
 
     if commit:
         db.commit()

@@ -6,6 +6,7 @@ puntuales almacenadas en la tabla fechas_resumen_tarjeta.
 """
 from __future__ import annotations
 
+import logging
 from calendar import monthrange
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
@@ -16,6 +17,8 @@ from sqlalchemy.orm import object_session
 from app.models.fecha_resumen_tarjeta import FechaResumenTarjeta
 from app.services.dias_habiles_service import ajustar_fecha_habil_sync
 from app.utils.fecha import hoy_argentina
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from app.models.tarjeta_credito import TarjetaCredito
@@ -130,6 +133,7 @@ def _obtener_overrides_fechas(tarjeta: TarjetaCredito) -> list[FechaResumenTarje
                 .all()
             )
         except Exception:
+            logger.warning("No se pudieron consultar las excepciones de fechas de resumen de la tarjeta", exc_info=True)
             return []
 
     return []

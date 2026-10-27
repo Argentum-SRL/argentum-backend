@@ -82,6 +82,14 @@ Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_21-10.md (versi
 - **Período único**: restricción única `uq_periodos_presupuesto_presupuesto_inicio` sobre `(presupuesto_id, fecha_inicio)` (migración `a6b7c8d9e0f2`). Toda creación de período pasa por `asegurar_periodo` con `on_conflict_do_nothing`.
 - **Metas**: `meta_service.recalcular_acumulado(db, meta)` es el único punto que escribe `Meta.monto_actual` como suma redondeada movimiento por movimiento (`ROUND_HALF_UP`) y actualiza el estado (`ACTIVA`/`COMPLETADA`, respetando `PAUSADA`). Toda meta nueva arranca en 0.
 
+### Reglas únicas (fase_eb_reglas)
+- **Pesificación con el vendedor del día del pago**: `pesificacion_service.cotizacion_pesificacion(db, fecha_pago, vencimiento)` usa el dólar oficial vendedor de `fecha_pago` (o hoy) topeado en `vencimiento`; la usan `pagar_resumen_tarjeta`, `simular_pesificacion` y `calcular_resumen_actual`.
+- **Monto de cuota**: `app/utils/cuotas.py` (`monto_efectivo_cuota` y `monto_efectivo_cuota_sql`) es el único lector del monto de una cuota en `app/` (fuera de modelos, esquemas e importación).
+- **Redondeo de cuotas**: `total_financiado` y `monto_base` se redondean a centavos con `ROUND_HALF_UP`, ajustando la diferencia en la última cuota.
+- **Dashboard con una sola lista de pagos**: `get_dashboard_resumen` arma `proximos_pagos_completos` una sola vez y toma `disponible_real` del resultado de `calcular_disponible_libre`. Se eliminó `calcular_saldo_disponible_ciclo_actual`.
+- **Excepts sin tragar en silencio**: en los servicios de plata, todo `except` lanza, registra con `logger` o lleva comentario `# Se ignora:`.
+- **Gastos hormiga y calculadora**: `_gastos_hormiga` en `notificacion_scheduler_service` excluye espejos de reintegro (`reintegro_de_id` nulo) del conteo manteniendo el total neto; `calcular_conveniencia_cuotas` usa `tna_a_mensual` (`app/utils/tasas.py`) y aplica el umbral del 1% y el signo del saldo final invertido cuando hay billetera de inversión.
+
 ### Reintegros (fase5c, 21/10/2026)
 - Un reintegro recibido es una transacción espejo: EGRESO con monto NEGATIVO, misma categoría, subcategoría, billetera, medio de pago y tarjeta que la compra, fecha = día en que llegó la plata, reintegro_de_id = la compra (app/services/reintegro_service.py). Sin crédito mueve el saldo con aplicar_impacto_saldo; con crédito crea padre, grupo de 1 cuota y cuota hija negativa en el primer resumen sin pago confirmado desde esa fecha.
 - Pendiente = reintegro_esperado sin espejo: no suma en ningún número. Aviso web a los 30 días (notificar_reintegros_pendientes, dentro de _job_vencimientos_tarjetas).

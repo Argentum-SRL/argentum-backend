@@ -16,6 +16,7 @@ from app.models.calibracion_usuario import CalibracionUsuario
 from app.models.usuario import EstadoUsuario, Moneda, Usuario
 from app.services.datos_motor_service import cargar_datos_motor, ciclos_anteriores
 from app.services.definiciones_service import es_gasto
+from app.utils.cuotas import monto_efectivo_cuota
 from app.utils.finanzas import (
     MINIMO_CICLOS_EVALUABLES_CALIBRACION,
     NIVEL_EVALUADO_PUERTA,
@@ -317,7 +318,7 @@ def evaluar_calibracion_usuario(
 
         # Compromisos ciertos pendientes al inicio del ciclo k
         cuotas_p = sum(
-            (c.monto_real or c.monto_proyectado or ZERO
+            (monto_efectivo_cuota(c)
              for c, g in data["cuotas"]
              if g.moneda == moneda and not c.pagada and inicio_k <= c.fecha_vencimiento <= fin_k),
             ZERO,

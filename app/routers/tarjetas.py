@@ -212,6 +212,7 @@ def simular_pesificacion(
     tarjeta_id: UUID,
     fecha_resumen: date | None = None,
     monto_usd: Decimal | None = None,
+    fecha_pago: date | None = None,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
@@ -220,6 +221,7 @@ def simular_pesificacion(
         current_user.id,
         tarjeta_id,
         fecha_resumen=fecha_resumen,
-        monto_usd=monto_usd
+        monto_usd=monto_usd,
+        fecha_pago=fecha_pago,
     )
 
