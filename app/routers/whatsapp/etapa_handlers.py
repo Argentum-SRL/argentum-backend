@@ -116,9 +116,13 @@ def procesar_estados_y_handlers_deterministicos(ctx: ContextoMensaje) -> None:
                 entidades_nuevas["billetera"] = b_nueva.nombre
                 entidades_nuevas.pop(clave_otra, None)
 
-                nuevo_msg = _construir_propuesta_transaccion(
-                    entidades_nuevas, b_nueva.nombre, se_asumio_principal=False, billetera_moneda=b_nueva.moneda
-                )
+                if entidades_nuevas.get("tipo_flujo") == "propuesta_usd_pesos":
+                    from app.routers.whatsapp.dolares_desde_pesos import texto_propuesta_usd_pesos
+                    nuevo_msg = texto_propuesta_usd_pesos(entidades_nuevas, b_nueva.nombre)
+                else:
+                    nuevo_msg = _construir_propuesta_transaccion(
+                        entidades_nuevas, b_nueva.nombre, se_asumio_principal=False, billetera_moneda=b_nueva.moneda
+                    )
 
                 propuesta_pendiente.entidades = entidades_nuevas
                 propuesta_pendiente.mensaje_bot = nuevo_msg
@@ -143,6 +147,12 @@ def procesar_estados_y_handlers_deterministicos(ctx: ContextoMensaje) -> None:
                 whatsapp_service.enviar_whatsapp(from_number, nuevo_msg)
                 ctx.terminado = True
                 return
+
+    # 2.1 Edición de monto en pesos para propuesta de gasto en dólares desde pesos (fase_f2a)
+    from app.routers.whatsapp.dolares_desde_pesos import manejar_monto_pesos_usd
+    if manejar_monto_pesos_usd(mensaje_texto, usuario, db, from_number, wamid=wamid):
+        ctx.terminado = True
+        return
 
     # Chequeo determinístico de cancelación para aporte a meta
     if manejar_cancelacion_aporte_meta(mensaje_texto, usuario, db, from_number, wamid=wamid):

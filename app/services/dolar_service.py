@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 import httpx
@@ -280,4 +280,41 @@ def guardar_cotizaciones_del_dia(db: Session) -> list[CotizacionDolar]:
     for item in guardadas:
         db.refresh(item)
     return guardadas
+
+
+def sugerir_pesos_para_usd(
+    db: Session,
+    monto_usd: Decimal,
+    fecha: date | None = None,
+) -> dict[str, Any]:
+    """
+    Calcula sugerencia de cotización oficial, percepción y monto en pesos para un monto en dólares.
+    Retorna un diccionario con claves: cotizacion, percepcion, monto_pesos, cotizacion_tarjeta.
+    cotizacion, monto_pesos y cotizacion_tarjeta son Decimal o None; percepcion es int.
+    """
+    fecha_consulta = fecha or hoy_argentina()
+    cotizacion_obj = obtener_cotizacion_por_fecha(
+        db, tipo="oficial", fecha_consulta=fecha_consulta
+    )
+    percepcion = settings.PERCEPCION_EXTERIOR_PORCENTAJE
+
+    if cotizacion_obj is None or cotizacion_obj.venta is None:
+        return {
+            "cotizacion": None,
+            "percepcion": percepcion,
+            "monto_pesos": None,
+            "cotizacion_tarjeta": None,
+        }
+
+    venta = Decimal(str(cotizacion_obj.venta))
+    factor = Decimal("1") + (Decimal(str(percepcion)) / Decimal("100"))
+    cotizacion_tarjeta = (venta * factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    monto_pesos = (monto_usd * venta * factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    return {
+        "cotizacion": venta,
+        "percepcion": percepcion,
+        "monto_pesos": monto_pesos,
+        "cotizacion_tarjeta": cotizacion_tarjeta,
+    }
 

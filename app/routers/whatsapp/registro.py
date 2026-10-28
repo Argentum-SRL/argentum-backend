@@ -463,6 +463,9 @@ def _confirmar_propuesta_transaccion(
     else:
         entidades = conv_previa.entidades or {} if conv_previa else {}
 
+    if entidades.get("tipo_flujo") == "propuesta_usd_pesos" and entidades.get("monto") is None:
+        return None, "Decime cuántos pesos te cobraron.", False
+
     monto = entidades.get("monto")
     if monto is None:
         return None, "No pude procesar la operación.", False
@@ -679,6 +682,9 @@ def _confirmar_propuesta_transaccion(
     )
 
     try:
+        moneda_orig_val = Moneda.USD if entidades.get("moneda_original") == "USD" else None
+        monto_orig_val = Decimal(str(entidades.get("monto_original"))) if (entidades.get("moneda_original") == "USD" and entidades.get("monto_original") is not None) else None
+
         data_tx = TransaccionCreate(
             tipo=TipoTransaccion.INGRESO if tipo_val == "ingreso" else TipoTransaccion.EGRESO,
             monto=monto_decimal,
@@ -693,6 +699,8 @@ def _confirmar_propuesta_transaccion(
             estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
             es_cuota_hija=False,
             es_padre_cuotas=False,
+            moneda_original=moneda_orig_val,
+            monto_original=monto_orig_val,
         )
         transaccion = transaccion_service.crear_transaccion(
             db=db,
@@ -722,7 +730,10 @@ def _confirmar_propuesta_transaccion(
     emitir_evento_actualizacion(db, usuario.id, "billeteras")
     db.flush()
 
-    monto_str = formatear_monto(float(transaccion.monto), transaccion.moneda)
+    if transaccion.moneda_original == Moneda.USD and transaccion.monto_original is not None:
+        monto_str = f"{formatear_monto(float(transaccion.monto_original), Moneda.USD)} ({formatear_monto(float(transaccion.monto), Moneda.ARS)})"
+    else:
+        monto_str = formatear_monto(float(transaccion.monto), transaccion.moneda)
     bill_nombre = billetera.nombre
 
     if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
@@ -845,7 +856,7 @@ def _es_registro_directo(
         return False
 
     tipo_flujo = entidades.get("tipo_flujo")
-    if tipo_flujo in ("verificacion_duplicado", "verificacion_lote_duplicado", "verificacion_duplicado_suscripcion"):
+    if tipo_flujo in ("verificacion_duplicado", "verificacion_lote_duplicado", "verificacion_duplicado_suscripcion", "propuesta_usd_pesos"):
         return False
 
     if tipo_flujo == "propuesta_credito":

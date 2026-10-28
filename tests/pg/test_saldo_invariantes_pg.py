@@ -107,6 +107,7 @@ OP_TIPOS = [
     "devolucion_cuotas",
     "parte_de_gasto",
     "paso_por_mi_cuenta",
+    "gasto_usd_desde_pesos",
 ]
 
 
@@ -891,6 +892,25 @@ def test_td7_invariantes_oraculo(db: Session, monkeypatch):
                         )
                         txs_activas.append(tx_paso)
                         oraculo[b_a.id].aplicar_movimiento(tx_paso.id, reloj_hoy, Decimal("700.00"), es_tx_o_tr=True)
+
+                    elif op_tipo == "gasto_usd_desde_pesos":
+                        tx_usd = transaccion_service.crear_transaccion(
+                            db, u.id,
+                            TransaccionCreate(
+                                tipo=TipoTransaccion.EGRESO,
+                                monto=Decimal("1300.00"),
+                                moneda=Moneda.ARS,
+                                metodo_pago=MetodoPago.DEBITO,
+                                categoria_id=cat_general.id,
+                                billetera_id=b_a.id,
+                                fecha=reloj_hoy,
+                                descripcion="Gasto USD desde pesos",
+                                moneda_original=Moneda.USD,
+                                monto_original=Decimal("1.00"),
+                            )
+                        )
+                        txs_activas.append(tx_usd)
+                        oraculo[b_a.id].aplicar_movimiento(tx_usd.id, reloj_hoy, Decimal("-1300.00"), es_tx_o_tr=True)
 
                     db.commit()
 

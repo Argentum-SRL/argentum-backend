@@ -409,6 +409,17 @@ def _resolver_billetera_y_duplicados(
     moneda_sol_str = entidades_actuales.get("moneda")
     moneda_sol = Moneda.USD if moneda_sol_str == "USD" else Moneda.ARS
 
+    # Gasto en dólares desde billetera en pesos (Decisión 2, fase_f2a)
+    if tipo_act == "egreso" and moneda_sol == Moneda.USD and entidades_actuales.get("monto") is not None:
+        from app.routers.whatsapp.dolares_desde_pesos import (
+            armar_propuesta_usd_pesos,
+            billetera_pesos_para_usd,
+        )
+        b_pesos = billetera_pesos_para_usd(entidades_actuales, billeteras_todas, clave_bill, clave_otra)
+        if b_pesos is not None:
+            armar_propuesta_usd_pesos(ctx, entidades_actuales, b_pesos, clave_bill, clave_otra)
+            return
+
     billeteras_moneda = [b for b in billeteras_todas if b.moneda == moneda_sol]
     if not billeteras_moneda:
         nom_moneda = "dólares" if moneda_sol == Moneda.USD else "pesos"

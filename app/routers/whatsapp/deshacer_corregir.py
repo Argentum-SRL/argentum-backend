@@ -7,6 +7,7 @@ from decimal import Decimal
 from uuid import UUID
 
 import structlog
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -338,7 +339,13 @@ def _confirmar_propuesta_corregir(
 
     update_payload = TransaccionUpdate(**kwargs_update)
 
-    actualizar_transaccion(db, usuario.id, tx.id, update_payload)
+    try:
+        actualizar_transaccion(db, usuario.id, tx.id, update_payload)
+    except HTTPException as e:
+        db.rollback()
+        conv_corr.accion_ejecutada = "error"
+        db.commit()
+        return None, str(e.detail), False
 
     conv_corr.accion_ejecutada = f"corregido:{tx_id}"
     emitir_evento_actualizacion(db, usuario.id, "transacciones")
@@ -533,7 +540,23 @@ def _detectar_correccion_ultimo_movimiento(
 def _construir_propuesta_deshacer(tx_actual: Transaccion | TransferenciaInterna | list[Transaccion], db: Session) -> str:
     if isinstance(tx_actual, list):
         cant = len(tx_actual)
-        return f"¿Querés eliminar los {cant} movimientos registrados recientemente? ¿Confirmás?"
+        ids = [t.id for t in tx_actual]
+        espejos_lote = db.query(Transaccion).filter(
+            Transaccion.reintegro_de_id.in_(ids),
+            Transaccion.es_cuota_hija == False,
+        ).all()
+        reintegros = [e for e in espejos_lote if getattr(e, "tipo_espejo", None) in ("reintegro", None)]
+        partes = [e for e in espejos_lote if getattr(e, "tipo_espejo", None) == "parte"]
+        frase_extra = ""
+        if reintegros:
+            suma_r = sum((abs(e.monto) for e in reintegros), Decimal("0"))
+            mon_r = reintegros[0].moneda
+            frase_extra += f" También se borra su reintegro de {formatear_monto(float(suma_r), mon_r)}."
+        if partes:
+            suma_p = sum((abs(e.monto) for e in partes), Decimal("0"))
+            mon_p = partes[0].moneda
+            frase_extra += f" Los {formatear_monto(float(suma_p), mon_p)} que te devolvieron de este gasto vuelven a quedar como cobro."
+        return f"¿Querés eliminar los {cant} movimientos registrados recientemente?{frase_extra} ¿Confirmás?"
 
     if isinstance(tx_actual, TransferenciaInterna):
         billetera_orig = db.get(Billetera, tx_actual.billetera_origen_id) if tx_actual.billetera_origen_id else None
@@ -547,6 +570,17 @@ def _construir_propuesta_deshacer(tx_actual: Transaccion | TransferenciaInterna 
         meta_nom = tx_actual.descripcion.replace("Aporte a la meta:", "").strip() if tx_actual.descripcion else "tu meta"
         monto_fmt = formatear_monto(float(tx_actual.monto), tx_actual.moneda)
         return f"¿Querés eliminar el aporte de {monto_fmt} a tu meta '{meta_nom}'? ¿Confirmás?"
+
+    # Si es un espejo (reintegro_de_id no nulo):
+    if getattr(tx_actual, "reintegro_de_id", None) is not None:
+        compra_padre = db.get(Transaccion, tx_actual.reintegro_de_id)
+        desc_padre = compra_padre.descripcion if compra_padre else "gasto"
+        monto_fmt = formatear_monto(abs(float(tx_actual.monto)), tx_actual.moneda)
+        billetera = db.get(Billetera, tx_actual.billetera_id) if tx_actual.billetera_id else None
+        bill_nom = billetera.nombre if billetera else "tu billetera"
+        fecha_nat = _formatear_fecha_natural(tx_actual.fecha)
+        fecha_disp = f" ({fecha_nat})" if fecha_nat else ""
+        return f"¿Querés eliminar la devolución de {monto_fmt} de «{desc_padre}» en {bill_nom}{fecha_disp}? ¿Confirmás?"
 
     monto_fmt = formatear_monto(float(tx_actual.monto), tx_actual.moneda)
     billetera = db.get(Billetera, tx_actual.billetera_id) if tx_actual.billetera_id else None
@@ -562,6 +596,22 @@ def _construir_propuesta_deshacer(tx_actual: Transaccion | TransferenciaInterna 
     fecha_nat = _formatear_fecha_natural(tx_actual.fecha)
     fecha_disp = f" ({fecha_nat})" if fecha_nat else ""
 
+    espejos_compra = db.query(Transaccion).filter(
+        Transaccion.reintegro_de_id == tx_actual.id,
+        Transaccion.es_cuota_hija == False,
+    ).all()
+    reintegros = [e for e in espejos_compra if getattr(e, "tipo_espejo", None) in ("reintegro", None)]
+    partes = [e for e in espejos_compra if getattr(e, "tipo_espejo", None) == "parte"]
+    frase_espejos = ""
+    if reintegros:
+        suma_r = sum((abs(e.monto) for e in reintegros), Decimal("0"))
+        mon_r = reintegros[0].moneda
+        frase_espejos += f" También se borra su reintegro de {formatear_monto(float(suma_r), mon_r)}."
+    if partes:
+        suma_p = sum((abs(e.monto) for e in partes), Decimal("0"))
+        mon_p = partes[0].moneda
+        frase_espejos += f" Los {formatear_monto(float(suma_p), mon_p)} que te devolvieron de este gasto vuelven a quedar como cobro."
+
     if tx_actual.metodo_pago == MetodoPago.CREDITO or tx_actual.tarjeta_id:
         tarjeta = db.get(TarjetaCredito, tx_actual.tarjeta_id) if tx_actual.tarjeta_id else None
         tarjeta_nom = f"tarjeta {tarjeta.nombre}" if tarjeta else "tarjeta de crédito"
@@ -569,14 +619,14 @@ def _construir_propuesta_deshacer(tx_actual: Transaccion | TransferenciaInterna 
             select(GrupoCuotas).where(GrupoCuotas.transaccion_padre_id == tx_actual.id)
         ).scalar_one_or_none()
         if grupo and grupo.cantidad_cuotas > 1:
-            return f"¿Querés eliminar la compra de {monto_fmt} en {grupo.cantidad_cuotas} cuotas con {tarjeta_nom}? ¿Confirmás?"
+            return f"¿Querés eliminar la compra de {monto_fmt} en {grupo.cantidad_cuotas} cuotas con {tarjeta_nom}?{frase_espejos} ¿Confirmás?"
         else:
-            return f"¿Querés eliminar el último consumo de {monto_fmt} en {cat_disp} con {tarjeta_nom}{fecha_disp}? ¿Confirmás?"
+            return f"¿Querés eliminar el último consumo de {monto_fmt} en {cat_disp} con {tarjeta_nom}{fecha_disp}?{frase_espejos} ¿Confirmás?"
 
     if tx_actual.tipo == TipoTransaccion.INGRESO:
-        return f"¿Querés eliminar el último ingreso de {monto_fmt} en {cat_disp} a {bill_nom}{fecha_disp}? ¿Confirmás?"
+        return f"¿Querés eliminar el último ingreso de {monto_fmt} en {cat_disp} a {bill_nom}{fecha_disp}?{frase_espejos} ¿Confirmás?"
     else:
-        return f"¿Querés eliminar el último movimiento de {monto_fmt} en {cat_disp} desde {bill_nom}{fecha_disp}? ¿Confirmás?"
+        return f"¿Querés eliminar el último movimiento de {monto_fmt} en {cat_disp} desde {bill_nom}{fecha_disp}?{frase_espejos} ¿Confirmás?" 
 
 
 def _construir_propuesta_corregir(

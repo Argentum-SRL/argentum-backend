@@ -2,8 +2,8 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy.orm import Session, joinedload, aliased
 
 from app.models.categoria import Categoria, EstadoCategoria
 from app.models.subcategoria import Subcategoria, EstadoSubcategoria
@@ -47,12 +47,26 @@ def calcular_gastos_periodo(
             .replace("_", "\\_")
             + "%"
         )
-        extras.append(Transaccion.descripcion.ilike(patron, escape="\\"))
+        tx_padre = aliased(Transaccion)
+        subq_espejos = (
+            select(tx_padre.id)
+            .where(
+                tx_padre.usuario_id == usuario_id,
+                tx_padre.descripcion.ilike(patron, escape="\\"),
+            )
+            .scalar_subquery()
+        )
+        extras.append(
+            or_(
+                Transaccion.descripcion.ilike(patron, escape="\\"),
+                Transaccion.reintegro_de_id.in_(subq_espejos),
+            )
+        )
     filas = db.execute(
         select(
             Transaccion.moneda,
             func.coalesce(func.sum(Transaccion.monto), 0),
-            func.count(Transaccion.id),
+            func.count(case((Transaccion.reintegro_de_id.is_(None), Transaccion.id))),
         )
         .where(cond, *extras)
         .group_by(Transaccion.moneda)

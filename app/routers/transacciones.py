@@ -1,13 +1,12 @@
 from typing import List, Optional
 from uuid import UUID
 from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
-from app.core.config import settings
 from app.core.database import get_db
 from app.models.usuario import Usuario, Moneda
 from app.core.constants import MAX_MONTO_INTEGRIDAD
@@ -92,29 +91,12 @@ def sugerencia_pesos(
     """
     Sugerencia de cotización, percepción y monto en pesos para un gasto en dólares.
     """
-    cotizacion_obj = dolar_service.obtener_cotizacion_por_fecha(
-        db, tipo="oficial", fecha_consulta=hoy_argentina()
-    )
-    percepcion = settings.PERCEPCION_EXTERIOR_PORCENTAJE
-
-    if cotizacion_obj is None or cotizacion_obj.venta is None:
-        return {
-            "cotizacion": None,
-            "percepcion": percepcion,
-            "monto_pesos": None,
-            "cotizacion_tarjeta": None,
-        }
-
-    venta = Decimal(str(cotizacion_obj.venta))
-    factor = Decimal("1") + (Decimal(str(percepcion)) / Decimal("100"))
-    cotizacion_tarjeta = (venta * factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    monto_pesos = (monto_usd * venta * factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
+    sug = dolar_service.sugerir_pesos_para_usd(db, monto_usd, fecha=hoy_argentina())
     return {
-        "cotizacion": float(venta),
-        "percepcion": percepcion,
-        "monto_pesos": float(monto_pesos),
-        "cotizacion_tarjeta": float(cotizacion_tarjeta),
+        "cotizacion": float(sug["cotizacion"]) if sug["cotizacion"] is not None else None,
+        "percepcion": sug["percepcion"],
+        "monto_pesos": float(sug["monto_pesos"]) if sug["monto_pesos"] is not None else None,
+        "cotizacion_tarjeta": float(sug["cotizacion_tarjeta"]) if sug["cotizacion_tarjeta"] is not None else None,
     }
 
 

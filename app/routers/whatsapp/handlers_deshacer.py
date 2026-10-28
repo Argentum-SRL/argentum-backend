@@ -141,6 +141,30 @@ def manejar_corregir(
 
     tx_last_corr, motivo_corr = _buscar_ultimo_movimiento_whatsapp(usuario.id, db)
     if tx_last_corr and isinstance(tx_last_corr, Transaccion):
+        # Guarda espejo (Decisión 4.b, fase_f2a)
+        if getattr(tx_last_corr, "reintegro_de_id", None) is not None:
+            if _parece_intento_correccion(mensaje_texto):
+                msg_esp = "Ese movimiento es una devolución de un gasto. Para cambiarlo, entrá a la web de Argentum."
+                nueva_conv = ConversacionWpp(
+                    usuario_id=usuario.id,
+                    wamid=wamid,
+                    mensaje_usuario=mensaje_texto,
+                    tipo_mensaje=TipoMensajeWpp.TEXTO,
+                    transcripcion=None,
+                    mensaje_bot=msg_esp,
+                    intent_detectado="corregir",
+                    entidades={},
+                    accion_ejecutada="sin_efecto",
+                    confianza=Decimal("1.000"),
+                    slot_filling_activo=False,
+                    slot_filling_estado=None,
+                )
+                db.add(nueva_conv)
+                db.commit()
+                whatsapp_service.enviar_whatsapp(from_number, msg_esp)
+                return True
+            return False
+
         es_corr, cambios, err_corr = _detectar_correccion_ultimo_movimiento(
             mensaje_texto, usuario.id, db, tx_last_corr
         )
@@ -166,6 +190,32 @@ def manejar_corregir(
                 return True
 
             if cambios:
+                if "billetera_id" in cambios:
+                    espejos = db.query(Transaccion).filter(
+                        Transaccion.reintegro_de_id == tx_last_corr.id,
+                        Transaccion.es_cuota_hija == False,
+                    ).all()
+                    if any(getattr(e, "tipo_espejo", None) in ("reintegro", None) for e in espejos):
+                        msg_aviso_reint = "Primero quitá el reintegro para cambiar el medio de pago o la billetera."
+                        nueva_conv = ConversacionWpp(
+                            usuario_id=usuario.id,
+                            wamid=wamid,
+                            mensaje_usuario=mensaje_texto,
+                            tipo_mensaje=TipoMensajeWpp.TEXTO,
+                            transcripcion=None,
+                            mensaje_bot=msg_aviso_reint,
+                            intent_detectado="corregir",
+                            entidades={},
+                            accion_ejecutada="sin_efecto",
+                            confianza=Decimal("1.000"),
+                            slot_filling_activo=False,
+                            slot_filling_estado=None,
+                        )
+                        db.add(nueva_conv)
+                        db.commit()
+                        whatsapp_service.enviar_whatsapp(from_number, msg_aviso_reint)
+                        return True
+
                 msg_propuesta_corr = _construir_propuesta_corregir(tx_last_corr, cambios, db)
                 nueva_conv = ConversacionWpp(
                     usuario_id=usuario.id,
