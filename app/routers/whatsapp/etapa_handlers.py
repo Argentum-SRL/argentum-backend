@@ -148,6 +148,12 @@ def procesar_estados_y_handlers_deterministicos(ctx: ContextoMensaje) -> None:
                 ctx.terminado = True
                 return
 
+    # 2.05 Respuestas numeradas para «¿Qué es esta plata?» y elección de compra/gasto (fase_f2b)
+    from app.routers.whatsapp.que_es_plata_wpp import manejar_respuesta_numerada
+    if manejar_respuesta_numerada(mensaje_texto, usuario, db, from_number, wamid=wamid):
+        ctx.terminado = True
+        return
+
     # 2.1 Edición de monto en pesos para propuesta de gasto en dólares desde pesos (fase_f2a)
     from app.routers.whatsapp.dolares_desde_pesos import manejar_monto_pesos_usd
     if manejar_monto_pesos_usd(mensaje_texto, usuario, db, from_number, wamid=wamid):
@@ -255,6 +261,12 @@ def procesar_estados_y_handlers_deterministicos(ctx: ContextoMensaje) -> None:
 
     # 7.4 Detección determinística de '¿me lo puedo permitir?' (Fase 3 F2)
     if manejar_consulta_permitirse(ctx):
+        ctx.terminado = True
+        return
+
+    # 7.45 Detección determinística de reintegros y devoluciones de compras (fase_f2b)
+    from app.routers.whatsapp.reintegro_wpp import manejar_reintegro_wpp
+    if manejar_reintegro_wpp(mensaje_texto, usuario, db, from_number, wamid=wamid):
         ctx.terminado = True
         return
 

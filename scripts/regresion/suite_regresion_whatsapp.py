@@ -45,6 +45,7 @@ from scripts.regresion.suite.controles import (
 )
 from scripts.regresion.suite.escenarios_p16 import GRABACIONES_P16
 from scripts.regresion.suite.escenarios_p22 import GRABACIONES_P22
+from scripts.regresion.suite.escenarios_p23 import GRABACIONES_P23
 from scripts.regresion.suite.catalogo import obtener_catalogo
 
 
@@ -66,6 +67,7 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
     )
     gestor._cache_grabaciones.update(GRABACIONES_P16)
     gestor._cache_grabaciones.update(GRABACIONES_P22)
+    gestor._cache_grabaciones.update(GRABACIONES_P23)
     comun._gestor_actual = gestor
     _gestor_actual = gestor
 

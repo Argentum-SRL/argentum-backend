@@ -104,6 +104,7 @@ OP_TIPOS = [
     "borrar_mov_meta",
     "reintegro",
     "borrar_reintegro",
+    "reintegro_a_pendiente",
     "devolucion_cuotas",
     "parte_de_gasto",
     "paso_por_mi_cuenta",
@@ -778,6 +779,46 @@ def test_td7_invariantes_oraculo(db: Session, monkeypatch):
                         c_id = rng.choice(list(reintegros_activos.keys()))
                         esp_id, esp_bid, esp_f, esp_m = reintegros_activos.pop(c_id)
                         reintegro_service.eliminar_reintegro(db, u.id, c_id)
+                        oraculo[esp_bid].revertir_movimiento(esp_id, esp_f, esp_m)
+
+                    elif op_tipo == "reintegro_a_pendiente":
+                        if not reintegros_activos:
+                            f_c = reloj_hoy - timedelta(days=5)
+                            tx_c = transaccion_service.crear_transaccion(
+                                db, u.id,
+                                TransaccionCreate(
+                                    tipo=TipoTransaccion.EGRESO,
+                                    monto=Decimal("1000.00"),
+                                    moneda=Moneda.ARS,
+                                    metodo_pago=MetodoPago.DEBITO,
+                                    categoria_id=cat_general.id,
+                                    billetera_id=b_a.id,
+                                    fecha=f_c,
+                                    descripcion="Compra para reintegro a pendiente",
+                                )
+                            )
+                            txs_activas.append(tx_c)
+                            oraculo[b_a.id].aplicar_movimiento(tx_c.id, f_c, Decimal("-1000.00"))
+                            reintegro_service.registrar_o_actualizar_reintegro(
+                                db, u.id, tx_c.id,
+                                monto=Decimal("200.00"),
+                                recibido=True,
+                                fecha_recibido=f_c,
+                            )
+                            espejo = db.execute(
+                                select(Transaccion).where(
+                                    Transaccion.reintegro_de_id == tx_c.id,
+                                    Transaccion.tipo_espejo == "reintegro",
+                                )
+                            ).scalars().first()
+                            oraculo[b_a.id].aplicar_movimiento(espejo.id, f_c, Decimal("200.00"))
+                            reintegros_activos[tx_c.id] = (espejo.id, b_a.id, f_c, Decimal("200.00"))
+
+                        c_id = rng.choice(list(reintegros_activos.keys()))
+                        esp_id, esp_bid, esp_f, esp_m = reintegros_activos.pop(c_id)
+                        reintegro_service.registrar_o_actualizar_reintegro(
+                            db, u.id, c_id, monto=esp_m, recibido=False
+                        )
                         oraculo[esp_bid].revertir_movimiento(esp_id, esp_f, esp_m)
 
                     elif op_tipo == "devolucion_cuotas":

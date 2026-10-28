@@ -458,15 +458,16 @@ class BuzonSalida:
         self._aviso_tipo: str | None = None
         self._aviso_al_enviar = None
 
-    def agregar_aviso(self, texto: str, tipo: str, al_enviar=None) -> None:
+    def agregar_aviso(self, texto: str, tipo: str, al_enviar=None) -> bool:
         if self._aviso_texto is not None:
-            return
+            return False
         if "\n" in texto or len(texto) > 90:
             logger.warning("Aviso rechazado: contiene salto de línea o supera 90 caracteres: %s", texto)
-            return
+            return False
         self._aviso_texto = texto
         self._aviso_tipo = tipo
         self._aviso_al_enviar = al_enviar
+        return True
 
 
 _buzon_actual_cv: ContextVar[BuzonSalida | None] = ContextVar("_buzon_actual_cv", default=None)

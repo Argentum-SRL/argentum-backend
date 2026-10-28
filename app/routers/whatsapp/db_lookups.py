@@ -585,6 +585,37 @@ def _buscar_ultimo_movimiento_whatsapp(usuario_id: UUID, db: Session) -> tuple[T
                 return tx, None
             except ValueError:
                 pass
+        if accion.startswith("reintegro:"):
+            try:
+                compra_id = UUID(accion.replace("reintegro:", ""))
+                compra = db.execute(
+                    select(Transaccion).where(
+                        Transaccion.id == compra_id,
+                        Transaccion.usuario_id == usuario_id,
+                    )
+                ).scalar_one_or_none()
+                espejo = db.execute(
+                    select(Transaccion).where(
+                        Transaccion.reintegro_de_id == compra_id,
+                        Transaccion.tipo_espejo == "reintegro",
+                        Transaccion.es_cuota_hija.is_(False),
+                        Transaccion.usuario_id == usuario_id,
+                    )
+                ).scalar_one_or_none()
+                if not compra or not espejo:
+                    return None, "YA_BORRADO"
+                limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_DESHACER_CORREGIR_MINUTOS)
+                fc = espejo.fecha_creacion.replace(tzinfo=timezone.utc) if espejo.fecha_creacion.tzinfo is None else espejo.fecha_creacion
+                if fc < limite:
+                    return None, "PLAZO_VENCIDO"
+                return espejo, None
+            except ValueError:
+                pass
+        if accion.startswith("que_es_esta_plata:"):
+            try:
+                tx_target_id = UUID(accion.replace("que_es_esta_plata:", ""))
+            except ValueError:
+                pass
         try:
             tx_target_id = UUID(accion.replace("corregido:", ""))
         except ValueError:

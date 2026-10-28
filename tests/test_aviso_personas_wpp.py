@@ -9,6 +9,7 @@ from uuid import uuid4
 from app.routers.whatsapp.aviso_personas_wpp import (
     TEXTO_AVISO_PAGOS,
     TEXTO_AVISO_COBROS,
+    TEXTO_PREGUNTA_COBRO,
     agregar_aviso_personas,
 )
 from app.services.whatsapp_service import BuzonSalida, _buzon_actual_cv
@@ -17,11 +18,14 @@ from app.services.whatsapp_service import BuzonSalida, _buzon_actual_cv
 def test_t5_textos_exactos():
     assert TEXTO_AVISO_PAGOS == "Si te acordás para qué era, decime «era el súper» y lo cambio."
     assert TEXTO_AVISO_COBROS == "Si te acordás qué era, decime «era un regalo» y lo cambio."
+    assert TEXTO_PREGUNTA_COBRO == "¿Qué era? 1) Me pagaron 2) Me devolvieron parte de un gasto 3) Solo pasó por mi cuenta"
 
     assert len(TEXTO_AVISO_PAGOS) <= 90
     assert len(TEXTO_AVISO_COBROS) <= 90
+    assert len(TEXTO_PREGUNTA_COBRO) <= 90
     assert "\n" not in TEXTO_AVISO_PAGOS
     assert "\n" not in TEXTO_AVISO_COBROS
+    assert "\n" not in TEXTO_PREGUNTA_COBRO
 
 
 def _crear_contexto_buzon(subcategorias_registradas: list[str], aviso_previo: str | None = None):
@@ -34,8 +38,9 @@ def _crear_contexto_buzon(subcategorias_registradas: list[str], aviso_previo: st
     token = _buzon_actual_cv.set(buzon)
 
     db_mock = MagicMock()
+    filas = [(uuid4(), subcat) for subcat in subcategorias_registradas]
     exec_res = MagicMock()
-    exec_res.scalars.return_value.all.return_value = subcategorias_registradas
+    exec_res.all.return_value = filas
     db_mock.execute.return_value = exec_res
 
     return usuario, buzon, db_mock, token
@@ -58,7 +63,7 @@ def test_t5_movimiento_cobros_de_personas():
         dt_inicio = datetime.now(timezone.utc)
         res = agregar_aviso_personas(db_mock, usuario, dt_inicio)
         assert res is True
-        assert buzon._aviso_texto == TEXTO_AVISO_COBROS
+        assert buzon._aviso_texto == TEXTO_PREGUNTA_COBRO
     finally:
         _buzon_actual_cv.reset(token)
 

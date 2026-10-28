@@ -228,6 +228,49 @@ def _confirmar_propuesta_deshacer(
 
         return tr, "Listo, movimiento eliminado.", False
 
+    reintegro_compra_id_str = entidades.get("reintegro_compra_id")
+    if reintegro_compra_id_str:
+        compra_id = UUID(str(reintegro_compra_id_str))
+        tx_id_str = entidades.get("transaccion_id")
+        compra = db.execute(
+            select(Transaccion)
+            .where(Transaccion.id == compra_id, Transaccion.usuario_id == usuario.id)
+            .with_for_update()
+        ).scalar_one_or_none()
+        espejo = None
+        if compra:
+            espejo = db.execute(
+                select(Transaccion).where(
+                    Transaccion.reintegro_de_id == compra.id,
+                    Transaccion.tipo_espejo == "reintegro",
+                    Transaccion.es_cuota_hija.is_(False),
+                )
+            ).scalars().first()
+
+        if not compra or not espejo:
+            conv_undo.accion_ejecutada = f"deshecho:{tx_id_str}"
+            db.commit()
+            return None, "El movimiento ya fue eliminado.", False
+
+        previo = entidades.get("reintegro_esperado_previo")
+        try:
+            from app.services import reintegro_service
+            if previo is None:
+                reintegro_service.eliminar_reintegro(db, usuario.id, compra.id, commit=False)
+            else:
+                reintegro_service.registrar_o_actualizar_reintegro(
+                    db, usuario.id, compra.id, Decimal(str(previo)), recibido=False, commit=False
+                )
+            conv_undo.accion_ejecutada = f"deshecho:{tx_id_str}"
+            emitir_evento_actualizacion(db, usuario.id, "transacciones")
+            emitir_evento_actualizacion(db, usuario.id, "billeteras")
+            db.commit()
+            return compra, "Listo, devolución eliminada.", False
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error al anular devolución reintegro {compra_id}: {e}")
+            return None, "Hubo un problema al anular el movimiento, no se modificó nada.", False
+
     tx_id_str = entidades.get("transaccion_id")
     if not tx_id_str:
         return None, "No pude procesar la anulación.", False

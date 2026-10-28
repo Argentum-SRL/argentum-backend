@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 from app.models.transferencia_interna import TransferenciaInterna
@@ -102,6 +103,24 @@ def manejar_deshacer(
         entidades_undo = {"lote_ids": [str(t.id) for t in tx_last]}
     elif isinstance(tx_last, TransferenciaInterna):
         entidades_undo = {"transferencia_id": str(tx_last.id)}
+    elif isinstance(tx_last, Transaccion) and tx_last.reintegro_de_id and tx_last.tipo_espejo == "reintegro":
+        conv_reint = db.execute(
+            select(ConversacionWpp)
+            .where(
+                ConversacionWpp.usuario_id == usuario.id,
+                ConversacionWpp.accion_ejecutada == f"reintegro:{tx_last.reintegro_de_id}",
+            )
+            .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+        ).scalars().first()
+        if conv_reint:
+            previo = (conv_reint.entidades or {}).get("reintegro_esperado_previo")
+            entidades_undo = {
+                "transaccion_id": str(tx_last.id),
+                "reintegro_compra_id": str(tx_last.reintegro_de_id),
+                "reintegro_esperado_previo": previo,
+            }
+        else:
+            entidades_undo = {"transaccion_id": str(tx_last.id)}
     else:
         entidades_undo = {"transaccion_id": str(tx_last.id)}
     nueva_conv = ConversacionWpp(
