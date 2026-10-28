@@ -1,7 +1,7 @@
 from typing import List, Optional
 from uuid import UUID
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.orm import Session
@@ -101,16 +101,19 @@ def sugerencia_pesos(
             "cotizacion": None,
             "percepcion": percepcion,
             "monto_pesos": None,
+            "cotizacion_tarjeta": None,
         }
 
-    cotizacion = cotizacion_obj.venta
+    venta = Decimal(str(cotizacion_obj.venta))
     factor = Decimal("1") + (Decimal(str(percepcion)) / Decimal("100"))
-    monto_pesos = round(monto_usd * cotizacion * factor, 2)
+    cotizacion_tarjeta = (venta * factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    monto_pesos = (monto_usd * venta * factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
     return {
-        "cotizacion": float(cotizacion),
+        "cotizacion": float(venta),
         "percepcion": percepcion,
         "monto_pesos": float(monto_pesos),
+        "cotizacion_tarjeta": float(cotizacion_tarjeta),
     }
 
 

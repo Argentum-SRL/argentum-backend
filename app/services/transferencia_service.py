@@ -1,5 +1,5 @@
 import logging
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy import select, desc
@@ -33,6 +33,24 @@ def obtener_transferencia(db: Session, usuario_id: UUID, transferencia_id: UUID)
     if not tr:
         raise HTTPException(status_code=404, detail="Transferencia no encontrada")
     return tr
+
+
+def calcular_monto_destino(
+    monto_origen: Decimal,
+    cotizacion: Decimal,
+    moneda_origen: Moneda,
+    moneda_destino: Moneda,
+) -> Decimal:
+    """
+    Calcula el monto de destino para una transferencia con cambio de moneda
+    (ARS a USD o USD a ARS) redondeado a centavos con ROUND_HALF_UP.
+    """
+    if moneda_origen == Moneda.ARS and moneda_destino == Moneda.USD:
+        return (monto_origen / cotizacion).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    elif moneda_origen == Moneda.USD and moneda_destino == Moneda.ARS:
+        return (monto_origen * cotizacion).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    else:
+        raise ValueError("La cotización solo aplica entre pesos y dólares.")
 
 
 def crear_transferencia(
@@ -86,27 +104,35 @@ def crear_transferencia(
         cotizacion = None
     else:
         # Transferencia entre monedas distintas (Compra/Venta de moneda extranjera)
-        if data.monto_destino is None or data.monto_destino <= Decimal("0"):
+        moneda_origen = b_origen.moneda
+        moneda_destino = b_destino.moneda
+        if data.moneda_destino:
+            _validar_moneda_coincide(data.moneda_destino, b_destino)
+
+        if (data.monto_destino is None or data.monto_destino <= Decimal("0")) and data.cotizacion is not None:
+            monto_destino = calcular_monto_destino(
+                monto_origen=monto_origen,
+                cotizacion=data.cotizacion,
+                moneda_origen=moneda_origen,
+                moneda_destino=moneda_destino,
+            )
+            cotizacion = data.cotizacion.quantize(Decimal("0.0001"))
+        elif data.monto_destino is not None and data.monto_destino > Decimal("0"):
+            monto_destino = data.monto_destino
+            # Convención de cotización implícita: siempre ARS / USD (pesos por cada dólar)
+            if moneda_origen == Moneda.ARS and moneda_destino == Moneda.USD:
+                # Compra de dólares: pesos que salen / dólares que entran
+                cotizacion = (monto_origen / monto_destino).quantize(Decimal("0.0001"))
+            elif moneda_origen == Moneda.USD and moneda_destino == Moneda.ARS:
+                # Venta de dólares: pesos que entran / dólares que salen
+                cotizacion = (monto_destino / monto_origen).quantize(Decimal("0.0001"))
+            else:
+                cotizacion = (monto_origen / monto_destino).quantize(Decimal("0.0001"))
+        else:
             raise HTTPException(
                 status_code=400,
                 detail="Para transferencias entre billeteras de distinta moneda debes ingresar el monto recibido en destino."
             )
-        monto_destino = data.monto_destino
-        if data.moneda_destino:
-            _validar_moneda_coincide(data.moneda_destino, b_destino)
-
-        moneda_origen = b_origen.moneda
-        moneda_destino = b_destino.moneda
-
-        # Convención de cotización implícita: siempre ARS / USD (pesos por cada dólar)
-        if moneda_origen == Moneda.ARS and moneda_destino == Moneda.USD:
-            # Compra de dólares: pesos que salen / dólares que entran
-            cotizacion = (monto_origen / monto_destino).quantize(Decimal("0.0001"))
-        elif moneda_origen == Moneda.USD and moneda_destino == Moneda.ARS:
-            # Venta de dólares: pesos que entran / dólares que salen
-            cotizacion = (monto_destino / monto_origen).quantize(Decimal("0.0001"))
-        else:
-            cotizacion = (monto_origen / monto_destino).quantize(Decimal("0.0001"))
 
     # 3. Manejo de comisión opcional (gasto real)
     tx_comision_id = None

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Literal
 from uuid import UUID
 
@@ -44,6 +44,38 @@ from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 
 logger = logging.getLogger(__name__)
+
+
+def calcular_montos_pesificacion(
+    monto_usd: Decimal,
+    cotizacion: Decimal,
+    porcentaje_percepcion: Decimal,
+    monto_pesos: Decimal | None = None,
+    monto_percepcion: Decimal | None = None,
+) -> dict[str, Decimal]:
+    """
+    Calcula los montos de pesificación para el pago o simulación de resumen de tarjeta.
+    Devuelve monto_convertido, monto_percepcion y total, redondeados
+    a centavos con ROUND_HALF_UP.
+    """
+    centavo = Decimal("0.01")
+    if monto_pesos is not None and monto_pesos > Decimal("0"):
+        monto_convertido = monto_pesos.quantize(centavo, rounding=ROUND_HALF_UP)
+    else:
+        monto_convertido = (monto_usd * cotizacion).quantize(centavo, rounding=ROUND_HALF_UP)
+
+    if monto_percepcion is not None and monto_percepcion >= Decimal("0"):
+        monto_percep = monto_percepcion.quantize(centavo, rounding=ROUND_HALF_UP)
+    else:
+        monto_percep = (monto_convertido * (porcentaje_percepcion / Decimal("100"))).quantize(centavo, rounding=ROUND_HALF_UP)
+
+    total = (monto_convertido + monto_percep).quantize(centavo, rounding=ROUND_HALF_UP)
+
+    return {
+        "monto_convertido": monto_convertido,
+        "monto_percepcion": monto_percep,
+        "total": total,
+    }
 
 
 def _subcategoria_impuestos_banco(db: Session, categoria_banco: Categoria | None) -> Subcategoria | None:
@@ -306,16 +338,16 @@ def pagar_resumen_tarjeta(
                     )
 
             tipo_dolar = "oficial"
-            if monto_pesos_personalizado is not None and monto_pesos_personalizado > Decimal("0"):
-                monto_convertido = monto_pesos_personalizado
-            else:
-                monto_convertido = (monto_pago * cotizacion).quantize(Decimal("0.01"))
-
             porcentaje_percep = getattr(tarjeta, "percepcion_moneda_extranjera", Decimal("30.00"))
-            if monto_percepcion_personalizado is not None and monto_percepcion_personalizado >= Decimal("0"):
-                monto_percepcion = monto_percepcion_personalizado
-            else:
-                monto_percepcion = (monto_convertido * (porcentaje_percep / Decimal("100"))).quantize(Decimal("0.01"))
+            calculos_pesif = calcular_montos_pesificacion(
+                monto_usd=monto_pago,
+                cotizacion=cotizacion,
+                porcentaje_percepcion=porcentaje_percep,
+                monto_pesos=monto_pesos_personalizado,
+                monto_percepcion=monto_percepcion_personalizado,
+            )
+            monto_convertido = calculos_pesif["monto_convertido"]
+            monto_percepcion = calculos_pesif["monto_percepcion"]
 
             monto_debito = monto_convertido
             moneda_debito = Moneda.ARS
@@ -571,11 +603,21 @@ def simular_pesificacion(
     fecha_resumen: date | None = None,
     monto_usd: Decimal | None = None,
     fecha_pago: date | None = None,
+    cotizacion: Decimal | None = None,
+    monto_pesos: Decimal | None = None,
+    monto_percepcion: Decimal | None = None,
 ) -> SimularPesificacionResponse:
     """
     Simula la pesificación del saldo en dólares de un resumen de tarjeta.
-    Propone la cotización oficial de cierre, calcula monto convertido, percepción y total en pesos.
+    Propone la cotización oficial de cierre o usa la provista, calcula monto convertido, percepción y total en pesos.
     """
+    if cotizacion is not None and cotizacion <= Decimal("0"):
+        raise HTTPException(status_code=422, detail="La cotización debe ser mayor a 0.")
+    if monto_pesos is not None and monto_pesos <= Decimal("0"):
+        raise HTTPException(status_code=422, detail="El monto en pesos debe ser mayor a 0.")
+    if monto_percepcion is not None and monto_percepcion < Decimal("0"):
+        raise HTTPException(status_code=422, detail="La percepción debe ser mayor o igual a 0.")
+
     tarjeta = db.query(TarjetaCredito).filter(
         TarjetaCredito.id == tarjeta_id,
         TarjetaCredito.usuario_id == usuario_id
@@ -598,20 +640,30 @@ def simular_pesificacion(
 
     porcentaje_percep = getattr(tarjeta, "percepcion_moneda_extranjera", Decimal("30.00"))
 
-    cot_val, _ = cotizacion_pesificacion(db, fecha_pago, limite_vencimiento)
-    if cot_val is not None:
-        monto_conv = (monto_usd * cot_val).quantize(Decimal("0.01"))
-        monto_percep = (monto_conv * (porcentaje_percep / Decimal("100"))).quantize(Decimal("0.01"))
-        total_ars = monto_conv + monto_percep
+    if cotizacion is not None:
+        cot_val = cotizacion
+        cot_disponible = True
+    else:
+        cot_val, _ = cotizacion_pesificacion(db, fecha_pago, limite_vencimiento)
+        cot_disponible = (cot_val is not None)
+
+    if cot_disponible and cot_val is not None:
+        calculos = calcular_montos_pesificacion(
+            monto_usd=monto_usd,
+            cotizacion=cot_val,
+            porcentaje_percepcion=porcentaje_percep,
+            monto_pesos=monto_pesos,
+            monto_percepcion=monto_percepcion,
+        )
         return SimularPesificacionResponse(
             fecha_cierre=fecha_cierre,
             monto_usd=monto_usd,
             cotizacion_oficial=cot_val,
             cotizacion_disponible=True,
             porcentaje_percepcion=porcentaje_percep,
-            monto_convertido_ars=monto_conv,
-            monto_percepcion_ars=monto_percep,
-            total_estimado_ars=total_ars
+            monto_convertido_ars=calculos["monto_convertido"],
+            monto_percepcion_ars=calculos["monto_percepcion"],
+            total_estimado_ars=calculos["total"]
         )
     else:
         return SimularPesificacionResponse(
@@ -624,4 +676,3 @@ def simular_pesificacion(
             monto_percepcion_ars=None,
             total_estimado_ars=None
         )
-

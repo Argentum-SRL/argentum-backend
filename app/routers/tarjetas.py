@@ -211,8 +211,11 @@ def pagar_tarjeta(
 def simular_pesificacion(
     tarjeta_id: UUID,
     fecha_resumen: date | None = None,
-    monto_usd: Decimal | None = None,
+    monto_usd: Decimal | None = Query(default=None, gt=0),
     fecha_pago: date | None = None,
+    cotizacion: Decimal | None = Query(default=None, gt=0),
+    monto_pesos: Decimal | None = Query(default=None, gt=0),
+    monto_percepcion: Decimal | None = Query(default=None, ge=0),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
@@ -223,5 +226,8 @@ def simular_pesificacion(
         fecha_resumen=fecha_resumen,
         monto_usd=monto_usd,
         fecha_pago=fecha_pago,
+        cotizacion=cotizacion,
+        monto_pesos=monto_pesos,
+        monto_percepcion=monto_percepcion,
     )
 

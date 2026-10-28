@@ -128,7 +128,8 @@ def test_s1_tope_diario_salientes(db_session, monkeypatch):
     monkeypatch.setattr(whatsapp_service, "get_meta_http_client", lambda: mock_client)
 
     # 150 filas de ayer -> no cuentan
-    ayer = datetime.now(timezone.utc) - timedelta(days=1)
+    # En hora argentina: con SQLite la fecha se guarda sin zona y se compara contra las 00:00 ART de hoy
+    ayer = datetime.now(TZ_ARGENTINA) - timedelta(days=1)
     for _ in range(150):
         db_session.add(MensajeSalienteWpp(
             id=uuid4(),

@@ -20,6 +20,7 @@ class TransferenciaInternaCreate(BaseModel):
     moneda: Moneda = Field(..., description="Moneda de origen")
     monto_origen: DecimalJSON | None = Field(default=None, gt=0, decimal_places=2, max_digits=15)
     monto_destino: DecimalJSON | None = Field(default=None, gt=0, decimal_places=2, max_digits=15, description="Monto que entra a la billetera de destino")
+    cotizacion: DecimalJSON | None = Field(default=None, gt=0, max_digits=15, decimal_places=4)
     moneda_origen: Moneda | None = None
     moneda_destino: Moneda | None = None
     monto_comision: DecimalJSON | None = Field(default=None, gt=0, decimal_places=2, max_digits=15, description="Comisión opcional de la operación")
@@ -111,3 +112,8 @@ class TransferenciaInternaUpdate(BaseModel):
             return None
         v_clean = v.strip()
         return v_clean if v_clean else None
+
+class SimularTransferenciaResponse(BaseModel):
+    """Respuesta para simulación de transferencia entre monedas distintas."""
+    monto_destino: DecimalJSON
+    cotizacion: DecimalJSON

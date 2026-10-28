@@ -130,3 +130,8 @@ Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_21-10.md (versi
 - Suite de WhatsApp: scripts/regresion/suite_regresion_whatsapp.py (escenarios en scripts/regresion/suite/). Las grabaciones de la IA en scripts/regresion/grabaciones_ia/ nunca se editan a mano. Comparación de salidas: scripts/regresion/comparar_salidas.py. Paridad web/WhatsApp: scripts/regresion/paridad_web_whatsapp.py.
 - Foto del motor: scripts/motor/foto_motor.py. Personas: scripts/motor/evaluar_personas.py. Verificador: scripts/testingadmin/verificar_testingadmin.py.
 - Ningún archivo de más de 1.300 líneas. Nunca se juntan líneas para cumplirlo: si un archivo se pasa, se parte en archivos.
+### Pesificación y transferencias (fase_ec2_front_sin_cuentas)
+- `calcular_montos_pesificacion` única en `pago_resumen_service.py`.
+- `calcular_monto_destino` única en `transferencia_service.py` y `GET /transferencias/simular`.
+- `GET /transacciones/sugerencia-pesos` devuelve `cotizacion_tarjeta`.
+- Todo redondeo financiero en centavos con ROUND_HALF_UP.

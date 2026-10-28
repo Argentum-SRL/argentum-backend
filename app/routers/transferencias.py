@@ -1,13 +1,19 @@
 from typing import List
+from decimal import Decimal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
+from app.core.constants import MAX_MONTO_INTEGRIDAD
 from app.core.database import get_db
-from app.models.usuario import Usuario
-from app.schemas.transferencia_interna import TransferenciaInternaCreate, TransferenciaInternaRead
+from app.models.usuario import Usuario, Moneda
+from app.schemas.transferencia_interna import (
+    SimularTransferenciaResponse,
+    TransferenciaInternaCreate,
+    TransferenciaInternaRead,
+)
 from app.services import transferencia_service, idempotencia_service
 
 router = APIRouter(prefix="/transferencias", tags=["transferencias"])
@@ -22,6 +28,33 @@ def list_transferencias(
     Lista las transferencias internas del usuario.
     """
     return transferencia_service.obtener_transferencias(db, current_user.id)
+
+
+@router.get("/simular", response_model=SimularTransferenciaResponse)
+def simular_transferencia(
+    monto: Decimal = Query(..., gt=0, le=MAX_MONTO_INTEGRIDAD),
+    cotizacion: Decimal = Query(..., gt=0),
+    moneda_origen: Moneda = Query(...),
+    moneda_destino: Moneda = Query(...),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Simula el monto de destino para una transferencia con cambio de moneda.
+    """
+    try:
+        monto_destino = transferencia_service.calcular_monto_destino(
+            monto_origen=monto,
+            cotizacion=cotizacion,
+            moneda_origen=moneda_origen,
+            moneda_destino=moneda_destino,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    return SimularTransferenciaResponse(
+        monto_destino=monto_destino,
+        cotizacion=cotizacion,
+    )
 
 
 @router.get("/{transferencia_id}", response_model=TransferenciaInternaRead)
