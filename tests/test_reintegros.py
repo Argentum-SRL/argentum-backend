@@ -443,12 +443,20 @@ def test_caso_e_historial_consolidacion_y_standalone(db: Session, usuario: Usuar
         hoy=date(2026, 10, 21),
     )
 
-    assert len(resp_ambos.items) == 1
-    fila = resp_ambos.items[0]
-    assert fila.monto == Decimal("75000.00")
-    assert fila.reintegro is not None
-    assert fila.reintegro.estado == "recibido"
-    assert fila.reintegro.monto == Decimal("25000.00")
+    assert len(resp_ambos.items) == 2
+    fila_espejo = resp_ambos.items[0]
+    assert fila_espejo.fecha == date(2026, 10, 5)
+    assert fila_espejo.etiqueta == "Reintegro"
+    assert fila_espejo.sentido == "entra"
+    assert fila_espejo.monto == Decimal("25000.00")
+
+    fila_compra = resp_ambos.items[1]
+    assert fila_compra.fecha == date(2026, 9, 15)
+    assert fila_compra.sentido == "sale"
+    assert fila_compra.monto == Decimal("100000.00")
+    assert fila_compra.reintegro is not None
+    assert fila_compra.reintegro.estado == "recibido"
+    assert fila_compra.reintegro.monto == Decimal("25000.00")
     assert resp_ambos.totales["ARS"].gastos == Decimal("75000.00")
 
     # 2. Rango que SOLO incluye el reintegro (01/10 a 31/10)

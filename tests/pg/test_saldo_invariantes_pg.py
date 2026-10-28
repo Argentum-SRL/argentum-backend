@@ -9,10 +9,11 @@ import threading
 import time as time_mod
 import uuid
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.categoria import Categoria, TipoCategoria, EstadoCategoria
+from app.models.subcategoria import Subcategoria
 from app.models.cuota import Cuota
 from app.models.grupo_cuotas import GrupoCuotas, EstadoGrupoCuotas
 from app.models.meta import Meta, EstadoMeta
@@ -37,6 +38,7 @@ from app.services import (
     fecha_saldo_service,
     meta_service,
     pago_resumen_service,
+    que_es_plata_service,
     reintegro_service,
     rendimiento_billetera_service,
     saldo_billetera_service,
@@ -102,6 +104,9 @@ OP_TIPOS = [
     "borrar_mov_meta",
     "reintegro",
     "borrar_reintegro",
+    "devolucion_cuotas",
+    "parte_de_gasto",
+    "paso_por_mi_cuenta",
 ]
 
 
@@ -131,10 +136,36 @@ def test_td7_invariantes_oraculo(db: Session, monkeypatch):
             db.commit()
 
             # Categorías
-            cat_banco = Categoria(id=uuid.uuid4(), nombre="Banco", tipo=TipoCategoria.EGRESO, estado=EstadoCategoria.ACTIVA)
-            cat_tarjeta = Categoria(id=uuid.uuid4(), nombre="Tarjeta de crédito", tipo=TipoCategoria.EGRESO, estado=EstadoCategoria.ACTIVA)
-            cat_general = Categoria(id=uuid.uuid4(), nombre="Varios", tipo=TipoCategoria.EGRESO, estado=EstadoCategoria.ACTIVA)
-            db.add_all([cat_banco, cat_tarjeta, cat_general])
+            cat_banco = db.execute(select(Categoria).where(func.lower(Categoria.nombre) == "banco", Categoria.tipo == TipoCategoria.EGRESO)).scalars().first()
+            if not cat_banco:
+                cat_banco = Categoria(id=uuid.uuid4(), nombre="Banco", tipo=TipoCategoria.EGRESO, estado=EstadoCategoria.ACTIVA)
+                db.add(cat_banco)
+
+            cat_tarjeta = db.execute(select(Categoria).where(func.lower(Categoria.nombre) == "tarjeta de crédito", Categoria.tipo == TipoCategoria.EGRESO)).scalars().first()
+            if not cat_tarjeta:
+                cat_tarjeta = Categoria(id=uuid.uuid4(), nombre="Tarjeta de crédito", tipo=TipoCategoria.EGRESO, estado=EstadoCategoria.ACTIVA)
+                db.add(cat_tarjeta)
+
+            cat_general = db.execute(select(Categoria).where(func.lower(Categoria.nombre) == "varios", Categoria.tipo == TipoCategoria.EGRESO)).scalars().first()
+            if not cat_general:
+                cat_general = Categoria(id=uuid.uuid4(), nombre="Varios", tipo=TipoCategoria.EGRESO, estado=EstadoCategoria.ACTIVA)
+                db.add(cat_general)
+
+            cat_otros_ing = db.execute(select(Categoria).where(func.lower(Categoria.nombre) == "otros", Categoria.tipo == TipoCategoria.INGRESO)).scalars().first()
+            if not cat_otros_ing:
+                cat_otros_ing = Categoria(id=uuid.uuid4(), nombre="Otros", tipo=TipoCategoria.INGRESO, estado=EstadoCategoria.ACTIVA)
+                db.add(cat_otros_ing)
+            db.flush()
+
+            sub_cobros = db.execute(select(Subcategoria).where(Subcategoria.categoria_id == cat_otros_ing.id, func.lower(Subcategoria.nombre) == "cobros de personas")).scalars().first()
+            if not sub_cobros:
+                sub_cobros = Subcategoria(id=uuid.uuid4(), categoria_id=cat_otros_ing.id, nombre="Cobros de personas", orden=1)
+                db.add(sub_cobros)
+
+            sub_paso_ing = db.execute(select(Subcategoria).where(Subcategoria.categoria_id == cat_otros_ing.id, func.lower(Subcategoria.nombre) == "pasó por mi cuenta")).scalars().first()
+            if not sub_paso_ing:
+                sub_paso_ing = Subcategoria(id=uuid.uuid4(), categoria_id=cat_otros_ing.id, nombre="Pasó por mi cuenta", orden=3)
+                db.add(sub_paso_ing)
             db.commit()
 
             # Billeteras A y B
@@ -170,6 +201,8 @@ def test_td7_invariantes_oraculo(db: Session, monkeypatch):
             movs_meta: list[tuple[uuid.UUID, uuid.UUID, uuid.UUID, date, Decimal]] = []  # (meta_id, mov_id, bill_id, fecha, impacto)
             movs_meta_futuros: list[tuple[uuid.UUID, uuid.UUID, date, Decimal]] = []  # (mov_m_id, b_id, fecha, impacto)
             reintegros_activos: dict[uuid.UUID, tuple[uuid.UUID, uuid.UUID, date, Decimal]] = {}  # compra_id -> (espejo_id, billetera_id, fecha_recibido, monto_reintegro)
+            compras_con_parte: dict[uuid.UUID, uuid.UUID] = {}  # compra_id -> parte_tx_id
+            filas_parte: set[uuid.UUID] = set()
 
             for op_num in range(30):
                 op_tipo = rng.choice(OP_TIPOS)
@@ -178,6 +211,8 @@ def test_td7_invariantes_oraculo(db: Session, monkeypatch):
                 }
                 snapshot_movs_meta_futuros = list(movs_meta_futuros)
                 snapshot_reintegros = dict(reintegros_activos)
+                snapshot_compras_con_parte = dict(compras_con_parte)
+                snapshot_filas_parte = set(filas_parte)
                 snapshot_transfs = list(transfs_activas)
                 snapshot_movs_meta = list(movs_meta)
                 snapshot_txs = list(txs_activas)
@@ -221,6 +256,7 @@ def test_td7_invariantes_oraculo(db: Session, monkeypatch):
                             and not t.reintegro_de_id
                             and not t.pago_resumen_vencimiento
                             and t.id not in reintegros_activos
+                            and t.id not in filas_parte
                             and t.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE
                             and t.fecha <= reloj_hoy
                         ]
@@ -294,15 +330,26 @@ def test_td7_invariantes_oraculo(db: Session, monkeypatch):
                             esp_id, esp_bid, esp_f, esp_m = reintegros_activos.pop(tx_b.id)
                             oraculo[esp_bid].revertir_movimiento(esp_id, esp_f, esp_m)
 
+                        if tx_b.id in compras_con_parte:
+                            compras_con_parte.pop(tx_b.id)
+
                         f_tx = tx_b.fecha
-                        imp = tx_b.monto if tx_b.tipo == TipoTransaccion.INGRESO else -tx_b.monto
+                        if tx_b.id in filas_parte:
+                            filas_parte.remove(tx_b.id)
+                            imp = Decimal("1000.00")
+                        else:
+                            imp = tx_b.monto if tx_b.tipo == TipoTransaccion.INGRESO else -tx_b.monto
                         b_id = tx_b.billetera_id
                         transaccion_service.eliminar_transaccion(db, u.id, tx_b.id)
                         if b_id in oraculo:
                             oraculo[b_id].revertir_movimiento(tx_b.id, f_tx, imp)
 
                     elif op_tipo == "confirmar_tx":
-                        pendientes = [t for t in txs_activas if t.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE]
+                        pendientes = [
+                            t for t in txs_activas
+                            if t.estado_verificacion == EstadoVerificacionTransaccion.PENDIENTE
+                            and t.id not in filas_parte
+                        ]
                         if not pendientes:
                             f_tx = reloj_hoy - timedelta(days=2)
                             tx_pend = transaccion_service.crear_transaccion(
@@ -511,6 +558,8 @@ def test_td7_invariantes_oraculo(db: Session, monkeypatch):
                                 t.id not in oraculo[t.billetera_id].movimientos_aplicados
                                 and t.fecha <= reloj_hoy
                                 and t.metodo_pago != MetodoPago.CREDITO
+                                and not t.es_padre_cuotas
+                                and not t.es_cuota_hija
                                 and t.estado_verificacion != EstadoVerificacionTransaccion.PENDIENTE
                             ):
                                 imp = t.monto if t.tipo == TipoTransaccion.INGRESO else -t.monto
@@ -648,6 +697,8 @@ def test_td7_invariantes_oraculo(db: Session, monkeypatch):
                             and not t.reintegro_de_id
                             and not t.pago_resumen_vencimiento
                             and t.id not in reintegros_activos
+                            and t.id not in compras_con_parte
+                            and t.id not in filas_parte
                             and t.fecha <= reloj_hoy
                         ]
                         if not candidatos:
@@ -681,7 +732,10 @@ def test_td7_invariantes_oraculo(db: Session, monkeypatch):
                             fecha_recibido=f_reint,
                         )
                         espejo = db.execute(
-                            select(Transaccion).where(Transaccion.reintegro_de_id == compra.id)
+                            select(Transaccion).where(
+                                Transaccion.reintegro_de_id == compra.id,
+                                Transaccion.tipo_espejo == "reintegro",
+                            )
                         ).scalars().first()
                         if espejo:
                             oraculo[compra.billetera_id].aplicar_movimiento(espejo.id, f_reint, m_reint)
@@ -712,7 +766,10 @@ def test_td7_invariantes_oraculo(db: Session, monkeypatch):
                                 fecha_recibido=f_c,
                             )
                             espejo = db.execute(
-                                select(Transaccion).where(Transaccion.reintegro_de_id == tx_c.id)
+                                select(Transaccion).where(
+                                    Transaccion.reintegro_de_id == tx_c.id,
+                                    Transaccion.tipo_espejo == "reintegro",
+                                )
                             ).scalars().first()
                             oraculo[b_a.id].aplicar_movimiento(espejo.id, f_c, Decimal("200.00"))
                             reintegros_activos[tx_c.id] = (espejo.id, b_a.id, f_c, Decimal("200.00"))
@@ -721,6 +778,119 @@ def test_td7_invariantes_oraculo(db: Session, monkeypatch):
                         esp_id, esp_bid, esp_f, esp_m = reintegros_activos.pop(c_id)
                         reintegro_service.eliminar_reintegro(db, u.id, c_id)
                         oraculo[esp_bid].revertir_movimiento(esp_id, esp_f, esp_m)
+
+                    elif op_tipo == "devolucion_cuotas":
+                        # compra con la tarjeta de 3.000 en 3 cuotas con fecha entre reloj_hoy − 10 y reloj_hoy,
+                        # y devolución de 3.000 recibida en reloj_hoy (crédito: el oráculo no cambia).
+                        dias_c = rng.randint(0, 10)
+                        f_c = reloj_hoy - timedelta(days=dias_c)
+                        tx_compra_cuotas = transaccion_service.crear_transaccion(
+                            db, u.id,
+                            TransaccionCreate(
+                                tipo=TipoTransaccion.EGRESO,
+                                monto=Decimal("3000.00"),
+                                moneda=Moneda.ARS,
+                                metodo_pago=MetodoPago.CREDITO,
+                                categoria_id=cat_tarjeta.id,
+                                billetera_id=b_a.id,
+                                tarjeta_id=tarjeta.id,
+                                fecha=f_c,
+                                descripcion="Compra tarjeta 3 cuotas",
+                                info_cuotas=InfoCuotas(cantidad_cuotas=3, monto_total=Decimal("3000.00")),
+                            )
+                        )
+                        txs_activas.append(tx_compra_cuotas)
+                        reintegro_service.registrar_o_actualizar_reintegro(
+                            db, u.id, tx_compra_cuotas.id,
+                            monto=Decimal("3000.00"),
+                            recibido=True,
+                            fecha_recibido=reloj_hoy,
+                        )
+
+                    elif op_tipo == "parte_de_gasto":
+                        # si no hay compra candidata, crea un egreso de 2.000 en débito en A con fecha reloj_hoy − 1 (oráculo −2.000);
+                        # crea un ingreso de 1.000 por transferencia en A en reloj_hoy en Cobros de personas (oráculo +1.000)
+                        # y lo pasa a parte de esa compra (el oráculo no cambia; anotá la parte para que borrar_tx de esa compra no la revierta;
+                        # la fila pasada a parte sale de los candidatos de editar_tx y confirmar_tx, y si borrar_tx la elige a ella el oráculo revierte su +1.000).
+                        candidatos_p = [
+                            t for t in txs_activas
+                            if t.billetera_id == b_a.id
+                            and t.tipo == TipoTransaccion.EGRESO
+                            and t.metodo_pago == MetodoPago.DEBITO
+                            and t.estado_verificacion == EstadoVerificacionTransaccion.CONFIRMADA
+                            and not t.es_cuota_hija
+                            and not t.es_padre_cuotas
+                            and not t.movimiento_meta_id
+                            and not t.reintegro_de_id
+                            and not t.pago_resumen_vencimiento
+                            and t.categoria_id == cat_general.id
+                            and t.id not in reintegros_activos
+                            and t.id not in compras_con_parte
+                            and t.id not in filas_parte
+                            and t.fecha <= reloj_hoy
+                            and t.monto >= Decimal("1000.00")
+                        ]
+                        if not candidatos_p:
+                            f_c = reloj_hoy - timedelta(days=1)
+                            compra_p = transaccion_service.crear_transaccion(
+                                db, u.id,
+                                TransaccionCreate(
+                                    tipo=TipoTransaccion.EGRESO,
+                                    monto=Decimal("2000.00"),
+                                    moneda=Moneda.ARS,
+                                    metodo_pago=MetodoPago.DEBITO,
+                                    categoria_id=cat_general.id,
+                                    billetera_id=b_a.id,
+                                    fecha=f_c,
+                                    descripcion="Compra para parte",
+                                )
+                            )
+                            txs_activas.append(compra_p)
+                            oraculo[b_a.id].aplicar_movimiento(compra_p.id, f_c, Decimal("-2000.00"), es_tx_o_tr=True)
+                        else:
+                            compra_p = rng.choice(candidatos_p)
+
+                        ingreso_p = transaccion_service.crear_transaccion(
+                            db, u.id,
+                            TransaccionCreate(
+                                tipo=TipoTransaccion.INGRESO,
+                                monto=Decimal("1000.00"),
+                                moneda=Moneda.ARS,
+                                metodo_pago=MetodoPago.TRANSFERENCIA,
+                                categoria_id=cat_otros_ing.id,
+                                subcategoria_id=sub_cobros.id,
+                                billetera_id=b_a.id,
+                                fecha=reloj_hoy,
+                                descripcion="Ingreso para pasar a parte",
+                            )
+                        )
+                        txs_activas.append(ingreso_p)
+                        oraculo[b_a.id].aplicar_movimiento(ingreso_p.id, reloj_hoy, Decimal("1000.00"), es_tx_o_tr=True)
+
+                        que_es_plata_service.responder(
+                            db, u.id, ingreso_p.id, opcion="parte_de_gasto", gasto_id=compra_p.id
+                        )
+                        compras_con_parte[compra_p.id] = ingreso_p.id
+                        filas_parte.add(ingreso_p.id)
+
+                    elif op_tipo == "paso_por_mi_cuenta":
+                        # ingreso de 700 en A en reloj_hoy en Pasó por mi cuenta (oráculo +700).
+                        tx_paso = transaccion_service.crear_transaccion(
+                            db, u.id,
+                            TransaccionCreate(
+                                tipo=TipoTransaccion.INGRESO,
+                                monto=Decimal("700.00"),
+                                moneda=Moneda.ARS,
+                                metodo_pago=MetodoPago.TRANSFERENCIA,
+                                categoria_id=cat_otros_ing.id,
+                                subcategoria_id=sub_paso_ing.id,
+                                billetera_id=b_a.id,
+                                fecha=reloj_hoy,
+                                descripcion="Paso por mi cuenta",
+                            )
+                        )
+                        txs_activas.append(tx_paso)
+                        oraculo[b_a.id].aplicar_movimiento(tx_paso.id, reloj_hoy, Decimal("700.00"), es_tx_o_tr=True)
 
                     db.commit()
 
@@ -734,6 +904,8 @@ def test_td7_invariantes_oraculo(db: Session, monkeypatch):
                             oraculo[k].movimientos_aplicados = dict(m_prev)
                         movs_meta_futuros = list(snapshot_movs_meta_futuros)
                         reintegros_activos = dict(snapshot_reintegros)
+                        compras_con_parte = dict(snapshot_compras_con_parte)
+                        filas_parte = set(snapshot_filas_parte)
                         transfs_activas = list(snapshot_transfs)
                         movs_meta = list(snapshot_movs_meta)
                         txs_activas = list(snapshot_txs)

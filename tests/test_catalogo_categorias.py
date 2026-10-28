@@ -107,9 +107,9 @@ def test_t1_catalogo_decision_1():
                     assert n_s not in nombres_visibles_ingreso, f"Repetido en ingreso: {s.nombre}"
                     nombres_visibles_ingreso.add(n_s)
 
-    assert total_visibles == 68
-    assert total_visibles_egreso == 56
-    assert total_visibles_ingreso == 12
+    assert total_visibles == 70
+    assert total_visibles_egreso == 57
+    assert total_visibles_ingreso == 13
 
     # 2 de sistema: Banco > Tarjeta de crédito y Banco > Impuestos
     assert len(subcats_sistema) == 2
@@ -147,8 +147,24 @@ def test_t1_catalogo_decision_1():
     migr_mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migr_mod)
     FOTO_ARBOL_DECISION_1 = migr_mod.FOTO_ARBOL_DECISION_1
-    assert len(FOTO_ARBOL_DECISION_1) == len(arbol)
-    for i, cat_migr in enumerate(FOTO_ARBOL_DECISION_1):
+
+    migr_f_path = Path(__file__).resolve().parent.parent / "alembic" / "versions" / "f8a9b0c1d2e3_bloque_f_espejos.py"
+    spec_f = importlib.util.spec_from_file_location("f8a9b0c1d2e3_bloque_f_espejos", migr_f_path)
+    migr_f_mod = importlib.util.module_from_spec(spec_f)
+    spec_f.loader.exec_module(migr_f_mod)
+    SUBCATEGORIAS_NUEVAS = migr_f_mod.SUBCATEGORIAS_NUEVAS
+
+    foto_combinada = []
+    for cat_migr in FOTO_ARBOL_DECISION_1:
+        nom_c, tipo_c, ord_c, ico_c, col_c, subcats_c = cat_migr
+        subcats_lista = list(subcats_c)
+        for c_nom, c_tipo, s_nom, s_ord, s_sis, s_ipc in SUBCATEGORIAS_NUEVAS:
+            if c_nom == nom_c and c_tipo == tipo_c:
+                subcats_lista.append((s_nom, s_ord, s_sis, s_ipc))
+        foto_combinada.append((nom_c, tipo_c, ord_c, ico_c, col_c, tuple(subcats_lista)))
+
+    assert len(foto_combinada) == len(arbol)
+    for i, cat_migr in enumerate(foto_combinada):
         cat_cat = arbol[i]
         assert cat_migr[0] == cat_cat.nombre
         assert cat_migr[1] == cat_cat.tipo

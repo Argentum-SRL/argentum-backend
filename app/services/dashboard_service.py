@@ -203,9 +203,6 @@ def get_dashboard_resumen(
     movimientos_data = []
     for item in resp_movs.items:
         tx = item.transaccion
-        # D8: Los espejos no se listan en Últimos movimientos
-        if item.etiqueta == "Reintegro" or (tx is not None and getattr(tx, "reintegro_de_id", None) is not None):
-            continue
 
         if item.clase == "transaccion" and tx is not None:
             tipo_item = tx.tipo.value if hasattr(tx.tipo, "value") else str(tx.tipo)

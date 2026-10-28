@@ -67,7 +67,7 @@ def condicion_gasto(
        La percepción por moneda extranjera y el prepago de cuotas sí son gasto.
     5. Categoría y Subcategoría:
        - Su categoría no es 'Ahorro' (resuelto dinámicamente por ID del catálogo).
-       - Su subcategoría no es 'Tarjeta de crédito' de la categoría 'Banco'.
+       - Su subcategoría no es 'Tarjeta de crédito' de la categoría 'Banco' ni 'Pasó por mi cuenta'.
     6. Tarjeta y cuotas:
        - Padre de cuotas (es_padre_cuotas): cuenta solo si cantidad_cuotas == 1.
        - Cuota hija (es_cuota_hija): cuenta solo si cantidad_cuotas > 1.
@@ -101,6 +101,9 @@ def condicion_gasto(
         .where(GrupoCuotas.id == Transaccion.grupo_cuotas_id)
         .scalar_subquery()
     )
+    subcat_paso_sq = (
+        select(Subcategoria.id).where(func.lower(Subcategoria.nombre) == "pasó por mi cuenta")
+    )
 
     conds = [
         Transaccion.usuario_id == usuario_id,
@@ -116,6 +119,10 @@ def condicion_gasto(
         or_(
             Transaccion.subcategoria_id.is_(None),
             Transaccion.subcategoria_id.not_in(subcat_tc_sq),
+        ),
+        or_(
+            Transaccion.subcategoria_id.is_(None),
+            Transaccion.subcategoria_id.not_in(subcat_paso_sq),
         ),
         or_(
             and_(
@@ -158,6 +165,7 @@ def condicion_ingreso(
     1. tipo == ingreso.
     2. Su billetera no es de inversión (billeteras.es_inversion = false).
     3. No es aporte ni retiro de meta (movimiento_meta_id IS NULL).
+    6. Subcategoría no es 'Reintegros' ni 'Pasó por mi cuenta'.
     7. Estado: estado nulo o 'confirmada'.
     9. Solo cuenta si fecha <= hoy en Argentina.
     """
@@ -170,6 +178,9 @@ def condicion_ingreso(
     )
     subcat_reintegros_sq = (
         select(Subcategoria.id).where(func.lower(Subcategoria.nombre) == "reintegros")
+    )
+    subcat_paso_sq = (
+        select(Subcategoria.id).where(func.lower(Subcategoria.nombre) == "pasó por mi cuenta")
     )
 
     conds = [
@@ -185,6 +196,10 @@ def condicion_ingreso(
         or_(
             Transaccion.subcategoria_id.is_(None),
             Transaccion.subcategoria_id.not_in(subcat_reintegros_sq),
+        ),
+        or_(
+            Transaccion.subcategoria_id.is_(None),
+            Transaccion.subcategoria_id.not_in(subcat_paso_sq),
         ),
         or_(
             Transaccion.estado_verificacion.is_(None),
@@ -220,6 +235,7 @@ class ContextoDefiniciones:
     subcategoria_tarjeta_ids: Set[UUID]
     hoy: date
     subcategoria_reintegros_ids: Set[UUID] = frozenset()
+    subcategoria_paso_ids: Set[UUID] = frozenset()
 
 
 def cargar_contexto(
@@ -275,6 +291,11 @@ def cargar_contexto(
     ).scalars().all()
     subcat_reintegros_set = set(subcat_reintegros_rows)
 
+    subcat_paso_rows = db.execute(
+        select(Subcategoria.id).where(func.lower(Subcategoria.nombre) == "pasó por mi cuenta")
+    ).scalars().all()
+    subcat_paso_set = set(subcat_paso_rows)
+
     return ContextoDefiniciones(
         grupos_cuotas_cantidades=grupos_map,
         billeteras_inversion_ids=b_inv_set,
@@ -283,12 +304,14 @@ def cargar_contexto(
         subcategoria_tarjeta_ids=subcat_tc_set,
         hoy=ref_hoy,
         subcategoria_reintegros_ids=subcat_reintegros_set,
+        subcategoria_paso_ids=subcat_paso_set,
     )
 
 
 def es_gasto(tx: Any, ctx: ContextoDefiniciones) -> bool:
     """
-    Determina si un objeto Transaccion en memoria cumple la regla estricta de gasto.
+    Determina si un objeto Transaccion en memoria cumple la regla estricta de gasto
+    (excluyendo subcategorías «Pasó por mi cuenta»).
     Garantiza 100% de paridad con condicion_gasto de SQLAlchemy.
     """
     # 1. tipo == egreso
@@ -319,6 +342,8 @@ def es_gasto(tx: Any, ctx: ContextoDefiniciones) -> bool:
         return False
     scid = getattr(tx, "subcategoria_id", None)
     if scid is not None and (scid in ctx.subcategoria_tarjeta_ids or scid == ctx.subcategoria_tarjeta_id):
+        return False
+    if scid is not None and scid in ctx.subcategoria_paso_ids:
         return False
 
     # 6. Tarjeta y cuotas
@@ -353,7 +378,8 @@ def es_gasto(tx: Any, ctx: ContextoDefiniciones) -> bool:
 
 def es_ingreso(tx: Any, ctx: ContextoDefiniciones) -> bool:
     """
-    Determina si un objeto Transaccion en memoria cumple la regla estricta de ingreso.
+    Determina si un objeto Transaccion en memoria cumple la regla estricta de ingreso
+    (excluyendo subcategorías «Pasó por mi cuenta»).
     Garantiza 100% de paridad con condicion_ingreso de SQLAlchemy.
     """
     # 1. tipo == ingreso
@@ -379,9 +405,9 @@ def es_ingreso(tx: Any, ctx: ContextoDefiniciones) -> bool:
     if cid in ctx.categoria_ahorro_ids:
         return False
 
-    # 6. Subcategoría no es "Reintegros" (Decisión 14.b)
+    # 6. Subcategoría no es "Reintegros" ni "Pasó por mi cuenta"
     scid = getattr(tx, "subcategoria_id", None)
-    if scid is not None and scid in ctx.subcategoria_reintegros_ids:
+    if scid is not None and (scid in ctx.subcategoria_reintegros_ids or scid in ctx.subcategoria_paso_ids):
         return False
 
     # 7. Estado de verificación
@@ -436,8 +462,10 @@ def etiqueta_movimiento(
     Determina la etiqueta, cuenta_como ('gasto', 'ingreso', 'nada') y aclaración
     de un movimiento financiero para el historial unificado.
     """
-    # Reintegro standalone (D7)
+    # Reintegro o devolución (Fase 5C y Fase F1)
     if getattr(tx, "reintegro_de_id", None) is not None:
+        if getattr(tx, "tipo_espejo", None) == "parte":
+            return ("Devolución", "gasto", None)
         return ("Reintegro", "gasto", None)
 
     # Evaluación para objetos Transacción
@@ -508,6 +536,15 @@ def etiqueta_movimiento(
         es_cat_ahorro = True
     if es_cat_ahorro:
         return ("Ahorro", "nada", "No es gasto")
+
+    # 7b. Subcategoría "Pasó por mi cuenta": "Pasó por mi cuenta", "nada", "No cuenta como gasto ni ingreso"
+    es_paso = False
+    if ctx and scid is not None and scid in ctx.subcategoria_paso_ids:
+        es_paso = True
+    if subcat_obj is not None and getattr(subcat_obj, "nombre", "").lower() == "pasó por mi cuenta":
+        es_paso = True
+    if es_paso:
+        return ("Pasó por mi cuenta", "nada", "No cuenta como gasto ni ingreso")
 
     # 8. es_gasto: "Gasto", gasto, None
     if ctx is not None and es_gasto(tx, ctx):

@@ -199,6 +199,8 @@ def test_crear_transferencia_con_cotizacion(db: Session, usuario_test: Usuario):
         moneda=Moneda.ARS,
         saldo_actual=Decimal("200000.00"),
         saldo_inicial=Decimal("200000.00"),
+        # Fecha del saldo fija: con la fecha real de creación, la transferencia del 27/10 quedaba anterior a la foto
+        fecha_saldo=date(2026, 10, 1),
         estado=EstadoBilletera.ACTIVA,
     )
     b_usd = Billetera(
@@ -208,6 +210,7 @@ def test_crear_transferencia_con_cotizacion(db: Session, usuario_test: Usuario):
         moneda=Moneda.USD,
         saldo_actual=Decimal("0.00"),
         saldo_inicial=Decimal("0.00"),
+        fecha_saldo=date(2026, 10, 1),
         estado=EstadoBilletera.ACTIVA,
     )
     db.add(b_ars)

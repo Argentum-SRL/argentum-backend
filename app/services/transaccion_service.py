@@ -506,10 +506,13 @@ def actualizar_transaccion(
 ) -> Transaccion:
     transaccion = obtener_transaccion(db, usuario_id, transaccion_id)
     
-    # D6: si la compra tiene espejo y cambia billetera_id, tarjeta_id, metodo_pago o moneda:
+    # D6: si la compra tiene espejo reintegro y cambia billetera_id, tarjeta_id, metodo_pago o moneda:
     # 400 "Primero quitá el reintegro para cambiar el medio de pago o la billetera."
     tiene_espejo = db.execute(
-        select(Transaccion.id).where(Transaccion.reintegro_de_id == transaccion.id)
+        select(Transaccion.id).where(
+            Transaccion.reintegro_de_id == transaccion.id,
+            or_(Transaccion.tipo_espejo == "reintegro", Transaccion.tipo_espejo.is_(None)),
+        )
     ).first() is not None
     if tiene_espejo:
         cambia_billetera = data.billetera_id is not None and data.billetera_id != transaccion.billetera_id
@@ -679,13 +682,28 @@ def eliminar_transaccion(
     billeteras_a_bloquear = [transaccion.billetera_id] + list(percepciones_billeteras)
     bloquear_billeteras(db, billeteras_a_bloquear, usuario_id)
 
-    # D6: Si se borra la compra, antes se borran sus espejos con la misma función.
+    # D6: Si se borra la compra, antes se borran sus espejos reintegro, y los espejos parte revierten a ingreso.
     espejos_ids = db.execute(
-        select(Transaccion.id).where(Transaccion.reintegro_de_id == transaccion.id)
+        select(Transaccion.id).where(
+            Transaccion.reintegro_de_id == transaccion.id,
+            or_(Transaccion.tipo_espejo == "reintegro", Transaccion.tipo_espejo.is_(None)),
+        )
     ).scalars().all()
     for esp_id in espejos_ids:
         if db.get(Transaccion, esp_id) is not None:
             eliminar_transaccion(db, usuario_id, esp_id, commit=False)
+
+    from app.services import que_es_plata_service
+    espejos_parte = db.execute(
+        select(Transaccion).where(
+            Transaccion.reintegro_de_id == transaccion.id,
+            Transaccion.tipo_espejo == "parte",
+        )
+    ).scalars().all()
+    for esp_parte in espejos_parte:
+        que_es_plata_service.revertir_parte(db, esp_parte)
+    if hasattr(transaccion, "espejos_reintegro"):
+        transaccion.espejos_reintegro.clear()
 
     # Manejo de cascada para cuotas
     if transaccion.es_padre_cuotas or transaccion.es_cuota_hija:

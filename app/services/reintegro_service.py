@@ -90,9 +90,14 @@ def _validar_compra_para_reintegro(transaccion: Transaccion, monto: Decimal) -> 
     ):
         raise HTTPException(status_code=400, detail="Solo un gasto puede tener reintegro.")
 
-    # Contra el monto total de la compra; en cuotas, el del padre
-    monto_total_compra = transaccion.monto
-    if monto > monto_total_compra:
+    # Contra el monto total de la compra menos partes vinculadas; en cuotas, el del padre
+    suma_partes = Decimal("0")
+    if getattr(transaccion, "espejos_reintegro", None):
+        for e in transaccion.espejos_reintegro:
+            if getattr(e, "tipo_espejo", None) == "parte" and not getattr(e, "es_cuota_hija", False):
+                suma_partes += abs(Decimal(str(e.monto)))
+    monto_disponible = transaccion.monto - suma_partes
+    if monto > monto_disponible:
         raise HTTPException(status_code=400, detail="El reintegro no puede ser mayor que la compra.")
 
 
@@ -112,9 +117,12 @@ def registrar_o_actualizar_reintegro(
     compra = obtener_transaccion(db, usuario_id, transaccion_id)
     _validar_compra_para_reintegro(compra, monto)
 
-    # 1. Borrar espejo anterior si ya existía
+    # 1. Borrar espejo anterior si ya existía (solo espejos tipo 'reintegro')
     espejos_existentes = db.execute(
-        select(Transaccion.id).where(Transaccion.reintegro_de_id == compra.id)
+        select(Transaccion.id).where(
+            Transaccion.reintegro_de_id == compra.id,
+            or_(Transaccion.tipo_espejo == "reintegro", Transaccion.tipo_espejo.is_(None)),
+        )
     ).scalars().all()
     for esp_id in espejos_existentes:
         eliminar_transaccion(db, usuario_id, esp_id, commit=False)
@@ -152,6 +160,7 @@ def registrar_o_actualizar_reintegro(
                 es_padre_cuotas=True,
                 es_cuota_hija=False,
                 reintegro_de_id=compra.id,
+                tipo_espejo="reintegro",
             )
             espejo_padre.saldo_aplicado = not _queda_pendiente_por_fecha(espejo_padre)
             db.add(espejo_padre)
@@ -193,6 +202,7 @@ def registrar_o_actualizar_reintegro(
                 es_padre_cuotas=False,
                 grupo_cuotas_id=grupo.id,
                 reintegro_de_id=compra.id,
+                tipo_espejo="reintegro",
             )
             hija.saldo_aplicado = not _queda_pendiente_por_fecha(hija)
             db.add(hija)
@@ -228,6 +238,7 @@ def registrar_o_actualizar_reintegro(
                 es_padre_cuotas=False,
                 es_cuota_hija=False,
                 reintegro_de_id=compra.id,
+                tipo_espejo="reintegro",
             )
             espejo.saldo_aplicado = not _queda_pendiente_por_fecha(espejo)
             db.add(espejo)
@@ -277,7 +288,10 @@ def eliminar_reintegro(
         raise HTTPException(status_code=400, detail="Solo un gasto puede tener reintegro.")
 
     espejos_existentes = db.execute(
-        select(Transaccion.id).where(Transaccion.reintegro_de_id == compra.id)
+        select(Transaccion.id).where(
+            Transaccion.reintegro_de_id == compra.id,
+            or_(Transaccion.tipo_espejo == "reintegro", Transaccion.tipo_espejo.is_(None)),
+        )
     ).scalars().all()
     for esp_id in espejos_existentes:
         eliminar_transaccion(db, usuario_id, esp_id, commit=False)
@@ -312,9 +326,12 @@ def notificar_reintegros_pendientes(db: Session, hoy: date) -> int:
 
     creadas = 0
     for c in compras:
-        # Si ya tiene un espejo recibido, no está pendiente
+        # Si ya tiene un espejo recibido (reintegro), no está pendiente
         tiene_espejo = db.execute(
-            select(Transaccion.id).where(Transaccion.reintegro_de_id == c.id)
+            select(Transaccion.id).where(
+                Transaccion.reintegro_de_id == c.id,
+                or_(Transaccion.tipo_espejo == "reintegro", Transaccion.tipo_espejo.is_(None)),
+            )
         ).first() is not None
         if tiene_espejo:
             continue

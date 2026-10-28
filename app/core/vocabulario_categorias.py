@@ -82,6 +82,7 @@ PADRES_DESTINO: dict[str, str] = {
     "AUH y asignaciones": "Jubilación y AUH",
     "Alquileres": "Inversiones",
     "Cobros de personas": "Otros",
+    "Pasó por mi cuenta": "Otros",
 }
 
 

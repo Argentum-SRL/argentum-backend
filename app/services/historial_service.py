@@ -585,37 +585,6 @@ def listar_movimientos(
             })
 
     # ==========================================================================
-    # D.1 CONSOLIDACIÓN DE REINTEGROS (D7)
-    # Si el espejo y su compra están los dos en la lista cruda, se juntan en UNA fila:
-    # la compra con monto neto (compra - espejo) y reintegro {estado, monto, fecha}.
-    # El espejo sale de la lista.
-    # ==========================================================================
-    compra_movs = {
-        m["entity"].id: m
-        for m in raw_movimientos
-        if m["clase"] == "transaccion" and m.get("entity") is not None and m.get("reintegro_de_id") is None
-    }
-    espejos_a_eliminar = set()
-    for m in raw_movimientos:
-        if m["clase"] == "transaccion" and m.get("reintegro_de_id") is not None:
-            c_id = m["reintegro_de_id"]
-            if c_id in compra_movs:
-                c_mov = compra_movs[c_id]
-                c_mov["monto"] = c_mov["monto"] - m["monto"]
-                c_mov["reintegro"] = {
-                    "estado": "recibido",
-                    "monto": m["monto"],
-                    "fecha_recibido": m["fecha"],
-                }
-                c_mov["es_reintegro_standalone"] = False
-                espejos_a_eliminar.add(m["id"])
-            else:
-                m["es_reintegro_standalone"] = True
-
-    if espejos_a_eliminar:
-        raw_movimientos = [m for m in raw_movimientos if m["id"] not in espejos_a_eliminar]
-
-    # ==========================================================================
     # E. SALDO INICIAL (Solo modo billetera)
     # ==========================================================================
     if modo == "billetera" and billetera_actual and not solo_transacciones and not busqueda_activa:

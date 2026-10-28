@@ -136,5 +136,26 @@ class TransaccionRead(TransaccionBase):
     fecha_creacion: datetime
     subcategoria: SubcategoriaRead | None = None
     reintegro: ReintegroRead | None = None
+    tipo_espejo: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class GastoParaVincular(BaseModel):
+    id: UUID
+    descripcion: str
+    fecha: date
+    monto: DecimalJSON
+    disponible: DecimalJSON
+    categoria_id: UUID | None = None
+    subcategoria_id: UUID | None = None
+    categoria_nombre: str | None = None
+    subcategoria_nombre: str | None = None
+    suscripcion_id: UUID | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class QueEsEstaPlataPayload(BaseModel):
+    opcion: Literal["me_pagaron", "parte_de_gasto", "paso_por_mi_cuenta"]
+    gasto_id: UUID | None = None

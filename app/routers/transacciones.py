@@ -9,10 +9,11 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_user
 from app.core.config import settings
 from app.core.database import get_db
-from app.models.usuario import Usuario
+from app.models.usuario import Usuario, Moneda
+from app.core.constants import MAX_MONTO_INTEGRIDAD
 from app.models.transaccion import TipoTransaccion
-from app.schemas.transaccion import TransaccionCreate, TransaccionUpdate, TransaccionRead, ReintegroPayload
-from app.services import transaccion_service, dolar_service, idempotencia_service
+from app.schemas.transaccion import TransaccionCreate, TransaccionUpdate, TransaccionRead, ReintegroPayload, GastoParaVincular, QueEsEstaPlataPayload
+from app.services import transaccion_service, dolar_service, idempotencia_service, que_es_plata_service
 from app.utils.fecha import hoy_argentina
 
 router = APIRouter(prefix="/transacciones", tags=["transacciones"])
@@ -115,6 +116,56 @@ def sugerencia_pesos(
         "monto_pesos": float(monto_pesos),
         "cotizacion_tarjeta": float(cotizacion_tarjeta),
     }
+
+
+@router.get("/gastos-para-vincular", response_model=List[GastoParaVincular])
+def gastos_para_vincular(
+    moneda: Moneda = Query(...),
+    fecha: date = Query(...),
+    monto: Decimal = Query(..., gt=0, le=MAX_MONTO_INTEGRIDAD),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Lista gastos candidatos para vincular un ingreso devuelto o aporte de tercero.
+    """
+    return que_es_plata_service.gastos_para_vincular(
+        db=db,
+        usuario_id=current_user.id,
+        moneda=moneda,
+        fecha=fecha,
+        monto=monto,
+    )
+
+
+@router.post("/{transaccion_id}/que-es-esta-plata", response_model=TransaccionRead, status_code=status.HTTP_200_OK)
+def que_es_esta_plata(
+    transaccion_id: UUID,
+    request: Request,
+    data: QueEsEstaPlataPayload,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Registra la respuesta a «¿Qué es esta plata?» para un ingreso o devolución.
+    """
+    cuerpo = data.model_dump(mode="json")
+    return idempotencia_service.ejecutar(
+        db=db,
+        request=request,
+        usuario_id=current_user.id,
+        cuerpo=cuerpo,
+        operar=lambda: que_es_plata_service.responder(
+            db=db,
+            usuario_id=current_user.id,
+            transaccion_id=transaccion_id,
+            opcion=data.opcion,
+            gasto_id=data.gasto_id,
+            commit=False,
+        ),
+        serializar=lambda obj: TransaccionRead.model_validate(obj).model_dump(mode="json"),
+        codigo=status.HTTP_200_OK,
+    )
 
 
 @router.get("/{transaccion_id}", response_model=TransaccionRead)

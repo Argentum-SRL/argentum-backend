@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from app.models.suscripcion import Suscripcion
     from app.models.movimiento_meta import MovimientoMeta
 
-from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, String, Index, text
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Enum as SAEnum, ForeignKey, Numeric, String, Index, text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -81,6 +81,10 @@ class Transaccion(Base):
         Index("ix_transacciones_suscripcion_id", "suscripcion_id", postgresql_where=text("suscripcion_id IS NOT NULL")),
         Index("ix_transacciones_movimiento_meta_id", "movimiento_meta_id", postgresql_where=text("movimiento_meta_id IS NOT NULL")),
         Index("ix_transacciones_reintegro_de_id", "reintegro_de_id", postgresql_where=text("reintegro_de_id IS NOT NULL")),
+        CheckConstraint(
+            "(reintegro_de_id IS NULL AND tipo_espejo IS NULL) OR (reintegro_de_id IS NOT NULL AND tipo_espejo IN ('reintegro', 'parte'))",
+            name="ck_transacciones_tipo_espejo",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -156,15 +160,15 @@ class Transaccion(Base):
         PGUUID(as_uuid=True), ForeignKey("movimientos_meta.id", ondelete="SET NULL"), nullable=True
     )
 
-    # Campos de reintegro de compras (Fase 5C)
+    # Campos de reintegro de compras (Fase 5C y Fase F1)
     reintegro_esperado: Mapped[Decimal | None] = mapped_column(Numeric(15, 2), nullable=True)
     reintegro_de_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("transacciones.id", ondelete="CASCADE"), nullable=True
     )
+    tipo_espejo: Mapped[str | None] = mapped_column(String(20), nullable=True)
     espejos_reintegro: Mapped[list[Transaccion]] = relationship(
         "Transaccion",
         foreign_keys="[Transaccion.reintegro_de_id]",
-        cascade="all, delete-orphan",
         passive_deletes=True,
         lazy="selectin",
     )
@@ -188,12 +192,17 @@ class Transaccion(Base):
             return None
         espejos = getattr(self, "espejos_reintegro", None)
         if espejos:
-            espejo = next((e for e in espejos if not getattr(e, "es_cuota_hija", False)), espejos[0])
-            return {
-                "estado": "recibido",
-                "monto": abs(espejo.monto),
-                "fecha_recibido": espejo.fecha,
-            }
+            espejos_reintegro_puros = [
+                e for e in espejos
+                if getattr(e, "tipo_espejo", None) == "reintegro" and not getattr(e, "es_cuota_hija", False)
+            ]
+            if espejos_reintegro_puros:
+                espejo = espejos_reintegro_puros[0]
+                return {
+                    "estado": "recibido",
+                    "monto": abs(espejo.monto),
+                    "fecha_recibido": espejo.fecha,
+                }
         if getattr(self, "reintegro_esperado", None) is not None:
             return {
                 "estado": "pendiente",

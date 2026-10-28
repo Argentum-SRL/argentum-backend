@@ -220,6 +220,7 @@ ARBOL_CATEGORIAS: tuple[CategoriaCatalogo, ...] = (
             SubcategoriaCatalogo("Mascotas", 1, False, "09", "veterinaria, alimento para perro o gato, piedritas, pipeta"),
             SubcategoriaCatalogo("Ayuda familiar", 2, False, "fuera", "plata para la familia (mamá, papá, abuelos, hijos)"),
             SubcategoriaCatalogo("Pagos a personas", 3, False, "general", "plata que le pasaste a alguien sin decir para qué"),
+            SubcategoriaCatalogo("Pasó por mi cuenta", 4, False, "fuera", "plata de otra persona que solo pasó por tu cuenta: pagaste algo suyo con la plata que te mandó"),
         ),
     ),
     CategoriaCatalogo(
@@ -277,6 +278,7 @@ ARBOL_CATEGORIAS: tuple[CategoriaCatalogo, ...] = (
             SubcategoriaCatalogo("Regalos", 0, False, None, "regalo recibido"),
             SubcategoriaCatalogo("Ayuda familiar", 1, False, None, "plata de la familia (mamá, papá, abuelos)"),
             SubcategoriaCatalogo("Cobros de personas", 2, False, None, "plata que alguien te pasó sin decir para qué"),
+            SubcategoriaCatalogo("Pasó por mi cuenta", 3, False, None, "plata que te mandaron para que pagues algo de otro o se la pases a alguien"),
         ),
     ),
     CategoriaCatalogo(

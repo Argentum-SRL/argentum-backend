@@ -126,7 +126,8 @@ def mapear_grupo_resumen(db: Session, grupo: GrupoCuotas) -> dict:
         "estado": grupo.estado.value if hasattr(grupo.estado, "value") else str(grupo.estado),
         "categoria_id": categoria_id,
         "subcategoria_id": subcategoria_id,
-        "suscripcion_id": suscripcion_id
+        "suscripcion_id": suscripcion_id,
+        "reintegro": grupo.transaccion_padre.reintegro if grupo.transaccion_padre else None,
     }
 
 @router.get("", response_model=list[GrupoCuotasResumen])

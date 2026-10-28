@@ -3,6 +3,7 @@ from decimal import Decimal
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.schemas.tipos import DecimalJSON
+from app.schemas.transaccion import ReintegroRead
 
 class GrupoCuotasResumen(BaseModel):
     id: UUID
@@ -30,6 +31,7 @@ class GrupoCuotasResumen(BaseModel):
     categoria_id: UUID | None = None
     subcategoria_id: UUID | None = None
     suscripcion_id: UUID | None = None
+    reintegro: ReintegroRead | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
