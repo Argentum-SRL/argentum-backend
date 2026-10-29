@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
+from app.schemas.tipos import DecimalJSON
 from app.schemas.transaccion import ReintegroRead
 
 
@@ -144,11 +145,37 @@ class BilleteraDashboardItem(BaseModel):
     tiene_transacciones: bool = False
 
 
+class FrescuraRead(BaseModel):
+    ultima_carga: Optional[str] = None
+    dias_sin_cargar: Optional[int] = None
+    umbral_dias: int
+    intervalos: int
+    datos_viejos: bool
+
+
+class ContratoNumeroRead(BaseModel):
+    valor: DecimalJSON
+    moneda: str
+    base_desde: str
+    base_hasta: str
+    fecha_corte: str
+    cobertura: Optional[int] = None
+    frescura: FrescuraRead
+    supuestos: List[str]
+
+
+class ContratoDisponibleRead(BaseModel):
+    ars: ContratoNumeroRead
+    usd: ContratoNumeroRead
+
+
 class ResumenCompletoResponse(BaseModel):
     billeteras: List[BilleteraDashboardItem]
     resumen: DashboardResumenResponse
     cotizacion: CotizacionDolarResponse
     saldo_disponible: Optional[SaldoDisponibleDashboard] = None
+    frescura: Optional[FrescuraRead] = None
+    contrato_disponible: Optional[ContratoDisponibleRead] = None
 
 
 class SubcategoriaGastoResponse(BaseModel):

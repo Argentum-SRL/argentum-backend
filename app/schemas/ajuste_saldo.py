@@ -65,3 +65,4 @@ class ControlSaldoPreview(BaseModel):
     ultimo_movimiento: date | None = None
     huecos: list[HuecoRead]
     posibles_duplicados: list[DuplicadoRead]
+    guardar_directo: bool

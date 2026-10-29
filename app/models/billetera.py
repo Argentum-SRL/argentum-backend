@@ -64,6 +64,8 @@ class Billetera(Base):
     fecha_saldo: Mapped[date | None] = mapped_column(Date, nullable=True)
     tiene_punto_partida: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     fecha_ultimo_control: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # hasta qué día no se pregunta el saldo de esta billetera (Saltear)
+    pregunta_saldo_pospuesta_hasta: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     @property
     def fecha_saldo_efectiva(self) -> date | None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, update, delete, exists, or_
 from sqlalchemy.orm import Session
@@ -33,7 +33,8 @@ from app.schemas.ajuste_saldo import (
     CoberturaRead,
     ControlSaldoPreview,
 )
-from app.services import usuario_service, rendimiento_billetera_service, ajuste_saldo_service, idempotencia_service
+from app.schemas.pregunta_saldo import PreguntaSaldoResponse
+from app.services import usuario_service, rendimiento_billetera_service, ajuste_saldo_service, idempotencia_service, pregunta_saldo_service
 from app.services.tasas_service import ultimas_tasas, tasa_efectiva, rendimiento_por_saldos
 from app.utils.fecha import hoy_argentina
 
@@ -238,6 +239,41 @@ def estimar_rendimiento(
         por_mes=por_mes,
     )
 
+
+@router.get("/pregunta-saldo", response_model=PreguntaSaldoResponse)
+def obtener_pregunta_saldo(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Obtiene la billetera sugerida para la pregunta de saldo de un toque en el dashboard."""
+    hoy = hoy_argentina()
+    billetera = pregunta_saldo_service.elegir_billetera_pregunta(db, current_user.id, hoy)
+    if not billetera:
+        return PreguntaSaldoResponse(billetera=None)
+
+    has_tx = db.query(exists().where(Transaccion.billetera_id == billetera.id)).scalar()
+    has_tr = db.query(exists().where(or_(
+        TransferenciaInterna.billetera_origen_id == billetera.id,
+        TransferenciaInterna.billetera_destino_id == billetera.id
+    ))).scalar()
+    has_rend = db.query(exists().where(RendimientoBilletera.billetera_id == billetera.id)).scalar()
+    has_ajuste = db.query(exists().where(AjusteSaldo.billetera_id == billetera.id)).scalar()
+
+    b_read = BilleteraRead.model_validate(billetera)
+    b_read.tiene_transacciones = bool(has_tx or has_tr or has_rend or has_ajuste)
+    return PreguntaSaldoResponse(billetera=b_read)
+
+
+@router.post("/{billetera_id}/pregunta-saldo/saltear", status_code=status.HTTP_204_NO_CONTENT)
+def saltear_pregunta_saldo(
+    billetera_id: str,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Pospone por 30 días la pregunta de saldo para una billetera."""
+    hoy = hoy_argentina()
+    pregunta_saldo_service.saltear_pregunta(db, current_user.id, billetera_id, hoy, commit=True)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{billetera_id}", response_model=BilleteraRead)

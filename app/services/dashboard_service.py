@@ -510,11 +510,21 @@ def get_resumen_completo(
     resumen = get_dashboard_resumen(db, usuario, desde, hasta, total_billeteras_override=total_saldo_activa, billetera_ids=billetera_ids)
     cotizacion = get_cotizacion_usuario(usuario)
 
+    hoy = hoy_argentina()
+    from app.services.frescura_service import calcular_frescura
+    from app.services.contrato_numero_service import contrato_disponible_libre
+
+    frescura_obj = calcular_frescura(db, usuario.id, hoy=hoy)
+    disp_dict = resumen.get("saldo_disponible") or {}
+    contratos = contrato_disponible_libre(db, usuario, hoy, disp_dict, frescura_obj)
+
     return {
         "billeteras": billeteras_data,
         "resumen": resumen,
         "cotizacion": cotizacion,
         "saldo_disponible": resumen.get("saldo_disponible"),
+        "frescura": frescura_obj.a_dict(),
+        "contrato_disponible": {m: c.a_dict() for m, c in contratos.items()},
     }
 
 def get_subcategorias_gasto(

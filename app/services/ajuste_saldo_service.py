@@ -95,6 +95,29 @@ def es_diferencia_grande(
     return abs(diferencia) > salida_semanal_tipica
 
 
+def decidir_guardar_directo(
+    diferencia: Decimal | float | int,
+    es_grande: bool,
+    rendimiento_propuesto: Optional[Decimal | float | int],
+    posibles_duplicados: list,
+) -> bool:
+    """
+    Evalúa si un ajuste de saldo puede guardarse directamente sin confirmación modal:
+    - True si diferencia == 0.
+    - Si no: True solo si es_grande es False, rendimiento_propuesto es None o <= 0,
+      y posibles_duplicados está vacía.
+    """
+    if diferencia == 0 or diferencia == Decimal("0") or diferencia == Decimal("0.00"):
+        return True
+    if es_grande:
+        return False
+    if rendimiento_propuesto is not None and rendimiento_propuesto > 0:
+        return False
+    if len(posibles_duplicados) > 0:
+        return False
+    return True
+
+
 def detectar_huecos(
     dias_con_movimiento: list[date],
     desde: date,
@@ -333,6 +356,13 @@ def previsualizar_control(
         else None
     )
 
+    guardar_directo = decidir_guardar_directo(
+        diferencia=diferencia,
+        es_grande=es_grande,
+        rendimiento_propuesto=rendimiento_propuesto,
+        posibles_duplicados=posibles_duplicados,
+    )
+
     return {
         "billetera_id": billetera.id,
         "moneda": billetera.moneda,
@@ -347,6 +377,7 @@ def previsualizar_control(
         "ultimo_movimiento": ultimo_movimiento,
         "huecos": huecos,
         "posibles_duplicados": posibles_duplicados,
+        "guardar_directo": guardar_directo,
     }
 
 

@@ -127,6 +127,16 @@ def enriquecer_respuesta_por_intent(
             msg = f"Tus saldos en pesos:\n- Total en billeteras: {_fmt(ars_total)}\n- Disponible libre: {_fmt(ars_disp)} (ya descontado lo que vence hasta el {fecha_fin_str})"
             if usd_total > 0 or usd_disp > 0:
                 msg += f"\n\nEn dólares:\n- Total en billeteras: {_fmt(usd_total, Moneda.USD)}\n- Disponible libre: {_fmt(usd_disp, Moneda.USD)}"
+
+            try:
+                from app.services.frescura_service import calcular_frescura
+                from app.routers.whatsapp.aviso_frescura_wpp import linea_frescura_wpp
+                linea = linea_frescura_wpp(calcular_frescura(db, usuario.id))
+                if linea is not None:
+                    msg += "\n" + linea
+            except Exception:
+                logger.exception("Error al calcular frescura para WhatsApp")
+
             resultado_ia["respuesta_usuario"] = msg
         except Exception:
             logger.exception("Error al calcular saldo para WhatsApp")
