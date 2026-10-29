@@ -25,6 +25,7 @@ JOBS_MANUALES_PERMITIDOS: frozenset[str] = frozenset({
     "actualizar_ipc_diario",
     "limpiar_refresh_tokens",
     "vigilar_deriva_saldos",
+    "reporte_uso_semanal",
 })
 
 
@@ -189,6 +190,13 @@ JOBS_CATALOGO: list[JobCatalogoItem] = [
         nombre="Control de saldos",
         que_hace="Cada noche compara el saldo guardado de cada billetera con el que sale de sus movimientos y avisa por email cuántas no coinciden.",
         periodo_esperado_minutos=1440,
+        puede_correr_ahora=True,
+    ),
+    JobCatalogoItem(
+        job_id="reporte_uso_semanal",
+        nombre="Reporte semanal de uso",
+        que_hace="Cada lunes manda al equipo un mail con altas, activación, retención y costo por usuario activo, sin datos personales.",
+        periodo_esperado_minutos=10080,
         puede_correr_ahora=True,
     ),
 ]

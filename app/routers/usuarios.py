@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, File, UploadFile, Request
+from fastapi import APIRouter, Depends, File, UploadFile, Request, Response
+from app.services import exportacion_datos_service
+from app.services.uso_service import registrar_evento
+from app.utils.fecha import hoy_argentina
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
@@ -156,4 +159,25 @@ def actualizar_permiso_mensajes(
 ):
     """Actualiza el permiso de lectura de mensajes del asistente para el equipo de soporte."""
     return usuario_service.actualizar_permiso_mensajes(db, current_user, body.permitido, commit=True)
+
+
+@router.get("/me/exportar")
+@limiter.limit("3/minute")
+def exportar_mis_datos(
+    request: Request,
+    current_user: Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Descarga un archivo ZIP con planillas CSV de todos los datos financieros y mensajes del usuario.
+    Registra el evento de uso 'descargar_datos'.
+    """
+    registrar_evento(db, current_user.id, "descargar_datos")
+    hoy = hoy_argentina()
+    contenido_zip = exportacion_datos_service.exportar_zip(db, current_user.id, hoy)
+    return Response(
+        content=contenido_zip,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="argentum_mis_datos_{hoy:%Y%m%d}.zip"'},
+    )
 

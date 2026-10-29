@@ -75,6 +75,7 @@ from app.services.factura_avisos_service import _job_notificaciones_facturas
 from app.services.notificacion_despacho_service import _job_reintentar_inmediatas
 from app.services.saldo_programado_service import _job_aplicar_movimientos_con_fecha_llegada
 from app.services.deriva_saldo_service import _job_vigilar_deriva_saldos
+from app.services.reporte_uso_service import _job_reporte_uso_semanal
 from app.core.registro_jobs import registrar_ejecucion, vigilar_tareas
 
 # ---------------------------------------------------------------------------
@@ -824,6 +825,18 @@ async def lifespan(app: FastAPI):
             max_instances=1,
             replace_existing=True,
         )
+        scheduler.add_job(
+            registrar_ejecucion("reporte_uso_semanal", _job_reporte_uso_semanal),
+            "cron",
+            day_of_week="mon",
+            hour=9,
+            minute=7,
+            timezone=TZ_ARGENTINA,
+            id="reporte_uso_semanal",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
         scheduler.start()
     else:
         logger.info("Scheduler desactivado por configuración (ENABLE_SCHEDULER=False). No se programan tareas automáticas.")
@@ -1022,7 +1035,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 
-from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin, perfil_financiero, importacion, reporte_error, memoria_comercios, facturas, patrones, salud, movimientos
+from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin, perfil_financiero, importacion, reporte_error, memoria_comercios, facturas, patrones, salud, movimientos, uso
 
 app.include_router(salud.router)
 app.include_router(auth.router)
@@ -1050,6 +1063,7 @@ app.include_router(perfil_financiero.router, prefix="/api/v1", tags=["perfil"])
 app.include_router(importacion.router)
 app.include_router(reporte_error.router)
 app.include_router(reporte_error.router, prefix="/api")
+app.include_router(uso.router)
 
 # Servir archivos estáticos de media (Ignorado por git)
 os.makedirs("media/fotos", exist_ok=True)

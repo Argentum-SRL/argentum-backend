@@ -9,6 +9,7 @@ from app.core.limiter import limiter
 from app.models.usuario import Usuario
 from app.schemas.tools import InstallmentConvenienceRequest, CanAffordRequest, CanAffordResponse, FinancialContextResponse
 from app.services import tools_service
+from app.services.uso_service import registrar_evento
 
 router = APIRouter()
 
@@ -52,6 +53,7 @@ def calculate_convenience_endpoint(
     Calcula si conviene pagar en cuotas o de contado bajo la inflación provista.
     """
     result = tools_service.calcular_conveniencia_cuotas(body)
+    registrar_evento(db, current_user.id, "calculadora_cuotas")
     return {
         "success": True,
         "data": result
@@ -92,8 +94,9 @@ def can_afford_endpoint(
         tiene_interes=body.tiene_interes,
         tna=body.tna,
         ingreso_manual=body.ingreso_manual,
-        db=db
+        db=db,
     )
+    registrar_evento(db, current_user.id, "permitirse")
     return {
         "success": True,
         "data": result

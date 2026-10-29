@@ -142,3 +142,9 @@ Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_21-10.md (versi
 - `calcular_monto_destino` única en `transferencia_service.py` y `GET /transferencias/simular`.
 - `GET /transacciones/sugerencia-pesos` devuelve `cotizacion_tarjeta`.
 - Todo redondeo financiero en centavos con ROUND_HALF_UP.
+
+### Medición de uso y Descargar mis datos (fase_g1_uso_datos)
+- `eventos_uso`: tabla propia para registrar solo cuatro eventos de la web (visita, permitirse, calculadora_cuotas, descargar_datos), como máximo uno por usuario, evento y día. El uso por WhatsApp no lleva eventos y sale directamente de conversaciones_wpp y transacciones.
+- Reporte semanal (`reporte_uso_service`): se ejecuta cada lunes a las 09:07 con lock advisory; calcula altas, activación en 24 horas, retención a 7 y 30 días, costo de IA y de WhatsApp Meta por usuario activo, uso de funciones y transacciones que caen en Otros. Sin datos personales salvo descripciones de usuarios con `permiso_lectura_mensajes_en` activo. Se envía a `REPORTE_USO_EMAILS` o `ADMIN_ALERT_EMAIL`.
+- Purga de datos: el job semanal purga eventos de `eventos_uso` con más de 400 días de antigüedad (`dia < hoy - 400`).
+- `GET /usuarios/me/exportar`: descarga de portabilidad ("Descargar mis datos") con rate limit de 3/minuto. Devuelve un ZIP con nueve planillas CSV delimitadas por ";" con BOM (utf-8-sig), coma decimal, números negativos con signo "-" y fin de línea CRLF.

@@ -43,6 +43,7 @@ from app.models.ejecucion_job import EjecucionJob
 from app.models.uso_ia import UsoIA
 from app.models.mensaje_saliente_wpp import MensajeSalienteWpp
 from app.models.clave_idempotencia import ClaveIdempotencia
+from app.models.evento_uso import EventoUso
 
 __all__ = [
     "ClaveIdempotencia",
@@ -92,6 +93,7 @@ __all__ = [
     "CalibracionUsuario",
     "CodigoVerificacion",
     "RateLimit",
+    "EventoUso",
 ]
 
 

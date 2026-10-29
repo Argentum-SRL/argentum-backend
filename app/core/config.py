@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
@@ -44,6 +45,7 @@ class Settings(BaseSettings):
     WHATSAPP_PLANTILLAS_ACTIVAS: str = "resumen_ciclo,alerta_cambio_email,alerta_cambio_contrasena"
     WHATSAPP_MAX_SALIENTES_DIA: int = 150
     WHATSAPP_CUPO_GRATIS_MES: int = 1000
+    WHATSAPP_TARIFA_SERVICIO_USD: Decimal = Decimal("0.023")  # tarifa por mensaje de servicio cobrado en Argentina; vista en la facturación de Meta el 09/10/2026
 
     # Google
     GOOGLE_CLIENT_ID: str = ""
@@ -61,6 +63,9 @@ class Settings(BaseSettings):
 
     # Resend API
     RESEND_API_KEY: str = ""
+
+    # Reporte de uso
+    REPORTE_USO_EMAILS: str = ""
 
     # Environment
     ENVIRONMENT: str = "development"
