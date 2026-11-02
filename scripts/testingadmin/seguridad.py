@@ -49,7 +49,6 @@ CANARIO_MINIMO = [
     "benitezsantiago2001@gmail.com",
     "giordaninosebas@gmail.com",
     "mrm291201@gmail.com",
-    "orlandodjsegovia@gmail.com",
     "testingadmin@argentum.com",
 ]
 

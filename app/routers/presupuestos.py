@@ -1,11 +1,13 @@
 from uuid import UUID
 from typing import List, Optional
-from datetime import date, timedelta
-from fastapi import APIRouter, Depends, Query, HTTPException
+from datetime import timedelta
+from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
+from app.core.limiter import limiter
 from app.models.usuario import Usuario
 from app.schemas.presupuesto import (
     PresupuestoCreate, 
@@ -16,6 +18,9 @@ from app.schemas.presupuesto import (
     RestaurarPresupuestoRequest
 )
 from app.services import presupuesto_service
+from app.services.uso_service import registrar_evento
+from app.services.presupuestos_excel_datos import armar_datos_excel, nombre_archivo
+from app.services.presupuestos_excel_libro import armar_libro
 from app.utils.fecha import hoy_argentina
 
 router = APIRouter(tags=["presupuestos"])
@@ -90,6 +95,35 @@ def crear_presupuesto(
 ):
     p = presupuesto_service.crear_presupuesto(db, usuario.id, data)
     return _map_presupuesto_response(db, p)
+
+@router.get("/exportar-excel")
+@limiter.limit("3/minute")
+def exportar_excel(
+    request: Request,
+    alcance: str = Query("12"),
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    if alcance not in ("12", "todo"):
+        return JSONResponse(status_code=422, content={"detail": "El alcance tiene que ser 12 o todo."})
+
+    hoy = hoy_argentina()
+    datos = armar_datos_excel(db, usuario, alcance, hoy)
+    if datos is None:
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "Todavía no tenés gastos ni ingresos para armar el Excel."},
+        )
+
+    contenido_excel = armar_libro(datos)
+    registrar_evento(db, usuario.id, "descargar_presupuestos")
+    nombre = nombre_archivo(datos)
+    return Response(
+        content=contenido_excel,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )
+
 
 @router.get("/{id}", response_model=PresupuestoResponse)
 def obtener_presupuesto(

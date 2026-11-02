@@ -160,3 +160,24 @@ Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_21-10.md (versi
 - WhatsApp: aviso breve de una línea al pie de la respuesta a `consultar_saldo` (`linea_frescura_wpp`), exactamente 90 caracteres o menos, sin signos de pregunta, solo si hay datos viejos.
 - Contrato del Disponible libre (`contrato_numero_service`): declara valor, base (ciclo), fecha de corte, cobertura (mínima entre billeteras activas no de inversión) y supuestos desde una sola fuente (`contrato_disponible_libre`). Reutiliza el Disponible libre ya calculado por `get_dashboard_resumen` sin recalcularlo ni consultar próximos pagos.
 - Pregunta de saldo (`pregunta_saldo_service`): selecciona una billetera activa no de inversión con 30 días o más sin control (`(hoy - ref).days >= 30`), priorizando mayor uso en los últimos 90 días (mínimo 1 movimiento). "Saltear" pospone la pregunta por 30 días (`pregunta_saldo_pospuesta_hasta = hoy + 30`). Si la diferencia es chica, sin duplicados ni rendimiento (`guardar_directo`), el dashboard guarda directamente sin abrir modal.
+
+### Excel de presupuestos (fase_excel_presupuestos2)
+- **Ruta y alcance**: `GET /presupuestos/exportar-excel` con rate limit de 3/minuto. Parámetro `alcance` ("12" para últimos 12 meses o "todo" para historial completo hasta 120 ciclos). Devuelve un libro `.xlsx` con Content-Disposition `attachment; filename="Argentum_presupuestos_<inicio>_<fin>.xlsx"`.
+- **Ciclo con datos**: Un ciclo candidato entra al Excel únicamente si tiene al menos una transacción que cumpla `condicion_gasto` o `condicion_ingreso` dentro de las fechas del ciclo (hasta `hoy`). Si ningún ciclo tiene datos devuelve 404 con detail exacto.
+- **Nombre y orden de hojas**: Hoja 1 "Comparativo" (color de pestaña 1F3864, hoja activa), Hoja 2 "Anual" (color 2E75B6), seguidas por una hoja por cada ciclo con datos del más viejo al más nuevo, y Hoja final "Cómo leerlo" (color 595959). El nombre de cada hoja de ciclo corresponde al mes que más días abarca el ciclo (en empate, el mes de la fecha de fin; desambiguación con " (2)", " (3)").
+- **Diseño limpio y sin artefactos**: Sin `freeze_panes`, sin `auto_filter` y sin cuadrículas explícitas de bordes finos en todas las celdas. Tipografía uniforme Calibri, bordes sutiles solo para jerarquía (separadores, totales), anchos de columna automáticos con holgura.
+- **Hoja de ciclo rediseñada**:
+  - Ya NO existe la regla X-6 (se eliminó la hoja y sección "Otros presupuestos").
+  - "Tus presupuestos": un presupuesto por fila, sin repetir nombre, ordenados cronológicamente por inicio y nombre. Columnas: Presupuesto, Período, Asignado, Gastado, Te queda y % usado.
+  - "En qué gastaste": categorías ordenadas de mayor a menor gasto con comparativo contra mes anterior (Mes anterior, Este mes, % del total con `=IF($B$T=0,"",B{r}/$B$T)`, Variación con flecha ▲/▼/—).
+  - Subcategorías indentadas con tres espacios bajo cada categoría que tenga desglose.
+  - Sección USD separada al pie si existen gastos en dólares.
+- **Comparativo**: Incluye tabla "Presupuestos de cobro a cobro" antes del desglose de categorías, con semáforo de escala de color según % de uso y columna de conteo `Meses que te pasaste` con `=COUNTIF(... , ">1")`.
+- **Separación de monedas**: Montos en ARS y USD van estrictamente en tablas y bloques separados en todas las hojas.
+- **Solo lectura**: La generación del Excel nunca escribe en la base de datos, nunca crea ni renueva períodos de presupuesto y nunca ejecuta commit ni flush.
+- **Estructura modular (< 1.300 líneas)**: Servicio dividido en 4 archivos para respetar el límite de líneas:
+  - `app/services/presupuestos_excel_datos.py`: Dataclasses inmutables y extracción de datos desde BD.
+  - `app/services/presupuestos_excel_libro.py`: Orquestador principal del libro openpyxl, paleta de colores y estilos compartidos.
+  - `app/services/presupuestos_excel_hojas.py`: Generación de hojas Comparativo, Anual y Cómo leerlo.
+  - `app/services/presupuestos_excel_hoja_ciclo.py`: Generación detallada de cada hoja de ciclo.
+- **Métricas de uso**: La descarga registra el evento `"descargar_presupuestos"` en `eventos_uso`, reportado en `reporte_uso_service`.

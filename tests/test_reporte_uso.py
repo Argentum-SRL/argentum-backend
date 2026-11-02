@@ -317,7 +317,7 @@ def test_reporte_con_datos_completos(db: Session):
         "Retención a 30 días: no hay cuentas para medir.\n\n"
         "Costo de la semana: IA USD 0,02; WhatsApp 2 mensajes cobrados por Meta (≈ USD 0,05).\n"
         "Costo por usuario activo: USD 0,0165.\n\n"
-        "Funciones de la web (personas en la semana): ¿Me lo puedo permitir? 2; calculadora de cuotas 0; descargar mis datos 1.\n\n"
+        "Funciones de la web (personas en la semana): ¿Me lo puedo permitir? 2; calculadora de cuotas 0; descargar mis datos 1; Excel de presupuestos 0.\n\n"
         "WhatsApp en \"Otros\": 2 de 3 movimientos quedaron en Otros o sin subcategoría.\n"
         "Descripciones (solo de quien dio permiso):\n"
         "- kiosko raro"
@@ -343,7 +343,7 @@ def test_reporte_base_vacia(db: Session):
         "Retención a 30 días: no hay cuentas para medir.\n\n"
         "Costo de la semana: IA USD 0,00; WhatsApp 0 mensajes cobrados por Meta (≈ USD 0,00).\n"
         "Costo por usuario activo: sin usuarios activos.\n\n"
-        "Funciones de la web (personas en la semana): ¿Me lo puedo permitir? 0; calculadora de cuotas 0; descargar mis datos 0.\n\n"
+        "Funciones de la web (personas en la semana): ¿Me lo puedo permitir? 0; calculadora de cuotas 0; descargar mis datos 0; Excel de presupuestos 0.\n\n"
         "WhatsApp en \"Otros\": no hubo movimientos por WhatsApp."
     )
 
