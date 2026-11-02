@@ -197,7 +197,7 @@ def p12_caso_7(datos):
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE conversaciones_wpp SET slot_filling_activo = false, accion_ejecutada = 'test' WHERE usuario_id = :uid"), {"uid": u.id})
         respuestas.clear()
-        with patch("app.services.proyeccion_service.calcular_proyeccion", side_effect=RuntimeError("boom")):
+        with patch("app.services.fin_de_mes_service.calcular_fin_de_mes", side_effect=RuntimeError("boom")):
             _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "cuál es mi proyección financiera"), time.perf_counter())
         resp = respuestas[-1][1] if respuestas else ""
         row = conn.execute(

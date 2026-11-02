@@ -72,6 +72,8 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     ENABLE_SCHEDULER: bool = True
     ES_MODO_PC: bool = True
+    INICIALIZAR_BASE_AL_ARRANCAR: bool = True
+    # Si es False, el arranque no corre init_full_db ni precarga feriados (lo usan las pruebas)
 
     @model_validator(mode="after")
     def validate_modo_pc(self):

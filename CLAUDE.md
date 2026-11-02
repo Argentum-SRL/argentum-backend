@@ -137,6 +137,12 @@ Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_21-10.md (versi
 - Suite de WhatsApp: scripts/regresion/suite_regresion_whatsapp.py (escenarios en scripts/regresion/suite/). Las grabaciones de la IA en scripts/regresion/grabaciones_ia/ nunca se editan a mano. Comparación de salidas: scripts/regresion/comparar_salidas.py. Paridad web/WhatsApp: scripts/regresion/paridad_web_whatsapp.py.
 - Foto del motor: scripts/motor/foto_motor.py. Personas: scripts/motor/evaluar_personas.py. Verificador: scripts/testingadmin/verificar_testingadmin.py.
 - Ningún archivo de más de 1.300 líneas. Nunca se juntan líneas para cumplirlo: si un archivo se pasa, se parte en archivos.
+
+### Protección de las pruebas (fase_h1_libre_fin_mes)
+- pytest solo corre contra SQLite, la copia local (localhost:5433/argentum_local) o la CI (localhost:5432/argentum_ci con ARGENTUM_PG_TESTS_CI=1), nunca con ARGENTUM_PRODUCCION_CONFIRMADA ni en Railway; en las pruebas no se inicializa la base ni se precargan feriados (INICIALIZAR_BASE_AL_ARRANCAR=false) y el scheduler está apagado.
+
+### Libre hasta tu próximo ingreso y fin de mes (fase_h1_libre_fin_mes)
+- La fecha límite (próximo cobro deducido de los 3 últimos cobros de cada fuente regular, menos un día, nunca después del fin del ciclo), que el libre sale de calcular_disponible_libre con esa fecha, la historia de gasto del día a día (sin crédito, suscripciones ni cuotas), los cuatro estados y su prioridad, el rango (mínimo y máximo con menos de 10 ciclos, percentiles 10 y 90 con 10 o más, redondeo a $1.000), el riesgo como frecuencia, el margen por cobertura (100 / max(cobertura, 50)), la línea del saldo del ciclo y que WhatsApp usa la misma función.
 ### Pesificación y transferencias (fase_ec2_front_sin_cuentas)
 - `calcular_montos_pesificacion` única en `pago_resumen_service.py`.
 - `calcular_monto_destino` única en `transferencia_service.py` y `GET /transferencias/simular`.

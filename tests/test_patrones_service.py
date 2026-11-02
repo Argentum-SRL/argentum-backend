@@ -871,8 +871,10 @@ def test_caso_13_decisiones_ingresos_habituales(db_session: Session):
     assert ing_desh.estado == "sugerido"
 
 
-def test_caso_14_endpoints_http(db_session: Session):
+def test_caso_14_endpoints_http(db_session: Session, monkeypatch):
     """Caso 14: Endpoints HTTP de patrones vía TestClient (GET, POST decisiones, POST deshacer, errores)."""
+    # Fecha fija: los datos del test son de junio a agosto de 2026, como en los casos 1 a 13.
+    monkeypatch.setattr(patrones_service, "hoy_argentina", lambda: date(2026, 9, 5))
     u = _crear_usuario(db_session, "test_http@argentum.com", is_admin=True)
     _poblar_usuario_base(db_session, u)
 

@@ -9,6 +9,9 @@ from app.core.auth import get_current_user
 from app.models.usuario import Usuario
 from app.services import dashboard_service, proyeccion_service
 from app.services.calibracion_service import disparar_calibracion_a_demanda
+from app.services.fin_de_mes_service import calcular_fin_de_mes
+from app.services.fin_de_mes_textos import textos_web, textos_web_usd, calendario
+from app.schemas.fin_de_mes import FinDeMesResponse
 from app.schemas.dashboard import (
     DashboardResumenResponse,
     ResumenCompletoResponse,
@@ -140,6 +143,45 @@ def get_proyeccion(
     if ars_calib.get("motivo") == "calibracion_pendiente" or usd_calib.get("motivo") == "calibracion_pendiente":
         disparar_calibracion_a_demanda(background_tasks, current_user.id)
     return res
+
+
+@router.get("/fin-de-mes", response_model=FinDeMesResponse)
+def get_fin_de_mes(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+) -> Any:
+    """
+    Retorna el disponible libre hasta el próximo ingreso o fin de ciclo,
+    junto con la proyección empírica a fin de mes.
+    """
+    r = calcular_fin_de_mes(db, current_user)
+    mostrar_modal = bool(r.estado == "completo" and not getattr(current_user, "modal_bienvenida_financiera_visto", False))
+    return {
+        "estado": r.estado,
+        "fecha_limite": r.limite.isoformat(),
+        "proximo_ingreso": r.proximo_ingreso.isoformat() if r.proximo_ingreso else None,
+        "hasta_ingreso": r.hasta_ingreso,
+        "libre_ars": r.libre_ars,
+        "libre_usd": r.libre_usd,
+        "rango_bajo": r.rango.rango_bajo,
+        "rango_alto": r.rango.rango_alto,
+        "ciclos_historia": r.rango.ciclos,
+        "veces_no_alcanza": r.rango.veces_no_alcanza,
+        "cobertura": r.cobertura,
+        "saldo_inicio": r.saldo_inicio,
+        "movimiento": r.movimiento,
+        "saldo_hoy": r.saldo_hoy,
+        "contrato": r.contrato.a_dict(),
+        "mostrar_modal_bienvenida": mostrar_modal,
+        "ars": {
+            "textos": textos_web(r),
+            "calendario": calendario(r.compromisos_ars, "ARS"),
+        },
+        "usd": {
+            "textos": textos_web_usd(r),
+            "calendario": calendario(r.compromisos_usd, "USD"),
+        },
+    }
 
 
 @router.get("/categorias/{categoria_id}/subcategorias", response_model=List[SubcategoriaGastoResponse])

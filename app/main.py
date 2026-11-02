@@ -583,9 +583,12 @@ async def lifespan(app: FastAPI):
 
     # Crear el scheduler y registrar jobs aquí para evitar que se
     # añadan en tiempo de import (evita duplicados con --reload)
-    loop = asyncio.get_running_loop()
-    with ThreadPoolExecutor() as pool:
-        await loop.run_in_executor(pool, init_full_db)
+    if settings.INICIALIZAR_BASE_AL_ARRANCAR:
+        loop = asyncio.get_running_loop()
+        with ThreadPoolExecutor() as pool:
+            await loop.run_in_executor(pool, init_full_db)
+    else:
+        logger.info("Arranque sin inicializar la base ni precargar feriados (INICIALIZAR_BASE_AL_ARRANCAR=False).")
 
     scheduler = None
     if settings.ENABLE_SCHEDULER:
@@ -842,21 +845,22 @@ async def lifespan(app: FastAPI):
         logger.info("Scheduler desactivado por configuración (ENABLE_SCHEDULER=False). No se programan tareas automáticas.")
 
     # Pre-cargar feriados argentinos en cache y BD
-    from app.services.dias_habiles_service import obtener_feriados_argentina
-    from app.utils.fecha import hoy_argentina
-    anio_actual = hoy_argentina().year
-    for anio in (anio_actual - 1, anio_actual, anio_actual + 1):
-        try:
-            feriados = await obtener_feriados_argentina(anio)
-            if not feriados:
-                logger.error(
-                    f"Fallo en la precarga de feriados para el año {anio}: lista vacía o API no disponible. "
-                    f"El ciclo usará fechas nominales como fallback para {anio}."
-                )
-            else:
-                logger.info(f"Feriados argentinos precargados para el año {anio} ({len(feriados)} feriados).")
-        except Exception as e:
-            logger.error(f"Excepción al precargar feriados para el año {anio}: {e}")
+    if settings.INICIALIZAR_BASE_AL_ARRANCAR:
+        from app.services.dias_habiles_service import obtener_feriados_argentina
+        from app.utils.fecha import hoy_argentina
+        anio_actual = hoy_argentina().year
+        for anio in (anio_actual - 1, anio_actual, anio_actual + 1):
+            try:
+                feriados = await obtener_feriados_argentina(anio)
+                if not feriados:
+                    logger.error(
+                        f"Fallo en la precarga de feriados para el año {anio}: lista vacía o API no disponible. "
+                        f"El ciclo usará fechas nominales como fallback para {anio}."
+                    )
+                else:
+                    logger.info(f"Feriados argentinos precargados para el año {anio} ({len(feriados)} feriados).")
+            except Exception as e:
+                logger.error(f"Excepción al precargar feriados para el año {anio}: {e}")
 
     app.state.scheduler = scheduler
     if scheduler:
