@@ -23,8 +23,8 @@ from scripts.demo.generador import (
     ejecutar_borrar,
     ejecutar_crear,
     ejecutar_ponerse_al_dia,
-    imprimir_resumen,
 )
+from scripts.demo.resumen import imprimir_resumen
 from scripts.demo.persona import EMAIL_DEMO
 
 
