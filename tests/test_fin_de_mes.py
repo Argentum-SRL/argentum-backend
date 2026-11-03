@@ -31,13 +31,15 @@ from app.models.usuario import AuthProvider, CicloTipo, EstadoUsuario, Moneda, R
 from app.services import fin_de_mes_service
 from app.services.fin_de_mes_service import (
     calcular_fin_de_mes,
+    cobra_en_ciclo,
     dia_de_cobro,
     fecha_limite,
+    ingresos_en_ciclo,
     proxima_fecha_con_dia,
     rango_fin_de_mes,
     redondear_mil,
 )
-from app.services.fin_de_mes_textos import textos_web
+from app.services.fin_de_mes_textos import linea_saldo, textos_tarjeta
 from app.services.frescura_service import Frescura
 
 
@@ -132,6 +134,24 @@ def client_fixture(db: Session, usuario_test: Usuario):
 # ==============================================================================
 # 1. Funciones puras
 # ==============================================================================
+
+def test_cobra_en_ciclo():
+    assert cobra_en_ciclo(date(2026, 11, 25), date(2026, 11, 30)) is True
+    assert cobra_en_ciclo(date(2026, 11, 30), date(2026, 11, 30)) is True
+    assert cobra_en_ciclo(date(2026, 12, 1), date(2026, 11, 30)) is False
+    assert cobra_en_ciclo(None, date(2026, 11, 30)) is False
+
+
+def test_ingresos_en_ciclo():
+    hoy = date(2026, 11, 20)
+    fin = date(2026, 11, 30)
+    assert ingresos_en_ciclo([(date(2026, 11, 25), Decimal("1000000"))], hoy, fin) == Decimal("1000000")
+    assert ingresos_en_ciclo([(date(2026, 12, 5), Decimal("1000000"))], hoy, fin) == Decimal("0")
+    assert ingresos_en_ciclo([(date(2026, 11, 25), Decimal("1000000")), (date(2026, 11, 28), Decimal("200000"))], hoy, fin) == Decimal("1200000")
+    assert ingresos_en_ciclo([(date(2026, 11, 30), Decimal("5"))], hoy, fin) == Decimal("5")
+    assert ingresos_en_ciclo([(date(2026, 11, 20), Decimal("7"))], hoy, fin) == Decimal("0")
+    assert ingresos_en_ciclo([], hoy, fin) == Decimal("0")
+
 
 def test_dia_de_cobro():
     assert dia_de_cobro([]) is None
@@ -269,8 +289,7 @@ def test_calcular_fin_de_mes_integracion(db: Session, usuario_test: Usuario, mon
     db.commit()
 
     # 2. Billetera "Cuenta" ARS activa
-    # Neto movimientos = +4.000.000 ingresos - 1.905.000 egresos = +2.095.000
-    # saldo_inicial = 500.000 - 2.095.000 = -1.595.000
+    # Con saldo actual 500.000 hoy
     cuenta = Billetera(
         id=uuid4(),
         usuario_id=usuario_test.id,
@@ -424,43 +443,85 @@ def test_calcular_fin_de_mes_integracion(db: Session, usuario_test: Usuario, mon
     # 7. Ejecutar calcular_fin_de_mes caso completo
     res = calcular_fin_de_mes(db, usuario_test, fecha_ref=hoy)
 
-    assert len(llamadas_disponible) == 1
-    assert llamadas_disponible[0].get("fecha_fin_ciclo") == date(2026, 11, 24)
+    # 2 llamadas: la primera con fecha_fin_ciclo 30/11/2026 y la segunda con 24/11/2026
+    assert len(llamadas_disponible) == 2
+    assert llamadas_disponible[0].get("fecha_fin_ciclo") == date(2026, 11, 30)
+    assert llamadas_disponible[1].get("fecha_fin_ciclo") == date(2026, 11, 24)
 
     assert res.proximo_ingreso == date(2026, 11, 25)
-    assert res.fecha_limite == date(2026, 11, 24)
-    assert res.hasta_ingreso is True
-    assert res.libre_ars == Decimal("485000")
+    assert res.cobra_en_ciclo is True
+    assert res.limite == date(2026, 11, 24)
+    assert res.libre_ars == Decimal("445000")
+    assert res.libre_hasta_cobro == Decimal("485000")
+    assert res.ingreso_esperado == Decimal("1000000")
     assert res.estado == "completo"
+    assert res.mostrar_tarjeta is True
     assert res.ciclos == 3
-    assert res.rango_bajo == Decimal("365000")
-    assert res.rango_alto == Decimal("445000")
-    assert res.veces_no_alcanzo == 0
+    assert res.rango == (Decimal("1145000"), Decimal("1345000"))
+    assert res.veces == 0
     assert res.saldo_hoy == Decimal("500000")
     assert res.movimiento == Decimal("-50000")
     assert res.saldo_inicio == Decimal("550000")
-    assert len(res.compromisos_ars) == 1
-    assert res.compromisos_ars[0]["nombre"] == "Gimnasio"
 
-    # Textos web del resultado completo
-    tw = textos_web(res)
-    assert tw.titulo == "Libre hasta tu próximo ingreso"
-    assert tw.monto == "$485.000"
-    assert tw.subtitulo == "Hasta el 24/11, antes de cobrar el 25/11."
-    assert tw.linea_rango == "A esa fecha llegarías con entre $365.000 y $445.000."
-    assert tw.linea_riesgo is None
-    assert tw.linea_estado is None
-    assert tw.linea_cobertura is None
-    assert tw.linea_saldo == "Empezaste el ciclo con $550.000 y se movieron -$50.000: hoy tenés $500.000."
+    # Textos de tarjeta y línea de saldo
+    tt = textos_tarjeta(res)
+    assert tt is not None
+    assert tt["titulo"] == "¿Cómo llegás a fin de mes?"
+    assert tt["monto"] == "Entre $1.145.000 y $1.345.000"
+    assert tt["subtitulo"] == "Es con lo que llegarías al 30/11, contando tu cobro del 25/11."
+    assert tt["linea_riesgo"] is None
+    assert tt["linea_cobro"] == "Hasta tu cobro del 25/11 te quedan $485.000 libres."
+    assert tt["linea_cobertura"] is None
+
+    assert linea_saldo(res) == "Empezaste el ciclo con $550.000 y se movieron -$50.000: hoy tenés $500.000."
 
     # Contrato del caso completo
-    assert res.contrato.valor == Decimal("485000")
+    assert res.contrato.valor == Decimal("445000")
     assert res.contrato.base_desde == date(2026, 11, 1)
-    assert res.contrato.base_hasta == date(2026, 11, 24)
+    assert res.contrato.base_hasta == date(2026, 11, 30)
     assert len(res.contrato.supuestos) == 3
+    assert res.contrato.supuestos[1] == "Descuenta lo que vence hasta el 30/11."
     assert res.contrato.supuestos[2] == "Tu próximo cobro sale de tus últimos 3 cobros."
 
-    # 8. Con Frescura parcheada con datos_viejos True
+    # 8. El mismo usuario sin los 4 ingresos
+    llamadas_disponible.clear()
+    for tx in transacciones_ingresos:
+        db.delete(tx)
+    db.commit()
+
+    res_sin_ingreso = calcular_fin_de_mes(db, usuario_test, fecha_ref=hoy)
+    assert res_sin_ingreso.proximo_ingreso is None
+    assert res_sin_ingreso.cobra_en_ciclo is False
+    assert res_sin_ingreso.libre_ars == Decimal("445000")
+    assert res_sin_ingreso.libre_hasta_cobro is None
+    assert res_sin_ingreso.ingreso_esperado == Decimal("0")
+    assert res_sin_ingreso.estado == "sin_ingreso"
+    assert res_sin_ingreso.mostrar_tarjeta is False
+    assert textos_tarjeta(res_sin_ingreso) is None
+    assert len(llamadas_disponible) == 1
+    assert llamadas_disponible[0].get("fecha_fin_ciclo") == date(2026, 11, 30)
+
+    # 9. Con la Frescura parcheada con datos_viejos True (con ingresos)
+    # Reinsertar ingresos para probar frescura vieja con ingresos
+    for tx_data in transacciones_ingresos:
+        tx_re = Transaccion(
+            id=uuid4(),
+            usuario_id=usuario_test.id,
+            billetera_id=cuenta.id,
+            categoria_id=tx_data.categoria_id,
+            subcategoria_id=tx_data.subcategoria_id,
+            tipo=tx_data.tipo,
+            moneda=tx_data.moneda,
+            monto=tx_data.monto,
+            fecha=tx_data.fecha,
+            origen=tx_data.origen,
+            estado_verificacion=tx_data.estado_verificacion,
+            es_padre_cuotas=False,
+            es_cuota_hija=False,
+        )
+        db.add(tx_re)
+    db.commit()
+
     frescura_vieja = Frescura(
         ultima_carga=date(2026, 11, 1),
         dias_sin_cargar=19,
@@ -471,27 +532,7 @@ def test_calcular_fin_de_mes_integracion(db: Session, usuario_test: Usuario, mon
     monkeypatch.setattr(fin_de_mes_service, "calcular_frescura", lambda *a, **k: frescura_vieja)
     res_viejos = calcular_fin_de_mes(db, usuario_test, fecha_ref=hoy)
     assert res_viejos.estado == "datos_viejos"
-    tw_viejos = textos_web(res_viejos)
-    assert tw_viejos.linea_rango is None
-
-    # Restaurar frescura limpia
-    monkeypatch.setattr(fin_de_mes_service, "calcular_frescura", lambda *a, **k: frescura_ficticia)
-
-    # 9. El mismo usuario sin ingresos (los 4 borrados de los datos)
-    for tx in transacciones_ingresos:
-        db.delete(tx)
-    db.commit()
-
-    res_sin_ingreso = calcular_fin_de_mes(db, usuario_test, fecha_ref=hoy)
-    assert res_sin_ingreso.proximo_ingreso is None
-    assert res_sin_ingreso.fecha_limite == date(2026, 11, 30)
-    assert res_sin_ingreso.hasta_ingreso is False
-    assert res_sin_ingreso.libre_ars == Decimal("445000")
-    assert res_sin_ingreso.estado == "sin_ingreso"
-
-    tw_sin_ingreso = textos_web(res_sin_ingreso)
-    assert tw_sin_ingreso.subtitulo == "Hasta el 30/11, cuando termina tu ciclo."
-    assert tw_sin_ingreso.linea_estado == "Cuando cargues tus ingresos vas a ver cómo llegás a esa fecha."
+    assert res_viejos.mostrar_tarjeta is False
 
 
 # ==============================================================================
@@ -523,14 +564,17 @@ def test_paridad_y_ruta_fin_de_mes(client: TestClient, db: Session, usuario_test
     data_comp = res_comp.json()
 
     assert data_fin["estado"] == "sin_ingreso"
+    assert data_fin["mostrar_tarjeta"] is False
+    assert data_fin["tarjeta"] is None
     assert data_fin["libre_ars"] == 270000
     assert Decimal(str(data_fin["libre_ars"])) == Decimal(str(data_comp["saldo_disponible"]["ars"]["saldo_disponible"]))
-    assert data_fin["fecha_limite"] == data_comp["resumen"]["periodo"]["fecha_fin"]
-    assert data_fin["ars"]["textos"]["titulo"] == "Libre hasta el fin del ciclo"
-    assert data_fin["ars"]["calendario"] == []
+    assert data_fin["fin_ciclo"] == data_comp["resumen"]["periodo"]["fecha_fin"]
+    assert data_fin["linea_saldo"] == "Empezaste el ciclo con $270.000 y se movieron $0: hoy tenés $270.000."
     assert data_fin["mostrar_modal_bienvenida"] is False
+
+    # total_compromisos vale 0 (como número o texto)
+    assert Decimal(str(data_comp["saldo_disponible"]["ars"]["total_compromisos"])) == Decimal("0")
 
     # GET /dashboard/resumen y GET /dashboard/proyeccion siguen respondiendo 200
     assert client.get("/dashboard/resumen").status_code == 200
     assert client.get("/dashboard/proyeccion").status_code == 200
-

@@ -3,39 +3,29 @@ app/schemas/fin_de_mes.py — Esquemas de respuesta para la ruta GET /dashboard/
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from typing import Any, Dict, Optional
+from pydantic import BaseModel
 from app.schemas.tipos import DecimalJSON
 
 
-class FinDeMesTextos(BaseModel):
+class FinDeMesTarjeta(BaseModel):
     titulo: str
     monto: str
     subtitulo: str
-    linea_rango: Optional[str] = None
     linea_riesgo: Optional[str] = None
-    linea_estado: Optional[str] = None
+    linea_cobro: Optional[str] = None
     linea_cobertura: Optional[str] = None
-    linea_saldo: Optional[str] = None
-
-
-class FinDeMesFila(BaseModel):
-    fecha: str
-    nombre: str
-    monto: str
-
-
-class FinDeMesMoneda(BaseModel):
-    textos: FinDeMesTextos
-    calendario: List[FinDeMesFila] = Field(default_factory=list)
 
 
 class FinDeMesResponse(BaseModel):
     estado: str
-    fecha_limite: str
+    mostrar_tarjeta: bool
+    fin_ciclo: str
     proximo_ingreso: Optional[str] = None
-    hasta_ingreso: bool
+    cobra_en_ciclo: bool
     libre_ars: DecimalJSON
+    libre_hasta_cobro: Optional[DecimalJSON] = None
+    ingreso_esperado: DecimalJSON
     libre_usd: DecimalJSON
     rango_bajo: Optional[DecimalJSON] = None
     rango_alto: Optional[DecimalJSON] = None
@@ -45,8 +35,7 @@ class FinDeMesResponse(BaseModel):
     saldo_inicio: DecimalJSON
     movimiento: DecimalJSON
     saldo_hoy: DecimalJSON
+    linea_saldo: str
+    tarjeta: Optional[FinDeMesTarjeta] = None
     contrato: Dict[str, Any]
     mostrar_modal_bienvenida: bool
-    ars: FinDeMesMoneda
-    usd: FinDeMesMoneda
-

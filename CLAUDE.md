@@ -141,8 +141,8 @@ Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_21-10.md (versi
 ### Protección de las pruebas (fase_h1_libre_fin_mes)
 - pytest solo corre contra SQLite, la copia local (localhost:5433/argentum_local) o la CI (localhost:5432/argentum_ci con ARGENTUM_PG_TESTS_CI=1), nunca con ARGENTUM_PRODUCCION_CONFIRMADA ni en Railway; en las pruebas no se inicializa la base ni se precargan feriados (INICIALIZAR_BASE_AL_ARRANCAR=false) y el scheduler está apagado.
 
-### Libre hasta tu próximo ingreso y fin de mes (fase_h1_libre_fin_mes)
-- La fecha límite (próximo cobro deducido de los 3 últimos cobros de cada fuente regular, menos un día, nunca después del fin del ciclo), que el libre sale de calcular_disponible_libre con esa fecha, la historia de gasto del día a día (sin crédito, suscripciones ni cuotas), los cuatro estados y su prioridad, el rango (mínimo y máximo con menos de 10 ciclos, percentiles 10 y 90 con 10 o más, redondeo a $1.000), el riesgo como frecuencia, el margen por cobertura (100 / max(cobertura, 50)), la línea del saldo del ciclo y que WhatsApp usa la misma función.
+### ¿Cómo llegás a fin de mes? (fase_h2a_tarjeta_fin_de_mes)
+- Un solo número de plata libre en el inicio (el Disponible libre); el rango se calcula al fin del ciclo sumando los cobros regulares que caen dentro del ciclo; la tarjeta aparece solo con estado "completo"; la línea "Hasta tu cobro..." solo si el cobro cae dentro del ciclo; la línea del saldo del ciclo va en la tarjeta de saldo; WhatsApp usa la misma función y sin rango contesta con el libre de hoy.
 ### Pesificación y transferencias (fase_ec2_front_sin_cuentas)
 - `calcular_montos_pesificacion` única en `pago_resumen_service.py`.
 - `calcular_monto_destino` única en `transferencia_service.py` y `GET /transferencias/simular`.

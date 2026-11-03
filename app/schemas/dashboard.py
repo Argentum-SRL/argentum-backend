@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from typing import Dict, List, Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from app.schemas.tipos import DecimalJSON
 from app.schemas.transaccion import ReintegroRead
@@ -57,6 +57,11 @@ class SaldoDisponibleMoneda(BaseModel):
     facturas_pendientes: Decimal = Field(default=Decimal("0.00"), ge=0, description="Facturas pendientes de pago en el ciclo actual")
     saldo_disponible: Decimal = Field(..., description="Saldo disponible para gastar (saldo_total - cuotas - suscripciones - facturas)")
     compromisos: List[CompromisoDisponibleItem] = Field(default_factory=list, description="Lista detallada de compromisos descontados del disponible")
+
+    @computed_field
+    @property
+    def total_compromisos(self) -> Decimal:
+        return self.saldo_total - self.saldo_disponible
 
 
 class SaldoDisponibleDashboard(BaseModel):

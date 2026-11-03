@@ -84,8 +84,11 @@ class ResultadoFinDeMes:
     limite: date
     proximo_ingreso: Optional[date]
     hasta_ingreso: bool
+    cobra_en_ciclo: bool
     estado: str
     libre_ars: Decimal
+    libre_hasta_cobro: Optional[Decimal]
+    ingreso_esperado: Decimal
     libre_usd: Decimal
     compromisos_ars: List[Dict[str, Any]]
     compromisos_usd: List[Dict[str, Any]]
@@ -96,6 +99,10 @@ class ResultadoFinDeMes:
     saldo_hoy: Decimal
     frescura: Frescura
     contrato: ContratoNumero
+
+    @property
+    def mostrar_tarjeta(self) -> bool:
+        return self.estado == "completo"
 
     @property
     def fecha_limite(self) -> date:
@@ -137,6 +144,16 @@ class ResultadoFinDeMes:
 # ==============================================================================
 # FUNCIONES PURAS (H-A)
 # ==============================================================================
+
+def cobra_en_ciclo(proximo_ingreso: date | None, fin_ciclo: date) -> bool:
+    """Indica si el próximo ingreso habitual cae dentro del ciclo actual."""
+    return proximo_ingreso is not None and proximo_ingreso <= fin_ciclo
+
+
+def ingresos_en_ciclo(cobros: list[tuple[date, Decimal]], hoy: date, fin_ciclo: date) -> Decimal:
+    """Suma los montos de cobros regulares con hoy < fecha <= fin_ciclo."""
+    return sum((monto for fecha, monto in cobros if hoy < fecha <= fin_ciclo), Decimal("0"))
+
 
 def dia_de_cobro(fechas: list[date]) -> int | None:
     """
@@ -345,46 +362,67 @@ def calcular_fin_de_mes(
 
     ingreso_deducible = res_ingreso.monto is not None
 
-    candidatas_cobro: list[date] = []
+    cobros: list[tuple[date, Decimal]] = []
     if ingreso_deducible:
+        fuentes_por_par: dict[tuple[Any, Any], list[Any]] = {}
         for f in res_ingreso.fuentes:
             if f.tipo == "regular":
-                cat_id_val = UUID(f.categoria_id) if isinstance(f.categoria_id, str) and f.categoria_id else f.categoria_id
-                subcat_id_val = UUID(f.subcategoria_id) if isinstance(f.subcategoria_id, str) and f.subcategoria_id else f.subcategoria_id
-                query_fechas = db.query(Transaccion.fecha).filter(
-                    Transaccion.usuario_id == usuario.id,
-                    Transaccion.tipo == TipoTransaccion.INGRESO,
-                    or_(Transaccion.moneda == Moneda.ARS, Transaccion.moneda == "ARS"),
-                    Transaccion.categoria_id == cat_id_val,
-                    Transaccion.fecha >= fecha_ref - timedelta(days=120),
-                    Transaccion.fecha <= fecha_ref,
-                )
-                if subcat_id_val is not None:
-                    query_fechas = query_fechas.filter(Transaccion.subcategoria_id == subcat_id_val)
-                else:
-                    query_fechas = query_fechas.filter(Transaccion.subcategoria_id.is_(None))
+                par = (f.categoria_id, f.subcategoria_id)
+                fuentes_por_par.setdefault(par, []).append(f)
 
-                fechas_fuente = []
-                for t in query_fechas.all():
-                    v = t[0] if hasattr(t, "__getitem__") else t
-                    if isinstance(v, str):
-                        v = date.fromisoformat(v)
-                    fechas_fuente.append(v)
-                dia_cobro = dia_de_cobro(fechas_fuente)
-                if dia_cobro is not None:
-                    candidatas_cobro.append(proxima_fecha_con_dia(fecha_ref, dia_cobro))
+        fuentes_regulares_elegidas = []
+        for par, lista in fuentes_por_par.items():
+            elegida = next((f for f in lista if getattr(f, "orden_desdoble", None) == 1), lista[0])
+            fuentes_regulares_elegidas.append(elegida)
 
-    proximo_ingreso = min(candidatas_cobro) if candidatas_cobro else None
+        for f in fuentes_regulares_elegidas:
+            cat_id_val = UUID(f.categoria_id) if isinstance(f.categoria_id, str) and f.categoria_id else f.categoria_id
+            subcat_id_val = UUID(f.subcategoria_id) if isinstance(f.subcategoria_id, str) and f.subcategoria_id else f.subcategoria_id
+            query_fechas = db.query(Transaccion.fecha).filter(
+                Transaccion.usuario_id == usuario.id,
+                Transaccion.tipo == TipoTransaccion.INGRESO,
+                or_(Transaccion.moneda == Moneda.ARS, Transaccion.moneda == "ARS"),
+                Transaccion.categoria_id == cat_id_val,
+                Transaccion.fecha >= fecha_ref - timedelta(days=120),
+                Transaccion.fecha <= fecha_ref,
+            )
+            if subcat_id_val is not None:
+                query_fechas = query_fechas.filter(Transaccion.subcategoria_id == subcat_id_val)
+            else:
+                query_fechas = query_fechas.filter(Transaccion.subcategoria_id.is_(None))
+
+            fechas_fuente = []
+            for t in query_fechas.all():
+                v = t[0] if hasattr(t, "__getitem__") else t
+                if isinstance(v, str):
+                    v = date.fromisoformat(v)
+                fechas_fuente.append(v)
+            dia_cobro = dia_de_cobro(fechas_fuente)
+            if dia_cobro is not None:
+                candidata = proxima_fecha_con_dia(fecha_ref, dia_cobro)
+                monto_cobro = Decimal(str(f.monto)) if f.monto is not None else Decimal("0")
+                cobros.append((candidata, monto_cobro))
+
+    proximo_ingreso = min(c[0] for c in cobros) if cobros else None
     if not ingreso_deducible:
         proximo_ingreso = None
 
-    # 3. Fecha límite
+    # 3. Fecha límite y cobra en ciclo
     limite, hasta_ingreso = fecha_limite(fecha_ref, fin_ciclo, proximo_ingreso)
+    en_ciclo = cobra_en_ciclo(proximo_ingreso, fin_ciclo)
 
-    # 4. Disponible libre (una sola llamada)
-    disponible = calcular_disponible_libre(db, usuario, fecha_fin_ciclo=limite, hoy=fecha_ref)
+    # 4. Disponible libre
+    disponible = calcular_disponible_libre(db, usuario, fecha_fin_ciclo=fin_ciclo, hoy=fecha_ref)
     libre_ars = Decimal(str(disponible["ars"]["saldo_disponible"]))
     libre_usd = Decimal(str(disponible["usd"]["saldo_disponible"]))
+
+    if en_ciclo:
+        disp_cobro = calcular_disponible_libre(db, usuario, fecha_fin_ciclo=limite, hoy=fecha_ref)
+        libre_hasta_cobro = Decimal(str(disp_cobro["ars"]["saldo_disponible"]))
+    else:
+        libre_hasta_cobro = None
+
+    ingreso_esperado = ingresos_en_ciclo(cobros, fecha_ref, fin_ciclo) if ingreso_deducible else Decimal("0")
 
     # 5. Historia de ciclos anteriores (hasta 12 ciclos)
     min_fecha = db.query(func.min(Transaccion.fecha)).filter(Transaccion.usuario_id == usuario.id).scalar()
@@ -434,9 +472,9 @@ def calcular_fin_de_mes(
     # 6. Cobertura, frescura y rango
     cobertura = cobertura_usuario(db, usuario.id, fecha_ref)
     frescura = calcular_frescura(db, usuario.id, hoy=fecha_ref)
-    dias_restantes = (limite - fecha_ref).days
+    dias_restantes = (fin_ciclo - fecha_ref).days
     rango = rango_fin_de_mes(
-        libre=libre_ars,
+        libre=libre_ars + ingreso_esperado,
         dias_restantes=dias_restantes,
         ciclos=ciclos,
         cobertura=cobertura,
@@ -469,16 +507,16 @@ def calcular_fin_de_mes(
     # 8. Contrato de número
     supuestos = [
         "Suma solo billeteras activas que no son de inversión.",
-        f"Descuenta lo que vence hasta el {limite:%d/%m}.",
+        f"Descuenta lo que vence hasta el {fin_ciclo:%d/%m}.",
     ]
-    if hasta_ingreso:
+    if en_ciclo:
         supuestos.append("Tu próximo cobro sale de tus últimos 3 cobros.")
 
     contrato = ContratoNumero(
         valor=libre_ars,
         moneda="ARS",
         base_desde=inicio_ciclo,
-        base_hasta=limite,
+        base_hasta=fin_ciclo,
         fecha_corte=fecha_ref,
         cobertura=cobertura,
         frescura=frescura,
@@ -502,8 +540,11 @@ def calcular_fin_de_mes(
         limite=limite,
         proximo_ingreso=proximo_ingreso,
         hasta_ingreso=hasta_ingreso,
+        cobra_en_ciclo=en_ciclo,
         estado=rango.estado,
         libre_ars=libre_ars,
+        libre_hasta_cobro=libre_hasta_cobro,
+        ingreso_esperado=ingreso_esperado,
         libre_usd=libre_usd,
         compromisos_ars=compromisos_ars,
         compromisos_usd=compromisos_usd,

@@ -344,6 +344,7 @@ def test_te10_dashboard_una_sola_lista_y_respuesta_identica(db: Session, monkeyp
                         "percepcion": None,
                     },
                 ],
+                "total_compromisos": "37000.00",
             },
             "usd": {
                 "saldo_total": "200.00",
@@ -352,6 +353,7 @@ def test_te10_dashboard_una_sola_lista_y_respuesta_identica(db: Session, monkeyp
                 "facturas_pendientes": "0.00",
                 "saldo_disponible": "200.00",
                 "compromisos": [],
+                "total_compromisos": "0.00",
             },
         },
         "gastos_por_categoria": {"ars": [], "usd": []},

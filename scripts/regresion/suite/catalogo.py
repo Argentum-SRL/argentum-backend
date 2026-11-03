@@ -47,6 +47,15 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
     if ayer is None:
         ayer = hoy - timedelta(days=1)
 
+    MESES = [
+        "enero", "febrero", "marzo", "abril", "mayo", "junio",
+        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
+    ]
+    fecha_p63 = hoy - timedelta(days=20)
+    frase_p63 = f"el {fecha_p63.day} de {MESES[fecha_p63.month - 1]}"
+    if fecha_p63.year != hoy.year:
+        frase_p63 += f" de {fecha_p63.year}"
+
     catalogo = [
         {
             "id": "P3.1", "punto": "Punto 3", "match": "exacto",
@@ -260,9 +269,9 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P6.3", "punto": "Punto 6", "match": "exacto",
             "nombre": "Gasto del 31 de agosto",
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto 31 agosto", {
-                "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Galicia", "fecha": "2026-08-31"
+                "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Galicia", "fecha": fecha_p63.isoformat()
             }),
-            "esperado": "Propuesta:\nVoy a anotar $5.000 en Kiosco desde Galicia (el 31 de agosto). ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Galicia (el 31 de agosto) — registrado.",
+            "esperado": f"Propuesta:\nVoy a anotar $5.000 en Kiosco desde Galicia ({frase_p63}). ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Galicia ({frase_p63}) — registrado.",
         },
         {
             "id": "P6.4", "punto": "Punto 6", "match": "exacto",

@@ -36,8 +36,8 @@ def usuario_mock():
 def _caso_completo_resultado():
     rango = ResultadoRango(
         estado="completo",
-        rango_bajo=Decimal("365000"),
-        rango_alto=Decimal("445000"),
+        rango_bajo=Decimal("1145000"),
+        rango_alto=Decimal("1345000"),
         ciclos=3,
         veces_no_alcanza=0,
         factor_cobertura=Decimal("1"),
@@ -50,10 +50,10 @@ def _caso_completo_resultado():
         datos_viejos=False,
     )
     contrato = ContratoNumero(
-        valor=Decimal("485000"),
+        valor=Decimal("445000"),
         moneda="ARS",
         base_desde=date(2026, 11, 1),
-        base_hasta=date(2026, 11, 24),
+        base_hasta=date(2026, 11, 30),
         fecha_corte=date(2026, 11, 20),
         cobertura=None,
         frescura=frescura,
@@ -66,8 +66,11 @@ def _caso_completo_resultado():
         limite=date(2026, 11, 24),
         proximo_ingreso=date(2026, 11, 25),
         hasta_ingreso=True,
+        cobra_en_ciclo=True,
         estado="completo",
-        libre_ars=Decimal("485000"),
+        libre_ars=Decimal("445000"),
+        libre_hasta_cobro=Decimal("485000"),
+        ingreso_esperado=Decimal("1000000"),
         libre_usd=Decimal("0"),
         compromisos_ars=[{"fecha_cobro": "2026-11-22", "nombre": "Gimnasio", "monto": Decimal("15000")}],
         compromisos_usd=[],
@@ -137,4 +140,3 @@ def test_enriquecer_respuesta_consultar_proyeccion_error(usuario_mock, monkeypat
     assert res_intent == "consultar_proyeccion"
     assert resultado_ia["respuesta_usuario"] == "No pude calcular tu proyección en este momento. Probá de nuevo en unos minutos."
     assert contador_proyeccion == 0
-

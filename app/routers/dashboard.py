@@ -10,7 +10,7 @@ from app.models.usuario import Usuario
 from app.services import dashboard_service, proyeccion_service
 from app.services.calibracion_service import disparar_calibracion_a_demanda
 from app.services.fin_de_mes_service import calcular_fin_de_mes
-from app.services.fin_de_mes_textos import textos_web, textos_web_usd, calendario
+from app.services.fin_de_mes_textos import textos_tarjeta, linea_saldo
 from app.schemas.fin_de_mes import FinDeMesResponse
 from app.schemas.dashboard import (
     DashboardResumenResponse,
@@ -151,17 +151,19 @@ def get_fin_de_mes(
     current_user: Usuario = Depends(get_current_user),
 ) -> Any:
     """
-    Retorna el disponible libre hasta el próximo ingreso o fin de ciclo,
-    junto con la proyección empírica a fin de mes.
+    Retorna el disponible libre y la tarjeta de proyección a fin de mes.
     """
     r = calcular_fin_de_mes(db, current_user)
     mostrar_modal = bool(r.estado == "completo" and not getattr(current_user, "modal_bienvenida_financiera_visto", False))
     return {
         "estado": r.estado,
-        "fecha_limite": r.limite.isoformat(),
+        "mostrar_tarjeta": r.mostrar_tarjeta,
+        "fin_ciclo": r.fin_ciclo.isoformat(),
         "proximo_ingreso": r.proximo_ingreso.isoformat() if r.proximo_ingreso else None,
-        "hasta_ingreso": r.hasta_ingreso,
+        "cobra_en_ciclo": r.cobra_en_ciclo,
         "libre_ars": r.libre_ars,
+        "libre_hasta_cobro": r.libre_hasta_cobro,
+        "ingreso_esperado": r.ingreso_esperado,
         "libre_usd": r.libre_usd,
         "rango_bajo": r.rango.rango_bajo,
         "rango_alto": r.rango.rango_alto,
@@ -171,16 +173,10 @@ def get_fin_de_mes(
         "saldo_inicio": r.saldo_inicio,
         "movimiento": r.movimiento,
         "saldo_hoy": r.saldo_hoy,
+        "linea_saldo": linea_saldo(r),
+        "tarjeta": textos_tarjeta(r),
         "contrato": r.contrato.a_dict(),
         "mostrar_modal_bienvenida": mostrar_modal,
-        "ars": {
-            "textos": textos_web(r),
-            "calendario": calendario(r.compromisos_ars, "ARS"),
-        },
-        "usd": {
-            "textos": textos_web_usd(r),
-            "calendario": calendario(r.compromisos_usd, "USD"),
-        },
     }
 
 
