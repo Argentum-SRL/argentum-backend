@@ -251,6 +251,8 @@ def get_dashboard_resumen(
             "reintegro": reintegro_val,
             "titulo": item.titulo,
             "iconos": item.iconos,
+            "reintegro_de_id": getattr(tx, "reintegro_de_id", None) if tx else None,
+            "tipo_espejo": getattr(tx, "tipo_espejo", None) if tx else None,
         })
         if len(movimientos_data) == 6:
             break

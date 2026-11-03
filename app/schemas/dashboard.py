@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from typing import Dict, List, Literal, Optional
+from uuid import UUID
 from pydantic import BaseModel, Field, computed_field
 
 from app.schemas.tipos import DecimalJSON
@@ -84,6 +85,10 @@ class MovimientoDashboard(BaseModel):
     reintegro: Optional[ReintegroRead] = None
     titulo: str = ""
     iconos: List[str] = Field(default_factory=list)
+    sentido: Optional[str] = None
+    cuenta_como: Optional[str] = None
+    reintegro_de_id: Optional[UUID] = None
+    tipo_espejo: Optional[str] = None
 
 
 class PagoDashboard(BaseModel):
