@@ -33,12 +33,15 @@ class MovimientoItem(BaseModel):
     moneda_destino: Optional[str] = None
     transaccion: Optional[TransaccionRead] = None
     reintegro: Optional[ReintegroRead] = None
+    titulo: str = ""
+    iconos: List[str] = Field(default_factory=list)
 
 
 class TotalesMoneda(BaseModel):
     gastos: DecimalJSON = Decimal("0.00")
     ingresos: DecimalJSON = Decimal("0.00")
     balance: DecimalJSON = Decimal("0.00")
+    linea_metas: Optional[str] = None
 
 
 class MovimientosResponse(BaseModel):
@@ -46,3 +49,5 @@ class MovimientosResponse(BaseModel):
     hay_mas: bool
     total_items: int
     totales: Dict[str, TotalesMoneda]
+    proximos: List[MovimientoItem] = Field(default_factory=list)
+    proximos_total: int = 0

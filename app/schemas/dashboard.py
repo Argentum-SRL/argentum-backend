@@ -19,6 +19,7 @@ class BalanceMoneda(BaseModel):
     egresos: float = Field(..., ge=0, description="Total de egresos en el ciclo")
     balance: float = Field(..., description="Balance neto (ingresos - egresos)")
     variacion_vs_ciclo_anterior: Optional[float] = Field(default=None, description="Porcentaje de variación respecto al ciclo previo")
+    linea_metas: Optional[str] = Field(default=None, description="Texto explicativo del aporte neto a metas debajo del balance")
 
 
 class BalanceDashboard(BaseModel):
@@ -81,6 +82,8 @@ class MovimientoDashboard(BaseModel):
     estado_verificacion: Optional[str] = None
     subcategoria_nombre: Optional[str] = None
     reintegro: Optional[ReintegroRead] = None
+    titulo: str = ""
+    iconos: List[str] = Field(default_factory=list)
 
 
 class PagoDashboard(BaseModel):

@@ -204,7 +204,7 @@ def _cobrar_suscripcion(db: Session, suscripcion: Suscripcion, hoy: date, primer
             tarjeta_id=suscripcion.tarjeta_id,
             metodo_pago=MetodoPago.CREDITO,
             origen=OrigenTransaccion.RECURRENTE,
-            estado_verificacion=EstadoVerificacionTransaccion.PENDIENTE,
+            estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
             suscripcion_id=suscripcion.id,
             es_cuota_hija=False,
             es_padre_cuotas=True,

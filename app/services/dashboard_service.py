@@ -249,6 +249,8 @@ def get_dashboard_resumen(
             "aclaracion": item.aclaracion,
             "cuota_texto": item.cuota_texto,
             "reintegro": reintegro_val,
+            "titulo": item.titulo,
+            "iconos": item.iconos,
         })
         if len(movimientos_data) == 6:
             break
@@ -421,18 +423,32 @@ def calcular_balance_ciclo(
     balance_ant_usd = ing_ant_usd - egr_ant_usd
     variacion_usd = round(float(((balance_usd - balance_ant_usd) / abs(balance_ant_usd)) * 100), 1) if balance_ant_usd != 0 else None
 
+    from app.services.metas_balance import aportes_netos_metas, linea_metas
+
+    neto_metas_ars = aportes_netos_metas(
+        db, usuario.id, fecha_inicio, fecha_fin, Moneda.ARS, hoy, billetera_ids=billetera_ids
+    )
+    neto_metas_usd = aportes_netos_metas(
+        db, usuario.id, fecha_inicio, fecha_fin, Moneda.USD, hoy, billetera_ids=billetera_ids
+    )
+
+    linea_metas_ars = linea_metas(balance_ars, neto_metas_ars, Moneda.ARS)
+    linea_metas_usd = linea_metas(balance_usd, neto_metas_usd, Moneda.USD)
+
     return {
         "ars": {
             "ingresos": float(ing_actual_ars),
             "egresos": float(egr_actual_ars),
             "balance": float(balance_ars),
-            "variacion_vs_ciclo_anterior": variacion_ars
+            "variacion_vs_ciclo_anterior": variacion_ars,
+            "linea_metas": linea_metas_ars,
         },
         "usd": {
             "ingresos": float(ing_actual_usd),
             "egresos": float(egr_actual_usd),
             "balance": float(balance_usd),
-            "variacion_vs_ciclo_anterior": variacion_usd
+            "variacion_vs_ciclo_anterior": variacion_usd,
+            "linea_metas": linea_metas_usd,
         }
     }
 

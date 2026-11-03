@@ -293,12 +293,14 @@ def test_te10_dashboard_una_sola_lista_y_respuesta_identica(db: Session, monkeyp
                 "egresos": 0.0,
                 "balance": 0.0,
                 "variacion_vs_ciclo_anterior": None,
+                "linea_metas": None,
             },
             "usd": {
                 "ingresos": 0.0,
                 "egresos": 0.0,
                 "balance": 0.0,
                 "variacion_vs_ciclo_anterior": None,
+                "linea_metas": None,
             },
         },
         "disponible_real": {

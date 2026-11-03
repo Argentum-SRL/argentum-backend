@@ -181,3 +181,12 @@ Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_21-10.md (versi
   - `app/services/presupuestos_excel_hojas.py`: Generación de hojas Comparativo, Anual y Cómo leerlo.
   - `app/services/presupuestos_excel_hoja_ciclo.py`: Generación detallada de cada hoja de ciclo.
 - **Métricas de uso**: La descarga registra el evento `"descargar_presupuestos"` en `eventos_uso`, reportado en `reporte_uso_service`.
+
+### Lista de movimientos y usuario demo (fase_lista_movimientos_demo)
+- **Lista de movimientos pasada**: La lista principal (`listar_movimientos`), el detalle de billetera y "Últimos movimientos" del dashboard muestran únicamente eventos pasados (`fecha <= ref_hoy`). Los eventos con fecha futura se separan en el bloque `proximos` (primeros 50 en orden cronológico ascendente) y `proximos_total` para la cuenta total sin paginar.
+- **Sin chips ni carteles en filas**: Se eliminaron todos los carteles/chips ("Por confirmar", "Pendiente IA", "Cuota N/M", débito automático, etiqueta redundante). Cada fila muestra a lo sumo 2 íconos pequeños junto al monto según la función unificada `iconos_movimiento`: `reintegro`, `suscripcion`, `credito`, `paso_cuenta`, `devolucion_gasto`, `devolucion_compra`, `cuota`.
+- **Títulos consistentes sin prefijos redundantes**: Títulos calculados por `titulo_movimiento`: las transferencias internas reflejan la contraparte según el contexto de la billetera ("Hacia X" / "Desde X"), los aportes/retiros a metas indican "Aporte a meta" / "Retiro de meta" sin prefijos duplicados, y los reintegros muestran el detalle limpio.
+- **Usuario Demo (`scripts.demo`)**: Creación determinística del usuario `demo.argentum@argentum.com` (Lucía Demo, diseñadora en CABA) con datos completos desde el 25/05/2026 hasta el 21/08/2027 a través de las funciones de servicio reales de la aplicación.
+- **Comandos del script**: Soporta `--crear` (con contraseña por `DEMO_PASSWORD` o interactiva), `--ponerse-al-dia` (idempotente para vencimientos ocurridos) y `--borrar` (requiere confirmación explícita con el email exacto).
+- **Aislamiento y visualización**: La cuenta `testingadmin` es exclusivamente para auditoría interna y tests del motor, nunca para demostraciones ni visualización pública de producto. Todas las operaciones del usuario demo están estrictamente aisladas de otras cuentas.
+

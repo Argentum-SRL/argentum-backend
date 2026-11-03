@@ -27,8 +27,11 @@ from app.models.billetera import Billetera
 from app.models.categoria import Categoria
 from app.models.cuota import Cuota
 from app.models.grupo_cuotas import GrupoCuotas
+from app.models.meta import Meta
+from app.models.movimiento_meta import MovimientoMeta
 from app.models.rendimiento_billetera import RendimientoBilletera
 from app.models.subcategoria import Subcategoria
+from app.models.tarjeta_credito import TarjetaCredito
 from app.models.transaccion import (
     MetodoPago,
     TipoTransaccion,
@@ -41,6 +44,12 @@ from app.schemas.movimiento import (
     TotalesMoneda,
 )
 from app.schemas.transaccion import TransaccionRead
+from app.services.historial_presentacion import (
+    ContextoTitulos,
+    titulo_base,
+    titulo_movimiento,
+    iconos_movimiento,
+)
 from app.services.definiciones_service import (
     cargar_contexto,
     etiqueta_movimiento,
@@ -123,6 +132,53 @@ def listar_movimientos(
     cuotas_info_map: Dict[UUID, tuple[int, int]] = {
         r[0]: (r[1], r[2]) for r in cuotas_info_rows
     }
+
+    # Mapeo de metas para nombres de metas
+    metas_rows = db.execute(
+        select(MovimientoMeta.id, Meta.nombre)
+        .join(Meta, MovimientoMeta.meta_id == Meta.id)
+        .where(Meta.usuario_id == usuario_id)
+    ).all()
+    nombres_metas: Dict[UUID, str] = {
+        r[0]: r[1] for r in metas_rows if r[0] is not None
+    }
+
+    # Mapeo de compras para títulos base de espejos
+    reintegro_de_ids_sq = select(Transaccion.reintegro_de_id).where(
+        Transaccion.usuario_id == usuario_id,
+        Transaccion.reintegro_de_id.is_not(None),
+    )
+    compras_rows = db.execute(
+        select(Transaccion)
+        .outerjoin(Categoria, Transaccion.categoria_id == Categoria.id)
+        .outerjoin(Subcategoria, Transaccion.subcategoria_id == Subcategoria.id)
+        .where(
+            Transaccion.usuario_id == usuario_id,
+            Transaccion.id.in_(reintegro_de_ids_sq),
+        )
+    ).scalars().all()
+    titulos_base_compras: Dict[UUID, str] = {}
+    for c in compras_rows:
+        sub_nom = c.subcategoria.nombre if c.subcategoria else None
+        cat_nom = c.categoria.nombre if c.categoria else None
+        titulos_base_compras[c.id] = titulo_base(c.descripcion, sub_nom, cat_nom)
+
+    # Mapeo de tarjetas para títulos de pagos de resumen y percepciones
+    tarjetas_rows = db.execute(
+        select(TarjetaCredito.id, TarjetaCredito.nombre)
+        .where(TarjetaCredito.usuario_id == usuario_id)
+    ).all()
+    nombres_tarjetas: Dict[UUID, str] = {
+        r[0]: r[1] for r in tarjetas_rows if r[0] is not None
+    }
+
+    ctx_titulos = ContextoTitulos(
+        nombres_metas=nombres_metas,
+        titulos_base_compras=titulos_base_compras,
+        padres_desc_map=padres_desc_map,
+        cuotas_info=cuotas_info_map,
+        nombres_tarjetas=nombres_tarjetas,
+    )
 
     # Reglas de activación de filtros exclusivos de transacciones
     solo_transacciones = bool(
@@ -710,8 +766,16 @@ def listar_movimientos(
         )
 
     # ==========================================================================
-    # H. TOTALES GENERALES (Calculados antes de paginar)
+    # H. TÍTULOS, ÍCONOS Y TOTALES GENERALES
     # ==========================================================================
+    for m in raw_movimientos:
+        if m["clase"] == "transaccion":
+            m["titulo"] = titulo_movimiento(m["entity"], ctx_titulos)
+            m["iconos"] = iconos_movimiento(m["entity"], m["etiqueta"])
+        else:
+            m["titulo"] = "Transferencia" if m["clase"] == "transferencia" else m["descripcion"]
+            m["iconos"] = []
+
     totales_dict: Dict[str, TotalesMoneda] = {
         "ARS": TotalesMoneda(gastos=Decimal("0.00"), ingresos=Decimal("0.00"), balance=Decimal("0.00")),
         "USD": TotalesMoneda(gastos=Decimal("0.00"), ingresos=Decimal("0.00"), balance=Decimal("0.00")),
@@ -730,53 +794,91 @@ def listar_movimientos(
         elif m["cuenta_como"] == "ingreso":
             totales_dict[mon].ingresos += m["monto"]
 
+    from app.services.metas_balance import linea_metas
+
     for tot in totales_dict.values():
         tot.balance = tot.ingresos - tot.gastos
 
-    total_items = len(raw_movimientos)
-    paged_raw = raw_movimientos[skip : skip + limit]
+    for mon, tot in totales_dict.items():
+        neto_metas = Decimal("0.00")
+        for m in raw_movimientos:
+            if m["moneda"] == mon and m["fecha"] <= ref_hoy and m.get("clase") == "transaccion":
+                ent = m.get("entity")
+                if ent is not None and getattr(ent, "movimiento_meta_id", None) is not None:
+                    tipo_tx = getattr(ent, "tipo", None)
+                    tipo_val = tipo_tx.value if hasattr(tipo_tx, "value") else str(tipo_tx)
+                    if tipo_val == "egreso":
+                        neto_metas += m["monto"]
+                    elif tipo_val == "ingreso":
+                        neto_metas -= m["monto"]
+        tot.linea_metas = linea_metas(tot.balance, neto_metas, mon)
+
+    # ==========================================================================
+    # I. SEPARACIÓN DE PASADOS Y PRÓXIMOS (L-3)
+    # ==========================================================================
+    pasados = [m for m in raw_movimientos if m["fecha"] <= ref_hoy]
+    futuros = [m for m in raw_movimientos if m["fecha"] > ref_hoy]
+
+    total_items = len(pasados)
+    paged_raw = pasados[skip : skip + limit]
     hay_mas = (skip + limit) < total_items
 
-    # Conversión a esquemas Pydantic (solo se valida para la página solicitada)
-    items = []
-    for m in paged_raw:
+    proximos_total = len(futuros)
+    if skip == 0:
+        futuros_ordenados = sorted(
+            futuros,
+            key=lambda item: (
+                item["fecha"],
+                _norm_dt(item["fecha_creacion"]),
+            ),
+        )
+        proximos_raw = futuros_ordenados[:50]
+    else:
+        proximos_raw = []
+
+    def _convertir_a_movimiento_item(m_item: dict) -> MovimientoItem:
         tx_read = None
-        if m["clase"] == "transaccion" and m.get("entity") is not None:
+        if m_item["clase"] == "transaccion" and m_item.get("entity") is not None:
             try:
-                tx_read = TransaccionRead.model_validate(m["entity"])
+                tx_read = TransaccionRead.model_validate(m_item["entity"])
             except Exception:
                 logger.warning("No se pudo validar la entidad de transacción al listar movimientos", exc_info=True)
                 tx_read = None
 
-        items.append(
-            MovimientoItem(
-                id=m["id"],
-                clase=m["clase"],
-                fecha=m["fecha"],
-                descripcion=m["descripcion"],
-                monto=m["monto"],
-                moneda=m["moneda"],
-                sentido=m["sentido"],
-                etiqueta=m["etiqueta"],
-                cuenta_como=m["cuenta_como"],
-                aclaracion=m["aclaracion"],
-                cuenta_en_saldo=m["cuenta_en_saldo"],
-                saldo_despues=m["saldo_despues"],
-                cuota_texto=m["cuota_texto"],
-                grupo_cuotas_id=m["grupo_cuotas_id"],
-                billetera_id=m["billetera_id"],
-                billetera_nombre=m["billetera_nombre"],
-                billetera_destino_nombre=m["billetera_destino_nombre"],
-                monto_destino=m["monto_destino"],
-                moneda_destino=m["moneda_destino"],
-                transaccion=tx_read,
-                reintegro=m.get("reintegro"),
-            )
+        return MovimientoItem(
+            id=m_item["id"],
+            clase=m_item["clase"],
+            fecha=m_item["fecha"],
+            descripcion=m_item["descripcion"],
+            monto=m_item["monto"],
+            moneda=m_item["moneda"],
+            sentido=m_item["sentido"],
+            etiqueta=m_item["etiqueta"],
+            cuenta_como=m_item["cuenta_como"],
+            aclaracion=m_item["aclaracion"],
+            cuenta_en_saldo=m_item["cuenta_en_saldo"],
+            saldo_despues=m_item["saldo_despues"],
+            cuota_texto=m_item["cuota_texto"],
+            grupo_cuotas_id=m_item["grupo_cuotas_id"],
+            billetera_id=m_item["billetera_id"],
+            billetera_nombre=m_item["billetera_nombre"],
+            billetera_destino_nombre=m_item["billetera_destino_nombre"],
+            monto_destino=m_item["monto_destino"],
+            moneda_destino=m_item["moneda_destino"],
+            transaccion=tx_read,
+            reintegro=m_item.get("reintegro"),
+            titulo=m_item.get("titulo", m_item["descripcion"]),
+            iconos=m_item.get("iconos", []),
         )
+
+    items = [_convertir_a_movimiento_item(m) for m in paged_raw]
+    proximos = [_convertir_a_movimiento_item(m) for m in proximos_raw]
 
     return MovimientosResponse(
         items=items,
         hay_mas=hay_mas,
         total_items=total_items,
         totales=totales_dict,
+        proximos=proximos,
+        proximos_total=proximos_total,
     )

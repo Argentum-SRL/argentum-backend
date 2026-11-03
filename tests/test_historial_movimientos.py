@@ -607,20 +607,24 @@ def test_caso_a_modo_general_sin_filtros(db_session: Session, fixtures_historial
         hoy=hoy,
     )
 
-    assert res.total_items == 11
-    assert len(res.items) == 11
+    assert res.total_items == 10
+    assert len(res.items) == 10
 
-    # Fechas no crecientes y primer ítem Gimnasio
-    assert res.items[0].descripcion == "Gimnasio"
+    # Fechas no crecientes y primer ítem Kiosco
+    assert res.items[0].descripcion == "Kiosco"
     for i in range(len(res.items) - 1):
         assert res.items[i].fecha >= res.items[i + 1].fecha
+
+    assert res.proximos_total == 1
+    assert len(res.proximos) == 1
+    assert res.proximos[0].descripcion == "Gimnasio"
+    assert res.proximos[0].etiqueta == "Programado"
+    assert res.proximos[0].cuenta_como == "nada"
+    assert res.proximos[0].aclaracion == "Todavía no pasó"
 
     items_map = {item.descripcion: item for item in res.items}
 
     # Validaciones individuales de descripciones, etiquetas, aclaraciones y sentidos
-    assert items_map["Gimnasio"].etiqueta == "Programado"
-    assert items_map["Gimnasio"].cuenta_como == "nada"
-    assert items_map["Gimnasio"].aclaracion == "Todavía no pasó"
 
     assert items_map["Kiosco"].etiqueta == "Por confirmar"
     assert items_map["Kiosco"].cuenta_como == "nada"
@@ -700,7 +704,7 @@ def test_caso_b_paginado(db_session: Session, fixtures_historial):
 
     assert len(res.items) == 4
     assert res.hay_mas is True
-    assert res.total_items == 11
+    assert res.total_items == 10
     assert res.totales["ARS"].gastos == Decimal("60000.00")
     assert res.totales["ARS"].ingresos == Decimal("200000.00")
     assert res.totales["ARS"].balance == Decimal("140000.00")
@@ -721,8 +725,9 @@ def test_caso_c_filtro_tipo_egreso(db_session: Session, fixtures_historial):
         hoy=hoy,
     )
 
-    assert res.total_items == 7
-    assert len(res.items) == 7
+    assert res.total_items == 6
+    assert len(res.items) == 6
+    assert res.proximos_total == 1
     assert all(it.clase == "transaccion" for it in res.items)
 
 
@@ -789,7 +794,7 @@ def test_caso_f_modo_billetera_galicia(db_session: Session, fixtures_historial):
         hoy=hoy,
     )
 
-    assert res.total_items == 9
+    assert res.total_items == 8
 
     # Verificar que no aparecen compras crediticias
     descs = [it.descripcion for it in res.items]
@@ -824,9 +829,11 @@ def test_caso_f_modo_billetera_galicia(db_session: Session, fixtures_historial):
     assert kiosco.saldo_despues is None
     assert kiosco.cuenta_en_saldo is False
 
-    gimnasio = next(it for it in res.items if it.descripcion == "Gimnasio")
-    assert gimnasio.saldo_despues is None
-    assert gimnasio.cuenta_en_saldo is False
+    assert res.proximos_total == 1
+    assert len(res.proximos) == 1
+    assert res.proximos[0].descripcion == "Gimnasio"
+    assert res.proximos[0].saldo_despues is None
+    assert res.proximos[0].cuenta_en_saldo is False
 
 
 def test_caso_g_modo_billetera_mp(db_session: Session, fixtures_historial):
@@ -1003,7 +1010,8 @@ def test_caso_j_endpoint_movimientos(db_session: Session, fixtures_historial, mo
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["total_items"] == 11
+        assert data["total_items"] == 10
+        assert data["proximos_total"] == 1
         assert data["totales"]["ARS"]["gastos"] == 60000.00
         assert data["totales"]["ARS"]["ingresos"] == 200000.00
         assert data["totales"]["ARS"]["balance"] == 140000.00

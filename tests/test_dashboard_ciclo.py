@@ -543,6 +543,7 @@ def test_caso_11_deuda_vencida_resumen_y_pago_cubierto(db_session: Session, fixt
     monkeypatch.setattr("app.utils.fecha.hoy_argentina", lambda: date(2026, 10, 8))
     monkeypatch.setattr("app.services.dashboard_service.hoy_argentina", lambda: date(2026, 10, 8))
     monkeypatch.setattr("app.services.pagos_proximos_service.hoy_argentina", lambda: date(2026, 10, 8))
+    monkeypatch.setattr("app.services.resumen_tarjeta_service.hoy_argentina", lambda: date(2026, 10, 8))
 
     usuario = fixtures_caso_real["usuario"]
     b_nacion = fixtures_caso_real["b_nacion"]
