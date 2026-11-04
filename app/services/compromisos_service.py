@@ -400,26 +400,23 @@ def calcular_compromisos_mensuales(
     )
 
 
-def calcular_gasto_variable_tipico(
+def gastos_variables_por_ciclo(
     db: Session,
     usuario: Usuario,
     hoy: Optional[date] = None,
     moneda: Moneda | str = Moneda.ARS,
-    ctx: Optional[ContextoDefiniciones] = None,
+    max_ciclos: int = 12,
     streams_c: Optional[list[Any]] = None,
-) -> Decimal:
+) -> list[Decimal]:
     """
-    Calcula el gasto variable típico según las especificaciones de la Fase 2c:
-    Promedio, en los ciclos con historia usados por obtener_contexto_financiero (hasta 3 ciclos completos),
-    del gasto de cada ciclo devengado según definiciones_service, menos:
-      - cuotas de compras en varias cuotas (> 1);
-      - cobros de suscripciones;
-      - movimientos de los streams clasificados como compromisos fijos maduros (c).
+    Calcula para cada uno de los últimos max_ciclos ciclos cerrados con historia
+    el total gastado en transacciones variables (excluyendo cuotas > 1, suscripciones,
+    y movimientos de streams_c), con el mismo criterio que calcular_gasto_variable_tipico.
+    Devuelve la lista de montos por ciclo ordenados del más reciente al más antiguo.
     """
     ref_hoy = hoy or hoy_argentina()
     moneda_enum = Moneda[normalizar_moneda(moneda)]
 
-    # Determinar ciclos con historia (misma lógica canónica de obtener_contexto_financiero)
     c_ini_curr, c_fin_curr = get_ciclo_fechas(usuario, ref_hoy)
     fecha_fin_c1 = c_ini_curr - timedelta(days=1)
 
@@ -433,39 +430,22 @@ def calcular_gasto_variable_tipico(
     if primera_tx is None:
         primera_tx = usuario.fecha_registro.date()
 
-    ciclos_con_historia = 0
-    if primera_tx <= fecha_fin_c1:
-        current_date = primera_tx
-        while current_date <= fecha_fin_c1:
-            inicio, fin = get_ciclo_fechas(usuario, current_date)
-            if fin <= fecha_fin_c1:
-                ciclos_con_historia += 1
-                current_date = fin + timedelta(days=1)
-            else:
-                break
+    if primera_tx > fecha_fin_c1:
+        return []
 
-    if ciclos_con_historia >= 1:
-        n = min(ciclos_con_historia, 3)
-        end_range = fecha_fin_c1
-        start_date_c = end_range
-        for _ in range(n - 1):
-            inicio_c, _ = get_ciclo_fechas(usuario, start_date_c)
-            start_date_c = inicio_c - timedelta(days=1)
-        start_range, _ = get_ciclo_fechas(usuario, start_date_c)
-        divisor = n
-    else:
-        start_range = c_ini_curr
-        end_range = ref_hoy
-        divisor = 1
+    ciclos_cerrados: list[tuple[date, date]] = []
+    p = fecha_fin_c1
+    while p >= primera_tx and len(ciclos_cerrados) < max_ciclos:
+        inicio, fin = get_ciclo_fechas(usuario, p)
+        if fin <= fecha_fin_c1:
+            ciclos_cerrados.append((inicio, fin))
+            p = inicio - timedelta(days=1)
+        else:
+            break
 
-    # Obtener transacciones devengadas en el rango que constituyen gasto
-    cond_gas = condicion_gasto(usuario.id, start_range, end_range, hoy=ref_hoy)
-    txs_gastos = db.execute(
-        select(Transaccion).where(cond_gas, Transaccion.moneda == moneda_enum)
-    ).scalars().all()
+    if not ciclos_cerrados:
+        return []
 
-    # Identificar IDs de transacciones a excluir del gasto variable:
-    # 1. Cuotas de compras en varias cuotas (> 1)
     grupos_varias_cuotas = set(
         db.execute(
             select(GrupoCuotas.id).where(
@@ -475,7 +455,6 @@ def calcular_gasto_variable_tipico(
         ).scalars().all()
     )
 
-    # 2. Transacciones asociadas a streams de la parte c
     if streams_c is None:
         from app.services.datos_motor_service import cargar_datos_motor, ciclos_anteriores
         from app.utils.finanzas import clasificar_gastos
@@ -504,20 +483,113 @@ def calcular_gasto_variable_tipico(
         if normalizar_moneda(getattr(s, "moneda", "")) == normalizar_moneda(moneda):
             tx_ids_streams_c.update(getattr(s, "transacciones_ids", []))
 
-    # Filtrar transacciones variables
+    start_range = ciclos_cerrados[-1][0]
+    end_range = ciclos_cerrados[0][1]
+
+    cond_gas = condicion_gasto(usuario.id, start_range, end_range, hoy=ref_hoy)
+    txs_gastos = db.execute(
+        select(Transaccion).where(cond_gas, Transaccion.moneda == moneda_enum)
+    ).scalars().all()
+
+    gastos_por_ciclo: list[Decimal] = []
+    for c_ini, c_fin in ciclos_cerrados:
+        suma_c = Decimal("0")
+        for t in txs_gastos:
+            if c_ini <= t.fecha <= c_fin:
+                if t.es_cuota_hija and t.grupo_cuotas_id in grupos_varias_cuotas:
+                    continue
+                if t.suscripcion_id is not None:
+                    continue
+                if t.id in tx_ids_streams_c:
+                    continue
+                suma_c += Decimal(str(t.monto))
+        gastos_por_ciclo.append(suma_c.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+    return gastos_por_ciclo
+
+
+def calcular_gasto_variable_tipico(
+    db: Session,
+    usuario: Usuario,
+    hoy: Optional[date] = None,
+    moneda: Moneda | str = Moneda.ARS,
+    ctx: Optional[ContextoDefiniciones] = None,
+    streams_c: Optional[list[Any]] = None,
+) -> Decimal:
+    """
+    Calcula el gasto variable típico según las especificaciones de la Fase 2c:
+    Promedio, en los ciclos con historia usados por obtener_contexto_financiero (hasta 3 ciclos completos),
+    del gasto de cada ciclo devengado según definiciones_service, menos:
+      - cuotas de compras en varias cuotas (> 1);
+      - cobros de suscripciones;
+      - movimientos de los streams clasificados como compromisos fijos maduros (c).
+    """
+    ref_hoy = hoy or hoy_argentina()
+    moneda_enum = Moneda[normalizar_moneda(moneda)]
+
+    gastos_ciclos = gastos_variables_por_ciclo(
+        db, usuario, hoy=ref_hoy, moneda=moneda, max_ciclos=3, streams_c=streams_c
+    )
+    if gastos_ciclos:
+        suma = sum(gastos_ciclos)
+        return (suma / Decimal(str(len(gastos_ciclos)))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    # Si no hay ciclos con historia cerrados, se usa el ciclo actual parcial
+    c_ini_curr, _ = get_ciclo_fechas(usuario, ref_hoy)
+    start_range = c_ini_curr
+    end_range = ref_hoy
+
+    cond_gas = condicion_gasto(usuario.id, start_range, end_range, hoy=ref_hoy)
+    txs_gastos = db.execute(
+        select(Transaccion).where(cond_gas, Transaccion.moneda == moneda_enum)
+    ).scalars().all()
+
+    grupos_varias_cuotas = set(
+        db.execute(
+            select(GrupoCuotas.id).where(
+                GrupoCuotas.usuario_id == usuario.id,
+                GrupoCuotas.cantidad_cuotas > 1,
+            )
+        ).scalars().all()
+    )
+
+    if streams_c is None:
+        from app.services.datos_motor_service import cargar_datos_motor, ciclos_anteriores
+        from app.utils.finanzas import clasificar_gastos
+
+        data = cargar_datos_motor(db, usuario, ref_hoy)
+        ciclos_12 = ciclos_anteriores(usuario, ref_hoy, 12)
+        comprometidos_ext = [
+            *(c for c, _ in data["cuotas"] if not c.pagada and c.fecha_vencimiento >= ref_hoy),
+            *data["suscripciones"],
+        ]
+        res_clasif = clasificar_gastos(
+            data["txs"],
+            ciclos_12,
+            data["ipc"],
+            ref_hoy,
+            comprometidos_ext,
+            ctx=data["ctx"],
+        )
+        streams_c = [
+            s for s in res_clasif.streams
+            if s.clase == "COMPROMISO" and s.estado == "MADURO" and s.senal != "DECLARADO"
+        ]
+
+    tx_ids_streams_c: Set[UUID] = set()
+    for s in streams_c:
+        if normalizar_moneda(getattr(s, "moneda", "")) == normalizar_moneda(moneda):
+            tx_ids_streams_c.update(getattr(s, "transacciones_ids", []))
+
     suma_variables = Decimal("0")
     for t in txs_gastos:
-        # Excluir cuotas hijas de grupos con cantidad_cuotas > 1
         if t.es_cuota_hija and t.grupo_cuotas_id in grupos_varias_cuotas:
             continue
-        # Excluir cobros de suscripciones
         if t.suscripcion_id is not None:
             continue
-        # Excluir transacciones de streams fijos detectados
         if t.id in tx_ids_streams_c:
             continue
 
         suma_variables += Decimal(str(t.monto))
 
-    gasto_promedio_var = (suma_variables / Decimal(str(divisor))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    return gasto_promedio_var
+    return suma_variables.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)

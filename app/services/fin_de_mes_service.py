@@ -45,6 +45,7 @@ class ResultadoRango:
     ciclos: int
     veces_no_alcanza: Optional[int]
     factor_cobertura: Decimal
+    finales: tuple[Decimal, ...] = ()
 
     @property
     def rango(self) -> tuple[Decimal, Decimal] | None:
@@ -279,6 +280,7 @@ def rango_fin_de_mes(
         final = libre - restante
         finales.append(final)
 
+    finales_orden = tuple(Decimal(f) for f in finales)
     finales.sort()
     if not finales:
         return ResultadoRango(
@@ -288,6 +290,7 @@ def rango_fin_de_mes(
             ciclos=len(ciclos),
             veces_no_alcanza=None,
             factor_cobertura=factor_cobertura,
+            finales=(),
         )
 
     if len(ciclos) < 10:
@@ -306,6 +309,7 @@ def rango_fin_de_mes(
         ciclos=len(ciclos),
         veces_no_alcanza=veces_no_alcanza,
         factor_cobertura=factor_cobertura,
+        finales=finales_orden,
     )
 
 

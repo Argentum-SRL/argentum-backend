@@ -483,6 +483,29 @@ def _job_guardar_cotizaciones_diarias():
         db.close()
 
 
+def _job_actualizar_rem():
+    """Tarea programada diaria: baja una vez por mes la inflación esperada (REM del BCRA) a las 13:20 UTC (10:20 ART)."""
+    from app.services.inflacion_esperada_service import bajar_rem
+    db = SessionLocal()
+    lock_adquirido = False
+    try:
+        if not intentar_tomar_lock_job(db, "_job_actualizar_rem"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_actualizar_rem",
+            )
+            return
+        lock_adquirido = True
+        bajar_rem(db)
+        logger.info("Job actualizar_rem ejecutado exitosamente.")
+    except Exception:
+        logger.exception("Error en job _job_actualizar_rem")
+    finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_actualizar_rem")
+        db.close()
+
+
 def _job_actualizar_ipc():
     """Tarea programada diaria: actualiza la serie de IPC oficial a las 20:00 UTC (17:00 ART)."""
     from app.services.tools_service import get_current_ipc
@@ -799,6 +822,16 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
+            registrar_ejecucion("actualizar_rem", _job_actualizar_rem),
+            "cron",
+            hour=13,
+            minute=20,
+            id="actualizar_rem",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
             registrar_ejecucion("actualizar_ipc_diario", _job_actualizar_ipc),
             "cron",
             hour=20,
@@ -1061,6 +1094,7 @@ app.include_router(suscripciones.router)
 app.include_router(metas.router, prefix="/goals", tags=["goals"])
 app.include_router(notificaciones.router)
 app.include_router(tools.router, prefix="/api/v1/tools")
+app.include_router(tools.router, prefix="/tools", include_in_schema=False)
 app.include_router(grupos_cuotas.router)
 app.include_router(whatsapp_ia.router, prefix="/api")
 app.include_router(admin.router, prefix="/v1", tags=["admin"])

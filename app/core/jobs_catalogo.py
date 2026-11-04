@@ -23,6 +23,7 @@ JOBS_MANUALES_PERMITIDOS: frozenset[str] = frozenset({
     "actualizar_tasas_diarias",
     "refresh_feriados_argentina",
     "actualizar_ipc_diario",
+    "actualizar_rem",
     "limpiar_refresh_tokens",
     "vigilar_deriva_saldos",
     "reporte_uso_semanal",
@@ -197,6 +198,13 @@ JOBS_CATALOGO: list[JobCatalogoItem] = [
         nombre="Reporte semanal de uso",
         que_hace="Cada lunes manda al equipo un mail con altas, activación, retención y costo por usuario activo, sin datos personales.",
         periodo_esperado_minutos=10080,
+        puede_correr_ahora=True,
+    ),
+    JobCatalogoItem(
+        job_id="actualizar_rem",
+        nombre="Inflación esperada (REM del BCRA)",
+        que_hace="Baja una vez por mes la inflación que esperan los analistas (REM del BCRA); si no puede, usa la última del INDEC y avisa por mail.",
+        periodo_esperado_minutos=1440,
         puede_correr_ahora=True,
     ),
 ]

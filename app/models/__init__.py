@@ -32,6 +32,7 @@ from app.models.factura import Factura
 from app.models.decision_patron import DecisionPatron
 from app.models.usuario import Usuario
 from app.models.tools import IPCCache
+from app.models.expectativa_inflacion import ExpectativaInflacion
 from app.models.feriado import FeriadoAR
 from app.models.evento_actualizacion import EventoActualizacion
 from app.models.cotizacion_dolar import CotizacionDolar
@@ -94,6 +95,7 @@ __all__ = [
     "CodigoVerificacion",
     "RateLimit",
     "EventoUso",
+    "ExpectativaInflacion",
 ]
 
 

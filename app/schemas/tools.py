@@ -130,9 +130,10 @@ class CanAffordRequest(BaseModel):
     @field_validator('modo')
     @classmethod
     def modo_valido(cls, v):
-        if v not in ['contado', 'cuotas']:
-            raise ValueError('El modo de pago debe ser "contado" o "cuotas"')
-        return v
+        v_norm = str(v).lower().strip()
+        if v_norm not in ['contado', 'cuotas', 'mensual']:
+            raise ValueError('El modo de pago debe ser "contado", "cuotas" o "mensual"')
+        return v_norm
 
     @field_validator('cantidad_cuotas')
     @classmethod
@@ -161,8 +162,6 @@ class CanAffordRequest(BaseModel):
     @model_validator(mode='after')
     def validar_interes_y_modo(self) -> CanAffordRequest:
         if self.modo == 'cuotas':
-            if self.cantidad_cuotas < 2:
-                raise ValueError('Para compras en cuotas, la cantidad de cuotas debe ser al menos 2')
             if self.tiene_interes and self.tna is None:
                 raise ValueError('Debe ingresar la TNA si las cuotas tienen interés')
         else:
@@ -172,42 +171,46 @@ class CanAffordRequest(BaseModel):
         return self
 
 
-class CanAffordContadoData(BaseModel):
-    modo: str
-    precio_total: float
-    saldo_disponible_actual: float
-    saldo_restante_post_compra: float
-    porcentaje_del_saldo: float
-    porcentaje_del_ingreso_mensual: float | None = None
-    semaforo: str
-    mensaje_principal: str
-    ingreso_promedio_usado: float | None = None
-    ingreso_es_manual: bool
+class CanAffordAhorrosData(BaseModel):
+    inversiones: float
+    dolares_usd: float
+    dolares_en_pesos: float
+    metas: float
+    total: float
 
 
-class CanAffordCuotasData(BaseModel):
+class CanAffordResponseData(BaseModel):
     modo: str
+    resultado: str
+    motivo: str | None = None
+    titulo: str
+    linea_principal: str
+    lineas_plan: list[str] = []
+    linea_ahorros: str | None = None
+    ahorros: CanAffordAhorrosData | None = None
+    linea_liberacion: str | None = None
+    linea_compensar: str | None = None
+    linea_frescura: str | None = None
+    libre: float
     precio_total: float
-    monto_cuota: float
-    cantidad_cuotas: int
-    carga_mensual_previa: float
-    carga_mensual_nueva_total: float
-    porcentaje_carga_sobre_ingreso: float | None = None
-    margen_libre_post_compra: float | None = None
-    semaforo: str
-    mensaje_principal: str
-    ingreso_promedio_usado: float | None = None
-    ingreso_es_manual: bool
-    gasto_variable_promedio: float
-    tiene_interes: bool = False
-    tna_usada: float | None = None
-    precio_total_real: float
-    interes_total: float = 0.0
+    fuente_inflacion: str | None = None
 
 
 class CanAffordResponse(BaseModel):
     success: bool
-    data: CanAffordContadoData | CanAffordCuotasData
+    data: CanAffordResponseData
+
+
+class InflacionEsperadaData(BaseModel):
+    valor_mensual: float
+    meses: list[float]
+    fuente_texto: str
+    es_respaldo: bool
+
+
+class InflacionEsperadaResponse(BaseModel):
+    success: bool
+    data: InflacionEsperadaData | None = None
 
 
 class CurrencyFinancialData(BaseModel):

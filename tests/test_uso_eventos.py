@@ -198,7 +198,7 @@ def test_post_tools_endpoints_y_eventos(client: TestClient, db: Session, usuario
     assert resp_afford.status_code == 200
     json_afford = resp_afford.json()
     assert json_afford["success"] is True
-    assert "semaforo" in json_afford["data"]
+    assert "resultado" in json_afford["data"]
 
     filas_afford = db.query(EventoUso).filter(
         EventoUso.usuario_id == usuario_test.id,

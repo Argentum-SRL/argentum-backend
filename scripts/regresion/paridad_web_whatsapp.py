@@ -280,9 +280,7 @@ def ejecutar_verificaciones_paridad(db, usuario: Usuario, log_func=print) -> Dic
         ingreso_manual=None,
         db=db,
     )
-    disp_fmt = formatear_monto(r1_web["saldo_disponible_actual"], Moneda.ARS)
-    rest_fmt = formatear_monto(r1_web["saldo_restante_post_compra"], Moneda.ARS)
-    web_num_c1 = [normalizar_monto_str(rest_fmt), normalizar_monto_str(disp_fmt)]
+    web_num_c1 = extraer_montos_de_texto(r1_web.get("linea_principal", ""))
 
     resultados["¿Me lo puedo permitir? (contado 300.000)"] = verificar_paridad_numerica(
         "¿Me lo puedo permitir? (contado 300.000)",
@@ -321,10 +319,7 @@ def ejecutar_verificaciones_paridad(db, usuario: Usuario, log_func=print) -> Dic
         ingreso_manual=None,
         db=db,
     )
-    cuota_fmt = formatear_monto(r2_web["monto_cuota"], Moneda.ARS)
-    carga_fmt = formatear_monto(r2_web["carga_mensual_nueva_total"], Moneda.ARS)
-    margen_fmt = formatear_monto(abs(r2_web["margen_libre_post_compra"]), Moneda.ARS)
-    web_num_c2 = [normalizar_monto_str(cuota_fmt), normalizar_monto_str(carga_fmt), normalizar_monto_str(margen_fmt)]
+    web_num_c2 = extraer_montos_de_texto(r2_web.get("linea_principal", ""))
 
     resultados["¿Me lo puedo permitir? (6 cuotas de 600.000)"] = verificar_paridad_numerica(
         "¿Me lo puedo permitir? (6 cuotas de 600.000)",

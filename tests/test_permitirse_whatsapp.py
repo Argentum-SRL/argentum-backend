@@ -109,20 +109,15 @@ class TestDetectorPermitirse:
 
 
 class TestArmarRespuestaPermitirse:
-    """Casos 9 a 11 con dicts armados a mano y verificación de textos exactos."""
+    """Casos 9 a 11 con dicts armados a mano y verificación de textos exactos (nuevo formato B-G)."""
 
     def test_09_contado_verde_y_negro(self):
-        # Contado verde
-        res_verde = {
-            "modo": "contado",
-            "precio_total": 300000.0,
-            "saldo_disponible_actual": 5000000.0,
-            "saldo_restante_post_compra": 4700000.0,
-            "porcentaje_del_saldo": 6.0,
-            "semaforo": "verde",
-            "mensaje_principal": "Podés comprarlo sin comprometer tu estabilidad.",
+        # contado bien del caso de integración → "Te entra bien.\nDespués de pagarlo llegarías al 30/11 con entre $845.000 y $1.045.000."
+        res_bien = {
+            "titulo": "Te entra bien",
+            "linea_principal": "Despu\u00e9s de pagarlo llegar\u00edas al 30/11 con entre $845.000 y $1.045.000.",
         }
-        cons_verde = {
+        cons_bien = {
             "falta": None,
             "precio": Decimal("300000"),
             "modo": "contado",
@@ -131,44 +126,35 @@ class TestArmarRespuestaPermitirse:
             "tna": None,
             "nota_interes": False,
         }
-        esp_verde = "Podés comprarlo sin comprometer tu estabilidad. Te quedarían $4.700.000 de los $5.000.000 que tenés disponibles."
-        assert armar_respuesta_permitirse(res_verde, cons_verde) == esp_verde
+        esp_bien = "Te entra bien.\nDespu\u00e9s de pagarlo llegar\u00edas al 30/11 con entre $845.000 y $1.045.000."
+        assert armar_respuesta_permitirse(res_bien, cons_bien) == esp_bien
 
-        # Contado negro
-        res_negro = {
-            "modo": "contado",
-            "precio_total": 300000.0,
-            "saldo_disponible_actual": 100000.0,
-            "saldo_restante_post_compra": -200000.0,
-            "porcentaje_del_saldo": 300.0,
-            "semaforo": "negro",
-            "mensaje_principal": "No tenés suficiente saldo disponible para esta compra.",
+        # contado no_alcanza falta 155.000 sin ahorros → "No te alcanza.\nTe faltan $155.000."
+        res_no = {
+            "titulo": "No te alcanza",
+            "linea_principal": "Te faltan $155.000.",
         }
-        cons_negro = {
+        cons_no = {
             "falta": None,
-            "precio": Decimal("300000"),
+            "precio": Decimal("600000"),
             "modo": "contado",
             "cantidad_cuotas": 1,
             "tiene_interes": False,
             "tna": None,
             "nota_interes": False,
         }
-        esp_negro = "No tenés suficiente saldo disponible para esta compra. Tenés $100.000 disponibles y cuesta $300.000."
-        assert armar_respuesta_permitirse(res_negro, cons_negro) == esp_negro
+        esp_no = "No te alcanza.\nTe faltan $155.000."
+        assert armar_respuesta_permitirse(res_no, cons_no) == esp_no
 
     def test_10_cuotas_gris_margen_positivo_y_negativo(self):
-        # Cuotas gris
-        res_gris = {
-            "modo": "cuotas",
-            "precio_total": 600000.0,
-            "monto_cuota": 100000.0,
-            "cantidad_cuotas": 6,
-            "semaforo": "gris",
-            "mensaje_principal": "Ingresá tu ingreso mensual para ver el análisis completo.",
-            "porcentaje_carga_sobre_ingreso": None,
-            "margen_libre_post_compra": None,
+        # cuotas justo 6 × 100.000 r_min 15.000 colchon 20.000
+        # → "Te entra justo.\nSon 6 cuotas de $100.000.\nTe quedarían solo $15.000 por mes después de tus gastos de siempre."
+        res_justo = {
+            "titulo": "Te entra justo",
+            "lineas_plan": ["Son 6 cuotas de $100.000."],
+            "linea_principal": "Te quedar\u00edan solo $15.000 por mes despu\u00e9s de tus gastos de siempre.",
         }
-        cons_gris = {
+        cons_justo = {
             "falta": None,
             "precio": Decimal("600000"),
             "modo": "cuotas",
@@ -177,122 +163,78 @@ class TestArmarRespuestaPermitirse:
             "tna": None,
             "nota_interes": False,
         }
-        esp_gris = "La cuota sería de $100.000 por mes. Para decirte si te entra necesito conocer tus cobros: cargá tus ingresos y volvé a preguntarme."
-        assert armar_respuesta_permitirse(res_gris, cons_gris) == esp_gris
+        esp_justo = "Te entra justo.\nSon 6 cuotas de $100.000.\nTe quedar\u00edan solo $15.000 por mes despu\u00e9s de tus gastos de siempre."
+        assert armar_respuesta_permitirse(res_justo, cons_justo) == esp_justo
 
-        # Cuotas con margen positivo
-        res_pos = {
-            "modo": "cuotas",
-            "precio_total": 600000.0,
-            "monto_cuota": 100000.0,
-            "cantidad_cuotas": 6,
-            "carga_mensual_nueva_total": 250000.0,
-            "porcentaje_carga_sobre_ingreso": 25.0,
-            "margen_libre_post_compra": 450000.0,
-            "semaforo": "verde",
-            "mensaje_principal": "La cuota entra bien en tu presupuesto mensual.",
-            "tiene_interes": False,
-            "precio_total_real": 600000.0,
-            "interes_total": 0.0,
+        # mensual ahorros (TH.4)
+        # → "Solo tocando tus ahorros.\nTe faltarían $30.000 por mes: tus ahorros alcanzan para 6 meses.\nTus ahorros suman $200.000."
+        res_ahorros = {
+            "titulo": "Solo tocando tus ahorros",
+            "linea_principal": "Te faltar\u00edan $30.000 por mes: tus ahorros alcanzan para 6 meses.",
+            "linea_ahorros": "Tus ahorros suman $200.000.",
         }
-        cons_pos = {
+        cons_ahorros = {
             "falta": None,
-            "precio": Decimal("600000"),
-            "modo": "cuotas",
-            "cantidad_cuotas": 6,
+            "precio": Decimal("80000"),
+            "modo": "mensual",
+            "cantidad_cuotas": 1,
             "tiene_interes": False,
             "tna": None,
             "nota_interes": False,
         }
-        esp_pos = "La cuota entra bien en tu presupuesto mensual. La cuota sería de $100.000 por mes. Con lo que ya pagás en cuotas y suscripciones llegarías a $250.000 por mes, el 25% de tu ingreso. Después de tus gastos de siempre te quedarían $450.000 por mes."
-        assert armar_respuesta_permitirse(res_pos, cons_pos) == esp_pos
-
-        # Cuotas con margen negativo
-        res_neg = {
-            "modo": "cuotas",
-            "precio_total": 600000.0,
-            "monto_cuota": 100000.0,
-            "cantidad_cuotas": 6,
-            "carga_mensual_nueva_total": 600000.0,
-            "porcentaje_carga_sobre_ingreso": 85.0,
-            "margen_libre_post_compra": -50000.0,
-            "semaforo": "rojo",
-            "mensaje_principal": "Tus gastos totales y cuotas superarían tus ingresos mensuales, dejándote con saldo negativo.",
-            "tiene_interes": False,
-            "precio_total_real": 600000.0,
-            "interes_total": 0.0,
-        }
-        cons_neg = {
-            "falta": None,
-            "precio": Decimal("600000"),
-            "modo": "cuotas",
-            "cantidad_cuotas": 6,
-            "tiene_interes": False,
-            "tna": None,
-            "nota_interes": False,
-        }
-        esp_neg = "Tus gastos totales y cuotas superarían tus ingresos mensuales, dejándote con saldo negativo. La cuota sería de $100.000 por mes. Con lo que ya pagás en cuotas y suscripciones llegarías a $600.000 por mes, el 85% de tu ingreso. Después de tus gastos de siempre te faltarían $50.000 por mes."
-        assert armar_respuesta_permitirse(res_neg, cons_neg) == esp_neg
+        esp_ahorros = "Solo tocando tus ahorros.\nTe faltar\u00edan $30.000 por mes: tus ahorros alcanzan para 6 meses.\nTus ahorros suman $200.000."
+        assert armar_respuesta_permitirse(res_ahorros, cons_ahorros) == esp_ahorros
 
     def test_11_interes_y_nota_interes(self):
-        # Con interés
+        # cuotas con interés 6 × tna 60 de 300.000, resultado bien r_min 50.000
+        # → "Te entra bien.\nSon 6 cuotas de $59.105 ($354.631 en total).\nCada mes te quedarían al menos $50.000 después de tus gastos de siempre."
         res_int = {
-            "modo": "cuotas",
-            "precio_total": 600000.0,
-            "monto_cuota": 120000.0,
-            "cantidad_cuotas": 6,
-            "carga_mensual_nueva_total": 270000.0,
-            "porcentaje_carga_sobre_ingreso": 27.0,
-            "margen_libre_post_compra": 430000.0,
-            "semaforo": "verde",
-            "mensaje_principal": "La cuota entra bien en tu presupuesto mensual.",
-            "tiene_interes": True,
-            "precio_total_real": 720000.0,
-            "interes_total": 120000.0,
+            "titulo": "Te entra bien",
+            "lineas_plan": [
+                "Son 6 cuotas de $59.105 ($354.631 en total).",
+                "Pag\u00e1s $54.631 de inter\u00e9s.",
+            ],
+            "linea_principal": "Cada mes te quedar\u00edan al menos $50.000 despu\u00e9s de tus gastos de siempre.",
         }
         cons_int = {
             "falta": None,
-            "precio": Decimal("600000"),
+            "precio": Decimal("300000"),
             "modo": "cuotas",
             "cantidad_cuotas": 6,
             "tiene_interes": True,
             "tna": Decimal("60"),
             "nota_interes": False,
         }
-        esp_int = "La cuota entra bien en tu presupuesto mensual. La cuota sería de $120.000 por mes. Con lo que ya pagás en cuotas y suscripciones llegarías a $270.000 por mes, el 27% de tu ingreso. Después de tus gastos de siempre te quedarían $430.000 por mes. Con interés pagarías $720.000 en total ($120.000 de interés)."
+        esp_int = (
+            "Te entra bien.\n"
+            "Son 6 cuotas de $59.105 ($354.631 en total).\n"
+            "Cada mes te quedar\u00edan al menos $50.000 despu\u00e9s de tus gastos de siempre."
+        )
         assert armar_respuesta_permitirse(res_int, cons_int) == esp_int
 
-        # Con nota_interes
-        res_nota = {
-            "modo": "cuotas",
-            "precio_total": 600000.0,
-            "monto_cuota": 100000.0,
-            "cantidad_cuotas": 6,
-            "carga_mensual_nueva_total": 250000.0,
-            "porcentaje_carga_sobre_ingreso": 25.0,
-            "margen_libre_post_compra": 450000.0,
-            "semaforo": "verde",
-            "mensaje_principal": "La cuota entra bien en tu presupuesto mensual.",
-            "tiene_interes": False,
-            "precio_total_real": 600000.0,
-            "interes_total": 0.0,
+        # el mismo con nota_interes True y sin interés (6 × 50.000)
+        # → termina en "\nLo calculé sin interés. Si tiene interés, decime la tasa anual (TNA)."
+        res_sin_int = {
+            "titulo": "Te entra bien",
+            "lineas_plan": ["Son 6 cuotas de $50.000."],
+            "linea_principal": "Cada mes te quedar\u00edan al menos $50.000 despu\u00e9s de tus gastos de siempre.",
         }
-        cons_nota = {
+        cons_sin_int = {
             "falta": None,
-            "precio": Decimal("600000"),
+            "precio": Decimal("300000"),
             "modo": "cuotas",
             "cantidad_cuotas": 6,
             "tiene_interes": False,
             "tna": None,
             "nota_interes": True,
         }
-        esp_nota = (
-            "La cuota entra bien en tu presupuesto mensual. La cuota sería de $100.000 por mes. "
-            "Con lo que ya pagás en cuotas y suscripciones llegarías a $250.000 por mes, el 25% de tu ingreso. "
-            "Después de tus gastos de siempre te quedarían $450.000 por mes.\n"
-            "Lo calculé sin interés. Si tiene interés, decime la tasa anual (TNA)."
+        esp_sin_int = (
+            "Te entra bien.\n"
+            "Son 6 cuotas de $50.000.\n"
+            "Cada mes te quedar\u00edan al menos $50.000 despu\u00e9s de tus gastos de siempre.\n"
+            "Lo calcul\u00e9 sin inter\u00e9s. Si tiene inter\u00e9s, decime la tasa anual (TNA)."
         )
-        assert armar_respuesta_permitirse(res_nota, cons_nota) == esp_nota
+        assert armar_respuesta_permitirse(res_sin_int, cons_sin_int) == esp_sin_int
 
     def test_12_faltas(self):
         assert (

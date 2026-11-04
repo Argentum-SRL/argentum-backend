@@ -643,38 +643,10 @@ def medir_bloque_i(db: Session, usuario: Usuario) -> dict[str, str]:
             str(usuario.id), precio, modo, cuotas, tiene_int, tna, None, db
         )
         prefix = f"puede_permitirse.{tag}"
-        res[f"{prefix}.semaforo"] = _fmt_val(out.get("semaforo"))
-        res[f"{prefix}.mensaje_principal"] = _fmt_val(
-            out.get("mensaje_principal")
-        )
-        res[f"{prefix}.precio_total"] = _fmt_monto(out.get("precio_total"))
-        res[f"{prefix}.saldo_disponible_actual"] = _fmt_monto(
-            out.get("saldo_disponible_actual")
-        )
-        if modo == "contado":
-            res[f"{prefix}.saldo_restante_post_compra"] = _fmt_monto(
-                out.get("saldo_restante_post_compra")
-            )
-            res[f"{prefix}.porcentaje_del_saldo"] = _fmt_monto(
-                out.get("porcentaje_del_saldo")
-            )
-            res[f"{prefix}.porcentaje_del_ingreso_mensual"] = _fmt_monto(
-                out.get("porcentaje_del_ingreso_mensual")
-            )
-        else:
-            res[f"{prefix}.monto_cuota"] = _fmt_monto(out.get("monto_cuota"))
-            res[f"{prefix}.carga_mensual_previa"] = _fmt_monto(
-                out.get("carga_mensual_previa")
-            )
-            res[f"{prefix}.carga_mensual_nueva_total"] = _fmt_monto(
-                out.get("carga_mensual_nueva_total")
-            )
-            res[f"{prefix}.porcentaje_carga_sobre_ingreso"] = _fmt_monto(
-                out.get("porcentaje_carga_sobre_ingreso")
-            )
-            res[f"{prefix}.margen_libre_post_compra"] = _fmt_monto(
-                out.get("margen_libre_post_compra")
-            )
+        res[f"{prefix}.resultado"] = _fmt_val(out.get("resultado"))
+        res[f"{prefix}.motivo"] = _fmt_val(out.get("motivo"))
+        res[f"{prefix}.titulo"] = _fmt_val(out.get("titulo"))
+        res[f"{prefix}.linea_principal"] = _fmt_val(out.get("linea_principal"))
     return res
 
 
