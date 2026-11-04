@@ -4,14 +4,13 @@ import requests
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func
 
 from app.models.tools import IPCCache
 from app.schemas.tools import InstallmentConvenienceRequest
 from app.models.usuario import Usuario, Moneda
-from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion, MetodoPago
+from app.models.transaccion import Transaccion
 from app.services.dashboard_service import get_ciclo_fechas
-from app.services.definiciones_service import condicion_gasto, condicion_ingreso
 from app.utils.fecha import hoy_argentina
 from app.utils.tasas import tna_a_mensual
 
@@ -512,7 +511,6 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
     # 1. Saldo disponible actual mediante servicio canónico
     from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
     disponible_res = _calcular_saldo_disponible_sync(db, usuario.id)
-    carga_mensual_comprometida_ars = float(disponible_res["ars"]["cuotas_comprometidas"] + disponible_res["ars"]["suscripciones_mensuales"])
 
     # 2. Ciclos con historia
     primera_tx = db.query(func.min(Transaccion.fecha)).filter(
@@ -534,21 +532,6 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
                 current_date = fin + timedelta(days=1)
             else:
                 break
-
-    # Rango de ciclos para promediar gastos (máximo 3)
-    if ciclos_con_historia >= 1:
-        n = min(ciclos_con_historia, 3)
-        end_range = fecha_fin_c1
-        start_date_c = end_range
-        for _ in range(n - 1):
-            inicio_c, _ = get_ciclo_fechas(usuario, start_date_c)
-            start_date_c = inicio_c - timedelta(days=1)
-        start_range, _ = get_ciclo_fechas(usuario, start_date_c)
-        divisor = n
-    else:
-        start_range = fecha_inicio_curr
-        end_range = hoy
-        divisor = 1
 
     # 3. Ingreso habitual mensual estimado en ARS (módulo unificado de ingreso habitual)
     from app.services.ingreso_habitual_service import obtener_ingreso_habitual

@@ -41,16 +41,16 @@ from app.routers.whatsapp.gastos import (
 from app.schemas.tools import InstallmentConvenienceRequest
 from app.services import (
     ai_service,
-    calibracion_service,
     contexto_financiero_service,
     dashboard_service,
     gastos_consulta_service,
     perfil_financiero_service,
     presupuesto_service,
-    proyeccion_service,
     suscripcion_service,
     tools_service,
 )
+from app.services.datos_motor_service import cargar_datos_motor, ciclos_anteriores
+from app.utils.finanzas import clasificar_gastos
 from app.services.perfil_financiero_service import (
     calcular_perfil_nuevo,
 )
@@ -377,18 +377,6 @@ def medir_bloque_e(
         perf_calc.get("ingreso_tipico_ars")
     )
 
-    proy = proyeccion_service.calcular_proyeccion(db, usuario)
-    res["ingreso.proyeccion.ars_ingresos_proyectados"] = (
-        _fmt_val(proy.get("ars", {}).get("ingresos_proyectados"))
-        if proy.get("ars", {}).get("ingresos_proyectados") is None
-        else _fmt_monto(proy.get("ars", {}).get("ingresos_proyectados"))
-    )
-    res["ingreso.proyeccion.usd_ingresos_proyectados"] = (
-        _fmt_val(proy.get("usd", {}).get("ingresos_proyectados"))
-        if proy.get("usd", {}).get("ingresos_proyectados") is None
-        else _fmt_monto(proy.get("usd", {}).get("ingresos_proyectados"))
-    )
-
     bal = dashboard_service.calcular_balance_ciclo(db, usuario)
     res["ingreso.dashboard_balance.ars_ingresos"] = _fmt_monto(
         bal["ars"]["ingresos"]
@@ -510,86 +498,36 @@ def medir_bloque_f(db: Session, usuario: Usuario) -> dict[str, str]:
     return res
 
 
-def medir_bloque_g(db: Session, usuario: Usuario) -> dict[str, str]:
-    """Bloque G: Proyección aplanada para ARS y USD."""
-    res = {}
-    proy = proyeccion_service.calcular_proyeccion(db, usuario)
-
-    for moneda in ["ars", "usd"]:
-        p_m = proy.get(moneda, {})
-        prefix = f"proyeccion.{moneda}"
-        res[f"{prefix}.balance_proyectado"] = (
-            _fmt_val(p_m.get("balance_proyectado"))
-            if p_m.get("balance_proyectado") is None
-            else _fmt_monto(p_m.get("balance_proyectado"))
-        )
-        res[f"{prefix}.gasto_proyectado_total"] = _fmt_monto(
-            p_m.get("gasto_proyectado_total")
-        )
-        res[f"{prefix}.ingresos_proyectados"] = (
-            _fmt_val(p_m.get("ingresos_proyectados"))
-            if p_m.get("ingresos_proyectados") is None
-            else _fmt_monto(p_m.get("ingresos_proyectados"))
-        )
-        res[f"{prefix}.nivel_confianza"] = _fmt_val(p_m.get("nivel_confianza"))
-        res[f"{prefix}.datos_suficientes"] = _fmt_val(
-            p_m.get("datos_suficientes")
-        )
-        res[f"{prefix}.mensaje"] = _fmt_val(p_m.get("mensaje"))
-
-        certezas = p_m.get("certezas") or {}
-        res[f"{prefix}.certezas.total"] = _fmt_monto(certezas.get("total"))
-        res[f"{prefix}.certezas.cuotas_restantes"] = _fmt_monto(
-            certezas.get("cuotas_restantes")
-        )
-        res[f"{prefix}.certezas.suscripciones_restantes"] = _fmt_monto(
-            certezas.get("suscripciones_restantes")
-        )
-        res[f"{prefix}.certezas.compromisos_restantes"] = _fmt_monto(
-            certezas.get("compromisos_restantes")
-        )
-
-        desc = p_m.get("descomposicion") or {}
-        res[f"{prefix}.descomposicion.cierto"] = _fmt_monto(desc.get("cierto"))
-        res[f"{prefix}.descomposicion.recurrente_ya_ocurrido"] = _fmt_monto(
-            desc.get("recurrente_ya_ocurrido")
-        )
-        res[f"{prefix}.descomposicion.variable_proyectado"] = _fmt_monto(
-            desc.get("variable_proyectado")
-        )
-
-        rango = p_m.get("rango") or {}
-        res[f"{prefix}.rango.piso"] = _fmt_monto(rango.get("piso"))
-        res[f"{prefix}.rango.central"] = _fmt_monto(rango.get("central"))
-        res[f"{prefix}.rango.techo"] = _fmt_monto(rango.get("techo"))
-
-        calib = p_m.get("calibracion") or {}
-        res[f"{prefix}.calibracion.pasa_puerta"] = _fmt_val(
-            calib.get("pasa_puerta")
-        )
-        res[f"{prefix}.calibracion.ciclos_evaluados"] = _fmt_val(
-            calib.get("ciclos_evaluados")
-        )
-        res[f"{prefix}.calibracion.cobertura_50"] = _fmt_monto(
-            calib.get("cobertura_50")
-        )
-        res[f"{prefix}.calibracion.cobertura_80"] = _fmt_monto(
-            calib.get("cobertura_80")
-        )
-        res[f"{prefix}.calibracion.cobertura_95"] = _fmt_monto(
-            calib.get("cobertura_95")
-        )
-        res[f"{prefix}.calibracion.ancho_medio_80_rel"] = _fmt_monto(
-            calib.get("ancho_medio_80_rel")
-        )
-    return res
-
-
 def medir_bloque_h(db: Session, usuario: Usuario) -> dict[str, str]:
     """Bloque H: Clasificación de gastos (streams recurrentes y clases)."""
     res = {}
-    calc_res = calibracion_service.calcular_calibracion_usuario(db, usuario, Moneda.ARS)
-    clasificacion = calc_res.get("clasificacion") if calc_res else None
+    hoy = hoy_argentina()
+    data = cargar_datos_motor(db, usuario)
+    anteriores = ciclos_anteriores(usuario, hoy, 12)
+    ciclos_con_datos = [
+        (c_ini, c_fin)
+        for c_ini, c_fin in anteriores
+        if any(c_ini <= tx.fecha <= c_fin and tx.moneda == Moneda.ARS for tx in data["txs"])
+    ]
+    cerrados = [c for c in ciclos_con_datos if c[1] < hoy]
+
+    # mismo corte que tenía la calibración, para que la foto no cambie
+    CICLOS_MINIMOS_CLASIFICACION = 6
+    if len(cerrados) < CICLOS_MINIMOS_CLASIFICACION:
+        return res
+
+    comprometidos_externos = [
+        *(cuota for cuota, _ in data["cuotas"] if not cuota.pagada and cuota.fecha_vencimiento >= hoy),
+        *data["suscripciones"],
+    ]
+    clasificacion = clasificar_gastos(
+        data["txs"],
+        anteriores,
+        data["ipc"],
+        hoy,
+        comprometidos_externos,
+        ctx=data["ctx"],
+    )
 
     if not clasificacion:
         return res

@@ -37,7 +37,6 @@ from app.models.feriado import FeriadoAR
 from app.models.evento_actualizacion import EventoActualizacion
 from app.models.cotizacion_dolar import CotizacionDolar
 from app.models.saldo_arrastrado import SaldoArrastradoTarjeta, PagoSaldoArrastrado, EstadoSaldoArrastrado
-from app.models.calibracion_usuario import CalibracionUsuario
 from app.models.codigo_verificacion import CodigoVerificacion
 from app.models.rate_limit import RateLimit
 from app.models.ejecucion_job import EjecucionJob
@@ -91,7 +90,6 @@ __all__ = [
     "FeriadoAR",
     "EventoActualizacion",
     "CotizacionDolar",
-    "CalibracionUsuario",
     "CodigoVerificacion",
     "RateLimit",
     "EventoUso",

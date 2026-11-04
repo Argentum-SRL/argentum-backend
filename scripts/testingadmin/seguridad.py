@@ -20,7 +20,6 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models.billetera import Billetera
-from app.models.calibracion_usuario import CalibracionUsuario
 from app.models.cuota import Cuota
 from app.models.grupo_cuotas import GrupoCuotas
 from app.models.historial_suscripcion import HistorialSuscripcion
@@ -205,7 +204,6 @@ def snapshot_cuentas_ajenas(db: Session) -> Dict[str, int]:
         .count()
     )
     snap["billeteras"] = db.query(Billetera).filter(Billetera.usuario_id.in_(otros_uids)).count()
-    snap["calibraciones"] = db.query(CalibracionUsuario).filter(CalibracionUsuario.usuario_id.in_(otros_uids)).count()
     snap["perfiles"] = db.query(PerfilFinanciero).filter(PerfilFinanciero.usuario_id.in_(otros_uids)).count()
 
     tarjetas_ajenas = [t.id for t in db.query(TarjetaCredito.id).filter(TarjetaCredito.usuario_id.in_(otros_uids)).all()]
@@ -329,8 +327,7 @@ def ejecutar_borrado_testingadmin(db: Session, user: Usuario) -> Dict[str, int]:
     conteos["rendimientos_billetera"] = cant_rend
     conteos["ajustes_saldo"] = cant_ajustes
 
-    # 10. Calibraciones, Perfil Financiero y Memoria de Comercios
-    cant_cal = db.query(CalibracionUsuario).filter(CalibracionUsuario.usuario_id == uid).delete(synchronize_session=False)
+    # 10. Perfil Financiero y Memoria de Comercios
     cant_perf = db.query(PerfilFinanciero).filter(PerfilFinanciero.usuario_id == uid).delete(synchronize_session=False)
     from app.models.memoria_comercio import MemoriaComercio
     cant_memoria = db.query(MemoriaComercio).filter(MemoriaComercio.usuario_id == uid).delete(synchronize_session=False)
@@ -339,7 +336,6 @@ def ejecutar_borrado_testingadmin(db: Session, user: Usuario) -> Dict[str, int]:
     from app.models.decision_patron import DecisionPatron
     cant_decisiones = db.query(DecisionPatron).filter(DecisionPatron.usuario_id == uid).delete(synchronize_session=False)
     db.flush()
-    conteos["calibraciones_usuario"] = cant_cal
     conteos["perfiles_financieros"] = cant_perf
     conteos["memoria_comercios"] = cant_memoria
     conteos["facturas"] = cant_facturas

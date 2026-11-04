@@ -13,7 +13,7 @@ import pytest
 from app.models.usuario import AuthProvider, CicloTipo, EstadoUsuario, Moneda, RolUsuario, Usuario
 from app.routers.whatsapp.enriquecedores import enriquecer_respuesta_por_intent
 from app.services.contrato_numero_service import ContratoNumero
-from app.services import fin_de_mes_service, proyeccion_service
+from app.services import fin_de_mes_service
 from app.services.fin_de_mes_service import ResultadoFinDeMes, ResultadoRango
 from app.services.fin_de_mes_textos import mensaje_wpp
 from app.services.frescura_service import Frescura
@@ -88,14 +88,6 @@ def test_enriquecer_respuesta_consultar_proyeccion_ok(usuario_mock, monkeypatch)
     resultado_mock = _caso_completo_resultado()
     monkeypatch.setattr(fin_de_mes_service, "calcular_fin_de_mes", lambda db, u: resultado_mock)
 
-    contador_proyeccion = 0
-
-    def spy_proyeccion(*args, **kwargs):
-        nonlocal contador_proyeccion
-        contador_proyeccion += 1
-
-    monkeypatch.setattr(proyeccion_service, "calcular_proyeccion", spy_proyeccion)
-
     resultado_ia = {}
     db_mock = MagicMock()
 
@@ -109,7 +101,6 @@ def test_enriquecer_respuesta_consultar_proyeccion_ok(usuario_mock, monkeypatch)
 
     assert res_intent == "consultar_proyeccion"
     assert resultado_ia["respuesta_usuario"] == mensaje_wpp(resultado_mock)
-    assert contador_proyeccion == 0
 
 
 def test_enriquecer_respuesta_consultar_proyeccion_error(usuario_mock, monkeypatch):
@@ -117,14 +108,6 @@ def test_enriquecer_respuesta_consultar_proyeccion_error(usuario_mock, monkeypat
         raise RuntimeError("Fallo inesperado")
 
     monkeypatch.setattr(fin_de_mes_service, "calcular_fin_de_mes", boom)
-
-    contador_proyeccion = 0
-
-    def spy_proyeccion(*args, **kwargs):
-        nonlocal contador_proyeccion
-        contador_proyeccion += 1
-
-    monkeypatch.setattr(proyeccion_service, "calcular_proyeccion", spy_proyeccion)
 
     resultado_ia = {}
     db_mock = MagicMock()
@@ -139,4 +122,4 @@ def test_enriquecer_respuesta_consultar_proyeccion_error(usuario_mock, monkeypat
 
     assert res_intent == "consultar_proyeccion"
     assert resultado_ia["respuesta_usuario"] == "No pude calcular tu proyección en este momento. Probá de nuevo en unos minutos."
-    assert contador_proyeccion == 0
+

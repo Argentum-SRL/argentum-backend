@@ -1,14 +1,13 @@
 import uuid
 from datetime import date
 from typing import Any, List
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.models.usuario import Usuario
-from app.services import dashboard_service, proyeccion_service
-from app.services.calibracion_service import disparar_calibracion_a_demanda
+from app.services import dashboard_service
 from app.services.fin_de_mes_service import calcular_fin_de_mes
 from app.services.fin_de_mes_textos import textos_tarjeta, linea_saldo
 from app.schemas.fin_de_mes import FinDeMesResponse
@@ -16,7 +15,6 @@ from app.schemas.dashboard import (
     DashboardResumenResponse,
     ResumenCompletoResponse,
     CotizacionDolarResponse,
-    ProyeccionesResponse,
     SubcategoriaGastoResponse,
     PeriodoActualResponse
 )
@@ -123,26 +121,6 @@ def get_cotizacion(
     Retorna la cotizacion del dolar segun la preferencia del usuario.
     """
     return dashboard_service.get_cotizacion_usuario(current_user)
-
-
-@router.get("/proyeccion", response_model=ProyeccionesResponse)
-def get_proyeccion(
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user)
-) -> Any:
-    """
-    Retorna la proyección financiera para el ciclo actual.
-    Si la calibración está pendiente, programa su cálculo en segundo plano.
-    """
-    res = proyeccion_service.calcular_proyeccion(db, current_user)
-    mostrar_card = bool(res.get("mostrar_card", False))
-    res["mostrar_modal_bienvenida"] = bool(mostrar_card and not getattr(current_user, "modal_bienvenida_financiera_visto", False))
-    ars_calib = (res.get("ars") or {}).get("calibracion") or {}
-    usd_calib = (res.get("usd") or {}).get("calibracion") or {}
-    if ars_calib.get("motivo") == "calibracion_pendiente" or usd_calib.get("motivo") == "calibracion_pendiente":
-        disparar_calibracion_a_demanda(background_tasks, current_user.id)
-    return res
 
 
 @router.get("/fin-de-mes", response_model=FinDeMesResponse)

@@ -23,10 +23,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Optional, Set
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.cuota import Cuota
@@ -39,9 +39,7 @@ from app.models.usuario import Moneda, Usuario
 from app.services.dashboard_service import get_ciclo_fechas
 from app.services.definiciones_service import (
     ContextoDefiniciones,
-    cargar_contexto,
     condicion_gasto,
-    es_gasto,
 )
 from app.services.suscripcion_service import calcular_costo_mensual
 from app.utils.fecha import hoy_argentina

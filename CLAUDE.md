@@ -32,7 +32,7 @@ Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_21-10.md (versi
   - Textos concisos y directos: "Ojo: es anterior a tu saldo de «...» (dd/mm) y no lo modifica."
 
 ### Servicios del motor (app/services/)
-- definiciones_service, ingreso_habitual_service, compromisos_service, conciliacion_service, datos_motor_service, perfil_financiero_service, calibracion_service, proyeccion_service, resumen_tarjeta_service, pago_resumen_service, tarjeta_service.
+- definiciones_service, ingreso_habitual_service, compromisos_service, conciliacion_service, datos_motor_service, perfil_financiero_service, resumen_tarjeta_service, pago_resumen_service, tarjeta_service.
 
 ### Escrituras
 - transaccion_service (crear_transaccion, actualizar, eliminar, confirmar_transaccion_ia), transferencia_service, meta_service, pago_resumen_service, cuotas_service, rendimiento_billetera_service, ajuste_saldo_service.

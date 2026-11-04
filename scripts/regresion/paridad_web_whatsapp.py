@@ -35,6 +35,7 @@ from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 from app.routers.whatsapp.enriquecedores import enriquecer_respuesta_por_intent
 from app.routers.whatsapp.handlers_permitirse import detectar_consulta_permitirse, armar_respuesta_permitirse
+from app.services.fin_de_mes_textos import textos_tarjeta
 from app.routers.whatsapp.gastos import (
     _extraer_periodo_gastos,
     _rango_periodo,
@@ -43,7 +44,7 @@ from app.routers.whatsapp.gastos import (
 )
 from app.services import (
     dashboard_service,
-    proyeccion_service,
+    fin_de_mes_service,
     dolar_service,
     contexto_financiero_service,
     meta_service,
@@ -143,24 +144,20 @@ def ejecutar_verificaciones_paridad(db, usuario: Usuario, log_func=print) -> Dic
     )
 
     # -------------------------------------------------------------------------
-    # 3. Proyección
+    # 3. Fin de mes
     # -------------------------------------------------------------------------
     ia_res_proy = {"intent": "consultar_proyeccion", "entidades": {}}
     enriquecer_respuesta_por_intent("consultar_proyeccion", ia_res_proy, "proyección", usuario, db)
     msg_wpp_proy = ia_res_proy.get("respuesta_usuario", "")
     wpp_num_proy = extraer_montos_de_texto(msg_wpp_proy)
 
-    # Web: proyeccion_service.calcular_proyeccion
-    proy_res = proyeccion_service.calcular_proyeccion(db, usuario)
-    p_ars = proy_res.get("ars", {})
-    bal_proy = p_ars.get("balance_proyectado")
-    web_num_proy = []
-    if bal_proy is not None:
-        bal_proy_fmt = formatear_monto(abs(bal_proy), Moneda.ARS)
-        web_num_proy.append(normalizar_monto_str(bal_proy_fmt))
+    # Web: calcular_fin_de_mes de fin_de_mes_service y textos_tarjeta de fin_de_mes_textos
+    r = fin_de_mes_service.calcular_fin_de_mes(db, usuario)
+    tarjeta = textos_tarjeta(r)
+    web_num_proy = extraer_montos_de_texto(tarjeta["monto"]) if tarjeta is not None else []
 
-    resultados["Proyección"] = verificar_paridad_numerica(
-        "Proyección", wpp_num_proy, web_num_proy, msg_wpp_proy, log_func=log_func
+    resultados["Fin de mes"] = verificar_paridad_numerica(
+        "Fin de mes", wpp_num_proy, web_num_proy, msg_wpp_proy, log_func=log_func
     )
 
     # -------------------------------------------------------------------------

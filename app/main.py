@@ -69,7 +69,6 @@ from app.services.notificacion_scheduler_service import (
     _job_entrega_whatsapp_batched,
     _job_resumen_cierre_ciclo,
     _job_resumen_semanal,
-    _job_proyeccion_negativa,
 )
 from app.services.factura_avisos_service import _job_notificaciones_facturas
 from app.services.notificacion_despacho_service import _job_reintentar_inmediatas
@@ -389,10 +388,6 @@ def job_resumen_semanal():
     _job_resumen_semanal(SessionLocal)
 
 
-def job_proyeccion_negativa():
-    _job_proyeccion_negativa(SessionLocal)
-
-
 def job_notificaciones_facturas():
     _job_notificaciones_facturas(SessionLocal)
 
@@ -529,37 +524,6 @@ def _job_actualizar_ipc():
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_actualizar_ipc")
-        db.close()
-
-
-def _job_recalcular_calibraciones():
-    """Tarea programada diaria: recalcula la calibración de proyección para todos los usuarios a las 04:00 ART."""
-    from app.services.calibracion_service import recalcular_calibraciones_todos
-    db = SessionLocal()
-    lock_adquirido = False
-    try:
-        if not intentar_tomar_lock_job(db, "_job_recalcular_calibraciones"):
-            struct_logger.info(
-                "Job omitido: ya se está ejecutando en otra instancia",
-                job="_job_recalcular_calibraciones",
-            )
-            return
-        lock_adquirido = True
-        recalcular_calibraciones_todos(SessionLocal)
-    except Exception as e:
-        logger.exception("Error en job _job_recalcular_calibraciones")
-        try:
-            from app.services.alerta_service import enviar_alerta_admin
-            enviar_alerta_admin(
-                asunto="[Argentum] Falló el job _job_recalcular_calibraciones",
-                cuerpo=f"Error en job _job_recalcular_calibraciones: {e}",
-                clave="job:_job_recalcular_calibraciones",
-            )
-        except Exception as alerta_err:
-            logger.error("Error enviando alerta para job recalcular_calibraciones: %s", alerta_err)
-    finally:
-        if lock_adquirido:
-            liberar_lock_job(db, "_job_recalcular_calibraciones")
         db.close()
 
 
@@ -708,16 +672,6 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            registrar_ejecucion("proyeccion_negativa", job_proyeccion_negativa),
-            "cron",
-            hour=7,
-            minute=25,
-            id="proyeccion_negativa",
-            misfire_grace_time=300,
-            max_instances=1,
-            replace_existing=True,
-        )
-        scheduler.add_job(
             registrar_ejecucion("notificaciones_facturas", job_notificaciones_facturas),
             "cron",
             hour=7,
@@ -772,17 +726,6 @@ async def lifespan(app: FastAPI):
             hour=3,
             minute=0,
             id="refresh_feriados_argentina",
-            misfire_grace_time=300,
-            max_instances=1,
-            replace_existing=True,
-        )
-        scheduler.add_job(
-            registrar_ejecucion("recalcular_calibraciones_nocturno", _job_recalcular_calibraciones),
-            "cron",
-            hour=4,
-            minute=0,
-            timezone=TZ_ARGENTINA,
-            id="recalcular_calibraciones_nocturno",
             misfire_grace_time=300,
             max_instances=1,
             replace_existing=True,

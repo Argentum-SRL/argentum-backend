@@ -96,13 +96,6 @@ JOBS_CATALOGO: list[JobCatalogoItem] = [
         puede_correr_ahora=False,
     ),
     JobCatalogoItem(
-        job_id="proyeccion_negativa",
-        nombre="Alerta de saldo futuro negativo",
-        que_hace="Avisa al usuario si sus gastos previstos superan el dinero disponible.",
-        periodo_esperado_minutos=1440,
-        puede_correr_ahora=False,
-    ),
-    JobCatalogoItem(
         job_id="notificaciones_facturas",
         nombre="Avisos de facturas e impuestos",
         que_hace="Recuerda el vencimiento cercano de servicios públicos y facturas cargadas.",
@@ -143,13 +136,6 @@ JOBS_CATALOGO: list[JobCatalogoItem] = [
         que_hace="Consulta y guarda el calendario oficial de feriados de Argentina.",
         periodo_esperado_minutos=1440,
         puede_correr_ahora=True,
-    ),
-    JobCatalogoItem(
-        job_id="recalcular_calibraciones_nocturno",
-        nombre="Calibración nocturna de proyecciones",
-        que_hace="Ajusta la precisión de las proyecciones automáticas de saldo para cada usuario.",
-        periodo_esperado_minutos=1440,
-        puede_correr_ahora=False,
     ),
     JobCatalogoItem(
         job_id="actualizar_tasas_diarias",
