@@ -54,6 +54,16 @@ def tope_por_ingreso_temprano(resultado: str, modo: str, temprano: bool) -> str:
     return resultado
 
 
+def tope_por_datos_viejos(resultado: str, motivo: str | None) -> str:
+    """
+    Tope de resultado para datos viejos: nunca responde 'bien' (como máximo 'justo').
+    Pura.
+    """
+    if motivo == "datos_viejos" and resultado == "bien":
+        return "justo"
+    return resultado
+
+
 def mediana(valores: list[Decimal] | tuple[Decimal, ...]) -> Decimal:
     """Calcula la mediana de una secuencia de Decimals."""
     if not valores:
@@ -675,6 +685,7 @@ def calcular_puede_permitirse(
             )
 
     resultado = tope_por_ingreso_temprano(resultado, modo_norm, datos.ingreso_temprano)
+    resultado = tope_por_datos_viejos(resultado, motivo)
 
     # 4. Mes de liberación
     mes_liberacion_nombre: str | None = None
@@ -723,6 +734,7 @@ def calcular_puede_permitirse(
         "resultado": resultado,
         "motivo": motivo,
         "motivo_ingreso": datos.motivo_ingreso,
+        "sin_ingreso": datos.ingreso is None,
         "precio": precio_dec,
         "libre": datos.libre,
         "fin_ciclo": datos.fin_ciclo,
