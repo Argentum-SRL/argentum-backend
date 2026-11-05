@@ -292,7 +292,7 @@ def test_caso_b_debito_reintegro_pendiente_y_luego_recibido(db: Session, usuario
     assert billetera_ars.saldo_actual == Decimal("925000.00")
 
 
-def test_caso_c_credito_reintegro_mismo_resumen(db: Session, usuario: Usuario, billetera_ars: Billetera, tarjeta_credito: TarjetaCredito, categoria_supermercado: Categoria):
+def test_caso_c_credito_reintegro_mismo_resumen(db: Session, usuario: Usuario, billetera_ars: Billetera, tarjeta_credito: TarjetaCredito, categoria_supermercado: Categoria, monkeypatch):
     """c) Crédito en 1 pago 100.000 el 05/10 con reintegro 25.000 recibido el 05/10:
        resumen 04/11 con monto_facturado 75.000 y deuda 75.000; gasto 75.000; las billeteras no cambian.
     """
@@ -331,6 +331,8 @@ def test_caso_c_credito_reintegro_mismo_resumen(db: Session, usuario: Usuario, b
     assert detalle["monto_facturado"] == Decimal("75000.00")
     assert detalle["monto_deuda_restante"] == Decimal("75000.00")
 
+    # Fecha fija: el resumen actual depende de hoy y el test usa fechas fijas (resumen del 04/11).
+    monkeypatch.setattr(resumen_tarjeta_service, "hoy_argentina", lambda: date(2026, 10, 21))
     resumen = resumen_tarjeta_service.calcular_resumen_actual(db, tarjeta_credito)
     assert resumen.total_comprometido_resumen_actual == Decimal("75000.00")
     assert resumen.total_a_pagar_resumen_actual == Decimal("75000.00")
