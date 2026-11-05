@@ -1,5 +1,5 @@
 """
-app/services/permitirse_service.py â€” Motor unificado de "Â¿Me lo puedo permitir?".
+app/services/permitirse_service.py — Motor unificado de "¿Me lo puedo permitir?".
 """
 from __future__ import annotations
 
@@ -41,13 +41,23 @@ from app.utils.fecha import hoy_argentina
 
 
 # ==============================================================================
-# FUNCIONES PURAS DE CÃLCULO
+# FUNCIONES PURAS DE CÁLCULO
 # ==============================================================================
+
+def tope_por_ingreso_temprano(resultado: str, modo: str, temprano: bool) -> str:
+    """
+    Tope de resultado para ingreso temprano: nunca responde 'bien' en cuotas o mensual.
+    Pura.
+    """
+    if temprano and modo in ("cuotas", "mensual") and resultado == "bien":
+        return "justo"
+    return resultado
+
 
 def mediana(valores: list[Decimal] | tuple[Decimal, ...]) -> Decimal:
     """Calcula la mediana de una secuencia de Decimals."""
     if not valores:
-        raise ValueError("No se puede calcular mediana de lista vacÃ­a")
+        raise ValueError("No se puede calcular mediana de lista vacía")
     s = sorted(valores)
     n = len(s)
     mid = n // 2
@@ -139,7 +149,7 @@ def elegir_rubro(medianas: dict[str, Decimal]) -> str | None:
 
 
 def redondear_arriba_mil(valor: Decimal) -> Decimal:
-    """Redondea hacia arriba al mÃºltiplo de 1.000 mÃ¡s cercano."""
+    """Redondea hacia arriba al múltiplo de 1.000 más cercano."""
     if valor <= Decimal("0"):
         return Decimal("0.00")
     millares = math.ceil(float(valor) / 1000.0)
@@ -158,7 +168,7 @@ def evaluar_contado(
     ahorros_total: Decimal,
 ) -> tuple[str, int, int, Decimal]:
     """
-    EvalÃºa la compra de contado.
+    Evalúa la compra de contado.
     Devuelve (resultado, veces, n, falta).
     Pura.
     """
@@ -175,7 +185,7 @@ def evaluar_contado(
             falta_neta = falta - ahorros_dec if ahorros_dec > Decimal("0") else falta
             return ("no_alcanza", 0, 0, falta_neta.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
-    # b. finales None o vacÃ­o (estado distinto de "completo")
+    # b. finales None o vacío (estado distinto de "completo")
     if not finales:
         return ("justo", 0, 0, Decimal("0.00"))
 
@@ -204,7 +214,7 @@ def evaluar_mensual(
     indefinido: bool,
 ) -> tuple[str, Decimal, Decimal, int, Decimal, int]:
     """
-    EvalÃºa cuotas o gasto mensual recurrente.
+    Evalúa cuotas o gasto mensual recurrente.
     Devuelve (resultado, r_min, deficit_total, meses_deficit, deficit_mensual, meses_alcanzan).
     Pura.
     """
@@ -239,7 +249,7 @@ def evaluar_mensual(
 
 
 # ==============================================================================
-# RECOLECCIÃ“N DE DATOS (SOLO LECTURA)
+# RECOLECCIÓN DE DATOS (SOLO LECTURA)
 # ==============================================================================
 
 @dataclass(frozen=True)
@@ -265,11 +275,13 @@ class DatosPermitirse:
     metas: Decimal
     ahorros_total: Decimal
     rubros_medianas: dict[str, Decimal]
+    ingreso_temprano: bool = False
+    motivo_ingreso: str | None = None
 
 
 def recolectar(db: Session, usuario: Usuario, hoy: date | None = None) -> DatosPermitirse:
     """
-    Recolecta todos los datos financieros necesarios para el cÃ¡lculo de "Â¿Me lo puedo permitir?".
+    Recolecta todos los datos financieros necesarios para el cálculo de "¿Me lo puedo permitir?".
     Solo lectura.
     """
     ref_hoy = hoy or hoy_argentina()
@@ -283,8 +295,10 @@ def recolectar(db: Session, usuario: Usuario, hoy: date | None = None) -> DatosP
     dias_sin_cargar = fdm.dias_sin_cargar
 
     # 2. Ingreso habitual
-    res_ingreso = obtener_ingreso_habitual(db, usuario, hoy=ref_hoy, moneda="ARS")
+    res_ingreso = obtener_ingreso_habitual(db, usuario, hoy=ref_hoy, moneda="ARS", incluir_temprano=True)
     ingreso = res_ingreso.monto
+    ingreso_temprano = res_ingreso.es_temprano
+    motivo_ingreso = res_ingreso.motivo_sin_datos
 
     # 3. Compromisos mensuales
     es_admin = bool(usuario.is_admin)
@@ -297,7 +311,7 @@ def recolectar(db: Session, usuario: Usuario, hoy: date | None = None) -> DatosP
     else:
         gasto_variable = calcular_gasto_variable_tipico(db, usuario, hoy=ref_hoy, moneda=Moneda.ARS, streams_c=[])
 
-    # 4. Cotizaciones dÃ³lar oficial (venta para pesificar cuotas, compra para pesificar ahorros)
+    # 4. Cotizaciones dólar oficial (venta para pesificar cuotas, compra para pesificar ahorros)
     cot_obj = obtener_cotizacion_por_fecha(db, "oficial", ref_hoy)
     if cot_obj and cot_obj.venta is not None:
         cot_oficial_venta = Decimal(str(cot_obj.venta))
@@ -319,7 +333,7 @@ def recolectar(db: Session, usuario: Usuario, hoy: date | None = None) -> DatosP
         ).scalars().first()
         cot_oficial_compra = Decimal(str(last_c.compra)) if (last_c and last_c.compra) else Decimal("1.00")
 
-    # Calendario de cuotas existentes hijas no pagadas que vencen despuÃ©s del fin de ciclo actual
+    # Calendario de cuotas existentes hijas no pagadas que vencen después del fin de ciclo actual
     tx_cuotas = db.execute(
         select(Cuota.fecha_vencimiento, monto_efectivo_cuota_sql(), GrupoCuotas.moneda)
         .join(GrupoCuotas, Cuota.grupo_id == GrupoCuotas.id)
@@ -355,7 +369,7 @@ def recolectar(db: Session, usuario: Usuario, hoy: date | None = None) -> DatosP
     else:
         margenes = []
 
-    # 6. ColchÃ³n
+    # 6. Colchón
     gastos_ciclos = gastos_variables_por_ciclo(
         db, usuario, hoy=ref_hoy, moneda=Moneda.ARS, max_ciclos=12, streams_c=(None if es_admin else [])
     )
@@ -398,7 +412,7 @@ def recolectar(db: Session, usuario: Usuario, hoy: date | None = None) -> DatosP
 
     ahorros_total = (inversiones_total + dolares_en_pesos + metas_total).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-    # 8. Rubros para compensar (Ãºltimos hasta 6 ciclos cerrados, mÃ­nimo 3)
+    # 8. Rubros para compensar (últimos hasta 6 ciclos cerrados, mínimo 3)
     c_ini_curr, _ = get_ciclo_fechas(usuario, ref_hoy)
     fecha_fin_c1 = c_ini_curr - timedelta(days=1)
 
@@ -425,7 +439,7 @@ def recolectar(db: Session, usuario: Usuario, hoy: date | None = None) -> DatosP
 
     rubros_medianas: dict[str, Decimal] = {}
     if len(ciclos_rubros) >= 3:
-        EXCLUIDAS = {"vivienda", "salud", "educacion", "educaciÃ³n", "impuestos", "banco", "ahorro", "inversiones"}
+        EXCLUIDAS = {"vivienda", "salud", "educación", "impuestos", "banco", "ahorro", "inversiones"}
 
         grupos_varias_cuotas = set(
             db.execute(
@@ -480,7 +494,7 @@ def recolectar(db: Session, usuario: Usuario, hoy: date | None = None) -> DatosP
             for c in db.execute(select(Categoria.id, Categoria.nombre)).all()
         }
 
-        # Agrupar transacciones por categorÃ­a y por ciclo
+        # Agrupar transacciones por categoría y por ciclo
         cat_por_ciclo: dict[str, list[Decimal]] = {}
         for c_ini, c_fin in ciclos_rubros:
             gastos_cat_este_ciclo: dict[str, Decimal] = {}
@@ -497,7 +511,7 @@ def recolectar(db: Session, usuario: Usuario, hoy: date | None = None) -> DatosP
                         continue
                     gastos_cat_este_ciclo[cat_nom] = gastos_cat_este_ciclo.get(cat_nom, Decimal("0.00")) + Decimal(str(t.monto))
 
-            # Para todas las categorÃ­as conocidas, anotar el gasto de este ciclo (0 si no hubo)
+            # Para todas las categorías conocidas, anotar el gasto de este ciclo (0 si no hubo)
             for cat_nom in set(gastos_cat_este_ciclo.keys()) | set(cat_por_ciclo.keys()):
                 if cat_nom not in cat_por_ciclo:
                     cat_por_ciclo[cat_nom] = []
@@ -531,11 +545,13 @@ def recolectar(db: Session, usuario: Usuario, hoy: date | None = None) -> DatosP
         metas=metas_total,
         ahorros_total=ahorros_total,
         rubros_medianas=rubros_medianas,
+        ingreso_temprano=ingreso_temprano,
+        motivo_ingreso=motivo_ingreso,
     )
 
 
 # ==============================================================================
-# FUNCIÃ“N PRINCIPAL DEL MOTOR
+# FUNCIÓN PRINCIPAL DEL MOTOR
 # ==============================================================================
 
 def calcular_puede_permitirse(
@@ -550,11 +566,11 @@ def calcular_puede_permitirse(
     hoy: date | None = None,
 ) -> dict[str, Any]:
     """
-    FunciÃ³n canÃ³nica de "Â¿Me lo puedo permitir?".
+    Función canónica de "¿Me lo puedo permitir?".
     Mantiene nombres y orden de argumentos. Devuelve el dict estructurado de la respuesta.
     """
     if db is None:
-        raise ValueError("Se requiere una sesiÃ³n de base de datos activa")
+        raise ValueError("Se requiere una sesión de base de datos activa")
 
     usuario = db.get(Usuario, user_id)
     if not usuario:
@@ -580,6 +596,8 @@ def calcular_puede_permitirse(
         motivo = "datos_viejos"
     elif datos.ingreso is None:
         motivo = "sin_ingreso"
+    elif modo_norm in ("cuotas", "mensual") and datos.ingreso_temprano:
+        motivo = "aprendiendo"
     elif modo_norm == "contado" and not datos.finales:
         motivo = "pocos_datos"
     elif modo_norm in ("cuotas", "mensual") and datos.colchon is None:
@@ -656,7 +674,9 @@ def calcular_puede_permitirse(
                 indefinido=indefinido,
             )
 
-    # 4. Mes de liberaciÃ³n
+    resultado = tope_por_ingreso_temprano(resultado, modo_norm, datos.ingreso_temprano)
+
+    # 4. Mes de liberación
     mes_liberacion_nombre: str | None = None
     if modo_norm in ("cuotas", "mensual") and datos.colchon is not None and resultado != "bien" and datos.ingreso is not None:
         # Construir cuotas para el horizonte completo
@@ -702,6 +722,7 @@ def calcular_puede_permitirse(
         "modo": modo_norm,
         "resultado": resultado,
         "motivo": motivo,
+        "motivo_ingreso": datos.motivo_ingreso,
         "precio": precio_dec,
         "libre": datos.libre,
         "fin_ciclo": datos.fin_ciclo,

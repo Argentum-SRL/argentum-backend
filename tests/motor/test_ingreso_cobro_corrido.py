@@ -17,11 +17,7 @@ import calendar
 from datetime import date
 from decimal import Decimal
 
-import pytest
-
 from app.services.ingreso_habitual_service import (
-    PARECIDO_MINIMO_COBRO,
-    TOLERANCIA_COBRO_DIAS,
     asignar_ciclos_fuente,
     calcular_ingreso_habitual_en_memoria,
 )

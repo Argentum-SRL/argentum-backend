@@ -153,12 +153,12 @@ def test_permitirse_ruta_contado_1000(client: TestClient):
 
 def test_permitirse_ruta_mensual_1000(client: TestClient):
     # {"precio_total": 1000, "modo": "mensual"}
-    # → resultado "justo", linea_principal "Todavía no conozco tus cobros: no sé si te entra cada mes."
+    # → resultado "justo", linea_principal "Cuando cargues lo que cobrás de 2 meses seguidos, te digo si te entra cada mes."
     resp = client.post("/tools/can-afford", json={"precio_total": 1000, "modo": "mensual"})
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["resultado"] == "justo"
-    assert data["linea_principal"] == "Todav\u00eda no conozco tus cobros: no s\u00e9 si te entra cada mes."
+    assert data["linea_principal"] == "Cuando cargues lo que cobrás de 2 meses seguidos, te digo si te entra cada mes."
 
 
 def test_permitirse_ruta_ingreso_manual_ignorado(client: TestClient):
@@ -167,7 +167,7 @@ def test_permitirse_ruta_ingreso_manual_ignorado(client: TestClient):
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["resultado"] == "justo"
-    assert data["linea_principal"] == "Todav\u00eda no conozco tus cobros: no s\u00e9 si te entra cada mes."
+    assert data["linea_principal"] == "Cuando cargues lo que cobrás de 2 meses seguidos, te digo si te entra cada mes."
 
 
 def test_permitirse_ruta_no_alcanza_300000(client: TestClient):

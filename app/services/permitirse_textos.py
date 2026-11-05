@@ -33,6 +33,7 @@ def textos_permitirse(r: Any) -> dict[str, Any]:
     modo = d.get("modo", "contado")
     resultado = d.get("resultado", "justo")
     motivo = d.get("motivo")
+    motivo_ingreso = d.get("motivo_ingreso")
     precio = d.get("precio", Decimal("0"))
     libre = d.get("libre", Decimal("0"))
     fin_ciclo: date = d.get("fin_ciclo") or date.today()
@@ -104,7 +105,10 @@ def textos_permitirse(r: Any) -> dict[str, Any]:
     elif modo in ("cuotas", "mensual"):
         if motivo == "sin_ingreso":
             if resultado == "justo":
-                linea_principal = "Todavía no conozco tus cobros: no sé si te entra cada mes."
+                if motivo_ingreso == "irregular":
+                    linea_principal = "Tus cobros cambian mucho de un mes a otro: no sé si te entra cada mes."
+                else:
+                    linea_principal = "Cuando cargues lo que cobrás de 2 meses seguidos, te digo si te entra cada mes."
             elif resultado == "ahorros":
                 linea_principal = f"Con lo libre te faltan {_fmt(falta)}."
             elif resultado == "no_alcanza":
@@ -115,7 +119,9 @@ def textos_permitirse(r: Any) -> dict[str, Any]:
         elif resultado == "bien":
             linea_principal = f"Cada mes te quedarían al menos {_fmt(r_min)} después de tus gastos de siempre."
         elif resultado == "justo":
-            if motivo == "pocos_datos":
+            if motivo == "aprendiendo":
+                linea_principal = f"Cada mes te quedarían {_fmt(r_min)}, pero todavía estoy aprendiendo tus cobros."
+            elif motivo == "pocos_datos":
                 linea_principal = f"Cada mes te quedarían {_fmt(r_min)}, pero todavía no conozco bien tus meses."
             else:
                 linea_principal = f"Te quedarían solo {_fmt(r_min)} por mes después de tus gastos de siempre."
