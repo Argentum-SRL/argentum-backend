@@ -14,10 +14,12 @@ REGLAS DE DECISIÓN (Fase 2b):
 2. Fuentes:
    - Se agrupan los ingresos (según es_ingreso de definiciones_service) por categoría y subcategoría.
    - Aguinaldo: los movimientos de la subcategoría "Aguinaldo" nunca son fuente; se tratan aparte.
-   - Una fuente es habitual si aparece en al menos el 80% de los ciclos completos de la ventana.
-     * La ventana son los últimos 6 ciclos completos o, si hay menos historia, los ciclos completos
-       desde el primer ingreso.
-     * Hacen falta mínimo 3 ciclos completos.
+   - Cobro corrido (R-B): para fuentes que cobran una vez por ciclo, los cobros adelantados o atrasados
+     por feriado, fin de semana o pago corrido (tolerancia de 7 días y parecido de montos >= 70%)
+     se reasignan al ciclo vecino correspondiente.
+   - Ventana por fuente (R-A): la presencia de cada fuente se mide en sus últimos 6 ciclos completos
+     desde el ciclo al que quedó asignado su primer cobro, inclusive (mínimo 3 ciclos completos en su ventana).
+   - Una fuente es habitual si aparece en al menos el 80% de los ciclos completos de su ventana.
    - Si una fuente tiene 2 o más cobros por ciclo y, en la mediana, el segundo cobro es menos de
      la mitad del primero, se separa en dos series (el cobro mayor de cada ciclo y el siguiente).
      Ejemplo: jubilación + bono.
@@ -161,6 +163,99 @@ def es_movimiento_aguinaldo(tx: Any) -> bool:
 
 
 # ==============================================================================
+# COBRO CORRIDO Y ASIGNACIÓN DE CICLOS (R-B)
+# ==============================================================================
+
+TOLERANCIA_COBRO_DIAS = 7
+PARECIDO_MINIMO_COBRO = Decimal("0.70")
+
+
+def asignar_ciclos_fuente(
+    txs_fuente: List[Any],
+    ciclos: List[Tuple[date, date]],
+    tolerancia_dias: int = TOLERANCIA_COBRO_DIAS,
+    hoy: Optional[date] = None,
+) -> Dict[str, int]:
+    """
+    Asigna cada cobro de UNA fuente al índice del ciclo financiero correspondiente,
+    aplicando la regla de cobro corrido (R-B) para adelantos o atrasos en fuentes
+    que cobran una vez por ciclo.
+    """
+    asignacion: Dict[str, int] = {}
+    txs_por_ciclo: Dict[int, List[Any]] = {i: [] for i in range(len(ciclos))}
+
+    # 1. Asignación inicial por fecha literal dentro de cada ciclo
+    for tx in txs_fuente:
+        for idx, (c_ini, c_fin) in enumerate(ciclos):
+            if c_ini <= tx.fecha <= c_fin:
+                asignacion[str(tx.id)] = idx
+                txs_por_ciclo[idx].append(tx)
+                break
+
+    # 2. Verificar condición de periodicidad: la fuente debe cobrar 1 vez por ciclo
+    # (mediana de la cantidad de cobros en los ciclos completos con al menos un cobro)
+    if hoy is not None:
+        indices_completos = [i for i, c in enumerate(ciclos) if c[1] <= hoy]
+    else:
+        indices_completos = list(range(len(ciclos) - 1)) if len(ciclos) > 1 else [0]
+
+    cants_completos = [
+        len(txs_por_ciclo[i])
+        for i in indices_completos
+        if len(txs_por_ciclo[i]) >= 1
+    ]
+
+    if not cants_completos:
+        return asignacion
+
+    mediana_cobros = calcular_mediana([Decimal(str(c)) for c in cants_completos])
+    if mediana_cobros != Decimal("1"):
+        return asignacion
+
+    # 3. Recorrer pares de ciclos vecinos (k, k+1) de menor a mayor
+    cobros_movidos: Set[str] = set()
+
+    for k in range(len(ciclos) - 1):
+        k1 = k + 1
+        txs_k = txs_por_ciclo[k]
+        txs_k1 = txs_por_ciclo[k1]
+
+        # Adelantado: k tiene 2 cobros, k+1 tiene 0
+        if len(txs_k) == 2 and len(txs_k1) == 0:
+            txs_k_ordenadas = sorted(txs_k, key=lambda t: t.fecha)
+            tx_viejo = txs_k_ordenadas[0]
+            tx_nuevo = txs_k_ordenadas[1]
+            if str(tx_nuevo.id) not in cobros_movidos:
+                inicio_k1 = ciclos[k1][0]
+                if tx_nuevo.fecha >= inicio_k1 - timedelta(days=tolerancia_dias):
+                    monto_menor = min(tx_viejo.monto, tx_nuevo.monto)
+                    monto_mayor = max(tx_viejo.monto, tx_nuevo.monto)
+                    if monto_mayor > Decimal("0") and (monto_menor / monto_mayor) >= PARECIDO_MINIMO_COBRO:
+                        txs_k.remove(tx_nuevo)
+                        txs_k1.append(tx_nuevo)
+                        asignacion[str(tx_nuevo.id)] = k1
+                        cobros_movidos.add(str(tx_nuevo.id))
+
+        # Atrasado: k+1 tiene 2 cobros, k tiene 0
+        elif len(txs_k1) == 2 and len(txs_k) == 0:
+            txs_k1_ordenadas = sorted(txs_k1, key=lambda t: t.fecha)
+            tx_viejo = txs_k1_ordenadas[0]
+            tx_nuevo = txs_k1_ordenadas[1]
+            if str(tx_viejo.id) not in cobros_movidos:
+                inicio_k1 = ciclos[k1][0]
+                if tx_viejo.fecha <= inicio_k1 + timedelta(days=tolerancia_dias - 1):
+                    monto_menor = min(tx_viejo.monto, tx_nuevo.monto)
+                    monto_mayor = max(tx_viejo.monto, tx_nuevo.monto)
+                    if monto_mayor > Decimal("0") and (monto_menor / monto_mayor) >= PARECIDO_MINIMO_COBRO:
+                        txs_k1.remove(tx_viejo)
+                        txs_k.append(tx_viejo)
+                        asignacion[str(tx_viejo.id)] = k
+                        cobros_movidos.add(str(tx_viejo.id))
+
+    return asignacion
+
+
+# ==============================================================================
 # 4.1 FUNCIÓN PURA EN MEMORIA
 # ==============================================================================
 
@@ -221,8 +316,11 @@ def _calcular_ingreso_habitual_moneda_pura(
 
     # 3. Determinar ciclos completos y ciclo actual
     # Un ciclo es completo si ya finalizó respecto a hoy (fecha_fin <= hoy)
-    ciclos_completos = [c for c in ciclos if c[1] <= hoy]
-    ciclo_actual = next((c for c in ciclos if c[0] <= hoy <= c[1]), None)
+    ciclos_ordenados = sorted(list(dict.fromkeys(ciclos)), key=lambda x: x[0])
+    mapa_ciclo_a_idx = {c: i for i, c in enumerate(ciclos_ordenados)}
+    indices_completos = [i for i, c in enumerate(ciclos_ordenados) if c[1] <= hoy]
+    ciclos_completos = [ciclos_ordenados[i] for i in indices_completos]
+    ciclo_actual = next((c for c in ciclos_ordenados if c[0] <= hoy <= c[1]), None)
 
     # Ventana de ciclos completos:
     # "La ventana son los últimos 6 ciclos completos o, si hay menos historia, los ciclos completos desde el primer ingreso. Hacen falta mínimo 3 ciclos completos."
@@ -244,10 +342,6 @@ def _calcular_ingreso_habitual_moneda_pura(
             proximo_aguinaldo_monto=None,
         )
 
-    # Tomar hasta los últimos 6 ciclos completos de la historia disponible
-    ventana_ciclos = ciclos_completos[-6:] if len(ciclos_completos) >= 6 else ciclos_desde_primer_ingreso
-    n_ventana = len(ventana_ciclos)
-
     # 4. Agrupar transacciones base por categoría y subcategoría
     grupos_txs: Dict[Tuple[str, str], List[Any]] = {}
     for tx in txs_base:
@@ -263,12 +357,33 @@ def _calcular_ingreso_habitual_moneda_pura(
         if subcat_nom.strip().lower() == "cobros de personas":
             continue
 
+        # R-B: Asignar ciclos a los cobros de la fuente considerando cobro corrido
+        asig_fuente = asignar_ciclos_fuente(txs_fuente, ciclos_ordenados, tolerancia_dias=TOLERANCIA_COBRO_DIAS, hoy=hoy)
+
+        # R-A: Ventana por fuente medida desde el ciclo de su primer cobro asignado
+        txs_fuente_asignadas = [t for t in txs_fuente if str(t.id) in asig_fuente]
+        if not txs_fuente_asignadas:
+            continue
+
+        primer_cobro_fuente = min(txs_fuente_asignadas, key=lambda t: t.fecha)
+        idx_ciclo_primer_cobro = asig_fuente[str(primer_cobro_fuente.id)]
+
+        ciclos_fuente_completos = [
+            ciclos_ordenados[i] for i in indices_completos if i >= idx_ciclo_primer_cobro
+        ]
+        # Si esa ventana tiene menos de 3 ciclos completos, la fuente no es habitual
+        if len(ciclos_fuente_completos) < 3:
+            continue
+
+        ventana_fuente = ciclos_fuente_completos[-6:]
+
         # Evaluar si la fuente tiene 2 o más cobros por ciclo y se debe desdoblar
         cobros_por_ciclo: Dict[int, List[Decimal]] = {}
-        for idx, (c_ini, c_fin) in enumerate(ventana_ciclos):
-            txs_c = [t for t in txs_fuente if c_ini <= t.fecha <= c_fin]
+        for idx_v, c in enumerate(ventana_fuente):
+            c_idx = mapa_ciclo_a_idx[c]
+            txs_c = [t for t in txs_fuente if asig_fuente.get(str(t.id)) == c_idx]
             if txs_c:
-                cobros_por_ciclo[idx] = sorted([t.monto for t in txs_c], reverse=True)
+                cobros_por_ciclo[idx_v] = sorted([t.monto for t in txs_c], reverse=True)
 
         ciclos_con_multiples = [m for m in cobros_por_ciclo.values() if len(m) >= 2]
         desdoblar = False
@@ -291,6 +406,8 @@ def _calcular_ingreso_habitual_moneda_pura(
                 "orden_desdoble": 1,
                 "selector": lambda txs_en_c: [sorted(txs_en_c, key=lambda x: x.monto, reverse=True)[0]] if txs_en_c else [],
                 "txs": txs_fuente,
+                "asig": asig_fuente,
+                "ventana": ventana_fuente,
             })
             # Serie 2: segundo cobro de cada ciclo
             fuentes_candidatas_series.append({
@@ -302,6 +419,8 @@ def _calcular_ingreso_habitual_moneda_pura(
                 "orden_desdoble": 2,
                 "selector": lambda txs_en_c: [sorted(txs_en_c, key=lambda x: x.monto, reverse=True)[1]] if len(txs_en_c) >= 2 else [],
                 "txs": txs_fuente,
+                "asig": asig_fuente,
+                "ventana": ventana_fuente,
             })
         else:
             fuentes_candidatas_series.append({
@@ -313,18 +432,25 @@ def _calcular_ingreso_habitual_moneda_pura(
                 "orden_desdoble": 1,
                 "selector": lambda txs_en_c: txs_en_c,
                 "txs": txs_fuente,
+                "asig": asig_fuente,
+                "ventana": ventana_fuente,
             })
 
-    # 5. Evaluar habitualidad y tipo de cada serie en la ventana
+    # 5. Evaluar habitualidad y tipo de cada serie en su ventana
     fuentes_habituales: List[FuenteIngreso] = []
 
     for cand in fuentes_candidatas_series:
+        ventana_serie = cand["ventana"]
+        asig_serie = cand["asig"]
+        n_ventana_serie = len(ventana_serie)
+
         totales_ventana: List[Decimal] = []
         cant_cobros_ventana: List[int] = []
         ciclos_presente = 0
 
-        for (c_ini, c_fin) in ventana_ciclos:
-            txs_c = [t for t in cand["txs"] if c_ini <= t.fecha <= c_fin]
+        for c in ventana_serie:
+            c_idx = mapa_ciclo_a_idx[c]
+            txs_c = [t for t in cand["txs"] if asig_serie.get(str(t.id)) == c_idx]
             txs_sel = cand["selector"](txs_c)
             if txs_sel:
                 ciclos_presente += 1
@@ -332,8 +458,8 @@ def _calcular_ingreso_habitual_moneda_pura(
                 totales_ventana.append(tot)
                 cant_cobros_ventana.append(len(txs_sel))
 
-        # Habitual si aparece en al menos el 80% de los ciclos completos de la ventana
-        ratio_presencia = Decimal(str(ciclos_presente)) / Decimal(str(n_ventana))
+        # Habitual si aparece en al menos el 80% de los ciclos completos de su ventana
+        ratio_presencia = Decimal(str(ciclos_presente)) / Decimal(str(n_ventana_serie))
         if ratio_presencia < Decimal("0.80"):
             continue
 
@@ -345,15 +471,17 @@ def _calcular_ingreso_habitual_moneda_pura(
         txs_todos = cand["txs"]
         txs_act_sel = []
         if ciclo_actual:
-            txs_actual = [t for t in txs_todos if ciclo_actual[0] <= t.fecha <= ciclo_actual[1]]
+            act_idx = mapa_ciclo_a_idx[ciclo_actual]
+            txs_actual = [t for t in txs_todos if asig_serie.get(str(t.id)) == act_idx]
             txs_act_sel = cand["selector"](txs_actual)
 
         if txs_act_sel:
             ultimo_cobro = sorted(txs_act_sel, key=lambda x: x.fecha)[-1].monto
         else:
             txs_pasadas_sel: List[Any] = []
-            for (c_ini, c_fin) in ventana_ciclos:
-                txs_c = [t for t in txs_todos if c_ini <= t.fecha <= c_fin]
+            for c in ventana_serie:
+                c_idx = mapa_ciclo_a_idx[c]
+                txs_c = [t for t in txs_todos if asig_serie.get(str(t.id)) == c_idx]
                 txs_pasadas_sel.extend(cand["selector"](txs_c))
             ultimo_cobro = sorted(txs_pasadas_sel, key=lambda x: x.fecha)[-1].monto if txs_pasadas_sel else Decimal("0")
 
@@ -367,8 +495,9 @@ def _calcular_ingreso_habitual_moneda_pura(
             tipo_fuente = "variable"
             ultimos_12 = ciclos_completos[-12:]
             totales_12: List[Decimal] = []
-            for (c_ini, c_fin) in ultimos_12:
-                txs_c = [t for t in cand["txs"] if c_ini <= t.fecha <= c_fin]
+            for c in ultimos_12:
+                c_idx = mapa_ciclo_a_idx[c]
+                txs_c = [t for t in cand["txs"] if asig_serie.get(str(t.id)) == c_idx]
                 txs_sel = cand["selector"](txs_c)
                 if txs_sel:
                     totales_12.append(sum(t.monto for t in txs_sel))
