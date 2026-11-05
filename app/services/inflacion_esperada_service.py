@@ -173,7 +173,7 @@ def _mes_anterior(y: int, m: int) -> tuple[int, int]:
     return y, m - 1
 
 
-def bajar_rem(db: Session, hoy: date) -> None:
+def bajar_rem(db: Session, hoy: date) -> str:
     """
     Descarga el REM del BCRA una vez por mes y actualiza la tabla expectativas_inflacion.
     Nunca lanza excepciones.
@@ -188,30 +188,42 @@ def bajar_rem(db: Session, hoy: date) -> None:
             ExpectativaInflacion.relevamiento == relevamiento_esperado
         ).count()
         if count > 0:
-            return
+            return f"ya estaba {relevamiento_esperado}"
 
         # 2. Probar URL de ese mes y luego la del mes anterior
         y_ant2, m_ant2 = _mes_anterior(y_ant, m_ant)
         relevamiento_anterior = f"{y_ant2:04d}-{m_ant2:02d}"
 
         urls = [
-            f"https://www.bcra.gob.ar/archivos/Pdfs/PublicacionesEstadisticas/informes/relevamiento-expectativas-mercado-tablas-{relevamiento_esperado}.xlsx",
-            f"https://www.bcra.gob.ar/archivos/Pdfs/PublicacionesEstadisticas/informes/relevamiento-expectativas-mercado-tablas-{relevamiento_anterior}.xlsx",
+            (
+                relevamiento_esperado,
+                f"https://www.bcra.gob.ar/archivos/Pdfs/PublicacionesEstadisticas/informes/relevamiento-expectativas-mercado-tablas-{relevamiento_esperado}.xlsx",
+            ),
+            (
+                relevamiento_anterior,
+                f"https://www.bcra.gob.ar/archivos/Pdfs/PublicacionesEstadisticas/informes/relevamiento-expectativas-mercado-tablas-{relevamiento_anterior}.xlsx",
+            ),
         ]
 
         contenido_descargado = None
+        partes = []
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        for u in urls:
+        for rel_periodo, u in urls:
             try:
                 with httpx.Client(timeout=20.0, verify=False, follow_redirects=True, headers=headers) as client:
                     resp = client.get(u)
                     if resp.status_code == 200 and len(resp.content) > 1000:
                         contenido_descargado = resp.content
                         break
+                    elif resp.status_code == 200:
+                        partes.append(f"{rel_periodo} → archivo vacío")
+                    else:
+                        partes.append(f"{rel_periodo} → {resp.status_code}")
             except Exception as e:
                 logger.warning(f"Error descargando {u}: {e}")
+                partes.append(f"{rel_periodo} → {type(e).__name__}")
 
         if contenido_descargado:
             relevamiento, mensuales, prox12 = leer_rem_xlsx(contenido_descargado)
@@ -256,7 +268,7 @@ def bajar_rem(db: Session, hoy: date) -> None:
 
             db.commit()
             logger.info(f"REM relevamiento {relevamiento} guardado exitosamente.")
-            return
+            return f"guardado {relevamiento}"
 
         # 3. Si no se pudo descargar: control de alerta admin si hoy >= 10
         if hoy.day >= 10:
@@ -291,8 +303,11 @@ def bajar_rem(db: Session, hoy: date) -> None:
                     clave="rem_sin_datos",
                 )
 
+        return "no se pudo bajar: " + "; ".join(partes)
+
     except Exception as e:
         logger.error(f"Error inesperado en bajar_rem: {e}", exc_info=True)
+        return f"error: {type(e).__name__}: {str(e)[:120]}"
 
 
 def inflacion_esperada(db: Session, hoy: date | None = None, meses: int = 12) -> InflacionEsperada | None:

@@ -481,8 +481,11 @@ def _job_guardar_cotizaciones_diarias():
 def _job_actualizar_rem():
     """Tarea programada diaria: baja una vez por mes la inflación esperada (REM del BCRA) a las 13:20 UTC (10:20 ART)."""
     from app.services.inflacion_esperada_service import bajar_rem
+    from app.utils.fecha import hoy_argentina
+
     db = SessionLocal()
     lock_adquirido = False
+    resultado_rem = None
     try:
         if not intentar_tomar_lock_job(db, "_job_actualizar_rem"):
             struct_logger.info(
@@ -491,14 +494,18 @@ def _job_actualizar_rem():
             )
             return
         lock_adquirido = True
-        bajar_rem(db)
-        logger.info("Job actualizar_rem ejecutado exitosamente.")
+        resultado_rem = bajar_rem(db, hoy_argentina())
+        logger.info(f"Job actualizar_rem: {resultado_rem}")
     except Exception:
         logger.exception("Error en job _job_actualizar_rem")
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_actualizar_rem")
         db.close()
+
+    # Si no se pudo bajar el REM, que el Scheduler lo muestre como error con el motivo.
+    if resultado_rem is not None and not resultado_rem.startswith("guardado") and not resultado_rem.startswith("ya estaba"):
+        raise RuntimeError(resultado_rem)
 
 
 def _job_actualizar_ipc():
