@@ -19,6 +19,7 @@ from app.schemas.usuario import (
     EditarMoneda,
     EliminarCuentaRequest,
     PermisoMensajesRequest,
+    PrioridadesConsejosRequest,
 )
 from app.services import usuario_service
 
@@ -108,6 +109,19 @@ def update_moneda(
 ):
     """Actualiza configuración de moneda."""
     return usuario_service.actualizar_moneda(db, current_user, datos)
+
+
+@router.put("/me/prioridades-consejos", response_model=UsuarioResponse)
+def actualizar_prioridades_consejos(
+    datos: PrioridadesConsejosRequest,
+    current_user: Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Actualiza las prioridades de consejos del usuario."""
+    current_user.prioridades_consejos = datos.prioridades if datos.prioridades else None
+    db.commit()
+    db.refresh(current_user)
+    return current_user
 
 @router.post("/me/foto")
 def upload_foto(

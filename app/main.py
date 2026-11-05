@@ -433,6 +433,62 @@ def _job_actualizar_perfiles():
         db.close()
 
 
+def _job_consejos_diarios():
+    """Tarea programada diaria: elige el consejo del día de cada usuario activo, marca vencidos y mide."""
+    from sqlalchemy import select
+    from app.models.usuario import Usuario, EstadoUsuario
+    from app.services.consejos_service import marcar_vencidos, emitir_si_corresponde, medir_pendientes
+    from app.services.inflacion_esperada_service import inflacion_esperada
+    from app.utils.fecha import hoy_argentina
+
+    db = SessionLocal()
+    lock_adquirido = False
+    try:
+        if not intentar_tomar_lock_job(db, "_job_consejos_diarios"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_consejos_diarios",
+            )
+            return
+        lock_adquirido = True
+        hoy = hoy_argentina()
+        inflacion = inflacion_esperada(db, hoy, 1)
+        marcar_vencidos(db, hoy)
+
+        usuarios_activos = db.execute(
+            select(Usuario.id).where(
+                Usuario.estado == EstadoUsuario.ACTIVO,
+                Usuario.onboarding_completo == True,
+            )
+        ).scalars().all()
+
+        cant_emitidos = 0
+        cant_medidos = 0
+
+        for uid in usuarios_activos:
+            db_sub = SessionLocal()
+            try:
+                u_sub = db_sub.get(Usuario, uid)
+                if u_sub:
+                    m = medir_pendientes(db_sub, u_sub, hoy)
+                    cant_medidos += m
+                    em = emitir_si_corresponde(db_sub, u_sub, hoy, inflacion)
+                    if em is not None:
+                        cant_emitidos += 1
+            except Exception as e:
+                logger.error(f"Error procesando consejos para usuario {uid}: {e}")
+            finally:
+                db_sub.close()
+
+        logger.info(f"Job consejos_diarios finalizado: {cant_emitidos} emitidos, {cant_medidos} medidos.")
+    except Exception:
+        logger.exception("Error en job _job_consejos_diarios")
+    finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_consejos_diarios")
+        db.close()
+
+
 async def _job_refresh_feriados():
     """Tarea programada diaria: verifica y asegura que los feriados estén persistidos y cacheados."""
     from app.services.dias_habiles_service import asegurar_feriados_cargados
@@ -823,6 +879,17 @@ async def lifespan(app: FastAPI):
             max_instances=1,
             replace_existing=True,
         )
+        scheduler.add_job(
+            registrar_ejecucion("consejos_diarios", _job_consejos_diarios),
+            "cron",
+            hour=8,
+            minute=40,
+            timezone=TZ_ARGENTINA,
+            id="consejos_diarios",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
         scheduler.start()
     else:
         logger.info("Scheduler desactivado por configuración (ENABLE_SCHEDULER=False). No se programan tareas automáticas.")
@@ -1023,7 +1090,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 
-from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin, perfil_financiero, importacion, reporte_error, memoria_comercios, facturas, patrones, salud, movimientos, uso
+from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin, perfil_financiero, importacion, reporte_error, memoria_comercios, facturas, patrones, salud, movimientos, uso, consejos
 
 app.include_router(salud.router)
 app.include_router(auth.router)
@@ -1053,6 +1120,7 @@ app.include_router(importacion.router)
 app.include_router(reporte_error.router)
 app.include_router(reporte_error.router, prefix="/api")
 app.include_router(uso.router)
+app.include_router(consejos.router)
 
 # Servir archivos estáticos de media (Ignorado por git)
 os.makedirs("media/fotos", exist_ok=True)

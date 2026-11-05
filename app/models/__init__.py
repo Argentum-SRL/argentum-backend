@@ -44,8 +44,11 @@ from app.models.uso_ia import UsoIA
 from app.models.mensaje_saliente_wpp import MensajeSalienteWpp
 from app.models.clave_idempotencia import ClaveIdempotencia
 from app.models.evento_uso import EventoUso
+from app.models.consejo import ConsejoEmitido, ConsejoSilenciado
 
 __all__ = [
+    "ConsejoEmitido",
+    "ConsejoSilenciado",
     "ClaveIdempotencia",
     "EjecucionJob",
     "UsoIA",

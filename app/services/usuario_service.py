@@ -506,12 +506,14 @@ def eliminar_usuario(db: Session, usuario: Usuario, commit: bool = True) -> dict
         db.execute(delete(DecisionPatron).where(DecisionPatron.usuario_id == usuario_id))
 
         # 2. Modelos con usuario_id
+        from app.models.consejo import ConsejoEmitido, ConsejoSilenciado
         modelos_usuario = [
             ConversacionWpp, Notificacion, RefreshToken, Suscripcion,
             Presupuesto, Meta, GrupoCuotas, 
             TransferenciaInterna, CategoriaExcluida, ConfiguracionNotificacion,
             Transaccion, ImportacionResumen, TarjetaCredito, Billetera,
-            PerfilFinanciero, HistorialPerfilFinanciero, MemoriaComercio, Factura, DecisionPatron
+            PerfilFinanciero, HistorialPerfilFinanciero, MemoriaComercio, Factura, DecisionPatron,
+            ConsejoEmitido, ConsejoSilenciado
         ]
         
         # Desvincular filas de uso_ia conservando los costos sin datos personales

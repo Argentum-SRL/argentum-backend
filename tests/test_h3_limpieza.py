@@ -81,11 +81,11 @@ def test_2_tabla_calibraciones_usuario_no_en_metadata():
 
 
 def test_3_jobs_catalogo_sin_jobs_proyeccion():
-    """(3) JOBS_CATALOGO no contiene 'proyeccion_negativa' ni 'recalcular_calibraciones_nocturno' y len == 23."""
+    """(3) JOBS_CATALOGO no contiene 'proyeccion_negativa' ni 'recalcular_calibraciones_nocturno' y len == 24."""
     job_ids = [j.job_id for j in JOBS_CATALOGO]
     assert "proyeccion_negativa" not in job_ids
     assert "recalcular_calibraciones_nocturno" not in job_ids
-    assert len(JOBS_CATALOGO) == 23
+    assert len(JOBS_CATALOGO) == 24
 
 
 def test_4_main_y_scheduler_sin_funciones_jobs_eliminados():

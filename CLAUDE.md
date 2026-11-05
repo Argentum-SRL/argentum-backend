@@ -190,3 +190,11 @@ Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_21-10.md (versi
 - **Comandos del script**: Soporta `--crear` (con contraseña por `DEMO_PASSWORD` o interactiva), `--ponerse-al-dia` (idempotente para vencimientos ocurridos) y `--borrar` (requiere confirmación explícita con el email exacto).
 - **Aislamiento y visualización**: La cuenta `testingadmin` es exclusivamente para auditoría interna y tests del motor, nunca para demostraciones ni visualización pública de producto. Todas las operaciones del usuario demo están estrictamente aisladas de otras cuentas.
 
+### Consejos (fase_i1_consejos)
+- **Tablas y modelos**: `consejos_emitidos`, `consejos_silenciados` y columna `usuarios.prioridades_consejos` (migración `e3f4a5b6c7d8`). Modelos `ConsejoEmitido` y `ConsejoSilenciado` en `app/models/consejo.py`.
+- **Reglas puras**: `app/services/consejos_reglas.py` con constantes, dataclasses inmutables y evaluación de 7 consejos de texto fijo calculados por el sistema (C1 hormiga, C2 plata quieta, C3 colchón, C4 comisiones, C5 pico, C14 sin rubro, C15 sin ingresos), ordenamiento por prioridades y elección única (máximo 1/día, 2/semana, espera 30/60 días, vence a los 7 días).
+- **Recolección solo lectura**: `app/services/consejos_datos.py::recolectar` obtiene datos con `calcular_fin_de_mes`, ciclos cerrados, transacciones y cotizaciones sin commit, flush ni red.
+- **Servicio y ciclo de vida**: `app/services/consejos_service.py` gestiona `consejo_activo`, `emitir_si_corresponde`, `responder` (sirvio, no_sirve, no_avisar), `marcar_vencidos` y `medir_pendientes` (tras 2 ciclos cerrados).
+- **Job diario**: `_job_consejos_diarios` a las 08:40 ART (`job_id="consejos_diarios"`), registrado en `JOBS_CATALOGO` y `JOBS_MANUALES_PERMITIDOS`. La emisión corre exclusivamente por el job.
+- **API**: `GET /consejos/actual` (solo lectura de lo guardado), `POST /consejos/{id}/respuesta` y `PUT /usuarios/me/prioridades-consejos` (hasta 3 prioridades de 1 a 8). `UsuarioResponse` expone `prioridades_consejos`. Ningún consejo sale por WhatsApp.
+

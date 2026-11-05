@@ -27,6 +27,7 @@ JOBS_MANUALES_PERMITIDOS: frozenset[str] = frozenset({
     "limpiar_refresh_tokens",
     "vigilar_deriva_saldos",
     "reporte_uso_semanal",
+    "consejos_diarios",
 })
 
 
@@ -190,6 +191,13 @@ JOBS_CATALOGO: list[JobCatalogoItem] = [
         job_id="actualizar_rem",
         nombre="Inflación esperada (REM del BCRA)",
         que_hace="Baja una vez por mes la inflación que esperan los analistas (REM del BCRA); si no puede, usa la última del INDEC y avisa por mail.",
+        periodo_esperado_minutos=1440,
+        puede_correr_ahora=True,
+    ),
+    JobCatalogoItem(
+        job_id="consejos_diarios",
+        nombre="Consejos del inicio",
+        que_hace="Elige el consejo del día de cada persona (tarjeta «Un dato para vos» del inicio), marca los vencidos y mide si sirvieron.",
         periodo_esperado_minutos=1440,
         puede_correr_ahora=True,
     ),
