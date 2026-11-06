@@ -6,6 +6,7 @@ Lógica de persistencia, emisión, respuesta, vencimiento y medición de consejo
 from __future__ import annotations
 
 import logging
+import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from uuid import UUID, uuid4
@@ -16,21 +17,24 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria
 from app.models.consejo import ConsejoEmitido, ConsejoSilenciado
-from app.models.meta import Meta
+from app.models.meta import Meta, EstadoMeta
+from app.models.movimiento_meta import MovimientoMeta, TipoMovimientoMeta
 from app.models.periodo_presupuesto import PeriodoPresupuesto
-from app.models.presupuesto import Presupuesto
+from app.models.presupuesto import Presupuesto, EstadoPresupuesto
 from app.models.presupuesto_categoria import PresupuestoCategoria
+from app.models.saldo_arrastrado import SaldoArrastradoTarjeta, EstadoSaldoArrastrado
 from app.models.subcategoria import Subcategoria
+from app.models.tarjeta_credito import TarjetaCredito
 from app.models.transaccion import Transaccion
 from app.models.usuario import Moneda, Usuario
 from app.services.consejos_datos import recolectar
+from app.services.consejos_extra import evaluar_candidatos
 from app.services.presupuesto_service import uso_periodo
 from app.services.consejos_reglas import (
     FilaGasto,
     FilaHistorial,
     comparar_medicion,
     elegir,
-    evaluar_todos,
     fuera_de_consejos,
 )
 from app.services.dashboard_service import get_ciclo_fechas
@@ -39,6 +43,14 @@ from app.services.inflacion_esperada_service import InflacionEsperada
 from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
 
 logger = logging.getLogger(__name__)
+
+
+def _quitar_tildes(texto: str) -> str:
+    """Convierte a minúsculas y remueve acentos/diacríticos."""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", texto)
+        if unicodedata.category(c) != "Mn"
+    ).lower()
 
 
 def consejo_activo(
@@ -60,6 +72,239 @@ def consejo_activo(
     )
 
 
+def consejo_cumplido(
+    db: Session,
+    usuario: Usuario,
+    consejo: ConsejoEmitido,
+    hoy: date,
+) -> bool:
+    """
+    Determina de forma liviana y en solo lectura si la persona ya cumplió
+    la acción sugerida por el consejo.
+    """
+    tipo = consejo.tipo
+
+    if tipo == "sin_presupuesto":
+        cat_id_raw = consejo.valores.get("categoria_id")
+        if not cat_id_raw:
+            return False
+        cat_id_target = UUID(str(cat_id_raw))
+        presus = (
+            db.query(Presupuesto)
+            .options(
+                selectinload(Presupuesto.categorias).joinedload(PresupuestoCategoria.subcategoria)
+            )
+            .filter(
+                Presupuesto.usuario_id == usuario.id,
+                Presupuesto.eliminado_en.is_(None),
+                Presupuesto.estado.in_([EstadoPresupuesto.ACTIVO, EstadoPresupuesto.PAUSADO]),
+            )
+            .all()
+        )
+        for p in presus:
+            for pc in p.categorias:
+                if pc.categoria_id == cat_id_target:
+                    return True
+                if pc.subcategoria and pc.subcategoria.categoria_id == cat_id_target:
+                    return True
+        return False
+
+    elif tipo == "colchon":
+        metas = db.query(Meta).filter(Meta.usuario_id == usuario.id).all()
+        for m in metas:
+            fc_ar = (
+                m.fecha_creacion.astimezone(TZ_ARGENTINA).date()
+                if m.fecha_creacion.tzinfo
+                else m.fecha_creacion.date()
+            )
+            if fc_ar >= consejo.fecha_emision:
+                return True
+            if m.estado == EstadoMeta.ACTIVA:
+                nom = _quitar_tildes(m.nombre)
+                if any(k in nom for k in ("imprevist", "emergenc", "colchon")):
+                    return True
+        return False
+
+    elif tipo == "extra":
+        hay_aporte = (
+            db.query(MovimientoMeta.id)
+            .join(Meta, MovimientoMeta.meta_id == Meta.id)
+            .filter(
+                Meta.usuario_id == usuario.id,
+                MovimientoMeta.tipo == TipoMovimientoMeta.APORTE,
+                MovimientoMeta.fecha >= consejo.fecha_emision,
+            )
+            .first()
+            is not None
+        )
+        if hay_aporte:
+            return True
+        metas = db.query(Meta).filter(Meta.usuario_id == usuario.id).all()
+        for m in metas:
+            fc_ar = (
+                m.fecha_creacion.astimezone(TZ_ARGENTINA).date()
+                if m.fecha_creacion.tzinfo
+                else m.fecha_creacion.date()
+            )
+            if fc_ar >= consejo.fecha_emision:
+                return True
+        return False
+
+    elif tipo == "meta":
+        partes = consejo.clave.split("/")
+        if len(partes) < 2:
+            return False
+        try:
+            meta_id = UUID(partes[1])
+        except Exception:
+            return False
+
+        meta_obj = db.query(Meta).filter(Meta.id == meta_id, Meta.usuario_id == usuario.id).first()
+        if meta_obj is None or meta_obj.estado != EstadoMeta.ACTIVA:
+            return True
+
+        if consejo.accion == "aportar_meta":
+            hay_aporte = (
+                db.query(MovimientoMeta.id)
+                .filter(
+                    MovimientoMeta.meta_id == meta_id,
+                    MovimientoMeta.tipo == TipoMovimientoMeta.APORTE,
+                    MovimientoMeta.fecha >= consejo.fecha_emision,
+                )
+                .first()
+                is not None
+            )
+            return hay_aporte
+        elif consejo.accion == "poner_fecha_meta":
+            return meta_obj.fecha_limite is not None
+        return False
+
+    elif tipo == "ritmo":
+        presu_id_raw = consejo.valores.get("presupuesto_id")
+        inicio_raw = consejo.valores.get("inicio")
+        limite_raw = consejo.valores.get("limite")
+        if not presu_id_raw or not inicio_raw or limite_raw is None:
+            return False
+        try:
+            presupuesto_id = UUID(str(presu_id_raw))
+            fecha_inicio_val = date.fromisoformat(str(inicio_raw))
+            limite_original = Decimal(str(limite_raw))
+        except Exception:
+            return False
+
+        presu = (
+            db.query(Presupuesto)
+            .filter(Presupuesto.id == presupuesto_id, Presupuesto.usuario_id == usuario.id)
+            .first()
+        )
+        if presu is None or presu.eliminado_en is not None or presu.estado != EstadoPresupuesto.ACTIVO:
+            return True
+
+        periodo = (
+            db.query(PeriodoPresupuesto)
+            .filter(
+                PeriodoPresupuesto.presupuesto_id == presupuesto_id,
+                PeriodoPresupuesto.fecha_inicio == fecha_inicio_val,
+            )
+            .first()
+        )
+        if periodo is None:
+            return True
+
+        return periodo.monto_limite > limite_original
+
+    elif tipo == "arrastre":
+        tarjeta_id_raw = consejo.valores.get("tarjeta_id")
+        moneda_val = consejo.valores.get("moneda")
+        if not tarjeta_id_raw or not moneda_val:
+            return False
+        try:
+            tarjeta_id = UUID(str(tarjeta_id_raw))
+        except Exception:
+            return False
+
+        saldos = (
+            db.query(SaldoArrastradoTarjeta)
+            .join(TarjetaCredito, SaldoArrastradoTarjeta.tarjeta_id == TarjetaCredito.id)
+            .filter(
+                TarjetaCredito.usuario_id == usuario.id,
+                SaldoArrastradoTarjeta.tarjeta_id == tarjeta_id,
+                SaldoArrastradoTarjeta.estado == EstadoSaldoArrastrado.ACTIVO,
+            )
+            .all()
+        )
+        saldos_moneda = [
+            s for s in saldos
+            if (s.moneda.value if hasattr(s.moneda, "value") else str(s.moneda)) == moneda_val
+        ]
+        suma_restante = sum((s.monto_restante for s in saldos_moneda), Decimal("0"))
+        return suma_restante == Decimal("0")
+
+    elif tipo == "sin_ingresos":
+        cond_i = condicion_ingreso(usuario.id, desde=consejo.fecha_emision, hasta=hoy, moneda=None, hoy=hoy)
+        count_ing = db.query(func.count(Transaccion.id)).filter(cond_i).scalar() or 0
+        return count_ing > 0
+
+    elif tipo == "plata_quieta":
+        inv_raw = consejo.valores.get("inversiones")
+        if inv_raw is None:
+            return False
+        inv_original = Decimal(str(inv_raw))
+        bils_inv = (
+            db.query(Billetera)
+            .filter(
+                Billetera.usuario_id == usuario.id,
+                Billetera.estado == EstadoBilletera.ACTIVA,
+                Billetera.es_inversion.is_(True),
+            )
+            .all()
+        )
+        bils_inv_ars = [
+            b for b in bils_inv
+            if (b.moneda.value if hasattr(b.moneda, "value") else str(b.moneda)) == "ARS"
+        ]
+        suma_inv = sum((Decimal(str(b.saldo_actual)) for b in bils_inv_ars), Decimal("0"))
+        return suma_inv > inv_original
+
+    return False
+
+
+def resolver_cumplidos(
+    db: Session,
+    usuario: Usuario,
+    hoy: date,
+    commit: bool = True,
+) -> int:
+    """
+    A cada consejo del usuario con respuesta None y fecha_vence > hoy
+    que esté cumplido le pone respuesta 'resuelto' y fecha_respuesta = ahora UTC.
+    """
+    activos = (
+        db.query(ConsejoEmitido)
+        .filter(
+            ConsejoEmitido.usuario_id == usuario.id,
+            ConsejoEmitido.respuesta.is_(None),
+            ConsejoEmitido.fecha_vence > hoy,
+        )
+        .all()
+    )
+    resueltos = 0
+    now_utc = datetime.now(timezone.utc)
+    for c in activos:
+        if consejo_cumplido(db, usuario, c, hoy):
+            c.respuesta = "resuelto"
+            c.fecha_respuesta = now_utc
+            resueltos += 1
+
+    if resueltos > 0:
+        if commit:
+            db.commit()
+        else:
+            db.flush()
+
+    return resueltos
+
+
 def emitir_si_corresponde(
     db: Session,
     usuario: Usuario,
@@ -68,8 +313,10 @@ def emitir_si_corresponde(
     commit: bool = True,
 ) -> ConsejoEmitido | None:
     """Evalúa las reglas y emite un consejo si corresponde."""
+    resolver_cumplidos(db, usuario, hoy, commit=commit)
+
     datos = recolectar(db, usuario, hoy, inflacion)
-    candidatos = evaluar_todos(datos)
+    candidatos = evaluar_candidatos(datos)
 
     filas_hist = [
         FilaHistorial(
@@ -398,6 +645,109 @@ def medir_pendientes(
                 if coincide:
                     cant += 1
             despues = Decimal(cant)
+
+        elif tipo == "arrastre":
+            antes = Decimal(str(consejo.valores["saldo"]))
+            tarjeta_id_val = UUID(str(consejo.valores["tarjeta_id"]))
+            moneda_val = str(consejo.valores["moneda"])
+            saldos_db = (
+                db.query(SaldoArrastradoTarjeta)
+                .join(TarjetaCredito, SaldoArrastradoTarjeta.tarjeta_id == TarjetaCredito.id)
+                .filter(
+                    TarjetaCredito.usuario_id == usuario.id,
+                    SaldoArrastradoTarjeta.tarjeta_id == tarjeta_id_val,
+                    SaldoArrastradoTarjeta.estado == EstadoSaldoArrastrado.ACTIVO,
+                )
+                .all()
+            )
+            saldos_filtrados = [
+                s for s in saldos_db
+                if (s.moneda.value if hasattr(s.moneda, "value") else str(s.moneda)) == moneda_val
+            ]
+            despues = sum((Decimal(str(s.monto_restante)) for s in saldos_filtrados), Decimal("0"))
+
+        elif tipo == "meta":
+            antes = Decimal(str(consejo.valores["ritmo"]))
+            partes = consejo.clave.split("/")
+            meta_obj = (
+                db.query(Meta)
+                .filter(Meta.id == UUID(partes[1]), Meta.usuario_id == usuario.id)
+                .first()
+            )
+            if meta_obj is None:
+                despues = Decimal("0")
+            else:
+                m_moneda = meta_obj.moneda.value if hasattr(meta_obj.moneda, "value") else str(meta_obj.moneda)
+                netos = []
+                for c_ini, c_fin in ((c1_inicio, c1_fin), (c2_inicio, c2_fin)):
+                    movs = (
+                        db.query(MovimientoMeta)
+                        .filter(
+                            MovimientoMeta.meta_id == meta_obj.id,
+                            MovimientoMeta.fecha >= c_ini,
+                            MovimientoMeta.fecha <= c_fin,
+                        )
+                        .all()
+                    )
+                    tot_c = Decimal("0")
+                    for mov in movs:
+                        mov_mon = (
+                            mov.moneda_movimiento.value
+                            if hasattr(mov.moneda_movimiento, "value")
+                            else str(mov.moneda_movimiento)
+                        )
+                        if mov_mon == m_moneda:
+                            monto_conv = Decimal(str(mov.monto))
+                        else:
+                            if not mov.cotizacion_usada or mov.cotizacion_usada <= Decimal("0"):
+                                continue
+                            cot_usada = Decimal(str(mov.cotizacion_usada))
+                            if m_moneda == "USD" and mov_mon == "ARS":
+                                monto_conv = Decimal(str(mov.monto)) / cot_usada
+                            elif m_moneda == "ARS" and mov_mon == "USD":
+                                monto_conv = Decimal(str(mov.monto)) * cot_usada
+                            else:
+                                continue
+
+                        if mov.tipo == TipoMovimientoMeta.APORTE:
+                            tot_c += monto_conv
+                        elif mov.tipo == TipoMovimientoMeta.RETIRO:
+                            tot_c -= monto_conv
+                    netos.append(tot_c)
+                despues = sum(netos, Decimal("0")) / Decimal("2")
+
+        elif tipo == "extra":
+            antes = Decimal("0")
+            f_ini = consejo.fecha_emision
+            f_fin = consejo.fecha_emision + timedelta(days=7)
+            aportes_cant = (
+                db.query(func.count(MovimientoMeta.id))
+                .join(Meta, MovimientoMeta.meta_id == Meta.id)
+                .filter(
+                    Meta.usuario_id == usuario.id,
+                    MovimientoMeta.tipo == TipoMovimientoMeta.APORTE,
+                    MovimientoMeta.fecha >= f_ini,
+                    MovimientoMeta.fecha <= f_fin,
+                )
+                .scalar()
+                or 0
+            )
+            metas_usr = db.query(Meta).filter(Meta.usuario_id == usuario.id).all()
+            metas_creadas = sum(
+                1 for m in metas_usr
+                if f_ini <= (m.fecha_creacion.astimezone(TZ_ARGENTINA).date() if m.fecha_creacion.tzinfo else m.fecha_creacion.date()) <= f_fin
+            )
+            despues = Decimal(aportes_cant + metas_creadas)
+
+        elif tipo in ("carga", "subio", "dolares"):
+            consejo.medicion = {
+                "resultado": "sin_dato",
+                "antes": "0.00",
+                "despues": "0.00",
+            }
+            consejo.fecha_medicion = hoy
+            medidos += 1
+            continue
 
         res_medicion = comparar_medicion(tipo, antes, despues)
         consejo.medicion = {

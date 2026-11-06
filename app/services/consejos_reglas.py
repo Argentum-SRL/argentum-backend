@@ -96,6 +96,8 @@ TEXTO_ACCION: dict[str, str] = {
     "cargar_ingreso": "Cargar ingreso",
     "ver_presupuestos": "Ver presupuestos",
     "armar_presupuesto": "Armar uno",
+    "aportar_meta": "Aportar a meta",
+    "poner_fecha_meta": "Ponerle fecha",
 }
 
 
@@ -224,6 +226,7 @@ class DatosConsejos:
     categorias_con_presupuesto: frozenset[str] = frozenset()
     nombres_presupuestos: frozenset[str] = frozenset()
     ids_categorias: dict[str, str] = field(default_factory=dict)
+    extra: object | None = None
 
 
 # ==============================================================================
@@ -783,12 +786,19 @@ def a_precios_de_hoy(
 # B-F. EVALUAR TODOS
 # ==============================================================================
 
+def puede_aconsejar(datos: DatosConsejos) -> bool:
+    """Verifica si los datos del usuario son suficientes y vigentes para aconsejar."""
+    if not datos.hay_datos or datos.datos_viejos:
+        return False
+    if datos.cobertura is not None and datos.cobertura < 50:
+        return False
+    return True
+
+
 def evaluar_todos(datos: DatosConsejos) -> list[Consejo]:
     """Evalúa todos los consejos candidatos a partir de los datos recolectados (pura)."""
     # 0. Sin hay_datos, con datos_viejos o con cobertura no None y < 50 -> []
-    if not datos.hay_datos or datos.datos_viejos:
-        return []
-    if datos.cobertura is not None and datos.cobertura < 50:
+    if not puede_aconsejar(datos):
         return []
 
     candidatos: list[Consejo] = []
@@ -1064,11 +1074,13 @@ def elegir(
 
 def comparar_medicion(tipo: str, antes: Decimal, despues: Decimal) -> str:
     """Evalúa si el consejo mejoró la situación o si quedó igual."""
+    if tipo == "arrastre":
+        return "mejoro" if despues < antes else "igual"
     if tipo in ("hormiga", "comisiones", "sin_rubro"):
         return "mejoro" if despues < antes else "igual"
     if tipo in ("pico", "ritmo"):
         return "mejoro" if despues <= antes else "igual"
-    if tipo in ("plata_quieta", "colchon", "sin_ingresos", "sin_presupuesto"):
+    if tipo in ("plata_quieta", "colchon", "sin_ingresos", "sin_presupuesto", "meta", "extra"):
         return "mejoro" if despues > antes else "igual"
     return "igual"
 

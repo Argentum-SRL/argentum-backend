@@ -18,8 +18,14 @@ from app.schemas.consejo import (
     RespuestaConsejoRequest,
     RespuestaConsejoResponse,
 )
+from app.services import consejos_service
 from app.services.consejos_reglas import TEXTO_ACCION
-from app.services.consejos_service import consejo_activo, responder
+from app.services.consejos_service import (
+    consejo_activo,
+    consejo_cumplido,
+    resolver_cumplidos,
+    responder,
+)
 
 router = APIRouter(prefix="/consejos", tags=["consejos"])
 
@@ -30,8 +36,13 @@ def get_consejo_actual(
     current_user: Usuario = Depends(get_current_user),
 ):
     """Retorna el consejo activo guardado del usuario, sin recalcular."""
-    activo = consejo_activo(db, current_user.id)
+    hoy = consejos_service.hoy_argentina()
+    activo = consejo_activo(db, current_user.id, hoy=hoy)
     if not activo:
+        return {"consejo": None}
+
+    if consejo_cumplido(db, current_user, activo, hoy):
+        resolver_cumplidos(db, current_user, hoy, commit=True)
         return {"consejo": None}
 
     accion_texto = TEXTO_ACCION.get(activo.accion) if activo.accion else None

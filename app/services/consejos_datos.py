@@ -18,6 +18,7 @@ from app.models.meta import Meta, EstadoMeta
 from app.models.transaccion import Transaccion
 from app.models.usuario import Usuario
 from app.services import gasto_filas, presupuesto_sugerencias
+from app.services.consejos_extra_datos import recolectar_extra
 from app.services.consejos_reglas import DatosConsejos
 from app.services.definiciones_service import condicion_ingreso
 from app.services.dolar_service import obtener_cotizacion_por_fecha
@@ -165,6 +166,7 @@ def recolectar(
         presupuesto_sugerencias.categorias_con_presupuesto(db, usuario.id)
     )
     ids_categorias = presupuesto_sugerencias.ids_categorias_egreso(db)
+    extra = recolectar_extra(db, usuario, hoy, cerrados, ciclo_actual)
 
     return DatosConsejos(
         hoy=hoy,
@@ -192,4 +194,5 @@ def recolectar(
         categorias_con_presupuesto=categorias_con_presupuesto,
         nombres_presupuestos=nombres_presupuestos,
         ids_categorias=ids_categorias,
+        extra=extra,
     )

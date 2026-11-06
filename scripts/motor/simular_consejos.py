@@ -25,6 +25,7 @@ from app.services.consejos_reglas import (
     a_precios_de_hoy,
     fuera_de_consejos,
 )
+from app.services.consejos_extra import evaluar_carga, evaluar_subio
 from app.services.definiciones_service import ContextoDefiniciones, es_gasto, es_ingreso
 from app.utils.finanzas import mediana
 from tests.motor.personas import generar_todas_las_personas
@@ -188,6 +189,82 @@ def simular_para_persona(persona: Any, hoy: date = FECHA_FIN_HISTORIA) -> dict[s
                     {"tipo": c7.tipo, "moneda": c7.moneda, "texto": c7.texto, "valores": c7.valores}
                 )
 
+    # C8: carga (si la persona tiene cuotas)
+    tiene_cuotas = any(getattr(tx, "es_cuota_hija", False) for tx in persona.movimientos)
+    if tiene_cuotas and cerrados and ciclo_actual:
+        for mon_c8 in ("ARS", "USD"):
+            cuotas_hist = []
+            for c in cerrados[:6]:
+                tot_c = sum(
+                    (Decimal(str(tx.monto))
+                     for tx in persona.movimientos
+                     if getattr(tx, "es_cuota_hija", False)
+                     and c[0] <= tx.fecha <= c[1]
+                     and (tx.moneda.value if hasattr(tx.moneda, "value") else str(tx.moneda)) == mon_c8),
+                    Decimal("0"),
+                )
+                cuotas_hist.append(tot_c)
+
+            futuros = [c for c in ciclos if c[0] > ciclo_actual[1]]
+            if len(futuros) >= 1:
+                c1_fut = futuros[0]
+                c2_fut = futuros[1] if len(futuros) >= 2 else (c1_fut[1] + timedelta(days=1), c1_fut[1] + timedelta(days=30))
+                prox = sum(
+                    (Decimal(str(tx.monto))
+                     for tx in persona.movimientos
+                     if getattr(tx, "es_cuota_hija", False)
+                     and c1_fut[0] <= tx.fecha <= c1_fut[1]
+                     and (tx.moneda.value if hasattr(tx.moneda, "value") else str(tx.moneda)) == mon_c8),
+                    Decimal("0"),
+                )
+                sig = sum(
+                    (Decimal(str(tx.monto))
+                     for tx in persona.movimientos
+                     if getattr(tx, "es_cuota_hija", False)
+                     and c2_fut[0] <= tx.fecha <= c2_fut[1]
+                     and (tx.moneda.value if hasattr(tx.moneda, "value") else str(tx.moneda)) == mon_c8),
+                    Decimal("0"),
+                )
+
+                ingresos_hist = []
+                for c in cerrados[:3]:
+                    tot_i = sum(
+                        (Decimal(str(tx.monto))
+                         for tx in persona.movimientos
+                         if es_ingreso(tx, ctx)
+                         and c[0] <= tx.fecha <= c[1]
+                         and (tx.moneda.value if hasattr(tx.moneda, "value") else str(tx.moneda)) == mon_c8),
+                        Decimal("0"),
+                    )
+                    if tot_i > Decimal("0"):
+                        ingresos_hist.append(tot_i)
+                ing_hab = mediana(ingresos_hist) if ingresos_hist else None
+
+                c8 = evaluar_carga(cuotas_hist, prox, sig, ing_hab, mon_c8, c1_fut[0])
+                if c8:
+                    resultados["consejos"].append(
+                        {"tipo": c8.tipo, "moneda": c8.moneda, "texto": c8.texto, "valores": c8.valores}
+                    )
+
+    # C11: subió (solo ARS según especificación)
+    c11_list = evaluar_subio(filas, IPC_MAP, hoy)
+    for c11 in c11_list:
+        resultados["consejos"].append(
+            {
+                "tipo": c11.tipo,
+                "moneda": c11.moneda,
+                "texto": c11.texto,
+                "valores": c11.valores,
+                "pagos": c11.valores.get("pagos"),
+                "mes_antes": c11.valores.get("mes_antes"),
+                "mes_ahora": c11.valores.get("mes_ahora"),
+                "idx_antes": c11.valores.get("idx_antes"),
+                "idx_ahora": c11.valores.get("idx_ahora"),
+                "infl_estimada": c11.valores.get("infl_estimada"),
+                "infl": c11.valores.get("infl"),
+            }
+        )
+
     return resultados
 
 
@@ -206,7 +283,7 @@ if __name__ == "__main__":
     for r in resultados:
         print(f"=== Persona: {r['persona']} ({r['moneda_principal']}) ===")
         if not r["consejos"]:
-            print("  (Sin consejos emitibles para C1, C4, C5, C14, C15)")
+            print("  (Sin consejos emitibles)")
         for c in r["consejos"]:
             print(f"  Tipo: {c['tipo']} [{c['moneda']}]")
             print(f"  Texto: {c['texto']}")
@@ -214,4 +291,6 @@ if __name__ == "__main__":
             if c["tipo"] == "pico":
                 print(f"    Totales por cerrado (ajustados): {c.get('totales_cerrados')}")
                 print(f"    Total ciclo en curso: {c.get('total_actual')}")
+            elif c["tipo"] == "subio":
+                print(f"    4 pagos: {c.get('pagos')}, mes_antes: {c.get('mes_antes')} (idx: {c.get('idx_antes')}), mes_ahora: {c.get('mes_ahora')} (idx: {c.get('idx_ahora')}), infl_estimada: {c.get('infl_estimada')}, infl: {c.get('infl')}")
         print()
