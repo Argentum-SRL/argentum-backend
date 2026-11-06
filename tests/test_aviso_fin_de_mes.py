@@ -837,7 +837,8 @@ def test_job_consejos_diarios_aviso_fin_de_mes(db: Session, monkeypatch):
     monkeypatch.setattr("app.services.aviso_fin_de_mes_service.avisar_fin_de_mes", mock_avisar)
 
     from app.main import _job_consejos_diarios
-    _job_consejos_diarios()
+    with pytest.raises(RuntimeError, match="Consejos: 2 de 4 con error"):
+        _job_consejos_diarios()
 
     # Se llama para los ACTIVOS con onboarding completo y no para el INACTIVO ni el de onboarding incompleto
     assert u_act1.id in usuarios_avisar

@@ -169,7 +169,7 @@ JOBS_CATALOGO: list[JobCatalogoItem] = [
     JobCatalogoItem(
         job_id="vigilar_tareas",
         nombre="Vigilancia de tareas automáticas",
-        que_hace="Revisa el estado de todas las tareas y alerta por email si alguna falla o se atrasa.",
+        que_hace="Revisa el estado de todas las tareas y alerta por email si alguna falla o se atrasa; además avisa cuando el gasto del mes en OpenAI o en WhatsApp llega al 50%, 80% o 100% del tope.",
         periodo_esperado_minutos=60,
         puede_correr_ahora=False,
     ),

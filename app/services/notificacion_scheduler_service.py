@@ -160,6 +160,7 @@ def _job_notificaciones_cuotas(db_session_factory):
 
     except Exception:
         logger.exception("Error en _job_notificaciones_cuotas")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_notificaciones_cuotas")
@@ -203,6 +204,9 @@ def _job_notificaciones_presupuestos(db_session_factory):
             .all()
         )
 
+        total_presupuestos = len(presupuestos)
+        fallados = 0
+
         for pres in presupuestos:
             try:
                 periodo_activo = obtener_periodo_activo(db, pres, hoy=hoy)
@@ -218,14 +222,18 @@ def _job_notificaciones_presupuestos(db_session_factory):
                     enviar_whatsapp_ya=False,
                 )
             except Exception as e:
+                fallados += 1
                 logger.warning("No se pudo evaluar alertas del presupuesto %s: %s", pres.id, e)
                 db.rollback()
                 continue
 
         logger.info("Job notificaciones_presupuestos completado")
+        if fallados > 0:
+            raise RuntimeError(f"Presupuestos: {fallados} de {total_presupuestos} con error")
 
     except Exception:
         logger.exception("Error en _job_notificaciones_presupuestos")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_notificaciones_presupuestos")
@@ -316,6 +324,7 @@ def _job_notificaciones_suscripciones(db_session_factory):
 
     except Exception:
         logger.exception("Error en _job_notificaciones_suscripciones")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_notificaciones_suscripciones")
@@ -388,6 +397,7 @@ def _job_notificaciones_inactividad(db_session_factory):
 
     except Exception:
         logger.exception("Error en _job_notificaciones_inactividad")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_notificaciones_inactividad")
@@ -544,6 +554,7 @@ def _job_entrega_whatsapp_batched(db_session_factory):
             )
         except Exception as alerta_err:
             logger.error("Error enviando alerta para _job_entrega_whatsapp_batched: %s", alerta_err)
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_entrega_whatsapp_batched")
@@ -607,6 +618,9 @@ def _job_resumen_cierre_ciclo(db_session_factory):
             )
             .all()
         )
+
+        total_usuarios = len(usuarios)
+        fallados = 0
 
         for usuario in usuarios:
             try:
@@ -748,13 +762,17 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                     )
 
             except Exception:
+                fallados += 1
                 logger.exception("Error generando resumen de ciclo para usuario %s", usuario.id)
                 continue
 
         logger.info("Job resumen_cierre_ciclo completado")
+        if fallados > 0:
+            raise RuntimeError(f"Resumen de ciclo: {fallados} de {total_usuarios} con error")
 
     except Exception:
         logger.exception("Error en _job_resumen_cierre_ciclo")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_resumen_cierre_ciclo")
@@ -789,6 +807,9 @@ def _job_resumen_semanal(db_session_factory):
         usuarios = db.execute(
             select(Usuario).where(Usuario.estado == EstadoUsuario.ACTIVO)
         ).scalars().all()
+
+        total_usuarios = len(usuarios)
+        fallados = 0
 
         for usuario in usuarios:
             try:
@@ -908,15 +929,19 @@ def _job_resumen_semanal(db_session_factory):
                 )
 
             except Exception as e:
+                fallados += 1
                 logger.error(f"[resumen_semanal] Error procesando usuario {usuario.id}: {e}")
                 continue
 
         db.commit()
         logger.info("Job resumen_semanal completado")
+        if fallados > 0:
+            raise RuntimeError(f"Resumen semanal: {fallados} de {total_usuarios} con error")
 
     except Exception as e:
         logger.error(f"[resumen_semanal] Error general: {e}")
         db.rollback()
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_resumen_semanal")

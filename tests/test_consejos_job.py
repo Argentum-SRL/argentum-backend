@@ -192,7 +192,8 @@ def test_job_consejos_diarios(db: Session, monkeypatch):
     monkeypatch.setattr("app.services.consejos_service.emitir_si_corresponde", mock_emitir)
     monkeypatch.setattr("app.services.consejos_service.medir_pendientes", mock_medir)
 
-    _job_consejos_diarios()
+    with pytest.raises(RuntimeError, match="Consejos: 1 de 3 con error"):
+        _job_consejos_diarios()
 
     assert llamadas_inflacion == 1
     # u2 y u3 no se procesaron; u4 lanzó excepción; u1 y u5 se procesaron exitosamente

@@ -85,6 +85,7 @@ def _job_notificaciones_facturas(db_session_factory):
         logger.info("Job notificaciones_facturas completado")
     except Exception:
         logger.exception("Error en _job_notificaciones_facturas")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_notificaciones_facturas")

@@ -29,6 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from app.core.config import settings
+from app.core.ip_cliente import ip_cliente
 from app.core.limiter import limiter
 from app.services.rate_limit_service import verificar_rate_limit
 
@@ -139,7 +140,7 @@ def register(request: Request, user_in: RegisterRequest, background_tasks: Backg
     Registra un usuario con email/password.
     No devuelve tokens: primero debe verificar email y luego teléfono.
     """
-    ip_origen = request.client.host if request.client else None
+    ip_origen = ip_cliente(request)
     if not user_in.turnstile_token or not verificar_turnstile_token(user_in.turnstile_token, ip_origen):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

@@ -173,6 +173,7 @@ def _job_reintentar_inmediatas(db_session_factory: Callable[[], Session] | None 
 
     except Exception as e:
         logger.exception("Error en _job_reintentar_inmediatas", error=str(e))
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_reintentar_inmediatas")

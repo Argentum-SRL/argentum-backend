@@ -260,6 +260,7 @@ def _job_limpiar_tokens():
             logger.info("Registros de claves_idempotencia antiguos eliminados: %s", claves_eliminadas)
     except Exception:
         logger.exception("Error en job limpiar_tokens")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_limpiar_tokens")
@@ -298,6 +299,7 @@ def _job_vencimientos_tarjetas():
             )
         except Exception as alerta_err:
             logger.error("Error enviando alerta para job vencimientos_tarjetas: %s", alerta_err)
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_vencimientos_tarjetas")
@@ -320,6 +322,7 @@ def _job_renovar_presupuestos():
         logger.info("Job de renovación de presupuestos ejecutado.")
     except Exception:
         logger.exception("Error en job renovar_presupuestos")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_renovar_presupuestos")
@@ -342,6 +345,7 @@ def _job_cobros_suscripciones():
         logger.info("Job de cobros de suscripciones ejecutado.")
     except Exception:
         logger.exception("Error en job cobros_suscripciones")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_cobros_suscripciones")
@@ -378,6 +382,7 @@ def job_entrega_whatsapp_batched():
             )
         except Exception as alerta_err:
             logger.error("Error enviando alerta para job entrega_whatsapp_batched: %s", alerta_err)
+        raise
 
 
 def job_resumen_cierre_ciclo():
@@ -412,6 +417,8 @@ def _job_actualizar_perfiles():
             select(Usuario.id).where(Usuario.estado == EstadoUsuario.ACTIVO)
         ).scalars().all()
 
+        total_usuarios = len(usuarios_activos)
+        fallados = 0
         cant_actualizados = 0
 
         for uid in usuarios_activos:
@@ -420,13 +427,17 @@ def _job_actualizar_perfiles():
                 calcular_y_persistir_perfil(db_sub, uid)
                 cant_actualizados += 1
             except Exception as e:
+                fallados += 1
                 logger.error(f"Error actualizando perfil {uid}: {e}")
             finally:
                 db_sub.close()
 
         logger.info(f"Se actualizaron {cant_actualizados} perfiles financieros en el job programado.")
+        if fallados > 0:
+            raise RuntimeError(f"Perfiles: {fallados} de {total_usuarios} con error")
     except Exception:
         logger.exception("Error en job _job_actualizar_perfiles")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_actualizar_perfiles")
@@ -462,11 +473,14 @@ def _job_consejos_diarios():
             )
         ).scalars().all()
 
+        total_usuarios = len(usuarios_activos)
+        fallados = 0
         cant_emitidos = 0
         cant_medidos = 0
         cant_avisos = 0
 
         for uid in usuarios_activos:
+            error_persona = False
             db_sub = SessionLocal()
             try:
                 u_sub = db_sub.get(Usuario, uid)
@@ -478,6 +492,7 @@ def _job_consejos_diarios():
                         if em is not None:
                             cant_emitidos += 1
                     except Exception as e:
+                        error_persona = True
                         logger.error(f"Error procesando consejos para usuario {uid}: {e}")
                         db_sub.rollback()
 
@@ -485,14 +500,20 @@ def _job_consejos_diarios():
                         from app.services.aviso_fin_de_mes_service import avisar_fin_de_mes
                         cant_avisos += avisar_fin_de_mes(db_sub, u_sub, hoy)
                     except Exception as e_aviso:
+                        error_persona = True
                         logger.error(f"Error procesando aviso fin de mes para usuario {uid}: {e_aviso}")
                         db_sub.rollback()
             finally:
                 db_sub.close()
+            if error_persona:
+                fallados += 1
 
         logger.info(f"Job consejos_diarios finalizado: {cant_emitidos} emitidos, {cant_medidos} medidos, {cant_avisos} avisos de fin de mes.")
+        if fallados > 0:
+            raise RuntimeError(f"Consejos: {fallados} de {total_usuarios} con error")
     except Exception:
         logger.exception("Error en job _job_consejos_diarios")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_consejos_diarios")
@@ -515,6 +536,7 @@ async def _job_refresh_feriados():
         await asegurar_feriados_cargados()
     except Exception:
         logger.exception("Error en job _job_refresh_feriados")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_refresh_feriados")
@@ -538,6 +560,7 @@ def _job_guardar_cotizaciones_diarias():
         logger.info("Job guardar_cotizaciones_diarias ejecutado exitosamente (%d guardadas).", len(guardadas))
     except Exception:
         logger.exception("Error en job _job_guardar_cotizaciones_diarias")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_guardar_cotizaciones_diarias")
@@ -564,6 +587,7 @@ def _job_actualizar_rem():
         logger.info(f"Job actualizar_rem: {resultado_rem}")
     except Exception:
         logger.exception("Error en job _job_actualizar_rem")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_actualizar_rem")
@@ -592,8 +616,14 @@ def _job_actualizar_ipc():
             logger.info("Job actualizar_ipc ejecutado exitosamente (mes: %s, valor: %s).", res.fecha_dato, res.valor_mensual)
         else:
             logger.warning("Job actualizar_ipc completado: sin datos de IPC disponibles.")
+
+        if res is None:
+            raise RuntimeError("IPC: no hay datos en la base ni respuesta de datos.gob.ar")
+        if res.es_estimado is True:
+            raise RuntimeError(f"IPC: datos.gob.ar no respondió; queda el dato de {res.fecha_dato}")
     except Exception:
         logger.exception("Error en job _job_actualizar_ipc")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_actualizar_ipc")
@@ -626,6 +656,7 @@ def _job_actualizar_tasas():
             )
         except Exception as alerta_err:
             logger.error("Error enviando alerta para job actualizar_tasas: %s", alerta_err)
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_actualizar_tasas")
