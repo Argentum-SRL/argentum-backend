@@ -198,3 +198,11 @@ Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_21-10.md (versi
 - **Job diario**: `_job_consejos_diarios` a las 08:40 ART (`job_id="consejos_diarios"`), registrado en `JOBS_CATALOGO` y `JOBS_MANUALES_PERMITIDOS`. La emisión corre exclusivamente por el job.
 - **API**: `GET /consejos/actual` (solo lectura de lo guardado), `POST /consejos/{id}/respuesta` y `PUT /usuarios/me/prioridades-consejos` (hasta 3 prioridades de 1 a 8). `UsuarioResponse` expone `prioridades_consejos`. Ningún consejo sale por WhatsApp.
 
+### Presupuestos inteligentes (fase_i2a_presupuestos)
+- **Funciones puras y constantes (`app/services/presupuesto_sugerencias_reglas.py`)**: `SUBCATEGORIAS_FIJAS` (18 subcategorías fijas no proyectables), `proyectar_ritmo` (proyección lineal a fin de período con corte a partir del 30% transcurrido y sólo si no superó el límite), `linea_ritmo` y `sugerir_limite` (escalón mensual de aumento de pago único o superación en los últimos 3 períodos consecutivos).
+- **Lecturas compartidas (`app/services/gasto_filas.py`)**: `filas_gasto`, `ciclos_cerrados` e `indices_ipc` extraídas para uso común entre consejos y presupuestos sin commit, flush ni llamadas de red.
+- **Consultas de ritmo y sugerencia (`app/services/presupuesto_sugerencias.py`)**: `ritmo_presupuesto`, `sugerencia_limite`, `ritmos_activos`, `categorias_con_presupuesto`, `ids_categorias_egreso` y `rubro_sin_presupuesto`.
+- **Integración con motor de consejos (`app/services/consejos_reglas.py`)**: Consejos C6 (`ritmo`) y C7 (`sin_presupuesto`) incorporados a `evaluar_todos` y `medir_pendientes`, junto con `elegir_rubro_sin_presupuesto` (mediana de 3 ciclos >= 5% del gasto típico).
+- **Actualización de presupuestos (`app/services/presupuesto_service.py`)**: `calcular_gasto_en_periodo` soporta `condicion_extra`, extracción de `condiciones_categorias` y `contar_compras_en_periodo`. En `renovar_presupuestos` se eliminó la notificación obsoleta de sugerencia.
+- **API (`app/routers/presupuestos.py`, `app/schemas/presupuesto.py`)**: `PresupuestoResponse` incluye `ritmo_texto` y `sugerencia_limite`. Endpoint `GET /presupuestos/sugerencia-rubro` para detectar rubros frecuentes sin presupuesto asignado.
+

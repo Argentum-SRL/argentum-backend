@@ -156,6 +156,25 @@ class PeriodoPresupuestoResponse(BaseModel):
         return data
 
 
+class SugerenciaLimiteResponse(BaseModel):
+    texto: str
+    monto: DecimalJSON
+    boton: str
+
+
+class SugerenciaRubro(BaseModel):
+    categoria_id: UUID
+    categoria: str
+    moneda: str
+    monto: DecimalJSON
+    titulo: str
+    texto: str
+
+
+class SugerenciaRubroResponse(BaseModel):
+    sugerencia: Optional[SugerenciaRubro] = None
+
+
 class PresupuestoResponse(BaseModel):
     id: UUID
     usuario_id: UUID
@@ -169,6 +188,8 @@ class PresupuestoResponse(BaseModel):
     categorias: List[PresupuestoCategoriaResponse]
     periodo_actual: Optional[PeriodoPresupuestoResponse] = None
     proxima_renovacion: Optional[date] = None
+    ritmo_texto: Optional[str] = None
+    sugerencia_limite: Optional[SugerenciaLimiteResponse] = None
 
 
 class RestaurarPresupuestoRequest(BaseModel):

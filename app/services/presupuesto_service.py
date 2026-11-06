@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import calendar
 from typing import Optional, List
-from sqlalchemy import select, func, or_, desc
+from sqlalchemy import select, func, or_, desc, and_
 from sqlalchemy.orm import Session, joinedload, selectinload
 from fastapi import HTTPException
 
@@ -22,6 +22,7 @@ from app.core.politica_notificaciones import puede_salir_por_whatsapp
 from app.services.definiciones_service import condicion_gasto
 from app.services.whatsapp_service import enviar_whatsapp_template, enviar_whatsapp
 from app.utils.fecha import hoy_argentina
+from app.services.presupuesto_sugerencias_reglas import SUBCATEGORIAS_FIJAS
 
 logger = logging.getLogger(__name__)
 
@@ -133,22 +134,15 @@ class GastoPresupuesto(Decimal):
         return instance
 
 
-def calcular_gasto_en_periodo(
-    db: Session, 
-    usuario_id: UUID, 
-    categorias_input: List, 
-    fecha_inicio: date, 
-    fecha_fin: date,
-    moneda: Optional[Moneda | str] = None,
-    usuario: Optional[Usuario] = None,
-    hoy: Optional[date] = None
-) -> GastoPresupuesto:
-    # categorías_input puede ser PresupuestoCategoriaInput (schema) o PresupuestoCategoria (modelo)
-    # Regla: Si tiene subcategoria_id especificado, aplica solo a esa subcategoría.
-    # Si tiene categoria_id pero no subcategoria_id, aplica a toda la categoría padre.
+def condiciones_categorias(categorias_input: List) -> list:
+    """
+    Construye las condiciones SQLAlchemy para filtrar transacciones por categoría o subcategoría.
+    Si tiene subcategoria_id especificado, aplica solo a esa subcategoría.
+    Si tiene categoria_id pero no subcategoria_id, aplica a toda la categoría padre.
+    """
     cat_ids = [c.categoria_id for c in categorias_input if c.categoria_id and not getattr(c, 'subcategoria_id', None)]
     subcat_ids = [c.subcategoria_id for c in categorias_input if getattr(c, 'subcategoria_id', None)]
-    
+
     conditions = []
     if cat_ids:
         conditions.append(or_(
@@ -159,7 +153,21 @@ def calcular_gasto_en_periodo(
         ))
     if subcat_ids:
         conditions.append(Transaccion.subcategoria_id.in_(subcat_ids))
-        
+    return conditions
+
+
+def calcular_gasto_en_periodo(
+    db: Session, 
+    usuario_id: UUID, 
+    categorias_input: List, 
+    fecha_inicio: date, 
+    fecha_fin: date,
+    moneda: Optional[Moneda | str] = None,
+    usuario: Optional[Usuario] = None,
+    hoy: Optional[date] = None,
+    condicion_extra=None,
+) -> GastoPresupuesto:
+    conditions = condiciones_categorias(categorias_input)
     if not conditions:
         return GastoPresupuesto(Decimal("0"))
 
@@ -172,15 +180,16 @@ def calcular_gasto_en_periodo(
     # 1. Consultar transacciones en TODAS las monedas en una única consulta
     ref_hoy = hoy or hoy_argentina()
     cond = condicion_gasto(usuario_id, desde=fecha_inicio, hasta=fecha_fin, hoy=ref_hoy)
+    where_clauses = [cond, or_(*conditions)]
+    if condicion_extra is not None:
+        where_clauses.append(condicion_extra)
+
     query = select(
         Transaccion.monto,
         Transaccion.moneda,
         Transaccion.fecha,
         Transaccion.cotizacion_aplicada
-    ).where(
-        cond,
-        or_(*conditions)
-    )
+    ).where(*where_clauses)
     
     rows = db.execute(query).all()
     
@@ -254,6 +263,73 @@ def calcular_gasto_en_periodo(
         sin_cotizacion=monto_sin_cotizacion,
         moneda_sin_cotizacion=moneda_sin_cotizacion
     )
+
+
+def contar_compras_en_periodo(
+    db: Session,
+    usuario_id: UUID,
+    categorias_input: List,
+    fecha_inicio: date,
+    fecha_fin: date,
+    hoy: Optional[date] = None,
+) -> int:
+    """
+    Cuenta las compras confirmadas de egreso del usuario en el período que cumplen
+    con las condiciones de categoría del presupuesto, con monto > 0 y reintegro nulo.
+    """
+    conditions = condiciones_categorias(categorias_input)
+    if not conditions:
+        return 0
+
+    ref_hoy = hoy or hoy_argentina()
+    cond = condicion_gasto(usuario_id, desde=fecha_inicio, hasta=fecha_fin, hoy=ref_hoy)
+    query = select(func.count(Transaccion.id)).where(
+        cond,
+        or_(*conditions),
+        Transaccion.monto > Decimal("0"),
+        Transaccion.reintegro_de_id.is_(None),
+    )
+    return db.execute(query).scalar() or 0
+
+
+def condicion_fijo():
+    """Expresión SQLAlchemy que identifica gastos fijos (cuotas, suscripciones, subcategorías fijas)."""
+    cond_subcats = or_(*[
+        and_(Categoria.nombre == cat, Subcategoria.nombre == sub)
+        for cat, sub in SUBCATEGORIAS_FIJAS
+    ])
+    return or_(
+        Transaccion.es_cuota_hija.is_(True),
+        Transaccion.suscripcion_id.is_not(None),
+        Transaccion.subcategoria_id.in_(
+            select(Subcategoria.id)
+            .join(Categoria, Subcategoria.categoria_id == Categoria.id)
+            .where(cond_subcats)
+        ),
+    )
+
+
+def gasto_fijo_en_periodo(
+    db: Session,
+    presupuesto: Presupuesto,
+    fecha_inicio: date,
+    fecha_fin: date,
+    hoy: Optional[date] = None,
+    usuario: Optional[Usuario] = None,
+) -> GastoPresupuesto:
+    """Calcula el gasto fijo del presupuesto en el período especificado."""
+    return calcular_gasto_en_periodo(
+        db,
+        presupuesto.usuario_id,
+        presupuesto.categorias,
+        fecha_inicio,
+        fecha_fin,
+        moneda=presupuesto.moneda,
+        usuario=usuario,
+        hoy=hoy,
+        condicion_extra=condicion_fijo(),
+    )
+
 
 @dataclass(frozen=True)
 class UsoPeriodo:
@@ -922,39 +998,8 @@ def renovar_presupuestos(db: Session):
             ultimo_periodo = max(presu.periodos, key=lambda p: p.fecha_fin) if presu.periodos else None
             
             if ultimo_periodo and ultimo_periodo.fecha_fin < hoy:
-                ultimos_3 = db.execute(
-                    select(PeriodoPresupuesto)
-                    .where(PeriodoPresupuesto.presupuesto_id == presu.id)
-                    .order_by(desc(PeriodoPresupuesto.fecha_fin))
-                    .limit(3)
-                ).scalars().all()
-                
-                if len(ultimos_3) == 3:
-                    usos_3 = [
-                        uso_periodo(db, presu, p, hoy=hoy, usuario=presu.usuario)
-                        for p in ultimos_3
-                    ]
-                    if all(u.supera_limite for u in usos_3):
-                        promedio = sum((u.calculado for u in usos_3), Decimal("0")) / Decimal("3")
-                        from app.services.notificacion_service import crear_notificacion
-                        mensaje_sug = f"Superaste el límite del presupuesto '{presu.nombre}' por 3 períodos seguidos. El gasto promedio real fue de {formatear_monto(promedio, presu.moneda)}. Considerá ajustar el límite."
-                        crear_notificacion(
-                            db=db,
-                            usuario_id=presu.usuario_id,
-                            tipo=TipoNotificacion.PRESUPUESTO_LIMITE,
-                            nivel=NivelNotificacion.SOFT,
-                            mensaje=mensaje_sug,
-                            entidad_tipo="presupuesto",
-                            entidad_id=presu.id,
-                            deep_link="/app/presupuestos",
-                            canal_web=True,
-                            canal_whatsapp=False,
-                            canal_email=False,
-                            grupo_agrupacion_override=f"presupuestos/sugerencia/{presu.id}/{hoy.strftime('%Y%m%d')}"
-                        )
-
                 asegurar_periodo(db, presu, hoy, usuario=presu.usuario)
-    
+
     db.commit()
 
 

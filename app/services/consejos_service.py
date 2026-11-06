@@ -11,16 +11,20 @@ from decimal import Decimal, ROUND_HALF_UP
 from uuid import UUID, uuid4
 
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria
 from app.models.consejo import ConsejoEmitido, ConsejoSilenciado
 from app.models.meta import Meta
+from app.models.periodo_presupuesto import PeriodoPresupuesto
+from app.models.presupuesto import Presupuesto
+from app.models.presupuesto_categoria import PresupuestoCategoria
 from app.models.subcategoria import Subcategoria
 from app.models.transaccion import Transaccion
 from app.models.usuario import Moneda, Usuario
 from app.services.consejos_datos import recolectar
+from app.services.presupuesto_service import uso_periodo
 from app.services.consejos_reglas import (
     FilaGasto,
     FilaHistorial,
@@ -335,6 +339,65 @@ def medir_pendientes(
             cond_i = condicion_ingreso(usuario.id, desde=consejo.fecha_emision, hasta=c2_fin, moneda=None, hoy=hoy)
             ing_count = db.query(func.count(Transaccion.id)).filter(cond_i).scalar() or 0
             despues = Decimal(ing_count)
+
+        elif tipo == "ritmo":
+            antes = Decimal(str(consejo.valores["limite"]))
+            presupuesto_id_val = UUID(str(consejo.valores["presupuesto_id"]))
+            fecha_inicio_val = date.fromisoformat(str(consejo.valores["inicio"]))
+            periodo = (
+                db.query(PeriodoPresupuesto)
+                .filter(
+                    PeriodoPresupuesto.presupuesto_id == presupuesto_id_val,
+                    PeriodoPresupuesto.fecha_inicio == fecha_inicio_val,
+                )
+                .first()
+            )
+            presupuesto = db.get(Presupuesto, presupuesto_id_val)
+            if not periodo or not presupuesto:
+                consejo.medicion = {
+                    "resultado": "sin_dato",
+                    "antes": str(antes.quantize(Decimal("0.01"))),
+                    "despues": "0.00",
+                }
+                consejo.fecha_medicion = hoy
+                medidos += 1
+                continue
+            despues = uso_periodo(db, presupuesto, periodo, hoy=hoy, usuario=usuario).calculado
+
+        elif tipo == "sin_presupuesto":
+            antes = Decimal("0")
+            cat_id_target = UUID(str(consejo.valores["categoria_id"]))
+            presus = (
+                db.query(Presupuesto)
+                .options(
+                    selectinload(Presupuesto.categorias).joinedload(PresupuestoCategoria.subcategoria)
+                )
+                .filter(
+                    Presupuesto.usuario_id == usuario.id,
+                    Presupuesto.eliminado_en.is_(None),
+                )
+                .all()
+            )
+            cant = 0
+            for p in presus:
+                p_fecha = (
+                    p.fecha_creacion.astimezone(TZ_ARGENTINA).date()
+                    if p.fecha_creacion.tzinfo
+                    else p.fecha_creacion.date()
+                )
+                if p_fecha < consejo.fecha_emision:
+                    continue
+                coincide = False
+                for pc in p.categorias:
+                    if pc.categoria_id == cat_id_target:
+                        coincide = True
+                        break
+                    if pc.subcategoria and pc.subcategoria.categoria_id == cat_id_target:
+                        coincide = True
+                        break
+                if coincide:
+                    cant += 1
+            despues = Decimal(cant)
 
         res_medicion = comparar_medicion(tipo, antes, despues)
         consejo.medicion = {

@@ -18,6 +18,8 @@ from app.services.consejos_reglas import (
     evaluar_pico,
     evaluar_sin_rubro,
     evaluar_sin_ingresos,
+    evaluar_sin_presupuesto,
+    elegir_rubro_sin_presupuesto,
     tickets_90,
     es_compra,
     a_precios_de_hoy,
@@ -169,6 +171,22 @@ def simular_para_persona(persona: Any, hoy: date = FECHA_FIN_HISTORIA) -> dict[s
         resultados["consejos"].append(
             {"tipo": c15.tipo, "moneda": c15.moneda, "texto": c15.texto, "valores": c15.valores}
         )
+
+    # C7: sin presupuesto
+    if len(cerrados) >= 3:
+        for mon_c7 in ("ARS", "USD"):
+            rubro_c7 = elegir_rubro_sin_presupuesto(
+                filas_hoy,
+                cerrados[:3],
+                frozenset(),
+                frozenset(),
+                mon_c7,
+            )
+            if rubro_c7:
+                c7 = evaluar_sin_presupuesto(rubro_c7, f"cat-{rubro_c7.categoria.lower()}", hoy)
+                resultados["consejos"].append(
+                    {"tipo": c7.tipo, "moneda": c7.moneda, "texto": c7.texto, "valores": c7.valores}
+                )
 
     return resultados
 

@@ -14,19 +14,15 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.billetera import Billetera, EstadoBilletera
-from app.models.categoria import Categoria
 from app.models.meta import Meta, EstadoMeta
-from app.models.subcategoria import Subcategoria
-from app.models.tools import IPCCache
 from app.models.transaccion import Transaccion
 from app.models.usuario import Usuario
-from app.services.consejos_reglas import DatosConsejos, FilaGasto
-from app.services.dashboard_service import get_ciclo_fechas
-from app.services.definiciones_service import condicion_gasto, condicion_ingreso
+from app.services import gasto_filas, presupuesto_sugerencias
+from app.services.consejos_reglas import DatosConsejos
+from app.services.definiciones_service import condicion_ingreso
 from app.services.dolar_service import obtener_cotizacion_por_fecha
 from app.services.fin_de_mes_service import calcular_fin_de_mes
 from app.services.inflacion_esperada_service import InflacionEsperada, MESES
-from app.utils.finanzas import _indice_por_mes
 
 
 def _quitar_tildes(texto: str) -> str:
@@ -63,8 +59,7 @@ def recolectar(
     ciclo_actual = (fdm.inicio_ciclo, fdm.fin_ciclo)
 
     # 1b. IPC
-    ipc_filas = db.query(IPCCache).order_by(IPCCache.fecha_dato).all()
-    ipc = _indice_por_mes(ipc_filas)
+    ipc = gasto_filas.indices_ipc(db)
 
     # 2. Fecha mínima de transacciones
     min_fecha = db.query(func.min(Transaccion.fecha)).filter(
@@ -97,52 +92,12 @@ def recolectar(
         )
 
     # 3. Cerrados: desde el ciclo anterior hacia atrás con get_ciclo_fechas, hasta 6
-    cerrados: list[tuple[date, date]] = []
-    fin_k = fdm.inicio_ciclo - timedelta(days=1)
-    for _ in range(6):
-        inicio_k, fin_k_calc = get_ciclo_fechas(usuario, fin_k)
-        if inicio_k < min_fecha:
-            break
-        cerrados.append((inicio_k, fin_k_calc))
-        fin_k = inicio_k - timedelta(days=1)
+    cerrados = gasto_filas.ciclos_cerrados(usuario, fdm.inicio_ciclo, min_fecha, hasta=6)
 
     # 4. Filas de gasto: UNA consulta
     limite_89 = hoy - timedelta(days=89)
     desde_filas = min(cerrados[-1][0], limite_89) if cerrados else limite_89
-
-    cond_g = condicion_gasto(
-        usuario.id,
-        desde=desde_filas,
-        hasta=hoy,
-        moneda=None,
-        hoy=hoy,
-    )
-    txs_query = (
-        db.query(Transaccion, Categoria.nombre, Subcategoria.nombre)
-        .outerjoin(Categoria, Transaccion.categoria_id == Categoria.id)
-        .outerjoin(Subcategoria, Transaccion.subcategoria_id == Subcategoria.id)
-        .filter(cond_g)
-        .all()
-    )
-
-    filas: list[FilaGasto] = []
-    for tx, cat_nombre, subcat_nombre in txs_query:
-        moneda_tx = (
-            tx.moneda.value
-            if hasattr(tx.moneda, "value")
-            else str(tx.moneda)
-        ) if tx.moneda else "ARS"
-        filas.append(
-            FilaGasto(
-                fecha=tx.fecha,
-                monto=Decimal(str(tx.monto)),
-                moneda=moneda_tx,
-                categoria=cat_nombre,
-                subcategoria=subcat_nombre,
-                es_espejo=(tx.reintegro_de_id is not None),
-                es_cuota=bool(tx.es_cuota_hija),
-            )
-        )
+    filas = gasto_filas.filas_gasto(db, usuario.id, desde_filas, hoy, hoy)
 
     # 5. Ingresos en los últimos 45 días (desde hoy - 44 hasta hoy inclusive)
     desde_ingresos = hoy - timedelta(days=44)
@@ -205,6 +160,12 @@ def recolectar(
         mes_inflacion = MESES[mes_siguiente_idx]
         fuente_inflacion = inflacion.fuente_texto
 
+    ritmos = presupuesto_sugerencias.ritmos_activos(db, usuario, hoy)
+    categorias_con_presupuesto, nombres_presupuestos = (
+        presupuesto_sugerencias.categorias_con_presupuesto(db, usuario.id)
+    )
+    ids_categorias = presupuesto_sugerencias.ids_categorias_egreso(db)
+
     return DatosConsejos(
         hoy=hoy,
         hay_datos=True,
@@ -227,4 +188,8 @@ def recolectar(
         tiene_meta_colchon=tiene_meta_colchon,
         factor_cobertura=factor_cobertura,
         ipc=ipc,
+        ritmos=ritmos,
+        categorias_con_presupuesto=categorias_con_presupuesto,
+        nombres_presupuestos=nombres_presupuestos,
+        ids_categorias=ids_categorias,
     )

@@ -52,6 +52,10 @@ CATEGORIAS_PICO: frozenset[str] = frozenset({
     "Otros",
 })
 
+CATEGORIAS_SIN_PRESUPUESTO: frozenset[str] = frozenset(
+    CATEGORIAS_PICO - {"Otros"}
+)
+
 NUMERO_CATALOGO: dict[str, int] = {
     "hormiga": 1,
     "plata_quieta": 2,
@@ -90,6 +94,8 @@ TEXTO_ACCION: dict[str, str] = {
     "crear_meta": "Crear meta",
     "ver_movimientos": "Ver movimientos",
     "cargar_ingreso": "Cargar ingreso",
+    "ver_presupuestos": "Ver presupuestos",
+    "armar_presupuesto": "Armar uno",
 }
 
 
@@ -173,6 +179,25 @@ class FilaHistorial:
 
 
 @dataclass(frozen=True)
+class RitmoPresupuesto:
+    presupuesto_id: str
+    nombre: str
+    moneda: str
+    inicio: date
+    fin: date
+    proyeccion: Decimal
+    limite: Decimal
+
+
+@dataclass(frozen=True)
+class RubroSinPresupuesto:
+    categoria: str
+    moneda: str
+    monto: Decimal
+    mediana: Decimal
+
+
+@dataclass(frozen=True)
 class DatosConsejos:
     hoy: date
     hay_datos: bool
@@ -195,6 +220,10 @@ class DatosConsejos:
     tiene_meta_colchon: bool
     factor_cobertura: Decimal = Decimal("1")
     ipc: dict[str, Decimal] = field(default_factory=dict)
+    ritmos: tuple[RitmoPresupuesto, ...] = ()
+    categorias_con_presupuesto: frozenset[str] = frozenset()
+    nombres_presupuestos: frozenset[str] = frozenset()
+    ids_categorias: dict[str, str] = field(default_factory=dict)
 
 
 # ==============================================================================
@@ -581,6 +610,143 @@ def evaluar_sin_ingresos(
     )
 
 
+def elegir_rubro_sin_presupuesto(
+    filas: list[FilaGasto],
+    cerrados3: list[tuple[date, date]],
+    cubiertas: frozenset[str] | set[str],
+    nombres: frozenset[str] | set[str],
+    moneda: str = "ARS",
+) -> RubroSinPresupuesto | None:
+    """
+    Elige el rubro candidato sin presupuesto analizando los 3 ciclos cerrados más nuevos.
+    Pura: sin base, sin red.
+    """
+    if len(cerrados3) < 3:
+        return None
+
+    c3 = cerrados3[:3]
+
+    # 2. Gasto típico: mediana de Σ monto de todas las filas de cada ciclo
+    totales_ciclos = [
+        sum((f.monto for f in filas if f.moneda == moneda and c[0] <= f.fecha <= c[1]), Decimal("0"))
+        for c in c3
+    ]
+    gasto_tipico = mediana(totales_ciclos)
+
+    # 3. Categorías candidatas en orden alfabético
+    nombres_lower = {n.lower() for n in nombres}
+    cats_candidatas = sorted(
+        c for c in CATEGORIAS_SIN_PRESUPUESTO
+        if c not in cubiertas and c.lower() not in nombres_lower
+    )
+
+    mejor_cat: str | None = None
+    mejor_mediana: Decimal | None = None
+
+    for cat in cats_candidatas:
+        totales_k: list[Decimal] = []
+        consumos_k: list[Decimal] = []
+        califica = True
+
+        for c in c3:
+            filas_cat = [
+                f for f in filas
+                if f.moneda == moneda and f.categoria == cat and c[0] <= f.fecha <= c[1]
+            ]
+            # total_k: Σ monto de TODAS sus filas (también cuotas, espejos y subcategorías excluidas)
+            total_k = sum((f.monto for f in filas_cat), Decimal("0"))
+            # compras_k: cantidad de filas con es_compra y no fuera_de_consejos
+            compras_k = sum(1 for f in filas_cat if es_compra(f) and not fuera_de_consejos(f))
+            consumo_k = sum(
+                ((-f.monto if f.es_espejo else f.monto) for f in filas_cat if not fuera_de_consejos(f)),
+                Decimal("0"),
+            )
+
+            if compras_k < 1 or total_k <= Decimal("0"):
+                califica = False
+                break
+
+            totales_k.append(total_k)
+            consumos_k.append(consumo_k)
+
+        if not califica:
+            continue
+
+        mt = mediana(totales_k)
+        mc = mediana(consumos_k)
+        if mc * Decimal("100") < gasto_tipico * Decimal("5"):
+            continue
+        if mc * Decimal("2") < mt:
+            continue
+
+        # Se queda la de mayor mediana; empate: la primera en orden alfabético
+        if mejor_mediana is None or mt > mejor_mediana:
+            mejor_cat = cat
+            mejor_mediana = mt
+
+    if mejor_cat is None or mejor_mediana is None:
+        return None
+
+    x = redondeo_arriba(mejor_mediana, moneda)
+    if x == Decimal("0"):
+        return None
+
+    return RubroSinPresupuesto(mejor_cat, moneda, x, mejor_mediana)
+
+
+def evaluar_ritmo(r: RitmoPresupuesto) -> Consejo:
+    """C6: Proyección de ritmo de gasto que supera el límite del presupuesto."""
+    m_proy = m(redondeo(r.proyeccion, r.moneda), r.moneda)
+    m_lim = m(r.limite, r.moneda)
+    texto = f"A este ritmo llegás a unos {m_proy} en {r.nombre} (límite {m_lim})."
+    clave = f"ritmo/{r.presupuesto_id}/{r.inicio.isoformat()}"
+    ahorro = r.proyeccion - r.limite
+    valores = {
+        "proyeccion": str(r.proyeccion.quantize(Decimal("0.01"))),
+        "limite": str(r.limite.quantize(Decimal("0.01"))),
+        "presupuesto_id": r.presupuesto_id,
+        "inicio": r.inicio.isoformat(),
+    }
+    return Consejo(
+        tipo="ritmo",
+        clave=clave,
+        moneda=r.moneda,
+        texto=texto,
+        accion="ver_presupuestos",
+        valores=valores,
+        ahorro=ahorro,
+    )
+
+
+def evaluar_sin_presupuesto(rubro: RubroSinPresupuesto, categoria_id: str, hoy: date) -> Consejo:
+    """C7: Rubro frecuente sin presupuesto."""
+    m_monto = m(rubro.monto, rubro.moneda)
+    texto = f"{rubro.categoria} no tiene presupuesto. Gastás unos {m_monto} por mes."
+    trimestre = (hoy.month - 1) // 3 + 1
+    clave = f"sin_presupuesto/{rubro.moneda}/{rubro.categoria}/{hoy.year}-T{trimestre}"
+    accion_datos = {
+        "categoria_id": categoria_id,
+        "nombre": rubro.categoria,
+        "monto": str(int(rubro.monto)),
+        "moneda": rubro.moneda,
+    }
+    valores = {
+        "mediana": str(rubro.mediana.quantize(Decimal("0.01"))),
+        "categoria": rubro.categoria,
+        "categoria_id": categoria_id,
+    }
+    return Consejo(
+        tipo="sin_presupuesto",
+        clave=clave,
+        moneda=rubro.moneda,
+        texto=texto,
+        accion="armar_presupuesto",
+        accion_datos=accion_datos,
+        valores=valores,
+        ahorro=None,
+    )
+
+
 def a_precios_de_hoy(
     filas: list[FilaGasto],
     ipc: dict[str, Decimal],
@@ -771,6 +937,34 @@ def evaluar_todos(datos: DatosConsejos) -> list[Consejo]:
     if c15:
         candidatos.append(c15)
 
+    # 8. C6 (Ritmo de presupuesto)
+    for r in datos.ritmos:
+        candidatos.append(evaluar_ritmo(r))
+
+    # 9. C7 (Rubro sin presupuesto)
+    if datos.cerrados:
+        rubro_ars = elegir_rubro_sin_presupuesto(
+            filas_hoy,
+            datos.cerrados[:3],
+            datos.categorias_con_presupuesto,
+            datos.nombres_presupuestos,
+            "ARS",
+        )
+        rubro_elegido = rubro_ars
+        if rubro_elegido is None:
+            rubro_usd = elegir_rubro_sin_presupuesto(
+                filas_hoy,
+                datos.cerrados[:3],
+                datos.categorias_con_presupuesto,
+                datos.nombres_presupuestos,
+                "USD",
+            )
+            rubro_elegido = rubro_usd
+
+        if rubro_elegido is not None and rubro_elegido.categoria in datos.ids_categorias:
+            cat_id_egreso = datos.ids_categorias[rubro_elegido.categoria]
+            candidatos.append(evaluar_sin_presupuesto(rubro_elegido, cat_id_egreso, datos.hoy))
+
     return candidatos
 
 
@@ -872,9 +1066,9 @@ def comparar_medicion(tipo: str, antes: Decimal, despues: Decimal) -> str:
     """Evalúa si el consejo mejoró la situación o si quedó igual."""
     if tipo in ("hormiga", "comisiones", "sin_rubro"):
         return "mejoro" if despues < antes else "igual"
-    if tipo == "pico":
+    if tipo in ("pico", "ritmo"):
         return "mejoro" if despues <= antes else "igual"
-    if tipo in ("plata_quieta", "colchon", "sin_ingresos"):
+    if tipo in ("plata_quieta", "colchon", "sin_ingresos", "sin_presupuesto"):
         return "mejoro" if despues > antes else "igual"
     return "igual"
 
