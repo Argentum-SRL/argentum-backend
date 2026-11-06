@@ -216,6 +216,7 @@ class UsuarioResponse(UsuarioRead):
     fecha_nacimiento: date | None = None
     sexo: str | None = None
     prioridades_consejos: list[int] = Field(default_factory=list)
+    tiene_suscripciones: bool = False
 
     @field_validator("prioridades_consejos", mode="before")
     @classmethod

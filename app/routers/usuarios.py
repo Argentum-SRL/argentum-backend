@@ -8,6 +8,7 @@ from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.core.limiter import limiter
 from app.models.usuario import Usuario, AuthProvider
+from app.models.suscripcion import Suscripcion
 from app.schemas.usuario import (
     UsuarioResponse,
     MetodosLoginResponse,
@@ -31,6 +32,13 @@ def get_me(
     db: Session = Depends(get_db)
 ):
     """Devuelve el usuario autenticado completo."""
+    tiene_subs = (
+        db.query(Suscripcion.id)
+        .filter(Suscripcion.usuario_id == current_user.id)
+        .first()
+        is not None
+    )
+    setattr(current_user, "tiene_suscripciones", bool(tiene_subs))
     return current_user
 
 @router.get("/me/metodos-login", response_model=MetodosLoginResponse)
