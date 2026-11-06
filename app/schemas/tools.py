@@ -191,6 +191,7 @@ class CanAffordResponseData(BaseModel):
     linea_liberacion: str | None = None
     linea_compensar: str | None = None
     linea_frescura: str | None = None
+    linea_espera: str | None = None
     libre: float
     precio_total: float
     fuente_inflacion: str | None = None

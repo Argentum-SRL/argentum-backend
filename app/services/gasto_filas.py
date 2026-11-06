@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -17,7 +18,12 @@ from app.models.subcategoria import Subcategoria
 from app.models.tools import IPCCache
 from app.models.transaccion import Transaccion
 from app.models.usuario import Usuario
-from app.services.consejos_reglas import FilaGasto
+from app.services.consejos_reglas import (
+    FilaGasto,
+    GrupoHormiga,
+    grupos_hormiga,
+    tickets_90,
+)
 from app.services.dashboard_service import get_ciclo_fechas
 from app.services.definiciones_service import condicion_gasto
 from app.utils.finanzas import _indice_por_mes
@@ -95,4 +101,23 @@ def filas_gasto(
         )
 
     return filas
+
+
+def hormiga_del_ciclo(
+    db: Session,
+    usuario_id: Any,
+    desde: date,
+    hasta: date,
+    moneda: str,
+    hoy: date,
+) -> list[GrupoHormiga]:
+    """
+    Lectura compartida de gastos hormiga en un ciclo según las reglas de C1.
+    Solo lectura.
+    """
+    desde_90 = min(desde, hasta - timedelta(days=89))
+    filas = filas_gasto(db, usuario_id, desde_90, hasta, hoy)
+    filas_ciclo = [f for f in filas if desde <= f.fecha <= hasta]
+    return grupos_hormiga(filas_ciclo, tickets_90(filas, moneda, hasta), moneda)
+
 

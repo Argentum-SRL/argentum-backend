@@ -178,9 +178,7 @@ def _crear_escenario_hormiga(db_session, cantidad_compras: int):
 
 def test_gastos_hormiga_5_compras_y_reintegro(db_session):
     """
-    TE.14: 5 compras con débito de $2.000 en Gastronomía > Cafetería y un reintegro recibido
-    de $500 de una de ellas, en el ciclo: _gastos_hormiga devuelve
-    [{"categoria": "Gastronomía", "cantidad": 5, "total": 9500.0}].
+    Con la regla de C1, 5 compras en todo el ciclo no llegan a 20: _gastos_hormiga devuelve [].
     """
     usuario = _crear_escenario_hormiga(db_session, cantidad_compras=5)
     res = _gastos_hormiga(
@@ -191,7 +189,7 @@ def test_gastos_hormiga_5_compras_y_reintegro(db_session):
         moneda=Moneda.ARS,
         hoy=date(2026, 10, 31),
     )
-    assert res == [{"categoria": "Gastronomía", "cantidad": 5, "total": 9500.0}]
+    assert res == []
 
 
 def test_gastos_hormiga_4_compras_y_reintegro_no_llega_al_umbral(db_session):

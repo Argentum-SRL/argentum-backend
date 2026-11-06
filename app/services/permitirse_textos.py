@@ -12,6 +12,8 @@ from app.models.usuario import Moneda
 from app.services.fin_de_mes_service import redondear_mil
 from app.utils.formato import formatear_monto
 
+LINEA_ESPERA = "Si no es urgente, esperá 24 horas y volvé a fijarte."
+
 
 def _fmt(monto: Any) -> str:
     """Formatea un monto como ARS entero sin decimales hacia el usuario."""
@@ -184,6 +186,10 @@ def textos_permitirse(r: Any) -> dict[str, Any]:
     if motivo == "datos_viejos" and dias_sin_cargar is not None and dias_sin_cargar > 0:
         linea_frescura = f"Ojo: hace {dias_sin_cargar} días que no cargás nada, puede no estar al día."
 
+    linea_espera: str | None = None
+    if resultado in ("justo", "ahorros"):
+        linea_espera = LINEA_ESPERA
+
     return {
         "titulo": titulo,
         "linea_principal": linea_principal,
@@ -192,6 +198,7 @@ def textos_permitirse(r: Any) -> dict[str, Any]:
         "linea_liberacion": linea_liberacion,
         "linea_compensar": linea_compensar,
         "linea_frescura": linea_frescura,
+        "linea_espera": linea_espera,
     }
 
 
@@ -214,6 +221,7 @@ def armar_respuesta_permitirse(resultado: dict, consulta: dict) -> str:
     linea_liberacion = resultado.get("linea_liberacion")
     linea_compensar = resultado.get("linea_compensar")
     linea_frescura = resultado.get("linea_frescura")
+    linea_espera = resultado.get("linea_espera")
 
     partes: list[str] = [f"{titulo}."]
 
@@ -234,6 +242,9 @@ def armar_respuesta_permitirse(resultado: dict, consulta: dict) -> str:
 
     if linea_frescura:
         partes.append(linea_frescura)
+
+    if linea_espera:
+        partes.append(linea_espera)
 
     if consulta.get("nota_interes"):
         partes.append("Lo calculé sin interés. Si tiene interés, decime la tasa anual (TNA).")

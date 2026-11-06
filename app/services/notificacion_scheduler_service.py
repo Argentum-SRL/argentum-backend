@@ -557,35 +557,20 @@ def _gastos_hormiga(
     hasta: date,
     moneda: Moneda | str,
     hoy: date,
-    umbral: int = 5,
 ) -> list[dict]:
     """
-    Calcula las categorías con gastos hormiga en el período contando únicamente
-    compras reales (reintegro_de_id nulo) y manteniendo el total como suma neta.
+    Calcula los gastos hormiga en el período según las reglas de C1.
+    Retorna lista de dicts con categoria (nombre de la subcategoría), cantidad y total.
     """
-    from app.models.categoria import Categoria
-    from app.models.transaccion import Transaccion
+    from app.services import gasto_filas
 
-    conteo_compras = func.count(Transaccion.id).filter(Transaccion.reintegro_de_id.is_(None))
-    filas = (
-        db.query(
-            Categoria.nombre,
-            conteo_compras.label("cantidad"),
-            func.sum(Transaccion.monto).label("total"),
-        )
-        .join(Transaccion, Transaccion.categoria_id == Categoria.id)
-        .filter(
-            condicion_gasto(usuario_id, desde=desde, hasta=hasta, moneda=moneda, hoy=hoy),
-        )
-        .group_by(Categoria.nombre)
-        .having(conteo_compras >= umbral)
-        .order_by(conteo_compras.desc())
-        .limit(3)
-        .all()
-    )
+    mon = moneda.value if hasattr(moneda, "value") else str(moneda)
+    mon = mon.upper()
+
+    grupos = gasto_filas.hormiga_del_ciclo(db, usuario_id, desde, hasta, mon, hoy)
     return [
-        {"categoria": r.nombre, "cantidad": int(r.cantidad), "total": float(r.total)}
-        for r in filas
+        {"categoria": g.subcategoria, "cantidad": g.cantidad, "total": float(g.total)}
+        for g in grupos
     ]
 
 
@@ -608,7 +593,6 @@ def _job_resumen_cierre_ciclo(db_session_factory):
         from app.models.categoria import Categoria
         from app.services.dashboard_service import get_ciclo_fechas
         from app.services.definiciones_service import condicion_gasto, condicion_ingreso
-        from sqlalchemy import func
 
         hoy = hoy_argentina()
         ayer = hoy - timedelta(days=1)
@@ -686,7 +670,7 @@ def _job_resumen_cierre_ciclo(db_session_factory):
 
                 # Gastos hormiga: categorías con muchas transacciones de monto bajo
                 gastos_hormiga_lista = _gastos_hormiga(
-                    db, usuario.id, fecha_inicio, fecha_fin, moneda_top, hoy, umbral=5
+                    db, usuario.id, fecha_inicio, fecha_fin, moneda_top, hoy
                 )
                 gastos_hormiga = gastos_hormiga_lista if gastos_hormiga_lista else None
 

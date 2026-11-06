@@ -783,6 +783,7 @@ def calcular_puede_permitirse(
         "linea_liberacion": textos["linea_liberacion"],
         "linea_compensar": textos["linea_compensar"],
         "linea_frescura": textos["linea_frescura"],
+        "linea_espera": textos["linea_espera"],
         "libre": float(datos.libre),
         "precio_total": float(precio_dec),
         "fuente_inflacion": fuente_inflacion,

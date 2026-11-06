@@ -197,7 +197,7 @@ JOBS_CATALOGO: list[JobCatalogoItem] = [
     JobCatalogoItem(
         job_id="consejos_diarios",
         nombre="Consejos del inicio",
-        que_hace="Elige el consejo del día de cada persona (tarjeta «Un dato para vos» del inicio), marca los vencidos y mide si sirvieron.",
+        que_hace="Elige el consejo del día de cada persona (tarjeta «Un dato para vos» del inicio), marca los vencidos, mide si sirvieron y avisa una vez por ciclo si lo que tiene no alcanza para lo que vence.",
         periodo_esperado_minutos=1440,
         puede_correr_ahora=True,
     ),

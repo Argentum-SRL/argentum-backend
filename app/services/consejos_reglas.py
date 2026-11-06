@@ -242,23 +242,32 @@ def tickets_90(filas: list[FilaGasto], moneda: str, hoy: date) -> list[Decimal]:
     ]
 
 
-def evaluar_hormiga(
+@dataclass(frozen=True)
+class GrupoHormiga:
+    categoria: str
+    subcategoria: str
+    cantidad: int
+    total: Decimal
+
+
+def grupos_hormiga(
     filas_ciclo: list[FilaGasto],
     tickets90: list[Decimal],
     moneda: str,
-    inicio_ciclo: date,
-) -> Consejo | None:
-    """C1: Gastos chicos y seguidos (hormiga). Solo filas de la moneda especificada."""
+) -> list[GrupoHormiga]:
+    """
+    Identifica grupos de gastos hormiga en el ciclo según las reglas de C1.
+    Retorna lista de GrupoHormiga ordenados por total desc y subcategoría asc.
+    """
     compras = [f for f in filas_ciclo if f.moneda == moneda and es_compra(f)]
     if len(compras) < 20:
-        return None
+        return []
 
     gasto = sum((f.monto for f in filas_ciclo if f.moneda == moneda), Decimal("0"))
     med90 = mediana(tickets90)
     if med90 is None:
-        return None
+        return []
 
-    # Agrupar por (categoria, subcategoria) sin fuera_de_consejos ni subcategoria None
     grupos: dict[tuple[str, str], list[FilaGasto]] = {}
     for f in filas_ciclo:
         if f.moneda != moneda or f.categoria is None or f.subcategoria is None:
@@ -267,7 +276,7 @@ def evaluar_hormiga(
             continue
         grupos.setdefault((f.categoria, f.subcategoria), []).append(f)
 
-    califican: list[tuple[tuple[str, str], Decimal, list[FilaGasto]]] = []
+    califican: list[tuple[tuple[str, str], Decimal, int]] = []
     for par, lista in grupos.items():
         compras_grupo = [f for f in lista if es_compra(f)]
         if len(compras_grupo) < 4:
@@ -275,26 +284,50 @@ def evaluar_hormiga(
         med_grupo = mediana([f.monto for f in compras_grupo])
         if med_grupo is not None and med_grupo * 2 <= med90:
             tot_grupo = sum((f.monto for f in lista), Decimal("0"))
-            califican.append((par, tot_grupo, lista))
+            califican.append((par, tot_grupo, len(compras_grupo)))
 
     if not califican:
-        return None
+        return []
 
     total = sum((t for _, t, _ in califican), Decimal("0"))
     if total <= Decimal("0") or total * Decimal("100") < gasto * Decimal("5"):
-        return None
+        return []
 
     tr = redondeo(total, moneda)
     if tr == Decimal("0"):
-        return None
-
-    anual = tr * Decimal("12")
+        return []
 
     # Orden de grupos: total desc; empate por nombre de subcategoría asc
     califican.sort(key=lambda item: (-item[1], item[0][1]))
 
-    subcategorias_ordenadas = [par[1] for par, _, _ in califican]
-    pares_ordenados = [[par[0], par[1]] for par, _, _ in califican]
+    return [
+        GrupoHormiga(
+            categoria=par[0],
+            subcategoria=par[1],
+            cantidad=cant,
+            total=tot,
+        )
+        for par, tot, cant in califican
+    ]
+
+
+def evaluar_hormiga(
+    filas_ciclo: list[FilaGasto],
+    tickets90: list[Decimal],
+    moneda: str,
+    inicio_ciclo: date,
+) -> Consejo | None:
+    """C1: Gastos chicos y seguidos (hormiga). Solo filas de la moneda especificada."""
+    grupos = grupos_hormiga(filas_ciclo, tickets90, moneda)
+    if not grupos:
+        return None
+
+    total = sum((g.total for g in grupos), Decimal("0"))
+    tr = redondeo(total, moneda)
+    anual = tr * Decimal("12")
+
+    subcategorias_ordenadas = [g.subcategoria for g in grupos]
+    pares_ordenados = [[g.categoria, g.subcategoria] for g in grupos]
 
     cant = len(subcategorias_ordenadas)
     if cant == 1:

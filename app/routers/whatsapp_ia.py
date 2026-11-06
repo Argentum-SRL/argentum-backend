@@ -181,6 +181,7 @@ from app.routers.whatsapp.propuestas import (
 from app.routers.whatsapp.registro import _registrar_directo_si_corresponde
 from app.routers.whatsapp.recordatorio_impago_wpp import agregar_recordatorio_impago
 from app.routers.whatsapp.aviso_personas_wpp import agregar_aviso_personas
+from app.routers.whatsapp.aviso_fin_de_mes_wpp import agregar_aviso_fin_de_mes
 from app.routers.whatsapp.resolvers_cascada import (
     ALIAS_BANCOS_ARGENTINOS,
     ALIAS_BILLETERAS,
@@ -616,6 +617,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                 logger.info("[LATENCIA][ENVIO_META] Envío de mensaje: %.2fs", t_envio_end - t_envio_start)
                 agregar_recordatorio_impago(db, usuario)
                 agregar_aviso_personas(db, usuario, dt_inicio_mensaje)
+                agregar_aviso_fin_de_mes(db, usuario)
 
             t_total = time.perf_counter() - t_inicio
             logger.info(

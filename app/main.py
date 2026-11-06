@@ -464,23 +464,33 @@ def _job_consejos_diarios():
 
         cant_emitidos = 0
         cant_medidos = 0
+        cant_avisos = 0
 
         for uid in usuarios_activos:
             db_sub = SessionLocal()
             try:
                 u_sub = db_sub.get(Usuario, uid)
                 if u_sub:
-                    m = medir_pendientes(db_sub, u_sub, hoy)
-                    cant_medidos += m
-                    em = emitir_si_corresponde(db_sub, u_sub, hoy, inflacion)
-                    if em is not None:
-                        cant_emitidos += 1
-            except Exception as e:
-                logger.error(f"Error procesando consejos para usuario {uid}: {e}")
+                    try:
+                        m = medir_pendientes(db_sub, u_sub, hoy)
+                        cant_medidos += m
+                        em = emitir_si_corresponde(db_sub, u_sub, hoy, inflacion)
+                        if em is not None:
+                            cant_emitidos += 1
+                    except Exception as e:
+                        logger.error(f"Error procesando consejos para usuario {uid}: {e}")
+                        db_sub.rollback()
+
+                    try:
+                        from app.services.aviso_fin_de_mes_service import avisar_fin_de_mes
+                        cant_avisos += avisar_fin_de_mes(db_sub, u_sub, hoy)
+                    except Exception as e_aviso:
+                        logger.error(f"Error procesando aviso fin de mes para usuario {uid}: {e_aviso}")
+                        db_sub.rollback()
             finally:
                 db_sub.close()
 
-        logger.info(f"Job consejos_diarios finalizado: {cant_emitidos} emitidos, {cant_medidos} medidos.")
+        logger.info(f"Job consejos_diarios finalizado: {cant_emitidos} emitidos, {cant_medidos} medidos, {cant_avisos} avisos de fin de mes.")
     except Exception:
         logger.exception("Error en job _job_consejos_diarios")
     finally:
