@@ -770,7 +770,7 @@
     },
     {
       "id": "gimnasio",
-      "nombre": "Gimnasio",
+      "nombre": "Deportes y gimnasio",
       "logo": null,
       "icono": "Dumbbell",
       "generico": true,
@@ -781,14 +781,16 @@
       "colorTexto": "white",
       "variantes": [
         "gimnasio",
-        "gym"
+        "gym",
+        "deportes",
+        "deportes y gimnasio"
       ],
       "categoria_sugerida": "Ocio",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "prepaga",
-      "nombre": "Prepaga",
+      "nombre": "Prepaga y obra social",
       "logo": null,
       "icono": "HeartPulse",
       "generico": true,
@@ -799,14 +801,16 @@
       "colorTexto": "white",
       "variantes": [
         "prepaga",
-        "obra social"
+        "obra social",
+        "prepaga y obra social",
+        "medicina"
       ],
       "categoria_sugerida": "Salud",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "seguro",
-      "nombre": "Seguro (auto, hogar o vida)",
+      "nombre": "Seguros",
       "logo": null,
       "icono": "Shield",
       "generico": true,
@@ -817,32 +821,38 @@
       "colorTexto": "white",
       "variantes": [
         "seguro",
-        "seguros"
+        "seguros",
+        "seguro auto",
+        "seguro hogar",
+        "seguro vida"
       ],
       "categoria_sugerida": "Banco",
       "frecuencia_tipica": "mensual"
     },
     {
-      "id": "club_clases",
-      "nombre": "Club o clases",
+      "id": "cursos",
+      "nombre": "Cursos",
       "logo": null,
       "icono": "Users",
       "generico": true,
-      "categoria": "Ocio",
-      "subcategoria": null,
+      "categoria": "Educación",
+      "subcategoria": "Cursos",
       "frecuenciaDefault": "mensual",
       "color": "#D97706",
       "colorTexto": "white",
       "variantes": [
+        "cursos",
+        "clases",
         "club",
-        "clases"
+        "capacitaciones",
+        "talleres"
       ],
-      "categoria_sugerida": "Ocio",
+      "categoria_sugerida": "Educación",
       "frecuencia_tipica": "mensual"
     },
     {
       "id": "colegio",
-      "nombre": "Colegio o cuota escolar",
+      "nombre": "Colegio y facultad",
       "logo": null,
       "icono": "GraduationCap",
       "generico": true,
@@ -853,7 +863,9 @@
       "colorTexto": "white",
       "variantes": [
         "colegio",
+        "facultad",
         "escuela",
+        "universidad",
         "cuota escolar"
       ],
       "categoria_sugerida": "Educación",
@@ -861,7 +873,7 @@
     },
     {
       "id": "internet_cable",
-      "nombre": "Internet y cable",
+      "nombre": "Internet",
       "logo": null,
       "icono": "Wifi",
       "generico": true,
@@ -873,7 +885,10 @@
       "variantes": [
         "internet",
         "cable",
-        "wifi"
+        "wifi",
+        "fibertel",
+        "telecentro",
+        "internet y cable"
       ],
       "categoria_sugerida": "Tecnología",
       "frecuencia_tipica": "mensual"
@@ -891,6 +906,10 @@
       "colorTexto": "white",
       "variantes": [
         "celular",
+        "telefono",
+        "claro",
+        "movistar",
+        "personal",
         "telefono movil"
       ],
       "categoria_sugerida": "Tecnología",
