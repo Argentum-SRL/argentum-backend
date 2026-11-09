@@ -4,7 +4,7 @@ from datetime import datetime, date, timezone
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, Integer, String
+from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, Integer, String, JSON as sa_JSON
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -133,6 +133,7 @@ class Usuario(Base):
     ultimo_intento_fallido_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     modal_bienvenida_financiera_visto: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     permiso_lectura_mensajes_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    prioridades_consejos: Mapped[list[int] | None] = mapped_column(sa_JSON(none_as_null=True), nullable=True, default=None)
 
     @property
     def is_active(self) -> bool:

@@ -7,7 +7,7 @@ from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.core.limiter import limiter
 from app.models.usuario import Usuario
-from app.schemas.tools import InstallmentConvenienceRequest, CanAffordRequest, CanAffordResponse, FinancialContextResponse
+from app.schemas.tools import InstallmentConvenienceRequest, CanAffordRequest, CanAffordResponse, FinancialContextResponse, InflacionEsperadaResponse
 from app.services import tools_service
 from app.services.uso_service import registrar_evento
 
@@ -100,5 +100,31 @@ def can_afford_endpoint(
     return {
         "success": True,
         "data": result
+    }
+
+@router.get("/inflacion-esperada", response_model=InflacionEsperadaResponse)
+def get_inflacion_esperada_endpoint(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Devuelve la inflación mensual esperada (REM del BCRA o respaldo INDEC).
+    """
+    from app.services.inflacion_esperada_service import inflacion_esperada
+    res = inflacion_esperada(db, hoy=None, meses=12)
+    if res is None:
+        return {"success": True, "data": None}
+
+    tasas_12 = [round(float(t), 2) for t in res.tasas[:12]]
+    valor_mensual = tasas_12[0] if tasas_12 else 0.0
+
+    return {
+        "success": True,
+        "data": {
+            "valor_mensual": valor_mensual,
+            "meses": tasas_12,
+            "fuente_texto": res.fuente_texto,
+            "es_respaldo": res.es_respaldo,
+        }
     }
 

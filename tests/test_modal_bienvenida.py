@@ -2,10 +2,9 @@ from uuid import uuid4
 from app.models.usuario import Usuario, AuthProvider, EstadoUsuario, RolUsuario, CicloTipo
 from app.core.database import SessionLocal
 from app.services.perfil_financiero_service import calcular_perfil_nuevo
-from app.services.proyeccion_service import calcular_proyeccion
 
 def test_modal_bienvenida_flag_en_usuario_sin_historia():
-    """Usuario nuevo o con < 3 ciclos: perfil y proyeccion dan mostrar_card=False, flag queda False."""
+    """Usuario nuevo o con < 3 ciclos: el perfil da mostrar_card=False y el flag queda False."""
     db = SessionLocal()
     try:
         user = Usuario(
@@ -22,10 +21,8 @@ def test_modal_bienvenida_flag_en_usuario_sin_historia():
         db.flush()
 
         perfil = calcular_perfil_nuevo(db, user)
-        proy = calcular_proyeccion(db, user)
 
         assert perfil.get("mostrar_card") is False
-        assert proy.get("mostrar_card") is False
 
         # El trigger de primera vez no debe dispararse
         mostrar_modal_bienvenida = bool(perfil.get("mostrar_card") and not user.modal_bienvenida_financiera_visto)
@@ -46,6 +43,4 @@ def test_modal_bienvenida_calificacion_momentos_distintos():
     perfil_mostrar_card = True
     assert bool(perfil_mostrar_card and not usuario_visto.modal_bienvenida_financiera_visto) is False
 
-    # Si proyeccion califica despues:
-    proy_mostrar_card = True
-    assert bool(proy_mostrar_card and not usuario_visto.modal_bienvenida_financiera_visto) is False
+

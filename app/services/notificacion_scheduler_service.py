@@ -160,6 +160,7 @@ def _job_notificaciones_cuotas(db_session_factory):
 
     except Exception:
         logger.exception("Error en _job_notificaciones_cuotas")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_notificaciones_cuotas")
@@ -203,6 +204,9 @@ def _job_notificaciones_presupuestos(db_session_factory):
             .all()
         )
 
+        total_presupuestos = len(presupuestos)
+        fallados = 0
+
         for pres in presupuestos:
             try:
                 periodo_activo = obtener_periodo_activo(db, pres, hoy=hoy)
@@ -218,14 +222,18 @@ def _job_notificaciones_presupuestos(db_session_factory):
                     enviar_whatsapp_ya=False,
                 )
             except Exception as e:
+                fallados += 1
                 logger.warning("No se pudo evaluar alertas del presupuesto %s: %s", pres.id, e)
                 db.rollback()
                 continue
 
         logger.info("Job notificaciones_presupuestos completado")
+        if fallados > 0:
+            raise RuntimeError(f"Presupuestos: {fallados} de {total_presupuestos} con error")
 
     except Exception:
         logger.exception("Error en _job_notificaciones_presupuestos")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_notificaciones_presupuestos")
@@ -316,6 +324,7 @@ def _job_notificaciones_suscripciones(db_session_factory):
 
     except Exception:
         logger.exception("Error en _job_notificaciones_suscripciones")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_notificaciones_suscripciones")
@@ -388,6 +397,7 @@ def _job_notificaciones_inactividad(db_session_factory):
 
     except Exception:
         logger.exception("Error en _job_notificaciones_inactividad")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_notificaciones_inactividad")
@@ -544,6 +554,7 @@ def _job_entrega_whatsapp_batched(db_session_factory):
             )
         except Exception as alerta_err:
             logger.error("Error enviando alerta para _job_entrega_whatsapp_batched: %s", alerta_err)
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_entrega_whatsapp_batched")
@@ -557,35 +568,20 @@ def _gastos_hormiga(
     hasta: date,
     moneda: Moneda | str,
     hoy: date,
-    umbral: int = 5,
 ) -> list[dict]:
     """
-    Calcula las categorías con gastos hormiga en el período contando únicamente
-    compras reales (reintegro_de_id nulo) y manteniendo el total como suma neta.
+    Calcula los gastos hormiga en el período según las reglas de C1.
+    Retorna lista de dicts con categoria (nombre de la subcategoría), cantidad y total.
     """
-    from app.models.categoria import Categoria
-    from app.models.transaccion import Transaccion
+    from app.services import gasto_filas
 
-    conteo_compras = func.count(Transaccion.id).filter(Transaccion.reintegro_de_id.is_(None))
-    filas = (
-        db.query(
-            Categoria.nombre,
-            conteo_compras.label("cantidad"),
-            func.sum(Transaccion.monto).label("total"),
-        )
-        .join(Transaccion, Transaccion.categoria_id == Categoria.id)
-        .filter(
-            condicion_gasto(usuario_id, desde=desde, hasta=hasta, moneda=moneda, hoy=hoy),
-        )
-        .group_by(Categoria.nombre)
-        .having(conteo_compras >= umbral)
-        .order_by(conteo_compras.desc())
-        .limit(3)
-        .all()
-    )
+    mon = moneda.value if hasattr(moneda, "value") else str(moneda)
+    mon = mon.upper()
+
+    grupos = gasto_filas.hormiga_del_ciclo(db, usuario_id, desde, hasta, mon, hoy)
     return [
-        {"categoria": r.nombre, "cantidad": int(r.cantidad), "total": float(r.total)}
-        for r in filas
+        {"categoria": g.subcategoria, "cantidad": g.cantidad, "total": float(g.total)}
+        for g in grupos
     ]
 
 
@@ -608,7 +604,6 @@ def _job_resumen_cierre_ciclo(db_session_factory):
         from app.models.categoria import Categoria
         from app.services.dashboard_service import get_ciclo_fechas
         from app.services.definiciones_service import condicion_gasto, condicion_ingreso
-        from sqlalchemy import func
 
         hoy = hoy_argentina()
         ayer = hoy - timedelta(days=1)
@@ -623,6 +618,9 @@ def _job_resumen_cierre_ciclo(db_session_factory):
             )
             .all()
         )
+
+        total_usuarios = len(usuarios)
+        fallados = 0
 
         for usuario in usuarios:
             try:
@@ -686,7 +684,7 @@ def _job_resumen_cierre_ciclo(db_session_factory):
 
                 # Gastos hormiga: categorías con muchas transacciones de monto bajo
                 gastos_hormiga_lista = _gastos_hormiga(
-                    db, usuario.id, fecha_inicio, fecha_fin, moneda_top, hoy, umbral=5
+                    db, usuario.id, fecha_inicio, fecha_fin, moneda_top, hoy
                 )
                 gastos_hormiga = gastos_hormiga_lista if gastos_hormiga_lista else None
 
@@ -764,13 +762,17 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                     )
 
             except Exception:
+                fallados += 1
                 logger.exception("Error generando resumen de ciclo para usuario %s", usuario.id)
                 continue
 
         logger.info("Job resumen_cierre_ciclo completado")
+        if fallados > 0:
+            raise RuntimeError(f"Resumen de ciclo: {fallados} de {total_usuarios} con error")
 
     except Exception:
         logger.exception("Error en _job_resumen_cierre_ciclo")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_resumen_cierre_ciclo")
@@ -805,6 +807,9 @@ def _job_resumen_semanal(db_session_factory):
         usuarios = db.execute(
             select(Usuario).where(Usuario.estado == EstadoUsuario.ACTIVO)
         ).scalars().all()
+
+        total_usuarios = len(usuarios)
+        fallados = 0
 
         for usuario in usuarios:
             try:
@@ -924,109 +929,21 @@ def _job_resumen_semanal(db_session_factory):
                 )
 
             except Exception as e:
+                fallados += 1
                 logger.error(f"[resumen_semanal] Error procesando usuario {usuario.id}: {e}")
                 continue
 
         db.commit()
         logger.info("Job resumen_semanal completado")
+        if fallados > 0:
+            raise RuntimeError(f"Resumen semanal: {fallados} de {total_usuarios} con error")
 
     except Exception as e:
         logger.error(f"[resumen_semanal] Error general: {e}")
         db.rollback()
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_resumen_semanal")
         db.close()
 
-
-def _job_proyeccion_negativa(db_session_factory):
-    """
-    Recalcula la proyección para todos los usuarios activos.
-    Si el balance proyectado es negativo en alguna moneda con datos suficientes,
-    crea una notificación de tipo PROYECCION_NEGATIVA deduplicada por ciclo del usuario.
-    """
-    from sqlalchemy import select
-    from app.models.usuario import EstadoUsuario, Moneda
-    from app.services.proyeccion_service import calcular_proyeccion
-    from app.services.dashboard_service import get_ciclo_fechas
-
-    db = db_session_factory()
-    lock_adquirido = False
-    try:
-        if not intentar_tomar_lock_job(db, "_job_proyeccion_negativa"):
-            struct_logger.info(
-                "Job omitido: ya se está ejecutando en otra instancia",
-                job="_job_proyeccion_negativa",
-            )
-            return
-        lock_adquirido = True
-        usuarios_activos = db.execute(
-            select(Usuario.id).where(Usuario.estado == EstadoUsuario.ACTIVO)
-        ).scalars().all()
-
-        cant_notificaciones_creadas = 0
-
-        for usuario_id in usuarios_activos:
-            # Prohibición absoluta de Manuel
-            if str(usuario_id) in ("931c28da-96b0-4dd3-892e-79fbd73451c6", "fdc16c1a-8442-4e50-bcf6-cdb2ccf6884a"):
-                continue
-
-            db_ctx = db_session_factory()
-            try:
-                usuario = db_ctx.get(Usuario, usuario_id)
-                if not usuario:
-                    continue
-
-                proyecciones = calcular_proyeccion(db_ctx, usuario)
-                hoy = hoy_argentina()
-                fecha_inicio_ciclo, _ = get_ciclo_fechas(usuario, hoy)
-
-                for moneda_key, moneda_label, simbolo in [("ars", "pesos", "$"), ("usd", "dólares", "US$")]:
-                    proj = proyecciones.get(moneda_key)
-                    if proj and proj.get("datos_suficientes") is True:
-                        calib = proj.get("calibracion") or {}
-                        pasa_puerta = calib.get("pasa_puerta") is True
-                        balance = proj.get("balance_proyectado")
-                        if pasa_puerta and balance is not None and balance < 0:
-                            if moneda_key == "ars":
-                                monto_fmt = formatear_monto(abs(balance), Moneda.ARS, con_decimales=False)
-                                mensaje = f"¡Atención! Estimamos que tu saldo en pesos va a terminar este ciclo en negativo por {monto_fmt}. Te sugerimos revisar tus gastos."
-                            else:
-                                monto_fmt = formatear_monto(abs(balance), Moneda.USD)
-                                mensaje = f"¡Atención! Estimamos que tu saldo en dólares va a terminar este ciclo en negativo por {monto_fmt}. Te sugerimos revisar tus gastos."
-
-                            # Clave de deduplicación que incluye ID de usuario, moneda y fecha inicio del ciclo
-                            grupo_override = f"proyeccion_negativa/{usuario.id}/{moneda_key}/{fecha_inicio_ciclo.strftime('%Y%m%d')}"
-
-                            from app.services.notificacion_service import obtener_configuracion, resolver_canales_notificacion
-                            config = obtener_configuracion(db_ctx, usuario.id)
-                            canales = resolver_canales_notificacion(config, TipoNotificacion.PROYECCION_NEGATIVA)
-                            if canales is not None:
-                                canal_web, canal_whatsapp = canales
-                                notif = crear_notificacion(
-                                    db=db_ctx,
-                                    usuario_id=usuario.id,
-                                    tipo=TipoNotificacion.PROYECCION_NEGATIVA,
-                                    nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                                    mensaje=mensaje,
-                                    canal_web=canal_web,
-                                    canal_whatsapp=canal_whatsapp,
-                                    canal_email=False,
-                                    grupo_agrupacion_override=grupo_override,
-                                    datos_template={"moneda_label": "pesos" if moneda_key == "ars" else "dólares", "monto_fmt": monto_fmt},
-                                )
-                                if notif:
-                                    cant_notificaciones_creadas += 1
-
-            except Exception as e:
-                logger.error(f"Error en _job_proyeccion_negativa para usuario {usuario_id}: {e}")
-            finally:
-                db_ctx.close()
-
-        logger.info(f"Job _job_proyeccion_negativa finalizado. Notificaciones creadas: {cant_notificaciones_creadas}")
-    except Exception:
-        logger.exception("Error general en job _job_proyeccion_negativa")
-    finally:
-        if lock_adquirido:
-            liberar_lock_job(db, "_job_proyeccion_negativa")
-        db.close()

@@ -46,6 +46,7 @@ media/
 tests/fixtures/*.pdf
 tests/fixtures/*.csv
 tests/fixtures/*.xlsx
+!tests/fixtures/rem_2026_09.xlsx
 scratch/
 gitleaks-*.json
 

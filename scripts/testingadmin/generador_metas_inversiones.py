@@ -15,7 +15,7 @@ Cumple con:
 4.14 Movimientos entre cuentas:
     - Extracciones de efectivo Galicia -> Efectivo ARS.
     - Transferencias bancarias Galicia -> Santander.
-- Recálculo de saldos de billeteras y metas, perfil financiero y calibración.
+- Recálculo de saldos de billeteras y metas, perfil financiero.
 """
 from __future__ import annotations
 
@@ -51,7 +51,6 @@ from app.schemas.presupuesto import PresupuestoCategoriaInput, PresupuestoCreate
 from app.schemas.transaccion import TransaccionCreate
 from app.schemas.transferencia_interna import TransferenciaInternaCreate
 from app.services import (
-    calibracion_service,
     meta_service,
     perfil_financiero_service,
     presupuesto_service,
@@ -71,7 +70,7 @@ def generar_metas_e_inversiones(
 ) -> Dict[str, Any]:
     """
     Crea las metas, aportes, billetera de inversión, transferencias internas,
-    presupuestos, calibraciones y perfiles financieros de testingadmin.
+    presupuestos y perfiles financieros de testingadmin.
     Ninguna fila se crea con fecha posterior a fecha_corte (por defecto hoy_argentina).
     """
     if fecha_corte is None:
@@ -452,7 +451,6 @@ def generar_metas_e_inversiones(
 
     # Recalcular perfil financiero y calibración de testingadmin
     perfil_financiero_service.calcular_y_persistir_perfil(db, cat.user.id)
-    calibracion_service.calcular_y_guardar_calibracion_usuario(db, cat.user.id, Moneda.ARS)
     db.commit()
 
     return {

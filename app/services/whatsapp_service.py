@@ -458,6 +458,9 @@ class BuzonSalida:
         self._aviso_tipo: str | None = None
         self._aviso_al_enviar = None
 
+    def tiene_aviso(self) -> bool:
+        return self._aviso_texto is not None
+
     def agregar_aviso(self, texto: str, tipo: str, al_enviar=None) -> bool:
         if self._aviso_texto is not None:
             return False

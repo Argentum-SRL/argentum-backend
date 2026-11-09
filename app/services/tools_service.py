@@ -1,16 +1,16 @@
+from dataclasses import dataclass
 import logging
 import requests
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func
 
 from app.models.tools import IPCCache
 from app.schemas.tools import InstallmentConvenienceRequest
 from app.models.usuario import Usuario, Moneda
-from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion, MetodoPago
+from app.models.transaccion import Transaccion
 from app.services.dashboard_service import get_ciclo_fechas
-from app.services.definiciones_service import condicion_gasto, condicion_ingreso
 from app.utils.fecha import hoy_argentina
 from app.utils.tasas import tna_a_mensual
 
@@ -340,6 +340,68 @@ def ajustar_por_ipc(
     return AjusteIPCFloat(monto_ajustado, ajuste_posible=True)
 
 
+@dataclass(frozen=True)
+class PlanCuotas:
+    monto_cuota: Decimal
+    total: Decimal
+    interes: Decimal
+    valor_presente: Decimal | None
+
+
+def calcular_plan_cuotas(
+    precio: Decimal,
+    cantidad: int,
+    tna: Decimal | None = None,
+    inflacion_mensual: list[Decimal] | None = None,
+) -> PlanCuotas:
+    """
+    Calcula el plan de cuotas (monto cuota, total, interés y valor presente).
+    Función pura.
+    """
+    if cantidad <= 0:
+        raise ValueError("La cantidad de cuotas debe ser mayor a 0")
+
+    precio_dec = Decimal(str(precio))
+    if tna is not None and Decimal(str(tna)) > Decimal("0"):
+        tna_dec = Decimal(str(tna))
+        i = tna_a_mensual(tna_dec)
+        if i == Decimal("0"):
+            monto_cuota = precio_dec / Decimal(str(cantidad))
+            total = precio_dec
+            interes = Decimal("0.00")
+        else:
+            pot = (Decimal("1") + i) ** cantidad
+            monto_cuota = precio_dec * (i * pot) / (pot - Decimal("1"))
+            total = monto_cuota * Decimal(str(cantidad))
+            interes = total - precio_dec
+    else:
+        monto_cuota = precio_dec / Decimal(str(cantidad))
+        total = precio_dec
+        interes = Decimal("0.00")
+
+    monto_cuota_r = monto_cuota.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    total_r = total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    interes_r = interes.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    valor_presente_r = None
+    if inflacion_mensual is not None:
+        vp_total = Decimal("0")
+        factor = Decimal("1")
+        for k in range(1, cantidad + 1):
+            inf_k = inflacion_mensual[k - 1] if k - 1 < len(inflacion_mensual) else inflacion_mensual[-1]
+            tasa_k = Decimal(str(inf_k)) / Decimal("100")
+            factor = factor * (Decimal("1") + tasa_k)
+            vp_total += monto_cuota / factor
+        valor_presente_r = vp_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    return PlanCuotas(
+        monto_cuota=monto_cuota_r,
+        total=total_r,
+        interes=interes_r,
+        valor_presente=valor_presente_r,
+    )
+
+
 def calcular_conveniencia_cuotas(req: InstallmentConvenienceRequest) -> dict:
     """
     Calcula si conviene pagar en cuotas o de contado bajo la inflación provista.
@@ -347,17 +409,26 @@ def calcular_conveniencia_cuotas(req: InstallmentConvenienceRequest) -> dict:
     tasa = req.inflacion_mensual / 100  # Convertir a decimal
     
     if req.tiene_interes and req.tna is not None:
-        i = float(tna_a_mensual(req.tna))  # tasa mensual decimal
+        precio_base = Decimal(str(req.precio_contado))
+        tna_param = Decimal(str(req.tna))
+        i = float(tna_a_mensual(tna_param))
         if i == 0:
-            monto_cuota = req.precio_contado / req.cantidad_cuotas
+            monto_cuota = float(precio_base) / req.cantidad_cuotas
         else:
-            monto_cuota = req.precio_contado * (i * (1 + i) ** req.cantidad_cuotas) / ((1 + i) ** req.cantidad_cuotas - 1)
-        precio_total_cuotas = monto_cuota * req.cantidad_cuotas
-        interes_total = precio_total_cuotas - req.precio_contado
+            monto_cuota = float(precio_base) * (i * (1 + i) ** req.cantidad_cuotas) / ((1 + i) ** req.cantidad_cuotas - 1)
     else:
-        monto_cuota = req.precio_total_cuotas / req.cantidad_cuotas
-        precio_total_cuotas = req.precio_total_cuotas
-        interes_total = 0.0
+        precio_base = Decimal(str(req.precio_total_cuotas))
+        tna_param = None
+        monto_cuota = float(precio_base) / req.cantidad_cuotas
+
+    plan = calcular_plan_cuotas(
+        precio=precio_base,
+        cantidad=req.cantidad_cuotas,
+        tna=tna_param,
+        inflacion_mensual=[Decimal(str(req.inflacion_mensual))] * req.cantidad_cuotas if req.inflacion_mensual is not None else None,
+    )
+    precio_total_cuotas = float(plan.total)
+    interes_total = float(plan.interes)
 
     detalle_cuotas = []
     costo_real_total = 0.0
@@ -440,7 +511,6 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
     # 1. Saldo disponible actual mediante servicio canónico
     from app.services.contexto_financiero_service import _calcular_saldo_disponible_sync
     disponible_res = _calcular_saldo_disponible_sync(db, usuario.id)
-    carga_mensual_comprometida_ars = float(disponible_res["ars"]["cuotas_comprometidas"] + disponible_res["ars"]["suscripciones_mensuales"])
 
     # 2. Ciclos con historia
     primera_tx = db.query(func.min(Transaccion.fecha)).filter(
@@ -462,21 +532,6 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
                 current_date = fin + timedelta(days=1)
             else:
                 break
-
-    # Rango de ciclos para promediar gastos (máximo 3)
-    if ciclos_con_historia >= 1:
-        n = min(ciclos_con_historia, 3)
-        end_range = fecha_fin_c1
-        start_date_c = end_range
-        for _ in range(n - 1):
-            inicio_c, _ = get_ciclo_fechas(usuario, start_date_c)
-            start_date_c = inicio_c - timedelta(days=1)
-        start_range, _ = get_ciclo_fechas(usuario, start_date_c)
-        divisor = n
-    else:
-        start_range = fecha_inicio_curr
-        end_range = hoy
-        divisor = 1
 
     # 3. Ingreso habitual mensual estimado en ARS (módulo unificado de ingreso habitual)
     from app.services.ingreso_habitual_service import obtener_ingreso_habitual
@@ -538,119 +593,8 @@ def calcular_puede_permitirse(
     cantidad_cuotas: int,
     tiene_interes: bool,
     tna: float | None,
-    ingreso_manual: float | None,
-    db: Session
+    ingreso_manual: float | None = None,
+    db: Session | None = None,
 ) -> dict:
-
-    # 1. Obtener contexto financiero del usuario
-    ctx = obtener_contexto_financiero(user_id, db)
-    
-    ingreso = ingreso_manual if ctx.get('ingreso_promedio_mensual') is None else ctx['ingreso_promedio_mensual']
-    saldo = ctx.get('ars', {}).get('saldo_disponible', 0.0)
-    comp_dict = ctx.get('compromisos_mensuales', {})
-    carga_actual = comp_dict.get('deudas_y_suscripciones', ctx.get('ars', {}).get('cuotas_comprometidas', 0.0) + ctx.get('ars', {}).get('suscripciones_mensuales', 0.0))
-    compromisos_totales = comp_dict.get('total', carga_actual)
-    gasto_variable = ctx.get('gasto_promedio_variable', 0.0)
-    es_manual = bool(ctx.get('ingreso_promedio_mensual') is None and ingreso_manual is not None)
-
-    if modo == 'contado':
-        # ---- MODO CONTADO ----
-        porcentaje_del_saldo = (precio_total / saldo * 100) if saldo > 0 else 999
-        saldo_restante = saldo - precio_total
-        porcentaje_del_ingreso = (precio_total / ingreso * 100) if ingreso else None
-        
-        # Semáforo
-        if saldo <= 0 or precio_total > saldo:
-            semaforo = 'negro'
-            mensaje = 'No tenés suficiente saldo disponible para esta compra.'
-        elif porcentaje_del_saldo <= 20:
-            semaforo = 'verde'
-            mensaje = 'Podés comprarlo sin comprometer tu estabilidad.'
-        elif porcentaje_del_saldo <= 50:
-            semaforo = 'amarillo'
-            mensaje = 'Podés comprarlo, pero vas a usar una parte importante de tu saldo disponible.'
-        elif porcentaje_del_saldo <= 100:
-            semaforo = 'rojo'
-            mensaje = 'Comprarlo te dejaría con muy poco margen disponible.'
-        else:
-            semaforo = 'negro'
-            mensaje = 'No tenés suficiente saldo disponible para esta compra.'
-
-        return {
-            "modo": "contado",
-            "precio_total": round(precio_total, 2),
-            "saldo_disponible_actual": round(saldo, 2),
-            "saldo_restante_post_compra": round(saldo_restante, 2),
-            "porcentaje_del_saldo": round(porcentaje_del_saldo, 1),
-            "porcentaje_del_ingreso_mensual": round(porcentaje_del_ingreso, 1) if porcentaje_del_ingreso else None,
-            "semaforo": semaforo,
-            "mensaje_principal": mensaje,
-            "ingreso_promedio_usado": round(ingreso, 2) if ingreso else None,
-            "ingreso_es_manual": es_manual,
-        }
-
-    else:
-        # ---- MODO CUOTAS ----
-        if tiene_interes and tna:
-            # Amortización francesa
-            i = (tna / 100) / 12  # tasa mensual decimal
-            if i == 0:
-                monto_cuota = precio_total / cantidad_cuotas
-            else:
-                monto_cuota = precio_total * (i * (1 + i) ** cantidad_cuotas) / ((1 + i) ** cantidad_cuotas - 1)
-            precio_total_real = monto_cuota * cantidad_cuotas
-            interes_total = precio_total_real - precio_total
-        else:
-            # Sin interés
-            monto_cuota = precio_total / cantidad_cuotas
-            precio_total_real = precio_total
-            interes_total = 0.0
-
-        nueva_carga_total = carga_actual + monto_cuota
-        porcentaje_carga_sobre_ingreso = (nueva_carga_total / ingreso * 100) if ingreso else None
-        nuevo_margen_libre = (ingreso - compromisos_totales - gasto_variable - monto_cuota) if ingreso else None
-        
-        # Semáforo basado en % de carga comprometida sobre ingreso y margen libre resultante
-        if porcentaje_carga_sobre_ingreso is None:
-            semaforo = 'gris'
-            mensaje = 'Ingresá tu ingreso mensual para ver el análisis completo.'
-        elif nuevo_margen_libre is not None and nuevo_margen_libre < 0:
-            if porcentaje_carga_sobre_ingreso > 100:
-                semaforo = 'negro'
-                mensaje = 'Esta cuota supera tu capacidad de pago mensual según tu historial.'
-            else:
-                semaforo = 'rojo'
-                mensaje = 'Tus gastos totales y cuotas superarían tus ingresos mensuales, dejándote con saldo negativo.'
-        elif porcentaje_carga_sobre_ingreso <= 30:
-            semaforo = 'verde'
-            mensaje = 'La cuota entra bien en tu presupuesto mensual.'
-        elif porcentaje_carga_sobre_ingreso <= 50:
-            semaforo = 'amarillo'
-            mensaje = 'La cuota es manejable, pero ya comprometés la mitad de tu ingreso en obligaciones fijas.'
-        elif porcentaje_carga_sobre_ingreso <= 70:
-            semaforo = 'rojo'
-            mensaje = 'Con esta cuota, más del 70% de tu ingreso va a obligaciones fijas. Margen muy ajustado.'
-        else:
-            semaforo = 'negro'
-            mensaje = 'Esta cuota supera tu capacidad de pago mensual según tu historial.'
-
-        return {
-            "modo": "cuotas",
-            "precio_total": round(precio_total, 2),
-            "monto_cuota": round(monto_cuota, 2),
-            "cantidad_cuotas": cantidad_cuotas,
-            "carga_mensual_previa": round(carga_actual, 2),
-            "carga_mensual_nueva_total": round(nueva_carga_total, 2),
-            "porcentaje_carga_sobre_ingreso": round(porcentaje_carga_sobre_ingreso, 1) if porcentaje_carga_sobre_ingreso else None,
-            "margen_libre_post_compra": round(nuevo_margen_libre, 2) if nuevo_margen_libre else None,
-            "semaforo": semaforo,
-            "mensaje_principal": mensaje,
-            "ingreso_promedio_usado": round(ingreso, 2) if ingreso else None,
-            "ingreso_es_manual": es_manual,
-            "gasto_variable_promedio": round(gasto_variable, 2),
-            "tiene_interes": tiene_interes,
-            "tna_usada": tna if tiene_interes else None,
-            "precio_total_real": round(precio_total_real, 2),
-            "interes_total": round(interes_total, 2),
-        }
-
+    from app.services.permitirse_service import calcular_puede_permitirse as _motor_permitirse
+    return _motor_permitirse(user_id, precio_total, modo, cantidad_cuotas, tiene_interes, tna, ingreso_manual, db)

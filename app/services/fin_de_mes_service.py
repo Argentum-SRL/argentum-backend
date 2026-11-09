@@ -45,6 +45,7 @@ class ResultadoRango:
     ciclos: int
     veces_no_alcanza: Optional[int]
     factor_cobertura: Decimal
+    finales: tuple[Decimal, ...] = ()
 
     @property
     def rango(self) -> tuple[Decimal, Decimal] | None:
@@ -279,6 +280,7 @@ def rango_fin_de_mes(
         final = libre - restante
         finales.append(final)
 
+    finales_orden = tuple(Decimal(f) for f in finales)
     finales.sort()
     if not finales:
         return ResultadoRango(
@@ -288,6 +290,7 @@ def rango_fin_de_mes(
             ciclos=len(ciclos),
             veces_no_alcanza=None,
             factor_cobertura=factor_cobertura,
+            finales=(),
         )
 
     if len(ciclos) < 10:
@@ -306,6 +309,7 @@ def rango_fin_de_mes(
         ciclos=len(ciclos),
         veces_no_alcanza=veces_no_alcanza,
         factor_cobertura=factor_cobertura,
+        finales=finales_orden,
     )
 
 
@@ -332,33 +336,6 @@ def calcular_fin_de_mes(
 
     # 2. Ingreso habitual y deducción del próximo cobro
     res_ingreso = obtener_ingreso_habitual(db, usuario, hoy=fecha_ref, moneda="ARS")
-    if res_ingreso.monto is None and getattr(res_ingreso, "motivo_sin_datos", None) == "irregular":
-        # Si el usuario tiene menos de 6 ciclos completos desde su primer ingreso, la ventana
-        # son los ciclos completos desde el primer ingreso (regla de negocio de ingreso habitual)
-        min_f = db.query(func.min(Transaccion.fecha)).filter(
-            Transaccion.usuario_id == usuario.id,
-            Transaccion.tipo == TipoTransaccion.INGRESO,
-            or_(Transaccion.moneda == Moneda.ARS, Transaccion.moneda == "ARS"),
-        ).scalar()
-        if min_f is not None:
-            p = fecha_ref
-            c_list: list[tuple[date, date]] = []
-            while p >= min_f:
-                c_i, c_f = get_ciclo_fechas(usuario, p)
-                c_list.append((c_i, c_f))
-                p = c_i - timedelta(days=1)
-            c_list = sorted(list(set(c_list)), key=lambda x: x[0])
-            if len(c_list) >= 3:
-                from app.services.ingreso_habitual_service import calcular_ingreso_habitual_en_memoria, cargar_contexto
-                res_mem = calcular_ingreso_habitual_en_memoria(
-                    movimientos=db.query(Transaccion).filter(Transaccion.usuario_id == usuario.id).all(),
-                    ciclos=c_list,
-                    hoy=fecha_ref,
-                    ctx=cargar_contexto(db, usuario.id, fecha_ref),
-                    moneda="ARS",
-                )
-                if res_mem.monto is not None:
-                    res_ingreso = res_mem
 
     ingreso_deducible = res_ingreso.monto is not None
 

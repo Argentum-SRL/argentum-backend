@@ -3,19 +3,17 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 from uuid import UUID
-from typing import List, Optional
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from jose import jwt, JWTError
-from app.core.config import settings
 from app.core.database import SessionLocal, get_db
-from app.core.auth import get_current_user, verificar_access_token
+from app.core.auth import get_current_user, decodificar_access_token
 from app.models.usuario import Usuario
-from app.models.notificacion import Notificacion, NivelNotificacion
+from app.models.notificacion import Notificacion
 from app.models.evento_actualizacion import EventoActualizacion
-from app.schemas.notificacion import NotificacionRead, NotificacionUpdate
+from app.schemas.notificacion import NotificacionRead
 from app.schemas.configuracion_notificacion import ConfiguracionNotificacionRead, ConfiguracionNotificacionUpdate
 from app.services import notificacion_service
 from app.utils.texto import limpiar_mensaje_web
@@ -150,20 +148,9 @@ def actualizar_configuracion(
     return cfg_read
 
 
-@router.get("/sse")
-async def sse_notificaciones(
-    request: Request,
-    token: Optional[str] = Query(default=None),
-):
-    """
-    Endpoint SSE para streaming en vivo de notificaciones nuevas sin leer.
-    El cliente se autentica via cookie httpOnly (access_token) o via query param token.
-    El query param se mantiene por compatibilidad con clientes existentes.
-    """
-    # Leer token desde query param primero, luego desde cookie httpOnly
-    access_token = token or request.cookies.get("access_token")
-
-    if not access_token:
+def autenticar_sse(request: Request) -> tuple[UUID, datetime | None]:
+    token = request.cookies.get("access_token")
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token de acceso requerido",
@@ -171,8 +158,7 @@ async def sse_notificaciones(
         )
 
     try:
-        usuario_id_str = verificar_access_token(access_token)
-        usuario_id = UUID(usuario_id_str)
+        payload = decodificar_access_token(token)
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -180,36 +166,58 @@ async def sse_notificaciones(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    db_auth = SessionLocal()
-    try:
-        usuario = db_auth.get(Usuario, usuario_id)
-        if not usuario:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="No encontramos una cuenta con esos datos.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        tokens_revocados_at = usuario.tokens_revocados_at
-    finally:
-        db_auth.close()
-
-    try:
-        payload = jwt.decode(access_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        iat_timestamp = payload.get("iat")
-        iat_dt = datetime.fromtimestamp(iat_timestamp, tz=timezone.utc) if iat_timestamp else None
-    except JWTError:
+    if not isinstance(payload, dict) or payload.get("type") != "access" or not payload.get("sub"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token de acceso inválido o expirado",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if tokens_revocados_at and iat_dt and iat_dt < tokens_revocados_at:
+    try:
+        usuario_id = UUID(str(payload["sub"]))
+    except (ValueError, TypeError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Sesión revocada. Por favor iniciá sesión nuevamente.",
+            detail="Token de acceso inválido o expirado",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    iat_val = payload.get("iat")
+    iat_dt = datetime.fromtimestamp(iat_val, tz=timezone.utc) if iat_val is not None else None
+
+    db = SessionLocal()
+    try:
+        usuario = db.get(Usuario, usuario_id)
+        if not usuario:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="No encontramos una cuenta con esos datos.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        rev_at = usuario.tokens_revocados_at
+        if rev_at and rev_at.tzinfo is None:
+            rev_at = rev_at.replace(tzinfo=timezone.utc)
+        if rev_at and iat_dt and iat_dt < rev_at:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Sesión revocada. Por favor iniciá sesión nuevamente.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    finally:
+        db.close()
+
+    return usuario_id, iat_dt
+
+
+@router.get("/sse")
+async def sse_notificaciones(
+    request: Request,
+):
+    """
+    Endpoint SSE para streaming en vivo de notificaciones nuevas sin leer.
+    Se autentica solo con la cookie httpOnly access_token.
+    """
+    usuario_id, iat_dt = autenticar_sse(request)
 
     async def event_generator():
         # Enviar primer mensaje de conexión exitosa

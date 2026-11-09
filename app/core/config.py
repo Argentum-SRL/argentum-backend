@@ -17,6 +17,8 @@ class Settings(BaseSettings):
 
     # Auth
     SECRET_KEY: str
+    HMAC_SECRET_KEY: str = ""
+    # Clave de los resúmenes HMAC (refresh tokens, códigos, límite por IP y número de WhatsApp). SECRET_KEY queda solo para los JWT (fase_j2_auth, 09/11/2026). Vacía = se usa SECRET_KEY.
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
@@ -26,6 +28,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini-2024-07-18"
     IA_PRESUPUESTO_DIARIO_USD: float = 1.0
+    IA_PRESUPUESTO_MENSUAL_USD: float = 10.0  # Tope mensual de OpenAI (V6, Sebastián 06/11/2026): mail al 50%, 80% y 100%; al 100% el bot deja de usar la IA hasta el 1° del mes siguiente.
     IA_MAX_MENSAJES_DIA_USUARIO: int = 150
     IA_MAX_ARCHIVOS_DIA_USUARIO: int = 20
 
@@ -46,6 +49,8 @@ class Settings(BaseSettings):
     WHATSAPP_MAX_SALIENTES_DIA: int = 150
     WHATSAPP_CUPO_GRATIS_MES: int = 1000
     WHATSAPP_TARIFA_SERVICIO_USD: Decimal = Decimal("0.023")  # tarifa por mensaje de servicio cobrado en Argentina; vista en la facturación de Meta el 09/10/2026
+    META_TOPE_MENSUAL_ARS: Decimal = Decimal("5000")  # Tope mensual de Meta (V6, Sebastián 06/11/2026): solo avisa por mail al 50%, 80% y 100%; nunca corta WhatsApp.
+    WHATSAPP_TARIFA_SERVICIO_ARS: Decimal = Decimal("37.68")  # Precio por mensaje cobrado visto en la facturación de Meta el 09/10/2026 (plantillas UTILITY).
 
     # Google
     GOOGLE_CLIENT_ID: str = ""

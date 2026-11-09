@@ -15,6 +15,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.claves import clave_hmac
 from app.core.database import SessionLocal
 from app.models.mensaje_saliente_wpp import MensajeSalienteWpp
 from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
@@ -30,7 +31,7 @@ ORDEN_ESTADOS_META = {
 
 def hash_telefono(numero: str | None) -> str | None:
     """
-    Genera el HMAC-SHA256 del número en formato E.164 canónico usando settings.SECRET_KEY.
+    Genera el HMAC-SHA256 del número en formato E.164 canónico usando la clave HMAC (claves.clave_hmac).
     Retorna el resumen hexadecimal en minúsculas (64 caracteres) o None si el número es nulo.
     """
     if not numero:
@@ -39,7 +40,7 @@ def hash_telefono(numero: str | None) -> str | None:
     tel_formateado = formatear_numero_whatsapp(numero)
     if not tel_formateado:
         return None
-    key = settings.SECRET_KEY.encode("utf-8")
+    key = clave_hmac()
     return hmac.new(key, tel_formateado.encode("utf-8"), hashlib.sha256).hexdigest()
 
 

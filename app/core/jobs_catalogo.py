@@ -23,9 +23,11 @@ JOBS_MANUALES_PERMITIDOS: frozenset[str] = frozenset({
     "actualizar_tasas_diarias",
     "refresh_feriados_argentina",
     "actualizar_ipc_diario",
+    "actualizar_rem",
     "limpiar_refresh_tokens",
     "vigilar_deriva_saldos",
     "reporte_uso_semanal",
+    "consejos_diarios",
 })
 
 
@@ -95,13 +97,6 @@ JOBS_CATALOGO: list[JobCatalogoItem] = [
         puede_correr_ahora=False,
     ),
     JobCatalogoItem(
-        job_id="proyeccion_negativa",
-        nombre="Alerta de saldo futuro negativo",
-        que_hace="Avisa al usuario si sus gastos previstos superan el dinero disponible.",
-        periodo_esperado_minutos=1440,
-        puede_correr_ahora=False,
-    ),
-    JobCatalogoItem(
         job_id="notificaciones_facturas",
         nombre="Avisos de facturas e impuestos",
         que_hace="Recuerda el vencimiento cercano de servicios públicos y facturas cargadas.",
@@ -144,13 +139,6 @@ JOBS_CATALOGO: list[JobCatalogoItem] = [
         puede_correr_ahora=True,
     ),
     JobCatalogoItem(
-        job_id="recalcular_calibraciones_nocturno",
-        nombre="Calibración nocturna de proyecciones",
-        que_hace="Ajusta la precisión de las proyecciones automáticas de saldo para cada usuario.",
-        periodo_esperado_minutos=1440,
-        puede_correr_ahora=False,
-    ),
-    JobCatalogoItem(
         job_id="actualizar_tasas_diarias",
         nombre="Actualización de tasas de interés",
         que_hace="Descarga las tasas de rendimiento de billeteras virtuales y bancos.",
@@ -181,7 +169,7 @@ JOBS_CATALOGO: list[JobCatalogoItem] = [
     JobCatalogoItem(
         job_id="vigilar_tareas",
         nombre="Vigilancia de tareas automáticas",
-        que_hace="Revisa el estado de todas las tareas y alerta por email si alguna falla o se atrasa.",
+        que_hace="Revisa el estado de todas las tareas y alerta por email si alguna falla o se atrasa; además avisa cuando el gasto del mes en OpenAI o en WhatsApp llega al 50%, 80% o 100% del tope.",
         periodo_esperado_minutos=60,
         puede_correr_ahora=False,
     ),
@@ -197,6 +185,20 @@ JOBS_CATALOGO: list[JobCatalogoItem] = [
         nombre="Reporte semanal de uso",
         que_hace="Cada lunes manda al equipo un mail con altas, activación, retención y costo por usuario activo, sin datos personales.",
         periodo_esperado_minutos=10080,
+        puede_correr_ahora=True,
+    ),
+    JobCatalogoItem(
+        job_id="actualizar_rem",
+        nombre="Inflación esperada (REM del BCRA)",
+        que_hace="Baja una vez por mes la inflación que esperan los analistas (REM del BCRA); si no puede, usa la última del INDEC y avisa por mail.",
+        periodo_esperado_minutos=1440,
+        puede_correr_ahora=True,
+    ),
+    JobCatalogoItem(
+        job_id="consejos_diarios",
+        nombre="Consejos del inicio",
+        que_hace="Elige el consejo del día de cada persona (tarjeta «Un dato para vos» del inicio), marca los vencidos, mide si sirvieron y avisa una vez por ciclo si lo que tiene no alcanza para lo que vence.",
+        periodo_esperado_minutos=1440,
         puede_correr_ahora=True,
     ),
 ]

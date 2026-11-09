@@ -20,6 +20,7 @@ import structlog
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.job_lock import intentar_tomar_lock_job, liberar_lock_job
+from app.models.consejo import ConsejoEmitido
 from app.models.conversacion_wpp import ConversacionWpp
 from app.models.evento_uso import EventoUso
 from app.models.mensaje_saliente_wpp import MensajeSalienteWpp
@@ -323,6 +324,54 @@ def calcular_reporte(db: Session, hoy: date) -> dict[str, Any]:
                 if len(descripciones) == 20:
                     break
 
+    # Métricas de Consejos del inicio
+    consejos_emitidos_rows = db.query(ConsejoEmitido).all()
+    c_emitidos = 0
+    c_sirvio = 0
+    c_no_sirve = 0
+    c_no_avisar = 0
+    c_resueltos = 0
+    c_vencidos = 0
+    c_medidos = 0
+    c_mejoro = 0
+
+    for c in consejos_emitidos_rows:
+        if c.fecha_emision and semana_inicio <= c.fecha_emision <= semana_fin:
+            c_emitidos += 1
+
+        d_resp = dia_ar(c.fecha_respuesta)
+        if d_resp and semana_inicio <= d_resp <= semana_fin:
+            if c.respuesta == "sirvio":
+                c_sirvio += 1
+            elif c.respuesta == "no_sirve":
+                c_no_sirve += 1
+            elif c.respuesta == "no_avisar":
+                c_no_avisar += 1
+            elif c.respuesta == "resuelto":
+                c_resueltos += 1
+
+        if c.respuesta == "vencido" and c.fecha_vence and semana_inicio <= c.fecha_vence <= semana_fin:
+            c_vencidos += 1
+
+        if c.fecha_medicion and semana_inicio <= c.fecha_medicion <= semana_fin:
+            med = c.medicion if isinstance(c.medicion, dict) else {}
+            res_med = med.get("resultado")
+            if res_med is not None and res_med != "sin_dato":
+                c_medidos += 1
+                if res_med == "mejoro":
+                    c_mejoro += 1
+
+    consejos_metricas = {
+        "emitidos": c_emitidos,
+        "sirvio": c_sirvio,
+        "no_sirve": c_no_sirve,
+        "no_avisar": c_no_avisar,
+        "resueltos": c_resueltos,
+        "vencidos": c_vencidos,
+        "medidos": c_medidos,
+        "mejoro": c_mejoro,
+    }
+
     return {
         "semana_inicio": semana_inicio,
         "semana_fin": semana_fin,
@@ -356,6 +405,7 @@ def calcular_reporte(db: Session, hoy: date) -> dict[str, Any]:
             "descargar_datos": descargar_datos_count,
             "descargar_presupuestos": descargar_presupuestos_count,
         },
+        "consejos": consejos_metricas,
         "otros": {
             "total_wpp": total_wpp,
             "en_otros": en_otros,
@@ -425,6 +475,24 @@ def armar_texto(rep: dict[str, Any], hoy: date) -> str:
         f"Funciones de la web (personas en la semana): ¿Me lo puedo permitir? {fn['permitirse']}; "
         f"calculadora de cuotas {fn['calculadora_cuotas']}; descargar mis datos {fn['descargar_datos']}; "
         f"Excel de presupuestos {fn['descargar_presupuestos']}."
+    )
+
+    lineas.append("")
+
+    # Consejos del inicio
+    cj = rep.get("consejos", {})
+    emitidos = cj.get("emitidos", 0)
+    sirvio = cj.get("sirvio", 0)
+    no_sirve = cj.get("no_sirve", 0)
+    no_avisar = cj.get("no_avisar", 0)
+    resueltos = cj.get("resueltos", 0)
+    vencidos = cj.get("vencidos", 0)
+    medidos = cj.get("medidos", 0)
+    mejoro = cj.get("mejoro", 0)
+    lineas.append(
+        f"Consejos del inicio: {emitidos} mostrados. Respuestas: me sirvió {sirvio}, no me sirve {no_sirve}, "
+        f"no avisar más {no_avisar}, hicieron lo que proponía {resueltos}, vencieron sin respuesta {vencidos}. "
+        f"Medidos: {medidos} (mejoró en {mejoro})."
     )
 
     lineas.append("")

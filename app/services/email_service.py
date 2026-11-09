@@ -11,18 +11,18 @@ import hmac
 import httpx
 import logging
 import secrets
-import smtplib
-import time
 from dataclasses import dataclass, field
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 
+from urllib.parse import urlencode
+
+from app.core.claves import clave_hmac, claves_hmac_verificacion
 from app.core.config import settings
 from app.services.email_templates import (
     template_verificacion_email,
     template_recupero_contrasena,
     template_reset_password_email,
     template_bienvenida,
+    template_cuenta_existente,
 )
 from app.utils.privacidad import enmascarar_email
 
@@ -51,9 +51,9 @@ def _generar_codigo() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
-def _hash_codigo(tipo: str, identificador: str, codigo: str) -> str:
+def _hash_codigo(tipo: str, identificador: str, codigo: str, clave: bytes | None = None) -> str:
     msg = f"{tipo}:{identificador}:{codigo}".encode("utf-8")
-    key = settings.SECRET_KEY.encode("utf-8")
+    key = clave or clave_hmac()
     return hmac.new(key, msg, hashlib.sha256).hexdigest()
 
 
@@ -156,7 +156,6 @@ def verificar_codigo_email(email: str, codigo: str) -> tuple[bool, str | None]:
     Si ok=True el código se invalida (uso único).
     """
     identificador = email.strip().lower()
-    codigo_hash = _hash_codigo("verificacion_email", identificador, codigo)
     ahora = datetime.now(timezone.utc)
     with SessionLocal() as db:
         entrada = db.execute(
@@ -179,7 +178,11 @@ def verificar_codigo_email(email: str, codigo: str) -> tuple[bool, str | None]:
             db.commit()
             return False, "El código ya expiró. Pedí uno nuevo."
 
-        if not hmac.compare_digest(entrada.codigo, codigo_hash):
+        codigo_valido = any(
+            hmac.compare_digest(entrada.codigo, _hash_codigo("verificacion_email", identificador, codigo, c))
+            for c in claves_hmac_verificacion()
+        )
+        if not codigo_valido:
             entrada.intentos_fallidos += 1
             restantes = entrada.max_intentos - entrada.intentos_fallidos
             if restantes <= 0:
@@ -201,7 +204,8 @@ def enviar_email_verificacion(destinatario: str, codigo: str, nombre: str | None
     codigo_nuevo = _generar_codigo() if not codigo else codigo
     guardar_codigo_verificacion_email(destinatario, codigo_nuevo)
     asunto = "Verificá tu email para entrar a Argentum"
-    link = f"{settings.BACKEND_URL}/auth/email/verificar-link?email={destinatario}&codigo={codigo_nuevo}"
+    params = urlencode({"email": destinatario, "codigo": codigo_nuevo})
+    link = f"{settings.BACKEND_URL}/auth/email/verificar-link?{params}"
     cuerpo = (
         f"Tu código de verificación es: {codigo_nuevo}\n\n"
         f"O haz clic en el siguiente enlace para verificar tu cuenta directamente:\n"
@@ -219,7 +223,8 @@ def generar_y_enviar_verificacion_email(destinatario: str, nombre: str | None = 
     codigo = _generar_codigo()
     guardar_codigo_verificacion_email(destinatario, codigo)
     asunto = "Verificá tu email para entrar a Argentum"
-    link = f"{settings.BACKEND_URL}/auth/email/verificar-link?email={destinatario}&codigo={codigo}"
+    params = urlencode({"email": destinatario, "codigo": codigo})
+    link = f"{settings.BACKEND_URL}/auth/email/verificar-link?{params}"
     cuerpo = (
         f"Tu código de verificación es: {codigo}\n\n"
         f"O haz clic en el siguiente enlace para verificar tu cuenta directamente:\n"
@@ -285,7 +290,6 @@ def verificar_codigo_recuperacion(email: str, codigo: str) -> bool:
     from fastapi import HTTPException
 
     identificador = email.strip().lower()
-    codigo_hash = _hash_codigo("recuperacion_password", identificador, codigo)
     ahora = datetime.now(timezone.utc)
     with SessionLocal() as db:
         entrada = db.execute(
@@ -308,7 +312,11 @@ def verificar_codigo_recuperacion(email: str, codigo: str) -> bool:
             db.commit()
             return False
 
-        if not hmac.compare_digest(entrada.codigo, codigo_hash):
+        codigo_valido = any(
+            hmac.compare_digest(entrada.codigo, _hash_codigo("recuperacion_password", identificador, codigo, c))
+            for c in claves_hmac_verificacion()
+        )
+        if not codigo_valido:
             entrada.intentos_fallidos += 1
             if entrada.intentos_fallidos >= entrada.max_intentos:
                 entrada.consumido = True
@@ -336,7 +344,8 @@ def enviar_email_recuperacion(destinatario: str, codigo: str) -> bool:
         f"Si no pediste recuperar tu contraseña, ignorá este mensaje."
     )
     nombre = _obtener_nombre_usuario(destinatario)
-    link_recupero = f"{settings.FRONTEND_URL}/auth/recuperar-password?email={destinatario}&codigo={codigo}"
+    params = urlencode({"email": destinatario, "codigo": codigo})
+    link_recupero = f"{settings.FRONTEND_URL}/auth/recuperar-password?{params}"
     cuerpo_html = template_recupero_contrasena(nombre=nombre, link=link_recupero)
     return _enviar_email(destinatario, asunto, cuerpo, cuerpo_html)
 
@@ -359,7 +368,8 @@ def enviar_email_aviso_google(destinatario: str, codigo: str) -> bool:
     asunto = "Recuperación de acceso a tu cuenta de Argentum"
     nombre = _obtener_nombre_usuario(destinatario)
     login_url = f"{settings.FRONTEND_URL}/login"
-    link_recupero = f"{settings.FRONTEND_URL}/auth/recuperar-password?email={destinatario}&codigo={codigo}"
+    params = urlencode({"email": destinatario, "codigo": codigo})
+    link_recupero = f"{settings.FRONTEND_URL}/auth/recuperar-password?{params}"
     cuerpo = (
         f"Hola {nombre},\n\n"
         f"Recibimos una solicitud para restablecer el acceso a tu cuenta en Argentum.\n\n"
@@ -411,6 +421,18 @@ def enviar_email_aviso_google(destinatario: str, codigo: str) -> bool:
         </p>
     </div>
     """
+    return _enviar_email(destinatario, asunto, cuerpo, cuerpo_html)
+
+
+def enviar_email_cuenta_existente(destinatario: str, nombre: str | None = None, con_google: bool = False) -> bool:
+    link_login = f"{settings.FRONTEND_URL}/login"
+    link_recupero = f"{settings.FRONTEND_URL}/auth/recuperar-password"
+    saludo = f"Hola {nombre}:" if nombre and nombre.strip() else "Hola:"
+    linea_entrar = f"Entrá con el botón de Google acá: {link_login}" if con_google else f"Entrá acá: {link_login}"
+    linea_clave = f"Si preferís entrar con contraseña, creala acá: {link_recupero}" if con_google else f"Si no te acordás la contraseña, recuperala acá: {link_recupero}"
+    asunto = "Ya tenés una cuenta en Argentum"
+    cuerpo = f"{saludo}\n\nAlguien quiso crear una cuenta en Argentum con este mail, pero ya tenés una.\n\n{linea_entrar}\n{linea_clave}\n\nSi no fuiste vos, no tenés que hacer nada: tu cuenta sigue igual."
+    cuerpo_html = template_cuenta_existente(nombre=nombre, link_login=link_login, link_recupero=link_recupero, con_google=con_google)
     return _enviar_email(destinatario, asunto, cuerpo, cuerpo_html)
 
 

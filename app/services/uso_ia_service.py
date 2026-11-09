@@ -14,6 +14,11 @@ from app.core.database import SessionLocal
 from app.models.uso_ia import UsoIA
 from app.models.usuario import Usuario
 from app.services.alerta_service import enviar_alerta_admin
+from app.services.costos_service import (
+    avisar_costo_si_corresponde,
+    exento_tope_mensual,
+    gasto_ia_mes_usd,
+)
 from app.services.rate_limit_service import verificar_rate_limit
 from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
 
@@ -48,6 +53,7 @@ TEXTO_GLOBAL_SIN_ARCHIVOS = (
 TEXTO_GLOBAL_SIN_IA = (
     "Por hoy no puedo responder más por acá. Cargá tus movimientos desde la web; mañana vuelvo a andar."
 )
+TEXTO_MES_SIN_IA = "Este mes no puedo responder más por acá. Cargá tus movimientos desde la web."
 
 
 def calcular_costo_ia(
@@ -225,8 +231,16 @@ def verificar_cupo_ia(
     Nunca propaga excepciones: si algo falla, logger.exception y devuelve (True, None).
     """
     try:
-        # 1. Presupuesto global diario
         hoy = hoy_argentina()
+
+        # 0. Presupuesto global mensual
+        gasto_mes = gasto_ia_mes_usd(db, hoy)
+        tope_mes = Decimal(str(settings.IA_PRESUPUESTO_MENSUAL_USD))
+        avisar_costo_si_corresponde("OpenAI", gasto_mes, tope_mes, "USD", hoy)
+        if tope_mes > Decimal("0") and gasto_mes >= tope_mes and not exento_tope_mensual(usuario):
+            return False, TEXTO_MES_SIN_IA
+
+        # 1. Presupuesto global diario
         inicio_dia_ar = datetime(hoy.year, hoy.month, hoy.day, 0, 0, 0, tzinfo=TZ_ARGENTINA)
 
         gasto_dia = db.scalar(

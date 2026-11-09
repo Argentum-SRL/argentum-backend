@@ -575,6 +575,6 @@ def test_paridad_y_ruta_fin_de_mes(client: TestClient, db: Session, usuario_test
     # total_compromisos vale 0 (como número o texto)
     assert Decimal(str(data_comp["saldo_disponible"]["ars"]["total_compromisos"])) == Decimal("0")
 
-    # GET /dashboard/resumen y GET /dashboard/proyeccion siguen respondiendo 200
+    # GET /dashboard/resumen sigue respondiendo 200 y GET /dashboard/proyeccion ya no existe
     assert client.get("/dashboard/resumen").status_code == 200
-    assert client.get("/dashboard/proyeccion").status_code == 200
+    assert client.get("/dashboard/proyeccion").status_code == 404

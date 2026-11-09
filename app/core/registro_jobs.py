@@ -315,6 +315,14 @@ def vigilar_tareas(db: Optional[Session] = None) -> None:
         )
         db.commit()
 
+        # 3. Vigilar costos del mes
+        try:
+            from app.services.costos_service import vigilar_costos
+            vigilar_costos(db, hoy)
+        except Exception:
+            db.rollback()
+            logger.exception("Error al vigilar los costos del mes")
+
     except Exception as e:
         db.rollback()
         logger.exception("Error en ejecución de vigilar_tareas", error=str(e))

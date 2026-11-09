@@ -69,7 +69,6 @@ from app.services.notificacion_scheduler_service import (
     _job_entrega_whatsapp_batched,
     _job_resumen_cierre_ciclo,
     _job_resumen_semanal,
-    _job_proyeccion_negativa,
 )
 from app.services.factura_avisos_service import _job_notificaciones_facturas
 from app.services.notificacion_despacho_service import _job_reintentar_inmediatas
@@ -261,6 +260,7 @@ def _job_limpiar_tokens():
             logger.info("Registros de claves_idempotencia antiguos eliminados: %s", claves_eliminadas)
     except Exception:
         logger.exception("Error en job limpiar_tokens")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_limpiar_tokens")
@@ -299,6 +299,7 @@ def _job_vencimientos_tarjetas():
             )
         except Exception as alerta_err:
             logger.error("Error enviando alerta para job vencimientos_tarjetas: %s", alerta_err)
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_vencimientos_tarjetas")
@@ -321,6 +322,7 @@ def _job_renovar_presupuestos():
         logger.info("Job de renovación de presupuestos ejecutado.")
     except Exception:
         logger.exception("Error en job renovar_presupuestos")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_renovar_presupuestos")
@@ -343,6 +345,7 @@ def _job_cobros_suscripciones():
         logger.info("Job de cobros de suscripciones ejecutado.")
     except Exception:
         logger.exception("Error en job cobros_suscripciones")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_cobros_suscripciones")
@@ -379,6 +382,7 @@ def job_entrega_whatsapp_batched():
             )
         except Exception as alerta_err:
             logger.error("Error enviando alerta para job entrega_whatsapp_batched: %s", alerta_err)
+        raise
 
 
 def job_resumen_cierre_ciclo():
@@ -387,10 +391,6 @@ def job_resumen_cierre_ciclo():
 
 def job_resumen_semanal():
     _job_resumen_semanal(SessionLocal)
-
-
-def job_proyeccion_negativa():
-    _job_proyeccion_negativa(SessionLocal)
 
 
 def job_notificaciones_facturas():
@@ -417,6 +417,8 @@ def _job_actualizar_perfiles():
             select(Usuario.id).where(Usuario.estado == EstadoUsuario.ACTIVO)
         ).scalars().all()
 
+        total_usuarios = len(usuarios_activos)
+        fallados = 0
         cant_actualizados = 0
 
         for uid in usuarios_activos:
@@ -425,16 +427,96 @@ def _job_actualizar_perfiles():
                 calcular_y_persistir_perfil(db_sub, uid)
                 cant_actualizados += 1
             except Exception as e:
+                fallados += 1
                 logger.error(f"Error actualizando perfil {uid}: {e}")
             finally:
                 db_sub.close()
 
         logger.info(f"Se actualizaron {cant_actualizados} perfiles financieros en el job programado.")
+        if fallados > 0:
+            raise RuntimeError(f"Perfiles: {fallados} de {total_usuarios} con error")
     except Exception:
         logger.exception("Error en job _job_actualizar_perfiles")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_actualizar_perfiles")
+        db.close()
+
+
+def _job_consejos_diarios():
+    """Tarea programada diaria: elige el consejo del día de cada usuario activo, marca vencidos y mide."""
+    from sqlalchemy import select
+    from app.models.usuario import Usuario, EstadoUsuario
+    from app.services.consejos_service import marcar_vencidos, emitir_si_corresponde, medir_pendientes
+    from app.services.inflacion_esperada_service import inflacion_esperada
+    from app.utils.fecha import hoy_argentina
+
+    db = SessionLocal()
+    lock_adquirido = False
+    try:
+        if not intentar_tomar_lock_job(db, "_job_consejos_diarios"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_consejos_diarios",
+            )
+            return
+        lock_adquirido = True
+        hoy = hoy_argentina()
+        inflacion = inflacion_esperada(db, hoy, 1)
+        marcar_vencidos(db, hoy)
+
+        usuarios_activos = db.execute(
+            select(Usuario.id).where(
+                Usuario.estado == EstadoUsuario.ACTIVO,
+                Usuario.onboarding_completo == True,
+            )
+        ).scalars().all()
+
+        total_usuarios = len(usuarios_activos)
+        fallados = 0
+        cant_emitidos = 0
+        cant_medidos = 0
+        cant_avisos = 0
+
+        for uid in usuarios_activos:
+            error_persona = False
+            db_sub = SessionLocal()
+            try:
+                u_sub = db_sub.get(Usuario, uid)
+                if u_sub:
+                    try:
+                        m = medir_pendientes(db_sub, u_sub, hoy)
+                        cant_medidos += m
+                        em = emitir_si_corresponde(db_sub, u_sub, hoy, inflacion)
+                        if em is not None:
+                            cant_emitidos += 1
+                    except Exception as e:
+                        error_persona = True
+                        logger.error(f"Error procesando consejos para usuario {uid}: {e}")
+                        db_sub.rollback()
+
+                    try:
+                        from app.services.aviso_fin_de_mes_service import avisar_fin_de_mes
+                        cant_avisos += avisar_fin_de_mes(db_sub, u_sub, hoy)
+                    except Exception as e_aviso:
+                        error_persona = True
+                        logger.error(f"Error procesando aviso fin de mes para usuario {uid}: {e_aviso}")
+                        db_sub.rollback()
+            finally:
+                db_sub.close()
+            if error_persona:
+                fallados += 1
+
+        logger.info(f"Job consejos_diarios finalizado: {cant_emitidos} emitidos, {cant_medidos} medidos, {cant_avisos} avisos de fin de mes.")
+        if fallados > 0:
+            raise RuntimeError(f"Consejos: {fallados} de {total_usuarios} con error")
+    except Exception:
+        logger.exception("Error en job _job_consejos_diarios")
+        raise
+    finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_consejos_diarios")
         db.close()
 
 
@@ -454,6 +536,7 @@ async def _job_refresh_feriados():
         await asegurar_feriados_cargados()
     except Exception:
         logger.exception("Error en job _job_refresh_feriados")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_refresh_feriados")
@@ -477,10 +560,42 @@ def _job_guardar_cotizaciones_diarias():
         logger.info("Job guardar_cotizaciones_diarias ejecutado exitosamente (%d guardadas).", len(guardadas))
     except Exception:
         logger.exception("Error en job _job_guardar_cotizaciones_diarias")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_guardar_cotizaciones_diarias")
         db.close()
+
+
+def _job_actualizar_rem():
+    """Tarea programada diaria: baja una vez por mes la inflación esperada (REM del BCRA) a las 13:20 UTC (10:20 ART)."""
+    from app.services.inflacion_esperada_service import bajar_rem
+    from app.utils.fecha import hoy_argentina
+
+    db = SessionLocal()
+    lock_adquirido = False
+    resultado_rem = None
+    try:
+        if not intentar_tomar_lock_job(db, "_job_actualizar_rem"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_actualizar_rem",
+            )
+            return
+        lock_adquirido = True
+        resultado_rem = bajar_rem(db, hoy_argentina())
+        logger.info(f"Job actualizar_rem: {resultado_rem}")
+    except Exception:
+        logger.exception("Error en job _job_actualizar_rem")
+        raise
+    finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_actualizar_rem")
+        db.close()
+
+    # Si no se pudo bajar el REM, que el Scheduler lo muestre como error con el motivo.
+    if resultado_rem is not None and not resultado_rem.startswith("guardado") and not resultado_rem.startswith("ya estaba"):
+        raise RuntimeError(resultado_rem)
 
 
 def _job_actualizar_ipc():
@@ -501,42 +616,17 @@ def _job_actualizar_ipc():
             logger.info("Job actualizar_ipc ejecutado exitosamente (mes: %s, valor: %s).", res.fecha_dato, res.valor_mensual)
         else:
             logger.warning("Job actualizar_ipc completado: sin datos de IPC disponibles.")
+
+        if res is None:
+            raise RuntimeError("IPC: no hay datos en la base ni respuesta de datos.gob.ar")
+        if res.es_estimado is True:
+            raise RuntimeError(f"IPC: datos.gob.ar no respondió; queda el dato de {res.fecha_dato}")
     except Exception:
         logger.exception("Error en job _job_actualizar_ipc")
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_actualizar_ipc")
-        db.close()
-
-
-def _job_recalcular_calibraciones():
-    """Tarea programada diaria: recalcula la calibración de proyección para todos los usuarios a las 04:00 ART."""
-    from app.services.calibracion_service import recalcular_calibraciones_todos
-    db = SessionLocal()
-    lock_adquirido = False
-    try:
-        if not intentar_tomar_lock_job(db, "_job_recalcular_calibraciones"):
-            struct_logger.info(
-                "Job omitido: ya se está ejecutando en otra instancia",
-                job="_job_recalcular_calibraciones",
-            )
-            return
-        lock_adquirido = True
-        recalcular_calibraciones_todos(SessionLocal)
-    except Exception as e:
-        logger.exception("Error en job _job_recalcular_calibraciones")
-        try:
-            from app.services.alerta_service import enviar_alerta_admin
-            enviar_alerta_admin(
-                asunto="[Argentum] Falló el job _job_recalcular_calibraciones",
-                cuerpo=f"Error en job _job_recalcular_calibraciones: {e}",
-                clave="job:_job_recalcular_calibraciones",
-            )
-        except Exception as alerta_err:
-            logger.error("Error enviando alerta para job recalcular_calibraciones: %s", alerta_err)
-    finally:
-        if lock_adquirido:
-            liberar_lock_job(db, "_job_recalcular_calibraciones")
         db.close()
 
 
@@ -566,6 +656,7 @@ def _job_actualizar_tasas():
             )
         except Exception as alerta_err:
             logger.error("Error enviando alerta para job actualizar_tasas: %s", alerta_err)
+        raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_actualizar_tasas")
@@ -574,6 +665,8 @@ def _job_actualizar_tasas():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.core.claves import avisar_si_falta_clave_hmac
+    avisar_si_falta_clave_hmac()
     if settings.ES_MODO_PC:
         from app.core.entorno import es_base_local
         if es_base_local(settings.DATABASE_URL):
@@ -685,16 +778,6 @@ async def lifespan(app: FastAPI):
             replace_existing=True,
         )
         scheduler.add_job(
-            registrar_ejecucion("proyeccion_negativa", job_proyeccion_negativa),
-            "cron",
-            hour=7,
-            minute=25,
-            id="proyeccion_negativa",
-            misfire_grace_time=300,
-            max_instances=1,
-            replace_existing=True,
-        )
-        scheduler.add_job(
             registrar_ejecucion("notificaciones_facturas", job_notificaciones_facturas),
             "cron",
             hour=7,
@@ -753,17 +836,6 @@ async def lifespan(app: FastAPI):
             max_instances=1,
             replace_existing=True,
         )
-        scheduler.add_job(
-            registrar_ejecucion("recalcular_calibraciones_nocturno", _job_recalcular_calibraciones),
-            "cron",
-            hour=4,
-            minute=0,
-            timezone=TZ_ARGENTINA,
-            id="recalcular_calibraciones_nocturno",
-            misfire_grace_time=300,
-            max_instances=1,
-            replace_existing=True,
-        )
         # Actualiza las tasas de entidades financieras públicas a las 10:00 y a las 19:00 ART
         scheduler.add_job(
             registrar_ejecucion("actualizar_tasas_diarias", _job_actualizar_tasas),
@@ -794,6 +866,16 @@ async def lifespan(app: FastAPI):
             "cron",
             minute=5,
             id="guardar_cotizaciones_diarias",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            registrar_ejecucion("actualizar_rem", _job_actualizar_rem),
+            "cron",
+            hour=13,
+            minute=20,
+            id="actualizar_rem",
             misfire_grace_time=300,
             max_instances=1,
             replace_existing=True,
@@ -836,6 +918,17 @@ async def lifespan(app: FastAPI):
             minute=7,
             timezone=TZ_ARGENTINA,
             id="reporte_uso_semanal",
+            misfire_grace_time=300,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            registrar_ejecucion("consejos_diarios", _job_consejos_diarios),
+            "cron",
+            hour=8,
+            minute=40,
+            timezone=TZ_ARGENTINA,
+            id="consejos_diarios",
             misfire_grace_time=300,
             max_instances=1,
             replace_existing=True,
@@ -1040,7 +1133,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 
-from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin, perfil_financiero, importacion, reporte_error, memoria_comercios, facturas, patrones, salud, movimientos, uso, analisis
+from app.routers import auth, onboarding, usuarios, billeteras, transacciones, transferencias, categorias, dashboard, tarjetas, presupuestos, suscripciones, metas, notificaciones, tools, grupos_cuotas, whatsapp_ia, admin, perfil_financiero, importacion, reporte_error, memoria_comercios, facturas, patrones, salud, movimientos, uso, consejos, analisis
 
 app.include_router(salud.router)
 app.include_router(auth.router)
@@ -1062,6 +1155,7 @@ app.include_router(suscripciones.router)
 app.include_router(metas.router, prefix="/goals", tags=["goals"])
 app.include_router(notificaciones.router)
 app.include_router(tools.router, prefix="/api/v1/tools")
+app.include_router(tools.router, prefix="/tools", include_in_schema=False)
 app.include_router(grupos_cuotas.router)
 app.include_router(whatsapp_ia.router, prefix="/api")
 app.include_router(admin.router, prefix="/v1", tags=["admin"])
@@ -1070,6 +1164,7 @@ app.include_router(importacion.router)
 app.include_router(reporte_error.router)
 app.include_router(reporte_error.router, prefix="/api")
 app.include_router(uso.router)
+app.include_router(consejos.router)
 
 # Servir archivos estáticos de media (Ignorado por git)
 os.makedirs("media/fotos", exist_ok=True)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, date
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing_extensions import Self
 
 from app.models.usuario import AuthProvider, CicloTipo, CicloRegla, EstadoUsuario, Moneda, RolUsuario, Sexo, CicloAjusteDireccion
@@ -196,9 +196,34 @@ class MetodosLoginResponse(BaseModel):
     puede_agregar_telefono: bool
 
 
+class PrioridadesConsejosRequest(BaseModel):
+    prioridades: list[int]
+
+    @field_validator("prioridades")
+    @classmethod
+    def validar_prioridades(cls, v: list[int]) -> list[int]:
+        if len(v) > 3:
+            raise ValueError("Como mucho 3 prioridades.")
+        if len(v) != len(set(v)):
+            raise ValueError("No puede haber prioridades repetidas.")
+        for p in v:
+            if not (1 <= p <= 8):
+                raise ValueError("Cada prioridad debe ser un entero entre 1 y 8.")
+        return v
+
+
 class UsuarioResponse(UsuarioRead):
     fecha_nacimiento: date | None = None
     sexo: str | None = None
+    prioridades_consejos: list[int] = Field(default_factory=list)
+    tiene_suscripciones: bool = False
+
+    @field_validator("prioridades_consejos", mode="before")
+    @classmethod
+    def validar_prioridades_response(cls, v: object) -> list[int]:
+        if v is None:
+            return []
+        return v
 
 
 class EliminarCuentaRequest(BaseModel):

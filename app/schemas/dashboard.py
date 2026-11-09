@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Optional
 from uuid import UUID
 from pydantic import BaseModel, Field, computed_field
 
@@ -195,79 +195,6 @@ class SubcategoriaGastoResponse(BaseModel):
     subcategoria_id: str
     subcategoria_nombre: str
     gasto_actual_ciclo: Dict[str, float]
-
-
-class ProyeccionCategoria(BaseModel):
-    categoria_id: Optional[str] = None
-    categoria_nombre: str
-    gasto_actual_ciclo: float = Field(..., ge=0)
-    promedio_historico: float = Field(..., ge=0)
-    proyectado: float = Field(..., ge=0)
-    rango_piso: float = Field(..., ge=0)
-    rango_techo: float = Field(..., ge=0)
-    fuera_de_patron: bool
-
-
-class PeriodoProyeccion(BaseModel):
-    fecha_inicio: str
-    fecha_fin: str
-    dias_transcurridos: int = Field(..., ge=0)
-    dias_restantes: int = Field(..., ge=0)
-    dias_totales: int = Field(..., ge=1)
-
-
-class CertezasProyeccion(BaseModel):
-    cuotas_restantes: float = Field(..., ge=0)
-    suscripciones_restantes: float = Field(..., ge=0)
-    compromisos_restantes: float = Field(default=0.0, ge=0)
-    total: float = Field(..., ge=0)
-
-
-class PesosProyeccion(BaseModel):
-    historial: float = Field(..., ge=0.0, le=1.0)
-    ciclo_actual: float = Field(..., ge=0.0, le=1.0)
-
-
-class CalibracionAuditoria(BaseModel):
-    pasa_puerta: bool = Field(..., description="Indica si la proyección superó la prueba de calibración individual sobre ciclos pasados")
-    ciclos_evaluados: int = Field(..., ge=0, description="Cantidad de ciclos cerrados con proyección previa evaluados en backtest")
-    cobertura_50: Optional[float] = Field(default=None, description="Cobertura empírica observada en el intervalo al 50%")
-    cobertura_80: Optional[float] = Field(default=None, description="Cobertura empírica observada en el intervalo al 80%")
-    cobertura_95: Optional[float] = Field(default=None, description="Cobertura empírica observada en el intervalo al 95%")
-    ancho_medio_80_rel: Optional[float] = Field(default=None, description="Ancho relativo medio del intervalo al 80% respecto al gasto real")
-    motivo: Optional[str] = Field(default=None, description="Motivo de rechazo de calibración si no pasa la puerta")
-    mensaje: Optional[str] = Field(default=None, description="Explicación en lenguaje claro para el usuario")
-
-
-class ProyeccionMoneda(BaseModel):
-    periodo: PeriodoProyeccion
-    gasto_proyectado_total: Optional[float] = Field(default=None, ge=0)
-    rango: Optional[Dict[str, float]] = None
-    rango_poco_informativo: Optional[bool] = None
-    balance_proyectado: Optional[float] = None
-    ingresos_proyectados: Optional[float] = Field(default=None, ge=0)
-    certezas: CertezasProyeccion
-    desglose_por_categoria: Optional[List[ProyeccionCategoria]] = None
-    nivel_confianza: Optional[Literal["alto", "medio", "bajo", "sin_datos", "inicial", "alta", "media", "baja"]] = None
-    ciclos_analizados: Optional[int] = Field(default=0, ge=0)
-    pesos: Optional[PesosProyeccion] = None
-    advertencias: List[str] = Field(default_factory=list)
-    datos_suficientes: Optional[bool] = False
-    clasificacion: Optional[Dict[str, int]] = None
-    distribucion: Optional[Dict[str, float]] = None
-    intervalos: Optional[Dict[str, Dict[str, float]]] = None
-    descomposicion: Optional[Dict[str, Optional[float]]] = None
-    mensaje_insuficiente: Optional[str] = None
-    mensaje: Optional[str] = None
-    calibracion: Optional[CalibracionAuditoria] = None
-    mostrar_card: bool = False
-
-
-class ProyeccionesResponse(BaseModel):
-    ars: ProyeccionMoneda
-    usd: ProyeccionMoneda
-    mostrar_card: bool = False
-    mostrar_modal_bienvenida: bool = False
 
 
 class PeriodoActualResponse(BaseModel):

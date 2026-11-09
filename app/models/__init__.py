@@ -32,11 +32,11 @@ from app.models.factura import Factura
 from app.models.decision_patron import DecisionPatron
 from app.models.usuario import Usuario
 from app.models.tools import IPCCache
+from app.models.expectativa_inflacion import ExpectativaInflacion
 from app.models.feriado import FeriadoAR
 from app.models.evento_actualizacion import EventoActualizacion
 from app.models.cotizacion_dolar import CotizacionDolar
 from app.models.saldo_arrastrado import SaldoArrastradoTarjeta, PagoSaldoArrastrado, EstadoSaldoArrastrado
-from app.models.calibracion_usuario import CalibracionUsuario
 from app.models.codigo_verificacion import CodigoVerificacion
 from app.models.rate_limit import RateLimit
 from app.models.ejecucion_job import EjecucionJob
@@ -44,9 +44,13 @@ from app.models.uso_ia import UsoIA
 from app.models.mensaje_saliente_wpp import MensajeSalienteWpp
 from app.models.clave_idempotencia import ClaveIdempotencia
 from app.models.evento_uso import EventoUso
+from app.models.consejo import ConsejoEmitido, ConsejoSilenciado
 from app.models.informe_personalizado import InformePersonalizado
 
 __all__ = [
+    "ConsejoEmitido",
+    "ConsejoSilenciado",
+    "InformePersonalizado",
     "ClaveIdempotencia",
     "EjecucionJob",
     "UsoIA",
@@ -91,10 +95,10 @@ __all__ = [
     "FeriadoAR",
     "EventoActualizacion",
     "CotizacionDolar",
-    "CalibracionUsuario",
     "CodigoVerificacion",
     "RateLimit",
     "EventoUso",
+    "ExpectativaInflacion",
 ]
 
 

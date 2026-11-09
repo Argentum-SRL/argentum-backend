@@ -168,6 +168,59 @@ def template_recupero_contrasena(nombre: str, link: str) -> str:
     )
 
 
+def template_cuenta_existente(
+    nombre: str | None,
+    link_login: str,
+    link_recupero: str,
+    con_google: bool,
+) -> str:
+    """
+    Template para cuando alguien intenta registrarse con un email que ya existe.
+    """
+    if nombre and nombre.strip():
+        saludo_p = f"Hola {nombre}, alguien quiso crear una cuenta en Argentum con este mail, pero ya tenés una."
+    else:
+        saludo_p = "Hola, alguien quiso crear una cuenta en Argentum con este mail, pero ya tenés una."
+
+    texto_boton = "Entrar con Google" if con_google else "Entrar a Argentum"
+    texto_link_clave = "Crear una contraseña" if con_google else "Recuperar mi contraseña"
+
+    contenido = f"""
+    <p style="font-size: 14px; color: #3a3d42; line-height: 1.6; margin: 0 0 20px 0;">
+      {saludo_p}
+    </p>
+
+    <!-- CTA BUTTON -->
+    <div style="text-align: center; margin-bottom: 16px;">
+      <a href="{link_login}" style="display: inline-block; background-color: #0D2045; color: #ffffff; font-size: 14px; font-weight: 600; text-decoration: none; padding: 13px 28px; border-radius: 8px;">
+        {texto_boton}
+      </a>
+    </div>
+
+    <!-- LINK RECUPERO -->
+    <div style="text-align: center; margin-bottom: 24px;">
+      <a href="{link_recupero}" style="font-size: 13px; color: #0C447C; text-decoration: underline;">
+        {texto_link_clave}
+      </a>
+    </div>
+
+    <!-- SECURITY NOTE -->
+    <div style="background-color: #FFF8F0; border-left: 3px solid #A8905A; border-radius: 0 6px 6px 0; padding: 12px 16px; font-size: 13px; color: #5F4A2A; line-height: 1.5;">
+      Si no fuiste vos, no tenés que hacer nada: tu cuenta sigue igual.
+    </div>
+    """
+    return _generar_html_base(
+        color_header="#0D2045",
+        badge_bg="#E6F1FB",
+        badge_text="#0C447C",
+        badge_label="Ya tenés cuenta",
+        titulo="Ya tenés una cuenta en Argentum",
+        contenido_html=contenido,
+        nota_footer_body="Si no fuiste vos, podés ignorar este email. Tu cuenta está segura.",
+        texto_footer="Este es un mensaje automático de seguridad de Argentum.",
+    )
+
+
 def template_cambio_contrasena(nombre: str, fecha_hora_argentina: str, dispositivo: str) -> str:
     """
     Template 3: Confirmación de contraseña cambiada.

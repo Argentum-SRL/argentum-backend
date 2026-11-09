@@ -15,9 +15,14 @@ from app.schemas.presupuesto import (
     PresupuestoResponse, 
     PeriodoPresupuestoResponse,
     PresupuestoCategoriaResponse,
-    RestaurarPresupuestoRequest
+    RestaurarPresupuestoRequest,
+    SugerenciaLimiteResponse,
+    SugerenciaRubro,
+    SugerenciaRubroResponse
 )
-from app.services import presupuesto_service
+from app.services import presupuesto_service, presupuesto_sugerencias
+from app.services.presupuesto_sugerencias_reglas import linea_ritmo
+from app.services.consejos_reglas import m
 from app.services.uso_service import registrar_evento
 from app.services.presupuestos_excel_datos import armar_datos_excel, nombre_archivo
 from app.services.presupuestos_excel_libro import armar_libro
@@ -26,12 +31,18 @@ from app.utils.fecha import hoy_argentina
 router = APIRouter(tags=["presupuestos"])
 
 def _map_presupuesto_response(db: Session, p) -> PresupuestoResponse:
-    periodo_actual, uso = presupuesto_service.uso_actual(db, p)
-    
+    hoy = hoy_argentina()
+    periodo_actual, uso = presupuesto_service.uso_actual(db, p, hoy=hoy)
+
     periodo_actual_resp = None
+    ritmo_texto = None
+    sugerencia_limite_resp = None
+
+    moneda_val = p.moneda.value if hasattr(p.moneda, "value") else str(p.moneda)
+
     if periodo_actual and uso:
-        dias_restantes = max(0, (periodo_actual.fecha_fin - hoy_argentina()).days)
-        
+        dias_restantes = max(0, (periodo_actual.fecha_fin - hoy).days)
+
         periodo_actual_resp = PeriodoPresupuestoResponse(
             id=periodo_actual.id,
             presupuesto_id=periodo_actual.presupuesto_id,
@@ -43,6 +54,18 @@ def _map_presupuesto_response(db: Session, p) -> PresupuestoResponse:
             porcentaje_usado=uso.porcentaje,
             dias_restantes=dias_restantes
         )
+
+        r = presupuesto_sugerencias.ritmo_presupuesto(db, p, periodo_actual, uso.calculado, hoy, p.usuario)
+        if r:
+            ritmo_texto = linea_ritmo(r.proyeccion, r.limite, moneda_val)
+
+        s = presupuesto_sugerencias.sugerencia_limite(db, p, periodo_actual, uso.calculado, hoy, p.usuario)
+        if s:
+            sugerencia_limite_resp = SugerenciaLimiteResponse(
+                texto=s.texto,
+                monto=s.monto,
+                boton=s.boton,
+            )
 
     categorias_resp = []
     for pc in p.categorias:
@@ -58,7 +81,6 @@ def _map_presupuesto_response(db: Session, p) -> PresupuestoResponse:
     # Próxima renovación: fecha_fin + 1 día del periodo actual
     proxima = (periodo_actual.fecha_fin + timedelta(days=1)) if periodo_actual else None
 
-    moneda_val = p.moneda.value if hasattr(p.moneda, "value") else str(p.moneda)
     periodo_val = p.periodo.value if hasattr(p.periodo, "value") else str(p.periodo)
     renovacion_val = p.renovacion.value if hasattr(p.renovacion, "value") else str(p.renovacion)
     estado_val = p.estado.value if hasattr(p.estado, "value") else str(p.estado)
@@ -75,7 +97,9 @@ def _map_presupuesto_response(db: Session, p) -> PresupuestoResponse:
         fecha_creacion=p.fecha_creacion,
         categorias=categorias_resp,
         periodo_actual=periodo_actual_resp,
-        proxima_renovacion=proxima
+        proxima_renovacion=proxima,
+        ritmo_texto=ritmo_texto,
+        sugerencia_limite=sugerencia_limite_resp,
     )
 
 @router.get("", response_model=List[PresupuestoResponse])
@@ -122,6 +146,28 @@ def exportar_excel(
         content=contenido_excel,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )
+
+
+@router.get("/sugerencia-rubro", response_model=SugerenciaRubroResponse)
+def obtener_sugerencia_rubro(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    hoy = hoy_argentina()
+    res = presupuesto_sugerencias.rubro_sin_presupuesto(db, usuario, hoy)
+    if not res:
+        return SugerenciaRubroResponse(sugerencia=None)
+    rubro, cat_id = res
+    return SugerenciaRubroResponse(
+        sugerencia=SugerenciaRubro(
+            categoria_id=UUID(cat_id),
+            categoria=rubro.categoria,
+            moneda=rubro.moneda,
+            monto=rubro.monto,
+            titulo=f"{rubro.categoria} no tiene presupuesto",
+            texto=f"Gastás unos {m(rubro.monto, rubro.moneda)} por mes.",
+        )
     )
 
 

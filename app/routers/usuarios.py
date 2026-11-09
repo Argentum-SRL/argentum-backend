@@ -8,6 +8,7 @@ from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.core.limiter import limiter
 from app.models.usuario import Usuario, AuthProvider
+from app.models.suscripcion import Suscripcion
 from app.schemas.usuario import (
     UsuarioResponse,
     MetodosLoginResponse,
@@ -19,6 +20,7 @@ from app.schemas.usuario import (
     EditarMoneda,
     EliminarCuentaRequest,
     PermisoMensajesRequest,
+    PrioridadesConsejosRequest,
 )
 from app.services import usuario_service
 
@@ -30,6 +32,13 @@ def get_me(
     db: Session = Depends(get_db)
 ):
     """Devuelve el usuario autenticado completo."""
+    tiene_subs = (
+        db.query(Suscripcion.id)
+        .filter(Suscripcion.usuario_id == current_user.id)
+        .first()
+        is not None
+    )
+    setattr(current_user, "tiene_suscripciones", bool(tiene_subs))
     return current_user
 
 @router.get("/me/metodos-login", response_model=MetodosLoginResponse)
@@ -108,6 +117,19 @@ def update_moneda(
 ):
     """Actualiza configuración de moneda."""
     return usuario_service.actualizar_moneda(db, current_user, datos)
+
+
+@router.put("/me/prioridades-consejos", response_model=UsuarioResponse)
+def actualizar_prioridades_consejos(
+    datos: PrioridadesConsejosRequest,
+    current_user: Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Actualiza las prioridades de consejos del usuario."""
+    current_user.prioridades_consejos = datos.prioridades if datos.prioridades else None
+    db.commit()
+    db.refresh(current_user)
+    return current_user
 
 @router.post("/me/foto")
 def upload_foto(

@@ -5,7 +5,6 @@ Verifica el formato exacto de los textos modificados en la Fase 3 E2:
 1. Detalle de error de cotización en meta_service.registrar_movimiento.
 2. Descripción de pago en pesificación en pago_resumen_service.pagar_resumen_tarjeta.
 3. Las cuatro interpretaciones de calcular_perfil_nuevo (usando parámetro data).
-4. Los mensajes ARS y USD de _job_proyeccion_negativa.
 """
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -22,7 +21,7 @@ from app.models.tarjeta_credito import EstadoTarjeta, TarjetaCredito
 from app.models.transaccion import TipoTransaccion, Transaccion
 from app.models.usuario import AuthProvider, CicloTipo, EstadoUsuario, Moneda, RolUsuario, Usuario
 from app.schemas.movimiento_meta import MovimientoMetaCreate
-from app.services import meta_service, notificacion_scheduler_service, pago_resumen_service, perfil_financiero_service
+from app.services import meta_service, pago_resumen_service, perfil_financiero_service
 from app.services.definiciones_service import ContextoDefiniciones
 
 
@@ -326,57 +325,3 @@ def test_calcular_perfil_nuevo_cuatro_interpretaciones_formato():
     # 4. Volatilidad
     assert "volatilidad" in interp
     assert interp["volatilidad"] == "Tus gastos variables fluctúan típicamente un ±20.0% respecto de tu mediana mensual ($500.000)."
-
-
-def test_job_proyeccion_negativa_mensajes_ars_y_usd():
-    """Verifica los textos de los mensajes en ARS y USD de _job_proyeccion_negativa."""
-    usuario_id = uuid4()
-    usuario = Usuario(
-        id=usuario_id,
-        nombre="Sebastián",
-        telefono="+5491112345678",
-        telefono_verificado=True,
-    )
-
-    mock_db = MagicMock()
-    mock_db.execute.return_value.scalars.return_value.all.return_value = [usuario_id]
-    mock_db.get.return_value = usuario
-
-    proyecciones = {
-        "ars": {
-            "datos_suficientes": True,
-            "calibracion": {"pasa_puerta": True},
-            "balance_proyectado": Decimal("-123456.78"),
-        },
-        "usd": {
-            "datos_suficientes": True,
-            "calibracion": {"pasa_puerta": True},
-            "balance_proyectado": Decimal("-150.50"),
-        },
-    }
-
-    mensajes_creados = []
-
-    def mock_crear_notif(**kwargs):
-        mensajes_creados.append(kwargs)
-        return MagicMock()
-
-    with patch("app.services.notificacion_scheduler_service.intentar_tomar_lock_job", return_value=True), \
-         patch("app.services.notificacion_scheduler_service.liberar_lock_job"), \
-         patch("app.services.proyeccion_service.calcular_proyeccion", return_value=proyecciones), \
-         patch("app.services.dashboard_service.get_ciclo_fechas", return_value=(date(2026, 10, 1), date(2026, 10, 31))), \
-         patch("app.services.notificacion_scheduler_service.crear_notificacion", side_effect=mock_crear_notif), \
-         patch("app.services.notificacion_service.obtener_configuracion"), \
-         patch("app.services.notificacion_service.resolver_canales_notificacion", return_value=(True, True)):
-
-        notificacion_scheduler_service._job_proyeccion_negativa(lambda: mock_db)
-
-    assert len(mensajes_creados) == 2
-    msg_ars = mensajes_creados[0]["mensaje"]
-    msg_usd = mensajes_creados[1]["mensaje"]
-
-    esperado_ars = "¡Atención! Estimamos que tu saldo en pesos va a terminar este ciclo en negativo por $123.457. Te sugerimos revisar tus gastos."
-    esperado_usd = "¡Atención! Estimamos que tu saldo en dólares va a terminar este ciclo en negativo por US$150,50. Te sugerimos revisar tus gastos."
-
-    assert msg_ars == esperado_ars
-    assert msg_usd == esperado_usd

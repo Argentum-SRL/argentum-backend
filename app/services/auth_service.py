@@ -2,7 +2,7 @@ import logging
 import time
 import httpx
 from fastapi import HTTPException, status
-from jose import jwt
+import jwt
 from app.core.config import settings
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update
@@ -14,6 +14,10 @@ from app.core.security import get_password_hash
 
 
 logger = logging.getLogger(__name__)
+
+TEXTO_GOOGLE_INVALIDO = "No pudimos validar tu cuenta de Google. Probá de nuevo."
+EMISORES_GOOGLE = ("accounts.google.com", "https://accounts.google.com")
+_REFETCH_MIN_SEGUNDOS = 300
 
 # Global variables for caching Google's JWKS
 _GOOGLE_JWKS = None
@@ -28,12 +32,17 @@ def _mask(value: str | None, visible: int = 12) -> str:
     return f"{value[:visible]}..."
 
 
-def _get_google_jwks() -> dict:
+def _get_google_jwks(forzar: bool = False) -> dict:
     global _GOOGLE_JWKS, _JWKS_LAST_FETCH
     now = time.time()
     
-    # If not cached or cached older than 1 hour, refetch
+    debe_bajar = False
     if not _GOOGLE_JWKS or (now - _JWKS_LAST_FETCH) > _CACHE_TTL:
+        debe_bajar = True
+    elif forzar and (now - _JWKS_LAST_FETCH) > _REFETCH_MIN_SEGUNDOS:
+        debe_bajar = True
+
+    if debe_bajar:
         url = "https://www.googleapis.com/oauth2/v3/certs"
         try:
             logger.debug("[Auth][Google][Backend] Fetching Google public JWKs...")
@@ -45,11 +54,13 @@ def _get_google_jwks() -> dict:
             else:
                 logger.warning("[Auth][Google][Backend] Failed to fetch JWKs, status: %s", response.status_code)
                 if not _GOOGLE_JWKS:
-                    raise Exception("Could not retrieve Google certs from server")
+                    raise HTTPException(status_code=400, detail=TEXTO_GOOGLE_INVALIDO)
+        except HTTPException:
+            raise
         except Exception as exc:
             logger.exception("[Auth][Google][Backend] Error fetching Google certs")
             if not _GOOGLE_JWKS:
-                raise HTTPException(status_code=400, detail="No se pudieron obtener las claves de Google") from exc
+                raise HTTPException(status_code=400, detail=TEXTO_GOOGLE_INVALIDO) from exc
                 
     return _GOOGLE_JWKS
 
@@ -58,7 +69,6 @@ def verify_google_token(token: str) -> dict:
     """
     Valida un ID token de Google localmente usando firmas criptográficas (offline)
     y el conjunto de claves públicas JWKS de Google.
-    Cae de vuelta a tokeninfo en caso de cualquier error de descompresión o firma local.
     """
     logger.debug(
         '[Auth][Google][Backend] Verificando token localmente tokenPresent=%s tokenLength=%s tokenPrefix=%s googleClientIdPresent=%s googleClientIdPrefix=%s',
@@ -70,52 +80,35 @@ def verify_google_token(token: str) -> dict:
     )
     
     try:
-        # 1. Obtener la cabecera sin verificar para extraer la Key ID ('kid')
+        # 1. kid = jwt.get_unverified_header(token).get("kid"); sin kid → falla.
         unverified_headers = jwt.get_unverified_header(token)
         kid = unverified_headers.get("kid")
         if not kid:
-            raise Exception("Token does not contain 'kid' in header")
+            raise ValueError("Token does not contain 'kid' in header")
             
-        # 2. Obtener las claves públicas de Google (con caché en memoria)
+        # 2. jwks = _get_google_jwks(); clave = la de ese kid; si no está: jwks = _get_google_jwks(forzar=True) y se busca otra vez; si tampoco está → falla.
         jwks = _get_google_jwks()
-        
-        # 3. Encontrar la clave correspondiente al 'kid'
-        key = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
-        if not key:
-            raise Exception(f"No matching public key found in Google JWKs for kid: {kid}")
+        clave = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
+        if not clave:
+            jwks = _get_google_jwks(forzar=True)
+            clave = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
+            if not clave:
+                raise ValueError(f"No matching public key found in Google JWKs for kid: {kid}")
             
-        # 4. Decodificar y verificar localmente usando jose
-        # Esto valida firma, exp, iat, y aud (settings.GOOGLE_CLIENT_ID)
+        # 3. token_data = jwt.decode(token, jwt.PyJWK(clave).key, algorithms=["RS256"], audience=settings.GOOGLE_CLIENT_ID, issuer=list(EMISORES_GOOGLE), options={"require": ["exp", "iat", "iss", "aud", "sub"]}). Devuelve token_data.
         token_data = jwt.decode(
             token,
-            key,
+            jwt.PyJWK(clave).key,
             algorithms=["RS256"],
             audience=settings.GOOGLE_CLIENT_ID,
-            issuer=["accounts.google.com", "https://accounts.google.com"]
+            issuer=list(EMISORES_GOOGLE),
+            options={"require": ["exp", "iat", "iss", "aud", "sub"]},
         )
-        
-        logger.debug('[Auth][Google][Backend] Verificación local exitosa')
         return token_data
         
     except Exception as e:
-        logger.warning('[Auth][Google][Backend] Falló verificación local, cayendo en fallback tokeninfo: %s', repr(e))
-        
-        # Fallback al endpoint tokeninfo para mayor robustez
-        url = f"https://oauth2.googleapis.com/tokeninfo?id_token={token}"
-        try:
-            response = httpx.get(url, timeout=10)
-            if response.status_code != 200:
-                logger.warning('[Auth][Google][Backend] Fallback tokeninfo falló: %s', response.text)
-                raise HTTPException(status_code=400, detail="Token de Google inválido")
-            
-            token_data = response.json()
-            if "aud" not in token_data or token_data["aud"] != settings.GOOGLE_CLIENT_ID:
-                raise HTTPException(status_code=400, detail="Audiencia del token no coincide")
-                
-            logger.debug('[Auth][Google][Backend] Fallback tokeninfo exitoso')
-            return token_data
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail="No se pudo validar el token de Google") from exc
+        logger.warning("[Auth][Google][Backend] Falló la validación del token de Google: %s", type(e).__name__)
+        raise HTTPException(status_code=400, detail=TEXTO_GOOGLE_INVALIDO) from e
 
 
 def validar_reset_token(db: Session, token_raw: str) -> str:
