@@ -10,6 +10,15 @@ db_logger = structlog.get_logger("database")
 
 from app.core.entorno import opciones_conexion
 
+if settings.DATABASE_URL.lower().startswith("sqlite"):
+    from sqlalchemy.dialects.postgresql import JSONB
+    from sqlalchemy.ext.compiler import compiles
+
+    if not hasattr(JSONB, "_compiler_dispatcher") or "sqlite" not in getattr(JSONB._compiler_dispatcher, "specs", {}):
+        @compiles(JSONB, "sqlite")
+        def _compile_jsonb_sqlite(type_, compiler, **kw):
+            return "TEXT"
+
 connect_args = opciones_conexion(settings.DATABASE_URL)
 
 engine = create_engine(

@@ -43,9 +43,11 @@ def init_full_db():
         logger.info("OK: Todos los modelos han sido detectados y registrados.")
 
         # 2. CREACIÓN DE TABLAS
-        # Base.metadata.create_all es desactivado para favorecer el control por Alembic
-        logger.info("El esquema de tablas es gestionado exclusivamente por Alembic.")
-        # Base.metadata.create_all(bind=engine)
+        if str(engine.url).lower().startswith("sqlite"):
+            logger.info("Entorno SQLite local detectado: asegurando creación de tablas con Base.metadata.create_all...")
+            Base.metadata.create_all(bind=engine)
+        else:
+            logger.info("El esquema de tablas es gestionado exclusivamente por Alembic.")
 
         
         # Validación de creación
