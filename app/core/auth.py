@@ -24,12 +24,13 @@ from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+import jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from app.core.config import settings
+from app.core.claves import clave_hmac, claves_hmac_verificacion
 from app.core.database import get_db
 from app.models.refresh_token import RefreshToken
 from app.models.usuario import EstadoUsuario, Usuario
@@ -44,9 +45,9 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
 
 
-def _refresh_verifier_hash(verifier: str) -> str:
+def _refresh_verifier_hash(verifier: str, clave: bytes | None = None) -> str:
     return hmac.new(
-        settings.SECRET_KEY.encode("utf-8"),
+        clave or clave_hmac(),
         verifier.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
@@ -66,12 +67,19 @@ def _parse_refresh_token(refresh_token_plain: str) -> tuple[str | None, str | No
 
 
 def _refresh_token_matches(verifier: str, token_hash: str) -> bool:
-    return hmac.compare_digest(_refresh_verifier_hash(verifier), token_hash)
+    for c in claves_hmac_verificacion():
+        if hmac.compare_digest(_refresh_verifier_hash(verifier, c), token_hash):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
 # Access token (JWT firmado)
 # ---------------------------------------------------------------------------
+
+def decodificar_access_token(token: str) -> dict:
+    return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+
 
 def crear_access_token(usuario_id: UUID | str, is_admin: bool = False) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -92,13 +100,13 @@ def verificar_access_token(token: str) -> str:
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = decodificar_access_token(token)
         usuario_id: str | None = payload.get("sub")
         token_type: str | None = payload.get("type")
         if usuario_id is None or token_type != "access":
             raise credentials_exc
         return usuario_id
-    except JWTError:
+    except jwt.PyJWTError:
         raise credentials_exc
 
 
@@ -306,17 +314,20 @@ def get_current_user(
 
     if usuario.tokens_revocados_at:
         try:
-            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            payload = decodificar_access_token(token)
             iat_timestamp = payload.get("iat")
             if iat_timestamp:
                 iat_dt = datetime.fromtimestamp(iat_timestamp, tz=timezone.utc)
-                if iat_dt < usuario.tokens_revocados_at:
+                rev_at = usuario.tokens_revocados_at
+                if rev_at.tzinfo is None:
+                    rev_at = rev_at.replace(tzinfo=timezone.utc)
+                if iat_dt < rev_at:
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
                         detail="Sesión revocada. Por favor iniciá sesión nuevamente.",
                         headers={"WWW-Authenticate": "Bearer"},
                     )
-        except JWTError:
+        except jwt.PyJWTError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token de acceso inválido o expirado",
@@ -352,7 +363,7 @@ def get_optional_user(
         return None
 
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = decodificar_access_token(token)
         usuario_id_str: str | None = payload.get("sub")
         token_type: str | None = payload.get("type")
 
@@ -365,7 +376,7 @@ def get_optional_user(
 
         return usuario
 
-    except (JWTError, Exception):
+    except (jwt.PyJWTError, Exception):
         return None
 
 

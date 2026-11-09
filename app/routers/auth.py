@@ -19,6 +19,7 @@ FLUJOS:
   3. Email/password → registro → verificar-email → verificar-teléfono → tokens
 """
 
+import functools
 import logging
 import time
 from datetime import datetime, timezone, timedelta
@@ -26,7 +27,9 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, BackgroundTasks, Cookie
+from fastapi.responses import JSONResponse
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.ip_cliente import ip_cliente
@@ -37,7 +40,6 @@ from app.core.auth import (
     crear_access_token,
     crear_refresh_token,
     get_current_user,
-    get_optional_user,
     renovar_tokens,
     revocar_refresh_token,
     revocar_todos_los_tokens,
@@ -72,6 +74,7 @@ from app.services.auth_service import (
 from app.services.email_service import (
     enviar_email_recuperacion,
     enviar_email_aviso_google,
+    enviar_email_cuenta_existente,
     generar_codigo_recuperacion,
     generar_y_enviar_verificacion_email,
     guardar_codigo_recuperacion,
@@ -80,9 +83,6 @@ from app.services.email_service import (
 )
 from app.services import usuario_service
 from app.services import whatsapp_service
-from app.services.whatsapp_service import (
-    generar_codigo_vinculacion,
-)
 from app.services.turnstile_service import verificar_turnstile_token
 
 logger = logging.getLogger(__name__)
@@ -130,6 +130,30 @@ def _requiere_onboarding(user: Usuario) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Helpers para login y registro sin revelar cuentas (fase_j2_auth)
+# ---------------------------------------------------------------------------
+
+def _respuesta_credenciales_invalidas(background_tasks: BackgroundTasks | None = None) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        content={
+            "success": False,
+            "error": {
+                "code": "UNAUTHORIZED",
+                "message": "El email o la contraseña no son correctos. Revisalos e intentá de nuevo.",
+            },
+        },
+        background=background_tasks,
+    )
+
+
+@functools.lru_cache(maxsize=1)
+def _hash_relleno() -> str:
+    # Así un email que no existe tarda lo mismo que una contraseña incorrecta.
+    return get_password_hash("argentum-relleno-para-igualar-tiempos")
+
+
+# ---------------------------------------------------------------------------
 # Email / Password
 # ---------------------------------------------------------------------------
 
@@ -137,8 +161,7 @@ def _requiere_onboarding(user: Usuario) -> bool:
 @limiter.limit("5/hour")
 def register(request: Request, user_in: RegisterRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
-    Registra un usuario con email/password.
-    No devuelve tokens: primero debe verificar email y luego teléfono.
+    Registra un usuario con email/password. La respuesta es siempre la misma (decisión 2A).
     """
     ip_origen = ip_cliente(request)
     if not user_in.turnstile_token or not verificar_turnstile_token(user_in.turnstile_token, ip_origen):
@@ -151,52 +174,69 @@ def register(request: Request, user_in: RegisterRequest, background_tasks: Backg
     tel_clean = user_in.telefono.strip() if user_in.telefono else None
     tel_norm = normalizar_telefono_ar(tel_clean) if tel_clean else None
 
-    email_existente = db.execute(
+    # Hash de la contraseña siempre antes de buscar el email para igualar tiempos
+    password_hash = get_password_hash(user_in.password)
+
+    existente = db.execute(
         select(Usuario).where(func.lower(Usuario.email) == email_clean)
     ).scalar_one_or_none()
-    if email_existente:
-        if email_existente.auth_provider == AuthProvider.GOOGLE:
-            raise HTTPException(
-                status_code=400,
-                detail="Este email ya está registrado con Google. Usá el botón de Google para iniciar sesión.",
-            )
-        raise HTTPException(status_code=400, detail="Ya existe una cuenta con ese email.")
 
-    if tel_clean:
-        condicion_tel = (Usuario.telefono == tel_clean)
-        if tel_norm:
-            condicion_tel = condicion_tel | (Usuario.telefono_normalizado == tel_norm)
+    if existente and not existente.email_verificado and existente.auth_provider == AuthProvider.EMAIL and existente.estado == EstadoUsuario.PENDIENTE_VERIFICACION:
+        existente.nombre = user_in.nombre.strip()
+        existente.apellido = user_in.apellido.strip()
+        existente.password_hash = password_hash
+        existente.password_configurada = True
+        db.commit()
+        # Respaldo: Sudhodanan y Paverd, "Pre-hijacked accounts", USENIX Security 2022
+        background_tasks.add_task(generar_y_enviar_verificacion_email, email_clean, nombre=existente.nombre)
+        # El teléfono recibido se ignora.
+    elif existente:
+        background_tasks.add_task(
+            enviar_email_cuenta_existente,
+            email_clean,
+            nombre=existente.nombre,
+            con_google=(existente.auth_provider == AuthProvider.GOOGLE),
+        )
+        # No se toca la cuenta.
+    else:
+        if tel_clean:
+            condicion_tel = (Usuario.telefono == tel_clean)
+            if tel_norm:
+                condicion_tel = condicion_tel | (Usuario.telefono_normalizado == tel_norm)
 
-        if db.execute(select(Usuario).where(condicion_tel)).scalar_one_or_none():
-            raise HTTPException(status_code=400, detail="Ese número de teléfono ya está registrado.")
+            if db.execute(select(Usuario).where(condicion_tel)).scalar_one_or_none():
+                tel_clean = None
+                tel_norm = None
 
-    nuevo = Usuario(
-        nombre=user_in.nombre.strip(),
-        apellido=user_in.apellido.strip(),
-        email=email_clean,
-        telefono=tel_clean,
-        telefono_normalizado=tel_norm,
-        password_hash=get_password_hash(user_in.password),
-        password_configurada=True, # Ya la puso en el registro
-        auth_provider=AuthProvider.EMAIL,
-        estado=EstadoUsuario.PENDIENTE_VERIFICACION,
-        email_verificado=False,
-        telefono_verificado=False,
-        onboarding_completo=False,
-        moneda_principal="ARS",
-    )
-    db.add(nuevo)
-    db.commit()
-    db.refresh(nuevo)
-
-    # Crear billeteras efectivo default
-    usuario_service.crear_billeteras_efectivo_default(db, nuevo.id)
-
-    # Enviar email en segundo plano para no bloquear el registro
-    background_tasks.add_task(generar_y_enviar_verificacion_email, nuevo.email, nombre=nuevo.nombre)
+        nuevo = Usuario(
+            nombre=user_in.nombre.strip(),
+            apellido=user_in.apellido.strip(),
+            email=email_clean,
+            telefono=tel_clean,
+            telefono_normalizado=tel_norm,
+            password_hash=password_hash,
+            password_configurada=True,
+            auth_provider=AuthProvider.EMAIL,
+            estado=EstadoUsuario.PENDIENTE_VERIFICACION,
+            email_verificado=False,
+            telefono_verificado=False,
+            onboarding_completo=False,
+            moneda_principal="ARS",
+        )
+        try:
+            db.add(nuevo)
+            db.commit()
+            db.refresh(nuevo)
+            # Crear billeteras efectivo default
+            usuario_service.crear_billeteras_efectivo_default(db, nuevo.id)
+            # Enviar email en segundo plano para no bloquear el registro
+            background_tasks.add_task(generar_y_enviar_verificacion_email, nuevo.email, nombre=nuevo.nombre)
+        except IntegrityError:
+            db.rollback()
+            logger.warning("Registro simultáneo con el mismo email: se responde igual.")
 
     return AuthResponse(
-        usuario=UsuarioRead.model_validate(nuevo),
+        usuario=None,
         requiere_verificacion_email=True,
         requiere_verificacion_telefono=False,
     )
@@ -216,30 +256,13 @@ def login(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
-    """Login con email y password. Requiere email verificado y contraseña configurada."""
+    """Login con email y password. No revela la existencia de cuentas ni credenciales."""
     email_clean = normalizar_email(user_in.email)
     user = db.execute(select(Usuario).where(func.lower(Usuario.email) == email_clean)).scalar_one_or_none()
 
-    if not user:
-        raise HTTPException(status_code=401, detail="El email o la contraseña no son correctos. Revisalos e intentá de nuevo.")
-
-    if not user.email_verificado:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "EMAIL_NO_VERIFICADO",
-                    "message": "Todavía no verificaste tu cuenta. Revisá tu email para activarla.",
-                }
-            }
-        )
-
-    if not user.password_hash:
-        raise HTTPException(
-            status_code=400,
-            detail="Tu cuenta no tiene contraseña configurada. Ingresá con tu teléfono o configurá una contraseña desde tu perfil.",
-        )
+    if not user or not user.password_hash:
+        verify_password(user_in.password, _hash_relleno())
+        return _respuesta_credenciales_invalidas()
 
     # Control de límite de intentos fallidos por cuenta
     ahora_utc = datetime.now(timezone.utc)
@@ -247,14 +270,23 @@ def login(
     if ultimo_fallo and ultimo_fallo.tzinfo is None:
         ultimo_fallo = ultimo_fallo.replace(tzinfo=timezone.utc)
 
-    if (user.intentos_fallidos_login or 0) >= MAX_INTENTOS_FALLIDOS_CUENTA and ultimo_fallo:
-        if ahora_utc - ultimo_fallo <= timedelta(minutes=VENTANA_BLOQUEO_CUENTA_MINUTOS):
+    bloqueada = bool(
+        (user.intentos_fallidos_login or 0) >= MAX_INTENTOS_FALLIDOS_CUENTA
+        and ultimo_fallo
+        and (ahora_utc - ultimo_fallo <= timedelta(minutes=VENTANA_BLOQUEO_CUENTA_MINUTOS))
+    )
+
+    ok = verify_password(user_in.password, user.password_hash)
+
+    if bloqueada:
+        if ok:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=MENSAJE_BLOQUEO_CUENTA,
             )
+        return _respuesta_credenciales_invalidas()
 
-    if not verify_password(user_in.password, user.password_hash):
+    if not ok:
         ahora_fallo = datetime.now(timezone.utc)
         if ultimo_fallo is None or (ahora_fallo - ultimo_fallo > timedelta(minutes=VENTANA_BLOQUEO_CUENTA_MINUTOS)):
             user.intentos_fallidos_login = 1
@@ -282,17 +314,18 @@ def login(
             except Exception as e:
                 logger.error("Error al disparar alerta de intentos fallidos de login: %s", e)
 
-        from fastapi.responses import JSONResponse
-        return JSONResponse(
+        return _respuesta_credenciales_invalidas(background_tasks)
+
+    if not user.email_verificado:
+        raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            content={
+            detail={
                 "success": False,
                 "error": {
-                    "code": "UNAUTHORIZED",
-                    "message": "El email o la contraseña no son correctos. Revisalos e intentá de nuevo.",
+                    "code": "EMAIL_NO_VERIFICADO",
+                    "message": "Todavía no verificaste tu cuenta. Revisá tu email para activarla.",
                 }
-            },
-            background=background_tasks,
+            }
         )
 
     # Cuenta suspendida: recién después de validar la contraseña

@@ -665,6 +665,8 @@ def _job_actualizar_tasas():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.core.claves import avisar_si_falta_clave_hmac
+    avisar_si_falta_clave_hmac()
     if settings.ES_MODO_PC:
         from app.core.entorno import es_base_local
         if es_base_local(settings.DATABASE_URL):

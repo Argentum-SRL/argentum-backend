@@ -877,6 +877,7 @@ def test_get_consejo_actual_accion_texto(db: Session, monkeypatch):
     """GET /consejos/actual con consejo de accion 'aportar_meta' -> accion_texto 'Aportar a meta'."""
     hoy = date(2026, 11, 5)
     monkeypatch.setattr("app.utils.fecha.hoy_argentina", lambda: hoy)
+    monkeypatch.setattr("app.services.consejos_service.hoy_argentina", lambda: hoy)
 
     u = Usuario(id=uuid4(), email="test_api@argentum.com", auth_provider=AuthProvider.EMAIL, rol=RolUsuario.USUARIO, estado=EstadoUsuario.ACTIVO, moneda_principal=Moneda.ARS, ciclo_tipo=CicloTipo.DIA_FIJO, ciclo_valor="1", onboarding_completo=True)
     db.add(u)

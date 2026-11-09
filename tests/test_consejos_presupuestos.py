@@ -635,7 +635,8 @@ def test_medicion_base(db: Session):
 # 5. GET /consejos/actual con accion_texto
 # ==============================================================================
 
-def test_ruta_consejos_actual(db: Session):
+def test_ruta_consejos_actual(db: Session, monkeypatch):
+    monkeypatch.setattr("app.services.consejos_service.hoy_argentina", lambda: date(2026, 11, 3))
     usuario = Usuario(
         id=uuid4(),
         email="consejo_test@argentum.com",

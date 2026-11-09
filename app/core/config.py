@@ -17,6 +17,8 @@ class Settings(BaseSettings):
 
     # Auth
     SECRET_KEY: str
+    HMAC_SECRET_KEY: str = ""
+    # Clave de los resúmenes HMAC (refresh tokens, códigos, límite por IP y número de WhatsApp). SECRET_KEY queda solo para los JWT (fase_j2_auth, 09/11/2026). Vacía = se usa SECRET_KEY.
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30

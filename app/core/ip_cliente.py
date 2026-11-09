@@ -16,7 +16,7 @@ from typing import Any
 
 from starlette.requests import Request
 
-from app.core.config import settings
+from app.core.claves import clave_hmac
 
 
 def ip_cliente(request: Request | Any) -> str | None:
@@ -45,6 +45,6 @@ def clave_limite(request: Request | Any) -> str:
     """
     ip = ip_cliente(request) or "sin_ip"
     msg = ("ip:" + ip).encode("utf-8")
-    key = settings.SECRET_KEY.encode("utf-8")
+    key = clave_hmac()
     return hmac.new(key, msg, hashlib.sha256).hexdigest()[:32]
 
