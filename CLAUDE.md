@@ -6,7 +6,7 @@ Sin explicaciones y sin vueltas. Solo: indicaciones, prompts, pushear o no, coma
 ## Estructura vigente (actualizada el 21/10/2026)
 
 Esta sección manda: si otra parte de este archivo dice algo distinto, vale lo que dice acá.
-Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_21-10.md (versión 3), con claude/DIAGNOSTICO_21-10.md, claude/DECISIONES_21-10.md y claude/MATRIZ_PRUEBAS_21-10.md. Ante una contradicción entre este archivo y el plan, vale el plan.
+Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_12-11.md (versión 4). Ante una contradicción entre este archivo y el plan, vale el plan.
 
 ### Reglas del motor
 - Qué es gasto y qué es ingreso lo decide solo app/services/definiciones_service.py. Ningún otro archivo filtra gastos o ingresos por su cuenta.
@@ -236,3 +236,13 @@ Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_21-10.md (versi
   - Rotar `SECRET_KEY`: invalida los access tokens vigentes cerrando todas las sesiones activas en un máximo de 15 minutos (tiempo de vida del token).
   - Rotar `HMAC_SECRET_KEY` (sin período de transición): invalida inmediatamente todos los refresh tokens y códigos de verificación/recuperación vigentes, y reinicia los contadores de rate limiting por IP y del límite diario de WhatsApp por número.
 - **Medidas previas consolidadas**: Códigos de verificación y recupero generados con `secrets.randbelow` y almacenados como HMAC-SHA256 (`test_12`); `create_engine` con `hide_parameters=True` (`test_14`); rate limit estricto de 10 peticiones/minuto en `/auth/google`; logs de Google sin email ni nombre del usuario (`test_15`); cookie de refresh token limitada al path `/auth`.
+
+### Análisis (fase_n_analisis y fase_n2_analisis)
+- Ciclos: solo los del usuario, con analisis_ciclos_service.generar_ventana_ciclos sobre dashboard_service.get_ciclo_fechas. Ningún otro lugar de Análisis arma ciclos.
+- Sumas: las mismas que el inicio (definiciones_service.condicion_gasto y condicion_ingreso); los reintegros y devoluciones restan. Cada ciclo da igual que calcular_balance_ciclo.
+- Ciclo en curso: se compara contra los mismos días del ciclo anterior; promedios y porcentaje de lo que te quedó, solo con ciclos completos; porcentaje null sin ingresos o por debajo de −100 %.
+- Dólares: cada movimiento se pasa con el dólar oficial vendedor de su fecha (dolar_service.obtener_cotizaciones_por_fechas); sin cotización no se suma y se avisa. Nunca un valor fijo.
+- Informes guardados: tabla informes_personalizados con migración (b6c7d8e9f0a1); todo se filtra por usuario_id.
+- Archivos: analisis_ciclos_service, analisis_resumen_service, analisis_insights_service, analisis_comparativa_service, analisis_proyeccion_service, analisis_informes_service y analisis_excel_service. Sin re-exports ni imports adentro de funciones.
+### Textos sin tecnicismos (12/11/2026)
+- Ningún texto que ve el usuario usa jerga técnica ni financiera (KPI, delta, REM, drill-down, tasa, etc.): todo en palabras simples. En Análisis lo controlan tests/test_analisis_n.py (TN16) y src/pages/app/analisis/sinTecnicismos.test.ts del front.

@@ -33,10 +33,10 @@ from app.models.transaccion import (
     Transaccion,
 )
 from app.models.usuario import AuthProvider, CicloTipo, EstadoUsuario, Moneda, RolUsuario, Usuario
-from app.services.analisis_informes_service import obtener_proyeccion_compromisos
-from app.services.analisis_service import (
-    generar_ventana_ciclos,
-    obtener_comparativa_ciclos,
+from app.services.analisis_proyeccion_service import obtener_proyeccion_compromisos
+from app.services.analisis_ciclos_service import generar_ventana_ciclos
+from app.services.analisis_comparativa_service import obtener_comparativa_ciclos
+from app.services.analisis_resumen_service import (
     obtener_resumen_analisis,
 )
 from app.services.dashboard_service import calcular_balance_ciclo, get_ciclo_fechas
@@ -640,10 +640,7 @@ def test_tn13_proyeccion_por_ciclos(db: Session):
 # ── TN16: Estático backend N-8 ───────────────────────────────────────────────
 def test_tn16_estatico_backend_n8():
     backend_root = Path(__file__).resolve().parent.parent
-    archivos = [
-        backend_root / "app" / "services" / "analisis_service.py",
-        backend_root / "app" / "services" / "analisis_informes_service.py",
-    ]
+    archivos = sorted(list((backend_root / "app" / "services").glob("analisis_*.py")))
 
     palabras_prohibidas = [
         "Flujo neto",

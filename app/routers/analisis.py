@@ -11,7 +11,13 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_user
 from app.core.database import get_db
 from app.models.usuario import Usuario
-from app.services import analisis_service
+from app.services import (
+    analisis_comparativa_service,
+    analisis_excel_service,
+    analisis_informes_service,
+    analisis_proyeccion_service,
+    analisis_resumen_service,
+)
 
 router = APIRouter(prefix="/analisis", tags=["analisis"])
 
@@ -40,7 +46,7 @@ def get_resumen_analisis(
     t_uuid = _parse_optional_uuid(tarjeta_id, "tarjeta_id")
     c_uuid = _parse_optional_uuid(categoria_id, "categoria_id")
 
-    return analisis_service.obtener_resumen_analisis(
+    return analisis_resumen_service.obtener_resumen_analisis(
         db=db,
         usuario=current_user,
         moneda_modo=moneda_modo,
@@ -68,7 +74,7 @@ def get_drilldown_movimientos(
     b_uuid = _parse_optional_uuid(billetera_id, "billetera_id")
     t_uuid = _parse_optional_uuid(tarjeta_id, "tarjeta_id")
 
-    items = analisis_service.obtener_movimientos_drilldown(
+    items = analisis_resumen_service.obtener_movimientos_drilldown(
         db=db,
         usuario=current_user,
         moneda_modo=moneda_modo,
@@ -97,7 +103,7 @@ def get_comparativa_ciclos(
     b_uuid = _parse_optional_uuid(billetera_id, "billetera_id")
     t_uuid = _parse_optional_uuid(tarjeta_id, "tarjeta_id")
 
-    return analisis_service.obtener_comparativa_ciclos(
+    return analisis_comparativa_service.obtener_comparativa_ciclos(
         db=db,
         usuario=current_user,
         moneda_modo=moneda_modo,
@@ -121,7 +127,7 @@ def get_proyeccion_compromisos(
     b_uuid = _parse_optional_uuid(billetera_id, "billetera_id")
     t_uuid = _parse_optional_uuid(tarjeta_id, "tarjeta_id")
 
-    return analisis_service.obtener_proyeccion_compromisos(
+    return analisis_proyeccion_service.obtener_proyeccion_compromisos(
         db=db,
         usuario=current_user,
         moneda_modo=moneda_modo,
@@ -152,7 +158,7 @@ def list_informes(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ) -> Any:
-    return {"items": analisis_service.listar_informes_usuario(db, current_user)}
+    return {"items": analisis_informes_service.listar_informes_usuario(db, current_user)}
 
 
 @router.post("/informes")
@@ -161,7 +167,7 @@ def create_informe(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ) -> Any:
-    return analisis_service.crear_informe_usuario(
+    return analisis_informes_service.crear_informe_usuario(
         db=db,
         usuario=current_user,
         nombre=payload.nombre,
@@ -181,7 +187,7 @@ def get_informe(
     inf_uuid = _parse_optional_uuid(informe_id, "informe_id")
     if not inf_uuid:
         raise HTTPException(status_code=400, detail="ID de informe requerido")
-    inf = analisis_service.obtener_informe_usuario(db, current_user, inf_uuid)
+    inf = analisis_informes_service.obtener_informe_usuario(db, current_user, inf_uuid)
     if not inf:
         raise HTTPException(status_code=404, detail="Informe no encontrado")
     return inf
@@ -197,7 +203,7 @@ def update_informe(
     inf_uuid = _parse_optional_uuid(informe_id, "informe_id")
     if not inf_uuid:
         raise HTTPException(status_code=400, detail="ID de informe requerido")
-    actualizado = analisis_service.actualizar_informe_usuario(
+    actualizado = analisis_informes_service.actualizar_informe_usuario(
         db=db,
         usuario=current_user,
         informe_id=inf_uuid,
@@ -217,7 +223,7 @@ def delete_informe(
     inf_uuid = _parse_optional_uuid(informe_id, "informe_id")
     if not inf_uuid:
         raise HTTPException(status_code=400, detail="ID de informe requerido")
-    ok = analisis_service.eliminar_informe_usuario(db, current_user, inf_uuid)
+    ok = analisis_informes_service.eliminar_informe_usuario(db, current_user, inf_uuid)
     if not ok:
         raise HTTPException(status_code=404, detail="Informe no encontrado")
     return {"ok": True}
@@ -237,7 +243,7 @@ def exportar_excel(
     b_uuid = _parse_optional_uuid(billetera_id, "billetera_id")
     t_uuid = _parse_optional_uuid(tarjeta_id, "tarjeta_id")
 
-    contenido = analisis_service.generar_excel_analisis(
+    contenido = analisis_excel_service.generar_excel_analisis(
         db=db,
         usuario=current_user,
         moneda_modo=moneda_modo,
