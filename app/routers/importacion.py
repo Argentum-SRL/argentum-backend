@@ -301,7 +301,7 @@ def confirmar_importacion(
                 "success": False,
                 "error": {
                     "code": "MONEDA_BILLETERA_INVALIDA",
-                    "message": "La billetera principal debe estar configurada en Pesos Argentinos (ARS)."
+                    "message": "La billetera principal debe estar configurada en Pesos."
                 }
             }
         )
@@ -330,7 +330,7 @@ def confirmar_importacion(
                     "success": False,
                     "error": {
                         "code": "MONEDA_BILLETERA_USD_INVALIDA",
-                        "message": "La billetera secundaria para gastos internacionales debe estar configurada en Dólares (USD)."
+                        "message": "La billetera secundaria para gastos internacionales debe estar configurada en Dólares."
                     }
                 }
             )

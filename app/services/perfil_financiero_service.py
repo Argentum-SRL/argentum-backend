@@ -133,11 +133,11 @@ def generar_texto_contexto_ia(perfil: PerfilFinanciero) -> str:
     
     # Capacidad de ahorro
     if perfil.tasa_ahorro_ars is not None:
-        lineas.append(f"- Capacidad de ahorro típica ARS: {float(perfil.tasa_ahorro_ars)*100:.1f}%")
+        lineas.append(f"- Capacidad de ahorro típica en pesos: {float(perfil.tasa_ahorro_ars)*100:.1f}%")
         
     # Gasto comprometido sobre ingreso
     if perfil.ratio_cuotas_ars is not None:
-        lineas.append(f"- Gasto comprometido sobre ingreso ARS: {float(perfil.ratio_cuotas_ars)*100:.1f}%")
+        lineas.append(f"- Gasto comprometido sobre ingreso en pesos: {float(perfil.ratio_cuotas_ars)*100:.1f}%")
 
     if perfil.tasa_ahorro_ars is None and perfil.ratio_cuotas_ars is None:
         lineas.append("- Ingresos: no sabemos cuánto cobra el usuario. Debe cargar sus cobros para habilitar métricas de ahorro y compromisos sobre ingreso.")
@@ -462,7 +462,7 @@ def calcular_perfil_nuevo(db: Session, usuario: Usuario, data: dict[str, Any] | 
         interp_relativas["volatilidad"] = f"Tus gastos variables fluctúan típicamente un ±{pct_vol}% respecto de tu mediana mensual ({formatear_monto(variable_tipico, Moneda.ARS, con_decimales=False)})."
 
     if ingreso_tipico is not None:
-        interp_relativas["ingreso_tipico"] = "Ingreso habitual estimado en ARS."
+        interp_relativas["ingreso_tipico"] = "Ingreso habitual estimado en pesos."
 
     return {
         "mostrar_card": datos_suficientes,

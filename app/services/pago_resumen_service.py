@@ -306,7 +306,7 @@ def pagar_resumen_tarjeta(
                 if billetera_pago.moneda != Moneda.USD:
                     raise HTTPException(
                         status_code=400,
-                        detail="La billetera seleccionada debe ser en dólares (USD). Si preferís pagar en pesos, elegí la opción de pesificar."
+                        detail="La billetera seleccionada debe ser en dólares. Si preferís pagar en pesos, elegí la opción de pesificar."
                     )
             billetera_pago_id = billetera_pago.id
             monto_debito = monto_pago
@@ -372,7 +372,7 @@ def pagar_resumen_tarjeta(
     if es_pesificacion:
         descripcion_pago = f"Pago resumen {ultimos_4} ({formatear_monto(monto_pago, Moneda.USD)})"
     elif moneda_a_pagar == Moneda.USD:
-        descripcion_pago = f"Pago resumen {ultimos_4} (USD)"
+        descripcion_pago = f"Pago resumen {ultimos_4} (Dólares)"
     else:
         descripcion_pago = f"Pago resumen {ultimos_4}"
 

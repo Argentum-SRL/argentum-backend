@@ -43,7 +43,7 @@ def construir_interpretaciones(perfil) -> dict:
     else:
         tasa_ahorro_ars = {"label": f"{round(perfil.tasa_ahorro_ars * 100)}% de tu ingreso", "nivel": "moderado"}
 
-    tasa_ahorro_usd = {"label": "Sin datos USD", "nivel": "sin_datos"}
+    tasa_ahorro_usd = {"label": "Sin datos en dólares", "nivel": "sin_datos"}
 
     # Gasto comprometido / ratio de cuotas
     if perfil.ratio_cuotas_ars is None:
@@ -51,7 +51,7 @@ def construir_interpretaciones(perfil) -> dict:
     else:
         ratio_cuotas_ars = {"label": f"{round(perfil.ratio_cuotas_ars * 100)}% de tu ingreso", "nivel": "moderado"}
 
-    ratio_cuotas_usd = {"label": "Sin datos USD", "nivel": "sin_datos"}
+    ratio_cuotas_usd = {"label": "Sin datos en dólares", "nivel": "sin_datos"}
 
     # Cobertura de registro
     if perfil.consistencia_registro is None:

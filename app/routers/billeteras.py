@@ -530,7 +530,7 @@ def delete_billetera(
         raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
 
     if billetera.es_efectivo:
-        raise HTTPException(status_code=400, detail="Las billeteras de efectivo (ARS/USD) no pueden eliminarse")
+        raise HTTPException(status_code=400, detail="Las billeteras de efectivo no pueden eliminarse")
 
     # VERIFICACIÓN DE INTEGRIDAD
     from app.models.suscripcion import Suscripcion
