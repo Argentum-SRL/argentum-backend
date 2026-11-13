@@ -431,6 +431,13 @@ def _es_intento_alta_suscripcion(mensaje: str) -> bool:
     return False
 
 
+def _numeros_de_monto(texto: str) -> list[str]:
+    """Números del texto contando "20.000" o "1,5" como uno solo y sin contar fechas."""
+    t = re.sub(r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b", " ", texto)
+    t = re.sub(r"\b\d{1,2}\s+de\s+(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b", " ", t)
+    return re.findall(r"\d+(?:[.,]\d+)*", t)
+
+
 def _bloquear_mezcla_en_handlers(mensaje_texto: str, usuario, db, from_number: str, wamid: str | None) -> bool:
     """
     Decisión C: Si el mensaje mezcla gastos con transferencia entre cuentas propias,
@@ -439,7 +446,7 @@ def _bloquear_mezcla_en_handlers(mensaje_texto: str, usuario, db, from_number: s
     if not _debe_bloquear_mezcla_lote(mensaje_texto, usuario.id, db):
         return False
     m_chk = normalizar_texto(mensaje_texto)
-    if re.search(r"\b(?:gaste|gasté|pague|pagué|compre|compré)\b", m_chk) or len(re.findall(r"\$?\s*[0-9]+", m_chk)) >= 2:
+    if re.search(r"\b(?:gaste|gasté|pague|pagué|compre|compré)\b", m_chk) or len(_numeros_de_monto(m_chk)) >= 2:
         from decimal import Decimal
         from app.routers.whatsapp_ia import MSG_NO_MEZCLAR_TRANSFERENCIAS
         from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
