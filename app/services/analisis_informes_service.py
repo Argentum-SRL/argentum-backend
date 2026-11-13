@@ -13,11 +13,25 @@ from app.models.grupo_cuotas import EstadoGrupoCuotas, GrupoCuotas
 from app.models.informe_personalizado import InformePersonalizado
 from app.models.suscripcion import EstadoSuscripcion, FrecuenciaSuscripcion, Suscripcion
 from app.models.usuario import Usuario
-from app.services.dashboard_service import get_cotizacion_usuario
+from app.services import dolar_service
+from app.services.dashboard_service import get_ciclo_fechas
 from app.utils.cuotas import monto_efectivo_cuota
 from app.utils.fecha import hoy_argentina
 
-_TABLA_INFORMES_VERIFICADA = False
+MESES_CORTOS = {
+    1: "Ene",
+    2: "Feb",
+    3: "Mar",
+    4: "Abr",
+    5: "May",
+    6: "Jun",
+    7: "Jul",
+    8: "Ago",
+    9: "Sep",
+    10: "Oct",
+    11: "Nov",
+    12: "Dic",
+}
 
 
 def _sumar_meses_calendario(anio: int, mes: int, delta_meses: int) -> tuple[int, int]:
@@ -48,16 +62,9 @@ def obtener_proyeccion_compromisos(
 ) -> Dict[str, Any]:
     """
     Proyecta la carga futura de tarjetas, cuotas pendientes y suscripciones activas
-    para los próximos `meses` meses calendario, identificando cuándo finalizan planes
-    y cuánto flujo de caja se libera.
+    para los próximos ciclos financieros del usuario, identificando cuándo finalizan planes
+    y cuánto flujo se libera.
     """
-    from app.services.analisis_service import (
-        MESES_CORTOS,
-        MESES_LARGOS,
-        _convertir_monto,
-        _resolver_cotizacion_valor,
-    )
-
     ref_hoy = hoy or hoy_argentina()
     horizonte = max(3, min(12, meses))
     modo = (moneda_modo or "solo_ars").lower()
@@ -65,35 +72,40 @@ def obtener_proyeccion_compromisos(
         modo = "solo_ars"
 
     moneda_visual = "USD" if modo in ("solo_usd", "consolidado_usd") else "ARS"
-    cotizacion_info = get_cotizacion_usuario(usuario)
-    tc_valor = _resolver_cotizacion_valor(cotizacion_info)
 
-    buckets: List[Dict[str, Any]] = []
-    buckets_map: Dict[str, Dict[str, Any]] = {}
-    for idx in range(horizonte):
-        y, m = _sumar_meses_calendario(ref_hoy.year, ref_hoy.month, idx)
-        clave = f"{y}-{m:02d}"
-        etiqueta = f"{MESES_CORTOS[m]} {str(y)[-2:]}"
-        mes_nombre = f"{MESES_LARGOS[m]} {y}"
-        b = {
+    # Cotización oficial de hoy para proyecciones futuras
+    cot_hoy_map = dolar_service.obtener_cotizaciones_por_fechas(db, "oficial", [ref_hoy])
+    cot_hoy = cot_hoy_map.get(ref_hoy)
+    tc_oficial_hoy = Decimal(str(cot_hoy.venta)) if (cot_hoy and cot_hoy.venta and cot_hoy.venta > 0) else Decimal("0")
+
+    # Armado de buckets por ciclo financiero futuro
+    ciclos: List[Dict[str, Any]] = []
+    cursor = ref_hoy
+    for _ in range(horizonte):
+        ini, fin = get_ciclo_fechas(usuario, cursor)
+        punto_medio = ini + (fin - ini) // 2
+        mes_txt = MESES_CORTOS.get(punto_medio.month, str(punto_medio.month))
+        anio_corto = str(punto_medio.year)[-2:]
+        etiqueta = f"{mes_txt} {anio_corto}"
+        rango_texto = f"{ini.strftime('%d/%m')} al {fin.strftime('%d/%m')}"
+        clave = f"{punto_medio.year}-{punto_medio.month:02d}-{ini.isoformat()}"
+
+        ciclos.append({
             "clave": clave,
-            "anio": y,
-            "mes": m,
             "etiqueta": etiqueta,
-            "mes_nombre": mes_nombre,
+            "rango_texto": rango_texto,
+            "fecha_inicio": ini,
+            "fecha_fin": fin,
             "cuotas_dec": Decimal("0"),
             "suscripciones_dec": Decimal("0"),
             "cantidad_cuotas": 0,
             "planes_que_finalizan": 0,
             "liberacion_dec": Decimal("0"),
-        }
-        buckets.append(b)
-        buckets_map[clave] = b
+        })
+        cursor = fin + timedelta(days=1)
 
-    primer_dia_ventana = date(ref_hoy.year, ref_hoy.month, 1)
-    ult_y, ult_m = buckets[-1]["anio"], buckets[-1]["mes"]
-    next_y, next_m = _sumar_meses_calendario(ult_y, ult_m, 1)
-    ultimo_dia_ventana = date(next_y, next_m, 1) - timedelta(days=1)
+    primer_ciclo_inicio = ciclos[0]["fecha_inicio"]
+    ultimo_ciclo_fin = ciclos[-1]["fecha_fin"]
 
     stmt_grupos = (
         select(GrupoCuotas)
@@ -122,46 +134,77 @@ def obtener_proyeccion_compromisos(
             if b_padre != billetera_id and b_tarj != billetera_id:
                 continue
 
-        mon_g = g.moneda.value if hasattr(g.moneda, "value") else str(g.moneda)
+        mon_g = (g.moneda.value if hasattr(g.moneda, "value") else str(g.moneda)).upper()
         cuotas_pend = [c for c in g.cuotas if not c.pagada]
         if not cuotas_pend:
             continue
 
         cuotas_pend.sort(key=lambda c: (c.fecha_vencimiento, c.numero_cuota))
         ultima_cuota = cuotas_pend[-1]
-        clave_ultima = f"{ultima_cuota.fecha_vencimiento.year}-{ultima_cuota.fecha_vencimiento.month:02d}"
+
+        # Percepción de moneda extranjera de la tarjeta
+        porcentaje_percep = Decimal("30.00")
+        if g.tarjeta and getattr(g.tarjeta, "percepcion_moneda_extranjera", None) is not None:
+            porcentaje_percep = Decimal(str(g.tarjeta.percepcion_moneda_extranjera))
+        tc_tarjeta = tc_oficial_hoy * (Decimal("1") + (porcentaje_percep / Decimal("100")))
 
         saldo_plan_dec = Decimal("0")
         monto_cuota_ref_dec = Decimal("0")
 
         for c in cuotas_pend:
             m_base = monto_efectivo_cuota(c)
-            m_conv = _convertir_monto(
-                m_base if mon_g == "ARS" else Decimal("0"),
-                m_base if mon_g == "USD" else Decimal("0"),
-                modo,
-                tc_valor,
-            )
-            if m_conv <= 0:
-                continue
+            if modo == "solo_ars":
+                if mon_g != "ARS":
+                    continue
+                m_conv = m_base
+            elif modo == "solo_usd":
+                if mon_g != "USD":
+                    continue
+                m_conv = m_base
+            elif modo == "consolidado_ars":
+                if mon_g == "ARS":
+                    m_conv = m_base
+                else:
+                    m_conv = m_base * tc_tarjeta
+            elif modo == "consolidado_usd":
+                if mon_g == "USD":
+                    m_conv = m_base
+                else:
+                    m_conv = (m_base / tc_tarjeta) if tc_tarjeta > 0 else Decimal("0")
+            else:
+                m_conv = m_base
 
             saldo_plan_dec += m_conv
-            if monto_cuota_ref_dec == 0:
+            if monto_cuota_ref_dec == Decimal("0"):
                 monto_cuota_ref_dec = m_conv
 
-            if primer_dia_ventana <= c.fecha_vencimiento <= ultimo_dia_ventana:
-                c_key = f"{c.fecha_vencimiento.year}-{c.fecha_vencimiento.month:02d}"
-                if c_key in buckets_map:
-                    buckets_map[c_key]["cuotas_dec"] += m_conv
-                    buckets_map[c_key]["cantidad_cuotas"] += 1
-                    total_cuotas_pendientes_dec += m_conv
+            venc = c.fecha_vencimiento
+            if venc < primer_ciclo_inicio:
+                # Cuotas vencidas sin pagar de meses anteriores suman en el ciclo actual
+                ciclos[0]["cuotas_dec"] += m_conv
+                ciclos[0]["cantidad_cuotas"] += 1
+                total_cuotas_pendientes_dec += m_conv
+            elif primer_ciclo_inicio <= venc <= ultimo_ciclo_fin:
+                for b in ciclos:
+                    if b["fecha_inicio"] <= venc <= b["fecha_fin"]:
+                        b["cuotas_dec"] += m_conv
+                        b["cantidad_cuotas"] += 1
+                        total_cuotas_pendientes_dec += m_conv
+                        break
 
-        if saldo_plan_dec <= 0:
+        if saldo_plan_dec <= Decimal("0"):
             continue
 
-        if clave_ultima in buckets_map:
-            buckets_map[clave_ultima]["planes_que_finalizan"] += 1
-            buckets_map[clave_ultima]["liberacion_dec"] += monto_cuota_ref_dec
+        venc_ult = ultima_cuota.fecha_vencimiento
+        if venc_ult < primer_ciclo_inicio:
+            ciclos[0]["planes_que_finalizan"] += 1
+            ciclos[0]["liberacion_dec"] += monto_cuota_ref_dec
+        else:
+            for b in ciclos:
+                if b["fecha_inicio"] <= venc_ult <= b["fecha_fin"]:
+                    b["planes_que_finalizan"] += 1
+                    b["liberacion_dec"] += monto_cuota_ref_dec
+                    break
 
         cuotas_pagadas_cnt = max(0, g.cantidad_cuotas - len(cuotas_pend))
         progreso_pct = (
@@ -185,6 +228,7 @@ def obtener_proyeccion_compromisos(
 
     planes_activos.sort(key=lambda p: -p["saldo_pendiente"])
 
+    # ── Suscripciones activas ─────────────────────────────────────────────────
     stmt_subs = (
         select(Suscripcion)
         .options(selectinload(Suscripcion.historial))
@@ -210,37 +254,60 @@ def obtener_proyeccion_compromisos(
             reverse=True,
         )
         vigente = hist_ordenado[0]
-        mon_s = vigente.moneda.value if hasattr(vigente.moneda, "value") else str(vigente.moneda)
-        m_sub_conv = _convertir_monto(
-            Decimal(str(vigente.monto)) if mon_s == "ARS" else Decimal("0"),
-            Decimal(str(vigente.monto)) if mon_s == "USD" else Decimal("0"),
-            modo,
-            tc_valor,
-        )
-        if m_sub_conv <= 0:
-            continue
+        mon_s = (vigente.moneda.value if hasattr(vigente.moneda, "value") else str(vigente.moneda)).upper()
+        m_base = Decimal(str(vigente.monto))
+
+        if modo == "solo_ars":
+            if mon_s != "ARS":
+                continue
+            m_sub_conv = m_base
+        elif modo == "solo_usd":
+            if mon_s != "USD":
+                continue
+            m_sub_conv = m_base
+        elif modo == "consolidado_ars":
+            if mon_s == "ARS":
+                m_sub_conv = m_base
+            else:
+                m_sub_conv = m_base * tc_oficial_hoy
+        elif modo == "consolidado_usd":
+            if mon_s == "USD":
+                m_sub_conv = m_base
+            else:
+                m_sub_conv = (m_base / tc_oficial_hoy) if tc_oficial_hoy > 0 else Decimal("0")
+        else:
+            m_sub_conv = m_base
 
         salto = _salto_meses_frecuencia(sub.frecuencia)
         carga_mensual_suscripciones_dec += m_sub_conv / Decimal(str(salto))
 
-        y_cobro, m_cobro = sub.proximo_cobro.year, sub.proximo_cobro.month
+        d_cobro = sub.proximo_cobro
         guard = 0
-        while (y_cobro, m_cobro) < (ref_hoy.year, ref_hoy.month) and guard < 120:
-            y_cobro, m_cobro = _sumar_meses_calendario(y_cobro, m_cobro, salto)
+        while d_cobro < primer_ciclo_inicio and guard < 120:
+            y, m = _sumar_meses_calendario(d_cobro.year, d_cobro.month, salto)
+            try:
+                d_cobro = d_cobro.replace(year=y, month=m)
+            except ValueError:
+                d_cobro = date(y, m, 28)
             guard += 1
 
-        while (y_cobro, m_cobro) <= (ult_y, ult_m) and guard < 240:
-            clave_s = f"{y_cobro}-{m_cobro:02d}"
-            if clave_s in buckets_map:
-                buckets_map[clave_s]["suscripciones_dec"] += m_sub_conv
-            y_cobro, m_cobro = _sumar_meses_calendario(y_cobro, m_cobro, salto)
+        while d_cobro <= ultimo_ciclo_fin and guard < 240:
+            for b in ciclos:
+                if b["fecha_inicio"] <= d_cobro <= b["fecha_fin"]:
+                    b["suscripciones_dec"] += m_sub_conv
+                    break
+            y, m = _sumar_meses_calendario(d_cobro.year, d_cobro.month, salto)
+            try:
+                d_cobro = d_cobro.replace(year=y, month=m)
+            except ValueError:
+                d_cobro = date(y, m, 28)
             guard += 1
 
     serie_mensual: List[Dict[str, Any]] = []
     mes_mayor_alivio: Optional[Dict[str, Any]] = None
     max_liberacion = Decimal("0")
 
-    for b in buckets:
+    for b in ciclos:
         c_dec = b["cuotas_dec"]
         s_dec = b["suscripciones_dec"]
         tot_dec = c_dec + s_dec
@@ -250,7 +317,7 @@ def obtener_proyeccion_compromisos(
             max_liberacion = lib_dec
             mes_mayor_alivio = {
                 "etiqueta": b["etiqueta"],
-                "mes_nombre": b["mes_nombre"],
+                "rango_texto": b["rango_texto"],
                 "monto_liberado": round(float(lib_dec), 2),
                 "planes_finalizados": b["planes_que_finalizan"],
             }
@@ -258,7 +325,7 @@ def obtener_proyeccion_compromisos(
         serie_mensual.append({
             "clave": b["clave"],
             "etiqueta": b["etiqueta"],
-            "mes_nombre": b["mes_nombre"],
+            "rango_texto": b["rango_texto"],
             "monto_cuotas": round(float(c_dec), 2),
             "monto_suscripciones": round(float(s_dec), 2),
             "monto_total": round(float(tot_dec), 2),
@@ -272,6 +339,9 @@ def obtener_proyeccion_compromisos(
     return {
         "moneda_visual": moneda_visual,
         "horizonte_meses": horizonte,
+        "cotizacion_referencia": {
+            "texto": "Las cuotas en dólares están pasadas con el dólar oficial de hoy más el impuesto de la tarjeta.",
+        },
         "kpis": {
             "compromiso_mes_actual": compromiso_mes_actual,
             "total_cuotas_ventana": round(float(total_cuotas_pendientes_dec), 2),
@@ -282,23 +352,6 @@ def obtener_proyeccion_compromisos(
         "serie_mensual": serie_mensual,
         "planes_activos": planes_activos[:15],
     }
-
-
-def _asegurar_tabla_informes(db: Session) -> None:
-    global _TABLA_INFORMES_VERIFICADA
-    if _TABLA_INFORMES_VERIFICADA:
-        return
-    try:
-        bind = db.get_bind()
-        InformePersonalizado.metadata.create_all(
-            bind=bind,
-            tables=[InformePersonalizado.__table__],  # type: ignore[list-item]
-            checkfirst=True,
-        )
-        _TABLA_INFORMES_VERIFICADA = True
-    except Exception:
-        # Se ignora: si el motor no permite DDL en este contexto, la tabla ya existe o fallará al consultar
-        pass
 
 
 def _serializar_informe(inf: InformePersonalizado) -> Dict[str, Any]:
@@ -315,7 +368,6 @@ def _serializar_informe(inf: InformePersonalizado) -> Dict[str, Any]:
 
 
 def listar_informes_usuario(db: Session, usuario: Usuario) -> List[Dict[str, Any]]:
-    _asegurar_tabla_informes(db)
     rows = (
         db.execute(
             select(InformePersonalizado)
@@ -340,7 +392,6 @@ def crear_informe_usuario(
     es_favorito: bool,
     configuracion: Dict[str, Any],
 ) -> Dict[str, Any]:
-    _asegurar_tabla_informes(db)
     nuevo = InformePersonalizado(
         usuario_id=usuario.id,
         nombre=(nombre or "Informe sin título").strip()[:120],
@@ -355,13 +406,32 @@ def crear_informe_usuario(
     return _serializar_informe(nuevo)
 
 
+def obtener_informe_usuario(
+    db: Session,
+    usuario: Usuario,
+    informe_id: UUID,
+) -> Optional[Dict[str, Any]]:
+    inf = (
+        db.execute(
+            select(InformePersonalizado).where(
+                InformePersonalizado.id == informe_id,
+                InformePersonalizado.usuario_id == usuario.id,
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if not inf:
+        return None
+    return _serializar_informe(inf)
+
+
 def actualizar_informe_usuario(
     db: Session,
     usuario: Usuario,
     informe_id: UUID,
     datos: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
-    _asegurar_tabla_informes(db)
     inf = (
         db.execute(
             select(InformePersonalizado).where(
@@ -393,7 +463,6 @@ def actualizar_informe_usuario(
 
 
 def eliminar_informe_usuario(db: Session, usuario: Usuario, informe_id: UUID) -> bool:
-    _asegurar_tabla_informes(db)
     inf = (
         db.execute(
             select(InformePersonalizado).where(
@@ -465,15 +534,15 @@ def generar_excel_analisis(
     kpis = resumen["kpis"]
     periodo_txt = resumen["periodo_seleccionado"]["etiqueta"]
 
-    # Hoja 1: Resumen y Evolución
+    # Hoja 1: Resumen y Ciclos
     ws1 = wb.active or wb.create_sheet("Resumen y Ciclos")
     ws1.title = "Resumen y Ciclos"
-    ws1["A1"] = titulo_informe or "Argentum — Informe de Análisis Financiero"
+    ws1["A1"] = titulo_informe or "Argentum — Tu análisis"
     ws1["A1"].font = title_font
     ws1["A2"] = f"Período: {periodo_txt} | Moneda: {moneda_vis}"
     ws1["A2"].font = regular_font
 
-    ws1["A4"] = "Indicador Clave"
+    ws1["A4"] = "Números principales"
     ws1["B4"] = "Valor"
     ws1["A4"].fill = navy_fill
     ws1["B4"].fill = navy_fill
@@ -481,12 +550,12 @@ def generar_excel_analisis(
     ws1["B4"].font = header_font
 
     kpi_rows = [
-        (f"Ingresos Totales ({moneda_vis})", kpis["ingresos_totales"]),
-        (f"Gastos Totales ({moneda_vis})", kpis["gastos_totales"]),
-        (f"Balance Neto ({moneda_vis})", kpis["balance_neto"]),
-        ("Tasa de Ahorro (%)", kpis["tasa_ahorro_pct"]),
-        (f"Promedio de Gasto por Ciclo ({moneda_vis})", kpis["promedio_gasto_ciclo"]),
-        ("Cantidad de Movimientos Evaluados", kpis["cantidad_operaciones"]),
+        (f"Ingresos ({moneda_vis})", kpis["ingresos_totales"]),
+        (f"Gastos ({moneda_vis})", kpis["gastos_totales"]),
+        (f"Te quedó ({moneda_vis})", kpis["balance_neto"]),
+        ("Te quedó (%)", kpis["tasa_ahorro_pct"]),
+        (f"Promedio de gasto por ciclo ({moneda_vis})", kpis["promedio_gasto_ciclo"]),
+        ("Cantidad de movimientos", kpis["cantidad_operaciones"]),
     ]
     for idx_r, (k_label, k_val) in enumerate(kpi_rows, start=5):
         ws1.cell(row=idx_r, column=1, value=k_label).font = bold_font
@@ -496,14 +565,14 @@ def generar_excel_analisis(
             c_val.number_format = "#,##0.00"
 
     start_ciclos = 13
-    ws1.cell(row=start_ciclos - 1, column=1, value="Evolución Ciclo a Ciclo").font = bold_font
+    ws1.cell(row=start_ciclos - 1, column=1, value="Por ciclo").font = bold_font
     headers_ciclos = [
         "Ciclo",
         "Rango",
         f"Ingresos ({moneda_vis})",
         f"Gastos ({moneda_vis})",
-        f"Balance ({moneda_vis})",
-        "Tasa Ahorro (%)",
+        f"Te quedó ({moneda_vis})",
+        "Te quedó (%)",
     ]
     for col_i, h_text in enumerate(headers_ciclos, start=1):
         cell = ws1.cell(row=start_ciclos, column=col_i, value=h_text)
@@ -515,7 +584,8 @@ def generar_excel_analisis(
         ws1.cell(row=r_offset, column=2, value=c_item["rango_texto"]).font = regular_font
         for col_m, key_m in [(3, "ingresos"), (4, "gastos"), (5, "balance")]:
             cm = ws1.cell(row=r_offset, column=col_m, value=c_item[key_m])
-            cm.number_format = "#,##0.00"
+            if isinstance(c_item[key_m], (int, float)):
+                cm.number_format = "#,##0.00"
             cm.font = regular_font
         ws1.cell(row=r_offset, column=6, value=c_item["tasa_ahorro_pct"]).font = regular_font
 

@@ -172,6 +172,21 @@ def create_informe(
     )
 
 
+@router.get("/informes/{informe_id}")
+def get_informe(
+    informe_id: str,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+) -> Any:
+    inf_uuid = _parse_optional_uuid(informe_id, "informe_id")
+    if not inf_uuid:
+        raise HTTPException(status_code=400, detail="ID de informe requerido")
+    inf = analisis_service.obtener_informe_usuario(db, current_user, inf_uuid)
+    if not inf:
+        raise HTTPException(status_code=404, detail="Informe no encontrado")
+    return inf
+
+
 @router.put("/informes/{informe_id}")
 def update_informe(
     informe_id: str,

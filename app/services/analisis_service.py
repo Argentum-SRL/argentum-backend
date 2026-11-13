@@ -10,17 +10,16 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria
-from app.models.cuota import Cuota
-from app.models.grupo_cuotas import EstadoGrupoCuotas, GrupoCuotas
+from app.models.grupo_cuotas import GrupoCuotas
 from app.models.subcategoria import Subcategoria
-from app.models.suscripcion import EstadoSuscripcion, FrecuenciaSuscripcion, Suscripcion
 from app.models.tarjeta_credito import TarjetaCredito
 from app.models.transaccion import OrigenTransaccion, Transaccion
 from app.models.usuario import Moneda, Usuario
-from app.services.dashboard_service import get_ciclo_fechas, get_cotizacion_usuario
+from app.services import dolar_service
+from app.services.dashboard_service import get_ciclo_fechas
 from app.services.definiciones_service import condicion_gasto, condicion_ingreso
-from app.utils.cuotas import monto_efectivo_cuota
 from app.utils.fecha import hoy_argentina
+from app.utils.formato import formatear_monto
 
 MESES_CORTOS = {
     1: "Ene",
@@ -37,155 +36,126 @@ MESES_CORTOS = {
     12: "Dic",
 }
 
+MESES_LARGOS = {
+    1: "Enero",
+    2: "Febrero",
+    3: "Marzo",
+    4: "Abril",
+    5: "Mayo",
+    6: "Junio",
+    7: "Julio",
+    8: "Agosto",
+    9: "Septiembre",
+    10: "Octubre",
+    11: "Noviembre",
+    12: "Diciembre",
+}
+
 
 def generar_ventana_ciclos(
     usuario: Usuario,
     hoy: date,
     cantidad_ciclos: int,
-    db: Optional[Session] = None,
 ) -> List[Dict[str, Any]]:
     """
     Genera la lista cronológica de los últimos `cantidad_ciclos` ciclos financieros del usuario,
-    desde el más antiguo hasta el ciclo actual.
-    Cuando se provee `db`, el día en que inicia cada ciclo se ancla al día real en que se cobró
-    el ingreso más grande de ese período (evitando que variaciones de 1 a 10 días en la fecha de
-    cobro del sueldo junten dos sueldos en un mismo ciclo o dejen un ciclo sin ingreso principal).
+    desde el más antiguo hasta el ciclo actual, utilizando exclusivamente get_ciclo_fechas.
     """
     n = max(1, min(24, cantidad_ciclos))
-    n_busqueda = max(2, n)
-    nominales_reversa: List[Dict[str, Any]] = []
+    ciclos_reversa: List[Dict[str, Any]] = []
     cursor = hoy
 
-    for idx in range(n_busqueda):
-        ini_nom, fin_nom = get_ciclo_fechas(usuario, cursor)
-        punto_medio_nom = ini_nom + (fin_nom - ini_nom) // 2
-        nominales_reversa.append({
-            "indice_atras": idx,
-            "ini_nom": ini_nom,
-            "fin_nom": fin_nom,
-            "punto_medio_nom": punto_medio_nom,
-        })
-        cursor = ini_nom - timedelta(days=1)
-
-    nominales = list(reversed(nominales_reversa))
-
-    if db is not None and nominales:
-        desde_busqueda = nominales[0]["ini_nom"] - timedelta(days=12)
-        rows_ing = db.execute(
-            select(Transaccion.fecha, Transaccion.monto)
-            .where(condicion_ingreso(usuario.id, desde=desde_busqueda, hasta=hoy, hoy=hoy))
-        ).all()
-
-        max_ing_global = max((Decimal(str(r.monto)) for r in rows_ing), default=Decimal("0"))
-        umbral_principal = max_ing_global * Decimal("0.35")
-
-        fechas_usadas: set[date] = set()
-        for item in nominales:
-            ini_n: date = item["ini_nom"]
-            v_ini = ini_n - timedelta(days=12)
-            v_fin = ini_n + timedelta(days=12)
-            candidatos = [
-                r
-                for r in rows_ing
-                if v_ini <= r.fecha <= v_fin
-                and Decimal(str(r.monto)) >= umbral_principal
-                and r.fecha not in fechas_usadas
-            ]
-            if candidatos and max_ing_global > 0:
-                mejor = max(
-                    candidatos,
-                    key=lambda r: (Decimal(str(r.monto)), -r.fecha.toordinal()),
-                )
-                item["ini_real"] = mejor.fecha
-                fechas_usadas.add(mejor.fecha)
-            else:
-                item["ini_real"] = ini_n
-
-        # Si hacia el final del último ciclo nominal ya se cobró un nuevo ingreso principal
-        # (por ejemplo 1 a 5 días antes de fin_nom), abrimos ese nuevo ciclo en esa fecha.
-        ult = nominales[-1]
-        v_fin_ult = ult["fin_nom"] - timedelta(days=10)
-        if v_fin_ult > ult["ini_real"] + timedelta(days=15) and max_ing_global > 0:
-            cand_nuevo = [
-                r
-                for r in rows_ing
-                if v_fin_ult <= r.fecha <= hoy
-                and Decimal(str(r.monto)) >= umbral_principal
-                and r.fecha not in fechas_usadas
-            ]
-            if cand_nuevo:
-                mejor_nuevo = max(
-                    cand_nuevo,
-                    key=lambda r: (Decimal(str(r.monto)), -r.fecha.toordinal()),
-                )
-                nuevo_fin_nom = mejor_nuevo.fecha + timedelta(days=30)
-                nominales.append({
-                    "indice_atras": 0,
-                    "ini_nom": mejor_nuevo.fecha,
-                    "fin_nom": nuevo_fin_nom,
-                    "ini_real": mejor_nuevo.fecha,
-                    "punto_medio_nom": mejor_nuevo.fecha + timedelta(days=15),
-                })
-    else:
-        for item in nominales:
-            item["ini_real"] = item["ini_nom"]
-
-    total_items = len(nominales)
-    ciclos_out: List[Dict[str, Any]] = []
-    for i, item in enumerate(nominales):
-        ini_real: date = item["ini_real"]
-        if i + 1 < total_items:
-            fin_real: date = nominales[i + 1]["ini_real"] - timedelta(days=1)
+    for idx in range(n):
+        ini, fin = get_ciclo_fechas(usuario, cursor)
+        dias_totales = (fin - ini).days + 1
+        if fin < hoy:
+            dias_transcurridos = dias_totales
+        elif ini > hoy:
+            dias_transcurridos = 0
         else:
-            fin_real = max(item["fin_nom"], ini_real)
+            dias_transcurridos = min(dias_totales, max(1, (hoy - ini).days + 1))
 
-        if fin_real < ini_real:
-            fin_real = ini_real
-
-        punto_medio = ini_real + (fin_real - ini_real) // 2
+        punto_medio = ini + (fin - ini) // 2
         mes_txt = MESES_CORTOS.get(punto_medio.month, str(punto_medio.month))
         anio_corto = str(punto_medio.year)[-2:]
         etiqueta = f"{mes_txt} {anio_corto}"
-        rango_texto = f"{ini_real.strftime('%d/%m')} al {fin_real.strftime('%d/%m')}"
-        idx_atras = (total_items - 1) - i
+        rango_texto = f"{ini.strftime('%d/%m')} al {fin.strftime('%d/%m')}"
 
-        ciclos_out.append({
-            "indice_atras": idx_atras,
-            "clave": f"{punto_medio.year}-{punto_medio.month:02d}-{ini_real.isoformat()}",
+        ciclos_reversa.append({
+            "indice_atras": idx,
+            "clave": f"{punto_medio.year}-{punto_medio.month:02d}-{ini.isoformat()}",
             "etiqueta": etiqueta,
             "rango_texto": rango_texto,
-            "fecha_inicio": ini_real,
-            "fecha_fin": fin_real,
-            "es_actual": i == (total_items - 1),
+            "fecha_inicio": ini,
+            "fecha_fin": fin,
+            "es_actual": (idx == 0),
+            "dias_transcurridos": dias_transcurridos,
+            "dias_totales": dias_totales,
         })
+        cursor = ini - timedelta(days=1)
 
-    return ciclos_out[-n:]
-
-
-def _resolver_cotizacion_valor(cotizacion_dict: Dict[str, Any]) -> Decimal:
-    venta = cotizacion_dict.get("venta") or cotizacion_dict.get("promedio") or cotizacion_dict.get("compra")
-    try:
-        if venta is not None and float(venta) > 0:
-            return Decimal(str(venta))
-    except (ValueError, TypeError):
-        pass
-    return Decimal("1200")
+    return list(reversed(ciclos_reversa))
 
 
-def _convertir_monto(
-    monto_ars: Decimal,
-    monto_usd: Decimal,
-    moneda_modo: str,
-    tc: Decimal,
-) -> Decimal:
-    modo = (moneda_modo or "solo_ars").lower()
+def _obtener_mapa_cotizaciones(
+    db: Session,
+    modo: str,
+    fechas: set[date],
+) -> Dict[date, Optional[Decimal]]:
+    """
+    Devuelve las cotizaciones oficiales de venta para las fechas solicitadas.
+    """
+    if modo not in ("consolidado_ars", "consolidado_usd") or not fechas:
+        return {}
+    cots = dolar_service.obtener_cotizaciones_por_fechas(db, "oficial", fechas)
+    res: Dict[date, Optional[Decimal]] = {}
+    for f, c in cots.items():
+        if c is not None and c.venta is not None and c.venta > 0:
+            res[f] = Decimal(str(c.venta))
+        else:
+            res[f] = None
+    return res
+
+
+def _convertir_movimiento(
+    monto: Decimal,
+    moneda_str: str,
+    fecha: date,
+    modo: str,
+    cotizaciones: Dict[date, Optional[Decimal]],
+) -> tuple[Optional[Decimal], bool]:
+    """
+    Convierte el monto de una transacción a la moneda visual requerida.
+    Retorna (monto_convertido, falta_cotizacion).
+    """
+    mon = moneda_str.upper()
+    if modo == "solo_ars":
+        if mon == "ARS":
+            return monto, False
+        return None, False
+
     if modo == "solo_usd":
-        return monto_usd
+        if mon == "USD":
+            return monto, False
+        return None, False
+
     if modo == "consolidado_ars":
-        return monto_ars + (monto_usd * tc)
+        if mon == "ARS":
+            return monto, False
+        tc = cotizaciones.get(fecha)
+        if tc is None or tc <= 0:
+            return None, True
+        return monto * tc, False
+
     if modo == "consolidado_usd":
-        return monto_usd + (monto_ars / tc if tc > 0 else Decimal("0"))
-    return monto_ars
+        if mon == "USD":
+            return monto, False
+        tc = cotizaciones.get(fecha)
+        if tc is None or tc <= 0:
+            return None, True
+        return monto / tc, False
+
+    return monto, False
 
 
 def _aplicar_filtros_extra(
@@ -227,6 +197,73 @@ def _aplicar_filtros_extra(
     return and_(*conds)
 
 
+def _sumar_periodo(
+    db: Session,
+    usuario_id: UUID,
+    desde: date,
+    hasta: date,
+    ref_hoy: date,
+    modo: str,
+    billetera_id: Optional[UUID],
+    tarjeta_id: Optional[UUID],
+    categoria_id: Optional[UUID],
+    naturaleza: Optional[str],
+    solo_gastos: bool,
+) -> tuple[Decimal, Optional[Decimal]]:
+    cond_g = _aplicar_filtros_extra(
+        condicion_gasto(usuario_id, desde=desde, hasta=hasta, hoy=ref_hoy),
+        billetera_id=billetera_id,
+        tarjeta_id=tarjeta_id,
+        categoria_id=categoria_id,
+        naturaleza=naturaleza,
+    )
+    rows_g = db.execute(
+        select(
+            Transaccion.fecha,
+            Transaccion.moneda,
+            func.coalesce(func.sum(Transaccion.monto), 0),
+        )
+        .where(cond_g)
+        .group_by(Transaccion.fecha, Transaccion.moneda)
+    ).all()
+    fechas_g = {r[0] for r in rows_g}
+    cots_g = _obtener_mapa_cotizaciones(db, modo, fechas_g)
+    gasto_tot = Decimal("0")
+    for f_tx, mon_tx, monto_tx in rows_g:
+        m_code = mon_tx.value if hasattr(mon_tx, "value") else str(mon_tx)
+        m_conv, _ = _convertir_movimiento(Decimal(str(monto_tx)), m_code, f_tx, modo, cots_g)
+        if m_conv is not None:
+            gasto_tot += m_conv
+
+    ingreso_tot = None
+    if not solo_gastos:
+        ingreso_tot = Decimal("0")
+        cond_i_base = condicion_ingreso(usuario_id, desde=desde, hasta=hasta, hoy=ref_hoy)
+        cond_i = (
+            and_(cond_i_base, Transaccion.billetera_id == billetera_id)
+            if billetera_id
+            else cond_i_base
+        )
+        rows_i = db.execute(
+            select(
+                Transaccion.fecha,
+                Transaccion.moneda,
+                func.coalesce(func.sum(Transaccion.monto), 0),
+            )
+            .where(cond_i)
+            .group_by(Transaccion.fecha, Transaccion.moneda)
+        ).all()
+        fechas_i = {r[0] for r in rows_i}
+        cots_i = _obtener_mapa_cotizaciones(db, modo, fechas_i)
+        for f_tx, mon_tx, monto_tx in rows_i:
+            m_code = mon_tx.value if hasattr(mon_tx, "value") else str(mon_tx)
+            m_conv, _ = _convertir_movimiento(Decimal(str(monto_tx)), m_code, f_tx, modo, cots_i)
+            if m_conv is not None:
+                ingreso_tot += m_conv
+
+    return gasto_tot, ingreso_tot
+
+
 def obtener_resumen_analisis(
     db: Session,
     usuario: Usuario,
@@ -244,18 +281,16 @@ def obtener_resumen_analisis(
         modo = "solo_ars"
 
     moneda_visual = "USD" if modo in ("solo_usd", "consolidado_usd") else "ARS"
+    solo_gastos = bool(categoria_id or tarjeta_id)
 
-    cotizacion_info = get_cotizacion_usuario(usuario)
-    tc_valor = _resolver_cotizacion_valor(cotizacion_info)
-
-    ciclos_con_prev = generar_ventana_ciclos(usuario, ref_hoy, max(2, cantidad_ciclos), db=db)
-    ciclos = ciclos_con_prev[-max(1, min(24, cantidad_ciclos)):]
+    # Obtenemos los ciclos pedidos más ciclos anteriores para calcular variaciones
+    ciclos_con_prev = generar_ventana_ciclos(usuario, ref_hoy, max(2, cantidad_ciclos + 1))
+    cant_n = max(1, min(24, cantidad_ciclos))
+    ciclos = ciclos_con_prev[-cant_n:]
     fecha_inicio_global = ciclos[0]["fecha_inicio"]
     fecha_fin_global = min(ciclos[-1]["fecha_fin"], ref_hoy)
 
-    # ── 1. Serie por Ciclo (Ingresos, Gastos, Balance, Tasa de ahorro) ────────
-    # Consultamos gastos e ingresos de toda la ventana en 2 queries agrupadas por fecha y moneda
-    # para evitar N round-trips por ciclo.
+    # ── 1. Consultas para la ventana seleccionada ────────────────────────────
     cond_ventana_gasto = _aplicar_filtros_extra(
         condicion_gasto(usuario.id, desde=fecha_inicio_global, hasta=fecha_fin_global, hoy=ref_hoy),
         billetera_id=billetera_id,
@@ -270,6 +305,7 @@ def obtener_resumen_analisis(
             Transaccion.categoria_id,
             Transaccion.subcategoria_id,
             func.coalesce(func.sum(Transaccion.monto), 0),
+            func.count(Transaccion.id),
         )
         .where(cond_ventana_gasto)
         .group_by(
@@ -280,52 +316,77 @@ def obtener_resumen_analisis(
         )
     ).all()
 
-    cond_i_ventana_base = condicion_ingreso(
-        usuario.id, desde=fecha_inicio_global, hasta=fecha_fin_global, hoy=ref_hoy
-    )
-    cond_ventana_ingreso = (
-        and_(cond_i_ventana_base, Transaccion.billetera_id == billetera_id)
-        if billetera_id
-        else cond_i_ventana_base
-    )
-    rows_i_diarios = db.execute(
-        select(
-            Transaccion.fecha,
-            Transaccion.moneda,
-            func.coalesce(func.sum(Transaccion.monto), 0),
+    rows_i_diarios = []
+    if not solo_gastos:
+        cond_i_ventana_base = condicion_ingreso(
+            usuario.id, desde=fecha_inicio_global, hasta=fecha_fin_global, hoy=ref_hoy
         )
-        .where(cond_ventana_ingreso)
-        .group_by(Transaccion.fecha, Transaccion.moneda)
-    ).all()
+        cond_ventana_ingreso = (
+            and_(cond_i_ventana_base, Transaccion.billetera_id == billetera_id)
+            if billetera_id
+            else cond_i_ventana_base
+        )
+        rows_i_diarios = db.execute(
+            select(
+                Transaccion.fecha,
+                Transaccion.moneda,
+                func.coalesce(func.sum(Transaccion.monto), 0),
+                func.count(Transaccion.id),
+            )
+            .where(cond_ventana_ingreso)
+            .group_by(Transaccion.fecha, Transaccion.moneda)
+        ).all()
 
+    # Recolectar fechas para cotizaciones si el modo es consolidado
+    fechas_a_convertir: set[date] = set()
+    if modo == "consolidado_ars":
+        for r in rows_g_diarios:
+            m_code = r[1].value if hasattr(r[1], "value") else str(r[1])
+            if m_code.upper() == "USD":
+                fechas_a_convertir.add(r[0])
+        for r in rows_i_diarios:
+            m_code = r[1].value if hasattr(r[1], "value") else str(r[1])
+            if m_code.upper() == "USD":
+                fechas_a_convertir.add(r[0])
+    elif modo == "consolidado_usd":
+        for r in rows_g_diarios:
+            m_code = r[1].value if hasattr(r[1], "value") else str(r[1])
+            if m_code.upper() == "ARS":
+                fechas_a_convertir.add(r[0])
+        for r in rows_i_diarios:
+            m_code = r[1].value if hasattr(r[1], "value") else str(r[1])
+            if m_code.upper() == "ARS":
+                fechas_a_convertir.add(r[0])
+
+    cotizaciones_map = _obtener_mapa_cotizaciones(db, modo, fechas_a_convertir)
+
+    # ── 2. Procesamiento de Serie por Ciclo ───────────────────────────────────
     serie_ciclos_raw: List[Dict[str, Any]] = []
-    suma_gastos_ventana = Decimal("0")
-    suma_ingresos_ventana = Decimal("0")
+    movimientos_sin_cotizacion = 0
+    total_operaciones_gasto = 0
 
     for c in ciclos:
         c_ini: date = c["fecha_inicio"]
         c_fin: date = min(c["fecha_fin"], ref_hoy)
         por_cat_dec: Dict[str, Decimal] = {}
         por_sub_dec: Dict[str, Decimal] = {}
+        gasto_ciclo = Decimal("0")
+        ingreso_ciclo = Decimal("0") if not solo_gastos else None
 
-        if c_ini > ref_hoy:
-            gasto_ciclo = Decimal("0")
-            ingreso_ciclo = Decimal("0")
-        else:
-            gasto_ciclo = Decimal("0")
-            for f_tx, mon_tx, cat_tx, sub_tx, monto_tx in rows_g_diarios:
+        if c_ini <= ref_hoy:
+            for f_tx, mon_tx, cat_tx, sub_tx, monto_tx, cant_tx in rows_g_diarios:
                 if c_ini <= f_tx <= c_fin:
                     m_code = mon_tx.value if hasattr(mon_tx, "value") else str(mon_tx)
                     m_dec = Decimal(str(monto_tx))
-                    m_conv = _convertir_monto(
-                        m_dec if m_code == "ARS" else Decimal("0"),
-                        m_dec if m_code == "USD" else Decimal("0"),
-                        modo,
-                        tc_valor,
-                    )
-                    if m_conv <= 0:
+                    m_conv, sin_cot = _convertir_movimiento(m_dec, m_code, f_tx, modo, cotizaciones_map)
+                    if sin_cot:
+                        movimientos_sin_cotizacion += int(cant_tx)
                         continue
+                    if m_conv is None:
+                        continue
+
                     gasto_ciclo += m_conv
+                    total_operaciones_gasto += int(cant_tx)
                     cid_key = str(cat_tx) if cat_tx else "sin-categoria"
                     por_cat_dec[cid_key] = por_cat_dec.get(cid_key, Decimal("0")) + m_conv
                     sid_key = str(sub_tx) if sub_tx else "general"
@@ -334,26 +395,29 @@ def obtener_resumen_analisis(
                         por_sub_dec.get(f"{cid_key}:{sid_key}", Decimal("0")) + m_conv
                     )
 
-            i_ars = Decimal("0")
-            i_usd = Decimal("0")
-            for f_tx, mon_tx, monto_tx in rows_i_diarios:
-                if c_ini <= f_tx <= c_fin:
-                    m_code = mon_tx.value if hasattr(mon_tx, "value") else str(mon_tx)
-                    if m_code == "USD":
-                        i_usd += Decimal(str(monto_tx))
-                    else:
-                        i_ars += Decimal(str(monto_tx))
-            ingreso_ciclo = _convertir_monto(i_ars, i_usd, modo, tc_valor)
+            if not solo_gastos:
+                for f_tx, mon_tx, monto_tx, cant_tx in rows_i_diarios:
+                    if c_ini <= f_tx <= c_fin:
+                        m_code = mon_tx.value if hasattr(mon_tx, "value") else str(mon_tx)
+                        m_dec = Decimal(str(monto_tx))
+                        m_conv, sin_cot = _convertir_movimiento(m_dec, m_code, f_tx, modo, cotizaciones_map)
+                        if sin_cot:
+                            movimientos_sin_cotizacion += int(cant_tx)
+                            continue
+                        if m_conv is None:
+                            continue
+                        assert ingreso_ciclo is not None
+                        ingreso_ciclo += m_conv
 
-        balance_ciclo = ingreso_ciclo - gasto_ciclo
-        tasa_ahorro = (
-            max(-100.0, min(100.0, round(float((balance_ciclo / ingreso_ciclo) * Decimal("100")), 1)))
-            if ingreso_ciclo > 0
-            else 0.0
-        )
-
-        suma_gastos_ventana += gasto_ciclo
-        suma_ingresos_ventana += ingreso_ciclo
+        if solo_gastos or ingreso_ciclo is None:
+            balance_ciclo = None
+            tasa_ahorro = None
+        else:
+            balance_ciclo = ingreso_ciclo - gasto_ciclo
+            if ingreso_ciclo <= 0 or balance_ciclo < -ingreso_ciclo:
+                tasa_ahorro = None
+            else:
+                tasa_ahorro = round(float((balance_ciclo / ingreso_ciclo) * Decimal("100")), 1)
 
         serie_ciclos_raw.append({
             "clave": c["clave"],
@@ -362,86 +426,126 @@ def obtener_resumen_analisis(
             "fecha_inicio": c["fecha_inicio"].isoformat(),
             "fecha_fin": c["fecha_fin"].isoformat(),
             "es_actual": c["es_actual"],
-            "ingresos": round(float(ingreso_ciclo), 2),
+            "dias_transcurridos": c["dias_transcurridos"],
+            "dias_totales": c["dias_totales"],
+            "ingresos": round(float(ingreso_ciclo), 2) if ingreso_ciclo is not None else None,
             "gastos": round(float(gasto_ciclo), 2),
-            "balance": round(float(balance_ciclo), 2),
+            "balance": round(float(balance_ciclo), 2) if balance_ciclo is not None else None,
             "tasa_ahorro_pct": tasa_ahorro,
             "por_categoria": {k: round(float(v), 2) for k, v in por_cat_dec.items()},
             "por_subcategoria": {k: round(float(v), 2) for k, v in por_sub_dec.items()},
+            "_gasto_dec": gasto_ciclo,
+            "_ingreso_dec": ingreso_ciclo,
         })
 
-    cant_ciclos_efectivos = max(1, len(serie_ciclos_raw))
-    promedio_gasto_ciclo = suma_gastos_ventana / Decimal(str(cant_ciclos_efectivos))
-    promedio_ingreso_ciclo = suma_ingresos_ventana / Decimal(str(cant_ciclos_efectivos))
-    promedio_gasto_float = round(float(promedio_gasto_ciclo), 2)
+    # ── 3. Promedios y Tasa de Ahorro con ciclos completos ────────────────────
+    ciclos_completos = [
+        item for item in serie_ciclos_raw if date.fromisoformat(item["fecha_fin"]) < ref_hoy
+    ]
+    if not ciclos_completos:
+        promedio_gasto_ciclo: Optional[float] = None
+        promedio_ingreso_ciclo: Optional[float] = None
+        tasa_ahorro_ventana: Optional[float] = None
+    else:
+        cant_comp = len(ciclos_completos)
+        sum_g_comp = sum(item["_gasto_dec"] for item in ciclos_completos)
+        promedio_gasto_ciclo = round(float(sum_g_comp / Decimal(str(cant_comp))), 2)
+
+        if solo_gastos:
+            promedio_ingreso_ciclo = None
+            tasa_ahorro_ventana = None
+        else:
+            sum_i_comp = sum(
+                (item["_ingreso_dec"] for item in ciclos_completos if item["_ingreso_dec"] is not None),
+                Decimal("0"),
+            )
+            promedio_ingreso_ciclo = round(float(sum_i_comp / Decimal(str(cant_comp))), 2)
+            bal_comp = sum_i_comp - sum_g_comp
+            if sum_i_comp <= 0 or bal_comp < -sum_i_comp:
+                tasa_ahorro_ventana = None
+            else:
+                tasa_ahorro_ventana = round(float((bal_comp / sum_i_comp) * Decimal("100")), 1)
 
     serie_ciclos = [
-        {**item, "promedio_historico_gastos": promedio_gasto_float}
+        {
+            k: v
+            for k, v in {
+                **item,
+                "promedio_historico_gastos": promedio_gasto_ciclo,
+            }.items()
+            if not k.startswith("_")
+        }
         for item in serie_ciclos_raw
     ]
 
-    # Variación del último ciclo vs el anterior inmediato
+    # ── 4. Variación vs. Ciclo Anterior ──────────────────────────────────────
     variacion_gasto_vs_ant: Optional[float] = None
     variacion_ingreso_vs_ant: Optional[float] = None
+    variacion_texto: Optional[str] = None
 
-    if len(serie_ciclos) >= 2:
-        ult = Decimal(str(serie_ciclos[-1]["gastos"]))
-        prev = Decimal(str(serie_ciclos[-2]["gastos"]))
-        if prev > 0:
-            variacion_gasto_vs_ant = round(float(((ult - prev) / prev) * Decimal("100")), 1)
+    ciclo_ult_meta = ciclos[-1]
+    es_ult_en_curso = (ciclo_ult_meta["fecha_fin"] >= ref_hoy)
+    ciclo_ant_meta = ciclos_con_prev[-2] if len(ciclos_con_prev) >= 2 else None
 
-        ult_i = Decimal(str(serie_ciclos[-1]["ingresos"]))
-        prev_i = Decimal(str(serie_ciclos[-2]["ingresos"]))
-        if prev_i > 0:
-            variacion_ingreso_vs_ant = round(float(((ult_i - prev_i) / prev_i) * Decimal("100")), 1)
-    else:
-        # Si pidió 1 solo ciclo, usamos el ciclo inmediato anterior anclado por ingreso principal
-        ciclo_prev = ciclos_con_prev[-2] if len(ciclos_con_prev) >= 2 else ciclos[0]
-        ini_ant, fin_ant = ciclo_prev["fecha_inicio"], ciclo_prev["fecha_fin"]
-        cond_g_ant = _aplicar_filtros_extra(
-            condicion_gasto(usuario.id, desde=ini_ant, hasta=min(fin_ant, ref_hoy), hoy=ref_hoy),
-            billetera_id=billetera_id,
-            tarjeta_id=tarjeta_id,
-            categoria_id=categoria_id,
-            naturaleza=naturaleza,
-        )
-        rows_g_ant = db.execute(
-            select(Transaccion.moneda, func.coalesce(func.sum(Transaccion.monto), 0))
-            .where(cond_g_ant)
-            .group_by(Transaccion.moneda)
-        ).all()
-        map_g_ant = {
-            (r[0].value if hasattr(r[0], "value") else str(r[0])): Decimal(str(r[1]))
-            for r in rows_g_ant
-        }
-        gasto_ant = _convertir_monto(
-            map_g_ant.get("ARS", Decimal("0")),
-            map_g_ant.get("USD", Decimal("0")),
-            modo,
-            tc_valor,
-        )
-        if gasto_ant > 0:
-            variacion_gasto_vs_ant = round(
-                float(((suma_gastos_ventana - gasto_ant) / gasto_ant) * Decimal("100")),
-                1,
+    if ciclo_ant_meta is not None:
+        if es_ult_en_curso:
+            dias_n = (ref_hoy - ciclo_ult_meta["fecha_inicio"]).days + 1
+            gasto_actual_n = serie_ciclos_raw[-1]["_gasto_dec"]
+            ingreso_actual_n = serie_ciclos_raw[-1]["_ingreso_dec"]
+
+            ant_ini = ciclo_ant_meta["fecha_inicio"]
+            ant_fin_n = min(ant_ini + timedelta(days=dias_n - 1), ciclo_ant_meta["fecha_fin"])
+
+            gasto_ant_n, ingreso_ant_n = _sumar_periodo(
+                db, usuario.id, ant_ini, ant_fin_n, ref_hoy, modo,
+                billetera_id, tarjeta_id, categoria_id, naturaleza, solo_gastos
             )
 
-    # ── 2. Desglose por Categoría y Subcategoría en la ventana seleccionada ───
-    cond_ventana_gasto = _aplicar_filtros_extra(
-        condicion_gasto(usuario.id, desde=fecha_inicio_global, hasta=fecha_fin_global, hoy=ref_hoy),
-        billetera_id=billetera_id,
-        tarjeta_id=tarjeta_id,
-        categoria_id=categoria_id,
-        naturaleza=naturaleza,
-    )
+            if gasto_ant_n > 0:
+                variacion_gasto_vs_ant = round(
+                    float(((gasto_actual_n - gasto_ant_n) / gasto_ant_n) * Decimal("100")),
+                    1,
+                )
+                variacion_texto = f"Comparado con los mismos {dias_n} días del ciclo anterior"
 
+            if not solo_gastos and ingreso_actual_n is not None and ingreso_ant_n and ingreso_ant_n > 0:
+                variacion_ingreso_vs_ant = round(
+                    float(((ingreso_actual_n - ingreso_ant_n) / ingreso_ant_n) * Decimal("100")),
+                    1,
+                )
+        else:
+            gasto_actual = serie_ciclos_raw[-1]["_gasto_dec"]
+            ingreso_actual = serie_ciclos_raw[-1]["_ingreso_dec"]
+            ant_ini = ciclo_ant_meta["fecha_inicio"]
+            ant_fin = ciclo_ant_meta["fecha_fin"]
+
+            gasto_ant, ingreso_ant = _sumar_periodo(
+                db, usuario.id, ant_ini, ant_fin, ref_hoy, modo,
+                billetera_id, tarjeta_id, categoria_id, naturaleza, solo_gastos
+            )
+
+            if gasto_ant > 0:
+                variacion_gasto_vs_ant = round(
+                    float(((gasto_actual - gasto_ant) / gasto_ant) * Decimal("100")),
+                    1,
+                )
+                variacion_texto = "Comparado con el ciclo anterior completo"
+
+            if not solo_gastos and ingreso_actual is not None and ingreso_ant and ingreso_ant > 0:
+                variacion_ingreso_vs_ant = round(
+                    float(((ingreso_actual - ingreso_ant) / ingreso_ant) * Decimal("100")),
+                    1,
+                )
+
+    # ── 5. Desglose por Categoría y Subcategoría (Suma neta) ─────────────────
     stmt_desglose = (
         select(
+            Transaccion.fecha,
+            Transaccion.moneda,
             Transaccion.categoria_id,
             Categoria.nombre.label("categoria_nombre"),
             Transaccion.subcategoria_id,
             Subcategoria.nombre.label("subcategoria_nombre"),
-            Transaccion.moneda,
             func.coalesce(func.sum(Transaccion.monto), 0).label("total_monto"),
             func.count(Transaccion.id).label("cant_tx"),
         )
@@ -449,73 +553,69 @@ def obtener_resumen_analisis(
         .outerjoin(Subcategoria, Transaccion.subcategoria_id == Subcategoria.id)
         .where(cond_ventana_gasto)
         .group_by(
+            Transaccion.fecha,
+            Transaccion.moneda,
             Transaccion.categoria_id,
             Categoria.nombre,
             Transaccion.subcategoria_id,
             Subcategoria.nombre,
-            Transaccion.moneda,
         )
     )
     rows_desglose = db.execute(stmt_desglose).all()
 
-    # Agrupación jerárquica Categoría -> Subcategoría
+    fechas_desglose = {r[0] for r in rows_desglose}
+    cots_desglose = _obtener_mapa_cotizaciones(db, modo, fechas_desglose)
+
     cat_acum: Dict[str, Dict[str, Any]] = {}
-    total_operaciones_gasto = 0
-
-    for row in rows_desglose:
-        cid_str = str(row.categoria_id) if row.categoria_id else "sin-categoria"
-        cnombre = row.categoria_nombre or "Otros"
-        sid_str = str(row.subcategoria_id) if row.subcategoria_id else "general"
-        snombre = row.subcategoria_nombre or "Otros"
-        mon_str = row.moneda.value if hasattr(row.moneda, "value") else str(row.moneda)
-        monto_dec = Decimal(str(row.total_monto or 0))
-        cant = int(row.cant_tx or 0)
-
-        monto_conv = _convertir_monto(
-            monto_dec if mon_str == "ARS" else Decimal("0"),
-            monto_dec if mon_str == "USD" else Decimal("0"),
-            modo,
-            tc_valor,
-        )
-        if monto_conv <= 0:
+    for r in rows_desglose:
+        f_tx, mon_tx, cat_id, cnombre, sub_id, snombre, monto_tx, cant_tx = r
+        m_code = mon_tx.value if hasattr(mon_tx, "value") else str(mon_tx)
+        m_conv, _ = _convertir_movimiento(Decimal(str(monto_tx)), m_code, f_tx, modo, cots_desglose)
+        if m_conv is None:
             continue
 
-        total_operaciones_gasto += cant
+        cid_str = str(cat_id) if cat_id else "sin-categoria"
+        c_name = cnombre or "Otros"
+        sid_str = str(sub_id) if sub_id else "general"
+        s_name = snombre or "Otros"
+        cant = int(cant_tx or 0)
 
         if cid_str not in cat_acum:
             cat_acum[cid_str] = {
-                "categoria_id": str(row.categoria_id) if row.categoria_id else None,
-                "categoria_nombre": cnombre,
+                "categoria_id": str(cat_id) if cat_id else None,
+                "categoria_nombre": c_name,
                 "monto": Decimal("0"),
                 "cantidad_movimientos": 0,
                 "subs": {},
             }
 
         cat_entry = cat_acum[cid_str]
-        cat_entry["monto"] += monto_conv
+        cat_entry["monto"] += m_conv
         cat_entry["cantidad_movimientos"] += cant
 
         subs_map = cat_entry["subs"]
         if sid_str not in subs_map:
             subs_map[sid_str] = {
                 "subcategoria_id": sid_str,
-                "subcategoria_nombre": snombre,
+                "subcategoria_nombre": s_name,
                 "monto": Decimal("0"),
                 "cantidad_movimientos": 0,
             }
-        subs_map[sid_str]["monto"] += monto_conv
+        subs_map[sid_str]["monto"] += m_conv
         subs_map[sid_str]["cantidad_movimientos"] += cant
 
-    # Ordenar categorías de mayor a menor monto
-    cats_ordenadas = sorted(cat_acum.values(), key=lambda x: -x["monto"])
+    # Filtrar categorías con suma neta positiva
+    cats_validas = [c for c in cat_acum.values() if c["monto"] > Decimal("0")]
+    cats_ordenadas = sorted(cats_validas, key=lambda x: -x["monto"])
+    suma_cats_listadas = sum((c["monto"] for c in cats_ordenadas), Decimal("0"))
     max_cat_monto = cats_ordenadas[0]["monto"] if cats_ordenadas else Decimal("0")
 
     desglose_categorias: List[Dict[str, Any]] = []
     for c_item in cats_ordenadas:
         c_monto: Decimal = c_item["monto"]
         pct_total = (
-            round(float((c_monto / suma_gastos_ventana) * Decimal("100")), 1)
-            if suma_gastos_ventana > 0
+            round(float((c_monto / suma_cats_listadas) * Decimal("100")), 1)
+            if suma_cats_listadas > 0
             else 0.0
         )
         ancho_barra = (
@@ -524,7 +624,8 @@ def obtener_resumen_analisis(
             else 0.0
         )
 
-        subs_ordenadas = sorted(c_item["subs"].values(), key=lambda s: -s["monto"])
+        subs_validas = [s for s in c_item["subs"].values() if s["monto"] > Decimal("0")]
+        subs_ordenadas = sorted(subs_validas, key=lambda s: -s["monto"])
         max_sub_monto = subs_ordenadas[0]["monto"] if subs_ordenadas else Decimal("0")
 
         subcategorias_out: List[Dict[str, Any]] = []
@@ -536,8 +637,8 @@ def obtener_resumen_analisis(
                 else 0.0
             )
             pct_global = (
-                round(float((s_monto / suma_gastos_ventana) * Decimal("100")), 1)
-                if suma_gastos_ventana > 0
+                round(float((s_monto / suma_cats_listadas) * Decimal("100")), 1)
+                if suma_cats_listadas > 0
                 else 0.0
             )
             ancho_sub = (
@@ -565,7 +666,19 @@ def obtener_resumen_analisis(
             "subcategorias": subcategorias_out,
         })
 
-    # ── 3. Generación de Insights Inteligentes (Deterministas) ────────────────
+    # ── 6. Totales de Ventana y Balance ──────────────────────────────────────
+    suma_gastos_ventana = sum((item["gastos"] for item in serie_ciclos), 0.0)
+    if solo_gastos:
+        suma_ingresos_ventana = None
+        balance_ventana = None
+    else:
+        suma_ingresos_ventana = sum(
+            (item["ingresos"] for item in serie_ciclos if item["ingresos"] is not None),
+            0.0,
+        )
+        balance_ventana = round(suma_ingresos_ventana - suma_gastos_ventana, 2)
+
+    # ── 7. Insights Deterministas ────────────────────────────────────────────
     insights: List[Dict[str, Any]] = []
 
     if desglose_categorias:
@@ -574,49 +687,58 @@ def obtener_resumen_analisis(
             "id": "top-categoria",
             "tipo": "info",
             "titulo": f"{top_cat['categoria_nombre']} lidera tus gastos ({top_cat['porcentaje_del_total']}%)",
-            "descripcion": f"Concentra {top_cat['cantidad_movimientos']} movimientos en el período seleccionado.",
+            "descripcion": f"Son {top_cat['cantidad_movimientos']} movimientos en estos ciclos.",
         })
 
     if variacion_gasto_vs_ant is not None:
         if variacion_gasto_vs_ant <= -5:
+            if es_ult_en_curso:
+                titulo_var = f"En lo que va del ciclo gastaste {abs(variacion_gasto_vs_ant):g}% menos que en los mismos días del anterior"
+            else:
+                titulo_var = f"Gastaste {abs(variacion_gasto_vs_ant):g}% menos que el ciclo anterior"
             insights.append({
                 "id": "variacion-gasto",
                 "tipo": "positivo",
-                "titulo": f"Bajaste tus gastos un {abs(variacion_gasto_vs_ant)}% vs. el ciclo anterior",
-                "descripcion": "Buen ritmo de contención respecto al ciclo previo.",
+                "titulo": titulo_var,
+                "descripcion": "Buen ritmo respecto al ciclo anterior.",
             })
         elif variacion_gasto_vs_ant >= 10:
+            if es_ult_en_curso:
+                titulo_var = f"En lo que va del ciclo gastaste {variacion_gasto_vs_ant:g}% más que en los mismos días del anterior"
+            else:
+                titulo_var = f"Gastaste {variacion_gasto_vs_ant:g}% más que el ciclo anterior"
             insights.append({
                 "id": "variacion-gasto",
                 "tipo": "alerta",
-                "titulo": f"Tus gastos subieron un {variacion_gasto_vs_ant}% respecto al ciclo pasado",
-                "descripcion": "Revisá el desglose por categorías para identificar el desvío.",
+                "titulo": titulo_var,
+                "descripcion": "Revisá el desglose por categorías para ver en qué rubros aumentó el gasto.",
             })
 
-    balance_ventana = suma_ingresos_ventana - suma_gastos_ventana
-    tasa_ahorro_ventana = (
-        round(float((balance_ventana / suma_ingresos_ventana) * Decimal("100")), 1)
-        if suma_ingresos_ventana > 0
-        else 0.0
-    )
-
-    if suma_ingresos_ventana > 0:
+    if ciclos_completos and not solo_gastos and tasa_ahorro_ventana is not None:
         if tasa_ahorro_ventana >= 20:
             insights.append({
                 "id": "tasa-ahorro",
                 "tipo": "positivo",
-                "titulo": f"Tasa de ahorro sólida del {tasa_ahorro_ventana}%",
-                "descripcion": "Estás reteniendo más de una quinta parte de tus ingresos en el período.",
+                "titulo": f"Te quedó el {tasa_ahorro_ventana:g}% de lo que entró",
+                "descripcion": "Estás reteniendo más de una quinta parte de lo que entró.",
             })
         elif tasa_ahorro_ventana < 0:
+            sum_g_c = sum(item["_gasto_dec"] for item in ciclos_completos)
+            sum_i_c = sum(
+                (item["_ingreso_dec"] for item in ciclos_completos if item["_ingreso_dec"] is not None),
+                Decimal("0"),
+            )
+            dif_monto = abs(sum_i_c - sum_g_c)
+            moneda_fmt = "ARS" if modo.endswith("ars") or modo == "solo_ars" else "USD"
+            monto_str = formatear_monto(dif_monto, moneda_fmt)
             insights.append({
                 "id": "tasa-ahorro",
                 "tipo": "alerta",
-                "titulo": "Flujo neto negativo en el período evaluado",
-                "descripcion": "Los egresos superaron a los ingresos registrados en esta ventana.",
+                "titulo": "Gastaste más de lo que entró",
+                "descripcion": f"En estos ciclos salieron {monto_str} más de lo que entró.",
             })
 
-    # ── 4. Catálogo de filtros disponibles (Billeteras y Tarjetas activas) ────
+    # ── 8. Filtros disponibles ───────────────────────────────────────────────
     billeteras_activas = (
         db.execute(
             select(Billetera)
@@ -643,11 +765,9 @@ def obtener_resumen_analisis(
     return {
         "moneda_modo": modo,
         "moneda_visual": moneda_visual,
+        "movimientos_sin_cotizacion": movimientos_sin_cotizacion,
         "cotizacion_referencia": {
-            "tipo": cotizacion_info.get("tipo", "blue"),
-            "nombre": cotizacion_info.get("nombre", "Dólar Blue"),
-            "valor": float(tc_valor),
-            "fecha_actualizacion": cotizacion_info.get("fecha_actualizacion"),
+            "texto": "Pasamos cada movimiento con el dólar oficial del día en que se hizo.",
         },
         "periodo_seleccionado": {
             "cantidad_ciclos": len(ciclos),
@@ -660,14 +780,15 @@ def obtener_resumen_analisis(
             ),
         },
         "kpis": {
-            "ingresos_totales": round(float(suma_ingresos_ventana), 2),
-            "gastos_totales": round(float(suma_gastos_ventana), 2),
-            "balance_neto": round(float(balance_ventana), 2),
+            "ingresos_totales": round(suma_ingresos_ventana, 2) if suma_ingresos_ventana is not None else None,
+            "gastos_totales": round(suma_gastos_ventana, 2),
+            "balance_neto": balance_ventana,
             "tasa_ahorro_pct": tasa_ahorro_ventana,
-            "promedio_gasto_ciclo": promedio_gasto_float,
-            "promedio_ingreso_ciclo": round(float(promedio_ingreso_ciclo), 2),
+            "promedio_gasto_ciclo": promedio_gasto_ciclo,
+            "promedio_ingreso_ciclo": promedio_ingreso_ciclo,
             "variacion_gasto_vs_anterior_pct": variacion_gasto_vs_ant,
             "variacion_ingreso_vs_anterior_pct": variacion_ingreso_vs_ant,
+            "variacion_texto": variacion_texto,
             "cantidad_operaciones": total_operaciones_gasto,
         },
         "insights": insights,
@@ -714,8 +835,7 @@ def obtener_movimientos_drilldown(
     """
     ref_hoy = hoy or hoy_argentina()
     modo = (moneda_modo or "solo_ars").lower()
-    ciclos_con_prev = generar_ventana_ciclos(usuario, ref_hoy, max(2, cantidad_ciclos), db=db)
-    ciclos = ciclos_con_prev[-max(1, min(24, cantidad_ciclos)):]
+    ciclos = generar_ventana_ciclos(usuario, ref_hoy, max(1, min(24, cantidad_ciclos)))
     fecha_inicio_global = ciclos[0]["fecha_inicio"]
     fecha_fin_global = min(ciclos[-1]["fecha_fin"], ref_hoy)
 
@@ -771,7 +891,6 @@ def obtener_movimientos_drilldown(
     )
     txs = db.execute(stmt).scalars().all()
 
-    # Mapear número de cuota si pertenece a grupo_cuotas
     grupo_ids = {t.grupo_cuotas_id for t in txs if t.grupo_cuotas_id}
     grupos_map: Dict[UUID, int] = {}
     if grupo_ids:
@@ -805,22 +924,6 @@ def obtener_movimientos_drilldown(
     return items
 
 
-MESES_LARGOS = {
-    1: "Enero",
-    2: "Febrero",
-    3: "Marzo",
-    4: "Abril",
-    5: "Mayo",
-    6: "Junio",
-    7: "Julio",
-    8: "Agosto",
-    9: "Septiembre",
-    10: "Octubre",
-    11: "Noviembre",
-    12: "Diciembre",
-}
-
-
 def obtener_comparativa_ciclos(
     db: Session,
     usuario: Usuario,
@@ -833,8 +936,8 @@ def obtener_comparativa_ciclos(
     hoy: Optional[date] = None,
 ) -> Dict[str, Any]:
     """
-    Compara mano a mano dos ciclos financieros (por defecto: Ciclo actual vs. Ciclo anterior),
-    devolviendo totales, deltas porcentuales y el espejo categoría por categoría.
+    Compara dos ciclos financieros devolviendo totales, diferencias y
+    qué cambió entre ambos rubro por rubro.
     """
     ref_hoy = hoy or hoy_argentina()
     modo = (moneda_modo or "solo_ars").lower()
@@ -842,17 +945,16 @@ def obtener_comparativa_ciclos(
         modo = "solo_ars"
 
     moneda_visual = "USD" if modo in ("solo_usd", "consolidado_usd") else "ARS"
-    cotizacion_info = get_cotizacion_usuario(usuario)
-    tc_valor = _resolver_cotizacion_valor(cotizacion_info)
+    solo_gastos = bool(tarjeta_id)
 
-    catalogo_ciclos = generar_ventana_ciclos(usuario, ref_hoy, 12, db=db)
+    catalogo_ciclos = generar_ventana_ciclos(usuario, ref_hoy, 12)
     mapa_ciclos = {c["clave"]: c for c in catalogo_ciclos}
 
     ciclo_a = mapa_ciclos.get(ciclo_a_clave or "") or catalogo_ciclos[-1]
     ciclo_b_default = catalogo_ciclos[-2] if len(catalogo_ciclos) >= 2 else catalogo_ciclos[-1]
     ciclo_b = mapa_ciclos.get(ciclo_b_clave or "") or ciclo_b_default
 
-    def _agrupar_ciclo(ciclo_meta: Dict[str, Any]):
+    def _agrupar_ciclo(ciclo_meta: Dict[str, Any]) -> tuple[Decimal, Decimal, Dict[str, Dict[str, Any]]]:
         c_ini: date = ciclo_meta["fecha_inicio"]
         c_fin: date = min(ciclo_meta["fecha_fin"], ref_hoy)
         if c_ini > ref_hoy:
@@ -866,61 +968,65 @@ def obtener_comparativa_ciclos(
         )
         rows_cat = db.execute(
             select(
+                Transaccion.fecha,
+                Transaccion.moneda,
                 Transaccion.categoria_id,
                 Categoria.nombre.label("categoria_nombre"),
-                Transaccion.moneda,
                 func.coalesce(func.sum(Transaccion.monto), 0).label("total_monto"),
             )
             .outerjoin(Categoria, Transaccion.categoria_id == Categoria.id)
             .where(cond_g)
-            .group_by(Transaccion.categoria_id, Categoria.nombre, Transaccion.moneda)
+            .group_by(Transaccion.fecha, Transaccion.moneda, Transaccion.categoria_id, Categoria.nombre)
         ).all()
+
+        fechas_g = {r[0] for r in rows_cat}
+        cots_g = _obtener_mapa_cotizaciones(db, modo, fechas_g)
 
         por_cat: Dict[str, Dict[str, Any]] = {}
         gasto_total = Decimal("0")
-        for r in rows_cat:
-            cid = str(r.categoria_id) if r.categoria_id else "sin-categoria"
-            cnombre = r.categoria_nombre or "Otros"
-            mon_code = r.moneda.value if hasattr(r.moneda, "value") else str(r.moneda)
-            m_dec = Decimal(str(r.total_monto or 0))
-            m_conv = _convertir_monto(
-                m_dec if mon_code == "ARS" else Decimal("0"),
-                m_dec if mon_code == "USD" else Decimal("0"),
-                modo,
-                tc_valor,
-            )
-            if m_conv <= 0:
+        for f_tx, mon_tx, cat_id, cnombre, total_m in rows_cat:
+            m_code = mon_tx.value if hasattr(mon_tx, "value") else str(mon_tx)
+            m_conv, _ = _convertir_movimiento(Decimal(str(total_m or 0)), m_code, f_tx, modo, cots_g)
+            if m_conv is None:
                 continue
+
             gasto_total += m_conv
+            cid = str(cat_id) if cat_id else "sin-categoria"
+            c_name = cnombre or "Otros"
             if cid not in por_cat:
                 por_cat[cid] = {
-                    "categoria_id": str(r.categoria_id) if r.categoria_id else None,
-                    "categoria_nombre": cnombre,
+                    "categoria_id": str(cat_id) if cat_id else None,
+                    "categoria_nombre": c_name,
                     "monto": Decimal("0"),
                 }
             por_cat[cid]["monto"] += m_conv
 
-        cond_i_base = condicion_ingreso(usuario.id, desde=c_ini, hasta=c_fin, hoy=ref_hoy)
-        cond_i = (
-            and_(cond_i_base, Transaccion.billetera_id == billetera_id)
-            if billetera_id
-            else cond_i_base
-        )
-        rows_i = db.execute(
-            select(Transaccion.moneda, func.coalesce(func.sum(Transaccion.monto), 0))
-            .where(cond_i)
-            .group_by(Transaccion.moneda)
-        ).all()
-        map_i = {
-            (r[0].value if hasattr(r[0], "value") else str(r[0])): Decimal(str(r[1]))
-            for r in rows_i
-        }
-        ingreso_total = _convertir_monto(
-            map_i.get("ARS", Decimal("0")),
-            map_i.get("USD", Decimal("0")),
-            modo,
-            tc_valor,
-        )
+        ingreso_total = Decimal("0")
+        if not solo_gastos:
+            cond_i_base = condicion_ingreso(usuario.id, desde=c_ini, hasta=c_fin, hoy=ref_hoy)
+            cond_i = (
+                and_(cond_i_base, Transaccion.billetera_id == billetera_id)
+                if billetera_id
+                else cond_i_base
+            )
+            rows_i = db.execute(
+                select(
+                    Transaccion.fecha,
+                    Transaccion.moneda,
+                    func.coalesce(func.sum(Transaccion.monto), 0),
+                )
+                .where(cond_i)
+                .group_by(Transaccion.fecha, Transaccion.moneda)
+            ).all()
+
+            fechas_i = {r[0] for r in rows_i}
+            cots_i = _obtener_mapa_cotizaciones(db, modo, fechas_i)
+            for f_tx, mon_tx, total_m in rows_i:
+                m_code = mon_tx.value if hasattr(mon_tx, "value") else str(mon_tx)
+                m_conv, _ = _convertir_movimiento(Decimal(str(total_m or 0)), m_code, f_tx, modo, cots_i)
+                if m_conv is not None:
+                    ingreso_total += m_conv
+
         return gasto_total, ingreso_total, por_cat
 
     gasto_a, ingreso_a, cats_a = _agrupar_ciclo(ciclo_a)
@@ -938,6 +1044,11 @@ def obtener_comparativa_ciclos(
         cat_id_real = info_base.get("categoria_id", cid)
         ma = info_a["monto"] if info_a else Decimal("0")
         mb = info_b["monto"] if info_b else Decimal("0")
+
+        # Excluir si en ambos ciclos es 0 o negativo
+        if ma <= Decimal("0") and mb <= Decimal("0"):
+            continue
+
         mayor = max(ma, mb)
         if mayor > max_monto_cat:
             max_monto_cat = mayor
@@ -1023,7 +1134,7 @@ def obtener_comparativa_ciclos(
     diff_ingreso_total = ingreso_a - ingreso_b
     diff_ingreso_pct = (
         round(float((diff_ingreso_total / ingreso_b) * Decimal("100")), 1)
-        if ingreso_b > 0
+        if ingreso_b > 0 and not solo_gastos
         else None
     )
 
@@ -1035,6 +1146,8 @@ def obtener_comparativa_ciclos(
                 "etiqueta": c["etiqueta"],
                 "rango_texto": c["rango_texto"],
                 "es_actual": c["es_actual"],
+                "dias_transcurridos": c["dias_transcurridos"],
+                "dias_totales": c["dias_totales"],
             }
             for c in reversed(catalogo_ciclos)
         ],
@@ -1042,23 +1155,27 @@ def obtener_comparativa_ciclos(
             "clave": ciclo_a["clave"],
             "etiqueta": ciclo_a["etiqueta"],
             "rango_texto": ciclo_a["rango_texto"],
+            "dias_transcurridos": ciclo_a["dias_transcurridos"],
+            "dias_totales": ciclo_a["dias_totales"],
         },
         "ciclo_b": {
             "clave": ciclo_b["clave"],
             "etiqueta": ciclo_b["etiqueta"],
             "rango_texto": ciclo_b["rango_texto"],
+            "dias_transcurridos": ciclo_b["dias_transcurridos"],
+            "dias_totales": ciclo_b["dias_totales"],
         },
         "resumen": {
             "gasto_a": round(float(gasto_a), 2),
             "gasto_b": round(float(gasto_b), 2),
             "diferencia_gasto_monto": round(float(diff_gasto_total), 2),
             "diferencia_gasto_pct": diff_gasto_pct,
-            "ingreso_a": round(float(ingreso_a), 2),
-            "ingreso_b": round(float(ingreso_b), 2),
-            "diferencia_ingreso_monto": round(float(diff_ingreso_total), 2),
+            "ingreso_a": round(float(ingreso_a), 2) if not solo_gastos else None,
+            "ingreso_b": round(float(ingreso_b), 2) if not solo_gastos else None,
+            "diferencia_ingreso_monto": round(float(diff_ingreso_total), 2) if not solo_gastos else None,
             "diferencia_ingreso_pct": diff_ingreso_pct,
-            "balance_a": round(float(ingreso_a - gasto_a), 2),
-            "balance_b": round(float(ingreso_b - gasto_b), 2),
+            "balance_a": round(float(ingreso_a - gasto_a), 2) if not solo_gastos else None,
+            "balance_b": round(float(ingreso_b - gasto_b), 2) if not solo_gastos else None,
             "mayor_aumento": mayor_aumento,
             "mayor_ahorro": mayor_ahorro,
         },
@@ -1066,13 +1183,14 @@ def obtener_comparativa_ciclos(
     }
 
 
-# ── Fase 3, 4 y 5: Re-exportación de Proyección, Informes y Excel (.xlsx) ─────
+# ── Re-exportación de Proyección, Informes y Excel (.xlsx) ────────────────────
 from app.services.analisis_informes_service import (
     actualizar_informe_usuario,
     crear_informe_usuario,
     eliminar_informe_usuario,
     generar_excel_analisis,
     listar_informes_usuario,
+    obtener_informe_usuario,
     obtener_proyeccion_compromisos,
 )
 
@@ -1083,10 +1201,9 @@ __all__ = [
     "obtener_comparativa_ciclos",
     "obtener_proyeccion_compromisos",
     "listar_informes_usuario",
+    "obtener_informe_usuario",
     "crear_informe_usuario",
     "actualizar_informe_usuario",
     "eliminar_informe_usuario",
     "generar_excel_analisis",
 ]
-
-
