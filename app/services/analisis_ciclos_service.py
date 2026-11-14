@@ -263,6 +263,29 @@ def sumar_periodo(
     return gasto_tot, ingreso_tot
 
 
+def obtener_fechas_con_transacciones_ventana(
+    db: Session,
+    usuario_id: UUID,
+    desde: date,
+    hasta: date,
+) -> set[date]:
+    """
+    Obtiene las fechas en que el usuario tiene alguna transacción en la ventana.
+    Sin mirar filtros de la consulta ni modo de moneda.
+    Una sola consulta agrupada para toda la ventana (Decisión 3B).
+    """
+    stmt = (
+        select(Transaccion.fecha)
+        .where(
+            Transaccion.usuario_id == usuario_id,
+            Transaccion.fecha >= desde,
+            Transaccion.fecha <= hasta,
+        )
+        .group_by(Transaccion.fecha)
+    )
+    return {r[0] for r in db.execute(stmt).all()}
+
+
 def calcular_serie_ciclos(
     ciclos: List[Dict[str, Any]],
     ref_hoy: date,
@@ -271,6 +294,7 @@ def calcular_serie_ciclos(
     rows_g_diarios: List[Any],
     rows_i_diarios: List[Any],
     cotizaciones_map: Dict[date, Optional[Decimal]],
+    fechas_con_transacciones: Optional[set[date]] = None,
 ) -> tuple[List[Dict[str, Any]], int, int]:
     serie_ciclos_raw: List[Dict[str, Any]] = []
     movimientos_sin_cotizacion = 0
@@ -283,6 +307,12 @@ def calcular_serie_ciclos(
         por_sub_dec: Dict[str, Decimal] = {}
         gasto_ciclo = Decimal("0")
         ingreso_ciclo = Decimal("0") if not solo_gastos else None
+
+        if fechas_con_transacciones is not None:
+            tiene_datos = any(c["fecha_inicio"] <= f <= c["fecha_fin"] for f in fechas_con_transacciones)
+            sin_datos = not tiene_datos
+        else:
+            sin_datos = False
 
         if c_ini <= ref_hoy:
             for f_tx, mon_tx, cat_tx, sub_tx, monto_tx, cant_tx in rows_g_diarios:
@@ -343,6 +373,7 @@ def calcular_serie_ciclos(
             "gastos": round(float(gasto_ciclo), 2),
             "balance": round(float(balance_ciclo), 2) if balance_ciclo is not None else None,
             "tasa_ahorro_pct": tasa_ahorro,
+            "sin_datos": sin_datos,
             "por_categoria": {k: round(float(v), 2) for k, v in por_cat_dec.items()},
             "por_subcategoria": {k: round(float(v), 2) for k, v in por_sub_dec.items()},
             "_gasto_dec": gasto_ciclo,
@@ -360,13 +391,16 @@ def calcular_promedios_y_tasa(
     ciclos_completos = [
         item for item in serie_ciclos_raw if date.fromisoformat(item["fecha_fin"]) < ref_hoy
     ]
-    if not ciclos_completos:
+    ciclos_completos_con_datos = [
+        item for item in ciclos_completos if not item.get("sin_datos", False)
+    ]
+    if not ciclos_completos_con_datos:
         promedio_gasto_ciclo: Optional[float] = None
         promedio_ingreso_ciclo: Optional[float] = None
         tasa_ahorro_ventana: Optional[float] = None
     else:
-        cant_comp = len(ciclos_completos)
-        sum_g_comp = sum(item["_gasto_dec"] for item in ciclos_completos)
+        cant_comp = len(ciclos_completos_con_datos)
+        sum_g_comp = sum(item["_gasto_dec"] for item in ciclos_completos_con_datos)
         promedio_gasto_ciclo = round(float(sum_g_comp / Decimal(str(cant_comp))), 2)
 
         if solo_gastos:
@@ -374,7 +408,7 @@ def calcular_promedios_y_tasa(
             tasa_ahorro_ventana = None
         else:
             sum_i_comp = sum(
-                (item["_ingreso_dec"] for item in ciclos_completos if item["_ingreso_dec"] is not None),
+                (item["_ingreso_dec"] for item in ciclos_completos_con_datos if item["_ingreso_dec"] is not None),
                 Decimal("0"),
             )
             promedio_ingreso_ciclo = round(float(sum_i_comp / Decimal(str(cant_comp))), 2)
@@ -395,4 +429,37 @@ def calcular_promedios_y_tasa(
         }
         for item in serie_ciclos_raw
     ]
-    return ciclos_completos, promedio_gasto_ciclo, promedio_ingreso_ciclo, tasa_ahorro_ventana, serie_ciclos
+    return ciclos_completos_con_datos, promedio_gasto_ciclo, promedio_ingreso_ciclo, tasa_ahorro_ventana, serie_ciclos
+
+
+def calcular_kpis_totales(
+    serie_ciclos: List[Dict[str, Any]],
+    ref_hoy: date,
+    solo_gastos: bool,
+) -> tuple[str, float, Optional[float], Optional[float]]:
+    """
+    Calcula los totales de kpis según la decisión 2A (solo ciclos terminados,
+    salvo si la ventana no tiene ninguno completo).
+    Retorna (alcance, gastos_totales, ingresos_totales, balance_neto).
+    """
+    ciclos_comp = [
+        item for item in serie_ciclos if date.fromisoformat(item["fecha_fin"]) < ref_hoy
+    ]
+    if ciclos_comp:
+        alcance = "terminados"
+        ciclos_kpis = ciclos_comp
+    else:
+        alcance = "en_curso"
+        ciclos_kpis = serie_ciclos
+
+    suma_gastos = sum((item["gastos"] for item in ciclos_kpis), 0.0)
+    if solo_gastos:
+        return alcance, round(suma_gastos, 2), None, None
+
+    suma_ingresos = sum(
+        (item["ingresos"] for item in ciclos_kpis if item["ingresos"] is not None),
+        0.0,
+    )
+    balance = round(suma_ingresos - suma_gastos, 2)
+    return alcance, round(suma_gastos, 2), round(suma_ingresos, 2), balance
+

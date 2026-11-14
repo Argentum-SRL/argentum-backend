@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional
 
 from app.utils.formato import formatear_monto
@@ -88,3 +88,54 @@ def armar_insights(
             })
 
     return insights
+
+
+def armar_frase_resumen(
+    solo_gastos: bool,
+    alcance: str,
+    es_ult_en_curso: bool,
+    dias_transcurridos: int,
+    dias_totales: int,
+    variacion_gasto_vs_anterior_pct: Optional[float],
+) -> Optional[str]:
+    """
+    Arma la frase resumen determinística de Análisis según la decisión 4A.
+    No toca la base de datos.
+    """
+    parte1: Optional[str] = None
+    if solo_gastos:
+        parte1 = "Con este filtro solo se ven gastos."
+    elif alcance == "terminados" and es_ult_en_curso:
+        parte1 = "Números de los ciclos terminados."
+    elif alcance == "en_curso":
+        parte1 = f"Números de lo que va del ciclo ({dias_transcurridos} de {dias_totales} días)."
+    elif not es_ult_en_curso:
+        parte1 = None
+
+    parte2: Optional[str] = None
+    if variacion_gasto_vs_anterior_pct is not None:
+        p = int(
+            Decimal(str(abs(variacion_gasto_vs_anterior_pct))).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        )
+        if es_ult_en_curso:
+            if p == 0:
+                parte2 = f"En estos {dias_transcurridos} días gastaste lo mismo que en los mismos días del ciclo anterior."
+            elif variacion_gasto_vs_anterior_pct > 0:
+                parte2 = f"En estos {dias_transcurridos} días gastaste {p}% más que en los mismos días del ciclo anterior."
+            else:
+                parte2 = f"En estos {dias_transcurridos} días gastaste {p}% menos que en los mismos días del ciclo anterior."
+        else:
+            if p == 0:
+                parte2 = "En el último ciclo gastaste lo mismo que en el anterior."
+            elif variacion_gasto_vs_anterior_pct > 0:
+                parte2 = f"En el último ciclo gastaste {p}% más que en el anterior."
+            else:
+                parte2 = f"En el último ciclo gastaste {p}% menos que en el anterior."
+
+    partes = [p_txt for p_txt in (parte1, parte2) if p_txt]
+    if not partes:
+        return None
+    return " ".join(partes)
+

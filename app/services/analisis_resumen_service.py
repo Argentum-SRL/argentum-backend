@@ -17,14 +17,16 @@ from app.models.transaccion import Transaccion
 from app.models.usuario import Moneda, Usuario
 from app.services.analisis_ciclos_service import (
     aplicar_filtros_extra,
+    calcular_kpis_totales,
     calcular_promedios_y_tasa,
     calcular_serie_ciclos,
     convertir_movimiento,
     generar_ventana_ciclos,
+    obtener_fechas_con_transacciones_ventana,
     obtener_mapa_cotizaciones,
     sumar_periodo,
 )
-from app.services.analisis_insights_service import armar_insights
+from app.services.analisis_insights_service import armar_frase_resumen, armar_insights
 from app.services.definiciones_service import condicion_gasto, condicion_ingreso
 from app.utils.fecha import hoy_argentina
 
@@ -342,8 +344,12 @@ def obtener_resumen_analisis(
         modo, billetera_id, tarjeta_id, categoria_id, naturaleza, solo_gastos
     )
 
+    fechas_con_tx = obtener_fechas_con_transacciones_ventana(
+        db, usuario.id, ciclos[0]["fecha_inicio"], ciclos[-1]["fecha_fin"]
+    )
+
     serie_raw, movs_sin_cot, cant_ops = calcular_serie_ciclos(
-        ciclos, ref_hoy, modo, solo_gastos, rows_g, rows_i, cotizaciones_map
+        ciclos, ref_hoy, modo, solo_gastos, rows_g, rows_i, cotizaciones_map, fechas_con_tx
     )
 
     ciclos_comp, prom_gasto, prom_ingreso, tasa_ventana, serie_ciclos = calcular_promedios_y_tasa(
@@ -357,16 +363,18 @@ def obtener_resumen_analisis(
 
     desglose = _desglose_categorias(db, cond_gasto, modo)
 
-    suma_gastos_ventana = sum((item["gastos"] for item in serie_ciclos), 0.0)
-    if solo_gastos:
-        suma_ingresos_ventana = None
-        balance_ventana = None
-    else:
-        suma_ingresos_ventana = sum(
-            (item["ingresos"] for item in serie_ciclos if item["ingresos"] is not None),
-            0.0,
-        )
-        balance_ventana = round(suma_ingresos_ventana - suma_gastos_ventana, 2)
+    alcance, suma_gastos_kpi, suma_ingresos_kpi, balance_kpi = calcular_kpis_totales(
+        serie_ciclos, ref_hoy, solo_gastos
+    )
+
+    frase_resumen = armar_frase_resumen(
+        solo_gastos=solo_gastos,
+        alcance=alcance,
+        es_ult_en_curso=es_ult_en_curso,
+        dias_transcurridos=ciclos[-1]["dias_transcurridos"],
+        dias_totales=ciclos[-1]["dias_totales"],
+        variacion_gasto_vs_anterior_pct=var_gasto,
+    )
 
     insights = armar_insights(
         desglose_categorias=desglose,
@@ -421,9 +429,9 @@ def obtener_resumen_analisis(
             ),
         },
         "kpis": {
-            "ingresos_totales": round(suma_ingresos_ventana, 2) if suma_ingresos_ventana is not None else None,
-            "gastos_totales": round(suma_gastos_ventana, 2),
-            "balance_neto": balance_ventana,
+            "ingresos_totales": round(suma_ingresos_kpi, 2) if suma_ingresos_kpi is not None else None,
+            "gastos_totales": round(suma_gastos_kpi, 2),
+            "balance_neto": balance_kpi,
             "tasa_ahorro_pct": tasa_ventana,
             "tasa_ahorro_texto": tasa_ahorro_texto,
             "promedio_gasto_ciclo": prom_gasto,
@@ -432,6 +440,8 @@ def obtener_resumen_analisis(
             "variacion_ingreso_vs_anterior_pct": var_ingreso,
             "variacion_texto": var_texto,
             "cantidad_operaciones": cant_ops,
+            "alcance": alcance,
+            "frase_resumen": frase_resumen,
         },
         "insights": insights,
         "serie_ciclos": serie_ciclos,
