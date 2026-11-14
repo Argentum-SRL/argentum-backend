@@ -367,11 +367,10 @@ def test_tn26_compatibilidad_y_excel(db: Session):
     # Excel
     excel_bytes = generar_excel_analisis(db, user, moneda_modo="solo_ars", cantidad_ciclos=6)
     wb = openpyxl.load_workbook(BytesIO(excel_bytes), data_only=True)
-    ws = wb["Resumen y Ciclos"]
+    ws = wb["Números principales"]
 
-    # Fila 5: Ingresos (ARS) -> 1.500.000
-    # Fila 6: Gastos (ARS) -> 1.300.000
-    # Fila 7: Te quedó (ARS) -> 200.000
+    # Fila 5: Ingresos -> 1.500.000
+    # Fila 6: Egresos -> 1.300.000
     val_gastos = ws.cell(row=6, column=2).value
     assert val_gastos == 1300000.0
 

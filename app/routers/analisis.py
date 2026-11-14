@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 import uuid
+from datetime import date
 from io import BytesIO
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,6 +13,8 @@ from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
 from app.core.database import get_db
+from app.models.billetera import Billetera
+from app.models.tarjeta_credito import TarjetaCredito
 from app.models.usuario import Usuario
 from app.services import (
     analisis_comparativa_service,
@@ -18,6 +23,7 @@ from app.services import (
     analisis_proyeccion_service,
     analisis_resumen_service,
 )
+from app.utils.fecha import hoy_argentina
 
 router = APIRouter(prefix="/analisis", tags=["analisis"])
 
@@ -229,19 +235,124 @@ def delete_informe(
     return {"ok": True}
 
 
+def _armar_nombre_archivo_excel(titulo: str | None, hoy: date) -> str:
+    """Genera el nombre de archivo estandarizado con formato argentum_{slug}_{AAAAMMDD}.xlsx."""
+    if not titulo or not titulo.strip():
+        slug = "analisis"
+    else:
+        s = unicodedata.normalize("NFKD", titulo)
+        s = "".join(c for c in s if not unicodedata.combining(c))
+        s = s.lower()
+        s = re.sub(r"[^a-z0-9]+", "_", s)
+        slug = re.sub(r"_+", "_", s).strip("_")
+        if not slug:
+            slug = "analisis"
+    fecha_str = hoy.strftime("%Y%m%d")
+    return f"argentum_{slug}_{fecha_str}.xlsx"
+
+
 @router.get("/exportar-excel")
 def exportar_excel(
     moneda_modo: str = Query("solo_ars"),
     ciclos: int = Query(6, ge=1, le=12),
     billetera_id: str | None = Query(None),
     tarjeta_id: str | None = Query(None),
+    categoria_id: str | None = Query(None),
     naturaleza: str | None = Query("todos"),
     titulo: str | None = Query(None),
+    bloques: str | None = Query(None),
+    titulos: str | None = Query(None),
+    ciclo_a: str | None = Query(None),
+    ciclo_b: str | None = Query(None),
+    meses: int = Query(6),
+    hoy: date | None = Query(None),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ) -> StreamingResponse:
     b_uuid = _parse_optional_uuid(billetera_id, "billetera_id")
     t_uuid = _parse_optional_uuid(tarjeta_id, "tarjeta_id")
+    c_uuid = _parse_optional_uuid(categoria_id, "categoria_id")
+
+    if b_uuid:
+        b = db.query(Billetera).filter(Billetera.id == b_uuid, Billetera.usuario_id == current_user.id).first()
+        if not b:
+            raise HTTPException(status_code=422, detail="No encontramos esa billetera.")
+
+    if t_uuid:
+        tc = db.query(TarjetaCredito).filter(TarjetaCredito.id == t_uuid, TarjetaCredito.usuario_id == current_user.id).first()
+        if not tc:
+            raise HTTPException(status_code=422, detail="No encontramos esa tarjeta.")
+
+    ref_hoy = hoy or hoy_argentina()
+
+    # Validación de meses de proyección
+    if meses not in (6, 12):
+        raise HTTPException(
+            status_code=422,
+            detail="La cantidad de meses de proyección debe ser 6 o 12.",
+        )
+
+    # Validación de tipos de bloques solicitados
+    valid_bloques = {
+        "kpis",
+        "evolucion_ciclos",
+        "desglose_categorias",
+        "comparativa_ciclos",
+        "proyeccion_cuotas",
+        "tabla_movimientos",
+    }
+    if bloques:
+        bloques_items = [b.strip() for b in bloques.split(",") if b.strip()]
+        for b_item in bloques_items:
+            if b_item not in valid_bloques:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Tipo de bloque desconocido: '{b_item}'.",
+                )
+
+    # Validación de ciclos para comparativa
+    ciclo_a_clave = None
+    ciclo_b_clave = None
+    if ciclo_a or ciclo_b:
+        from app.services.analisis_ciclos_service import generar_ventana_ciclos
+
+        ciclos_disp = generar_ventana_ciclos(current_user, ref_hoy, 12)
+
+        if ciclo_a:
+            c_match_a = next(
+                (
+                    c
+                    for c in ciclos_disp
+                    if c["clave"] == ciclo_a
+                    or c["clave"].startswith(ciclo_a)
+                    or c["etiqueta"].lower() == ciclo_a.lower()
+                ),
+                None,
+            )
+            if not c_match_a:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"El ciclo '{ciclo_a}' no se encuentra entre los ciclos disponibles.",
+                )
+            ciclo_a_clave = c_match_a["clave"]
+
+        if ciclo_b:
+            c_match_b = next(
+                (
+                    c
+                    for c in ciclos_disp
+                    if c["clave"] == ciclo_b
+                    or c["clave"].startswith(ciclo_b)
+                    or c["etiqueta"].lower() == ciclo_b.lower()
+                ),
+                None,
+            )
+            if not c_match_b:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"El ciclo '{ciclo_b}' no se encuentra entre los ciclos disponibles.",
+                )
+            ciclo_b_clave = c_match_b["clave"]
 
     contenido = analisis_excel_service.generar_excel_analisis(
         db=db,
@@ -250,11 +361,20 @@ def exportar_excel(
         cantidad_ciclos=ciclos,
         billetera_id=b_uuid,
         tarjeta_id=t_uuid,
+        categoria_id=c_uuid,
         naturaleza=naturaleza,
         titulo_informe=titulo,
+        bloques=bloques,
+        titulos=titulos,
+        ciclo_a=ciclo_a_clave or ciclo_a,
+        ciclo_b=ciclo_b_clave or ciclo_b,
+        meses=meses,
+        hoy=ref_hoy,
     )
+
+    nombre_archivo = _armar_nombre_archivo_excel(titulo, ref_hoy)
     headers = {
-        "Content-Disposition": 'attachment; filename="argentum_analisis.xlsx"',
+        "Content-Disposition": f'attachment; filename="{nombre_archivo}"',
     }
     return StreamingResponse(
         BytesIO(contenido),

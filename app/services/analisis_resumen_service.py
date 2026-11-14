@@ -27,6 +27,7 @@ from app.services.analisis_ciclos_service import (
     sumar_periodo,
 )
 from app.services.analisis_insights_service import armar_frase_resumen, armar_insights
+from app.services.analisis_totales_service import calcular_totales_reporte
 from app.services.definiciones_service import condicion_gasto, condicion_ingreso
 from app.utils.fecha import hoy_argentina
 
@@ -362,6 +363,9 @@ def obtener_resumen_analisis(
     )
 
     desglose = _desglose_categorias(db, cond_gasto, modo)
+    totales_terminados, total_desglose = calcular_totales_reporte(
+        serie_ciclos, desglose, solo_gastos
+    )
 
     alcance, suma_gastos_kpi, suma_ingresos_kpi, balance_kpi = calcular_kpis_totales(
         serie_ciclos, ref_hoy, solo_gastos
@@ -446,6 +450,8 @@ def obtener_resumen_analisis(
         "insights": insights,
         "serie_ciclos": serie_ciclos,
         "desglose_categorias": desglose,
+        "totales_terminados": totales_terminados,
+        "total_desglose": total_desglose,
         "filtros_disponibles": filtros,
     }
 

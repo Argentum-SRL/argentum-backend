@@ -13,6 +13,7 @@ from app.models.usuario import Usuario
 from app.services import dolar_service
 from app.services.dashboard_service import get_ciclo_fechas
 from app.services.definiciones_service import condicion_gasto, condicion_ingreso
+from app.services.excel_estilos import mes_corto
 
 MESES_CORTOS = {
     1: "Ene",
@@ -363,6 +364,7 @@ def calcular_serie_ciclos(
         serie_ciclos_raw.append({
             "clave": c["clave"],
             "etiqueta": c["etiqueta"],
+            "nombre_corto": mes_corto(c["etiqueta"]),
             "rango_texto": c["rango_texto"],
             "fecha_inicio": c["fecha_inicio"].isoformat(),
             "fecha_fin": c["fecha_fin"].isoformat(),
@@ -462,4 +464,37 @@ def calcular_kpis_totales(
     )
     balance = round(suma_ingresos - suma_gastos, 2)
     return alcance, round(suma_gastos, 2), round(suma_ingresos, 2), balance
+
+
+def ids_transacciones_ventana(
+    db: Session,
+    usuario_id: UUID,
+    desde: date,
+    hasta: date,
+    ref_hoy: date,
+    billetera_id: Optional[UUID] = None,
+    tarjeta_id: Optional[UUID] = None,
+    categoria_id: Optional[UUID] = None,
+    naturaleza: Optional[str] = None,
+) -> set[str]:
+    """
+    Retorna el conjunto de IDs (como string y con prefijo 'transaccion:') de las
+    transacciones de gasto que el análisis suma para esa ventana con esos filtros,
+    reutilizando aplicar_filtros_extra en una sola consulta.
+    """
+    cond_base = condicion_gasto(usuario_id, desde=desde, hasta=hasta, hoy=ref_hoy)
+    cond = aplicar_filtros_extra(
+        cond_base,
+        billetera_id=billetera_id,
+        tarjeta_id=tarjeta_id,
+        categoria_id=categoria_id,
+        naturaleza=naturaleza,
+    )
+    rows = db.execute(select(Transaccion.id).where(cond)).scalars().all()
+    resultado: set[str] = set()
+    for tx_id in rows:
+        s_id = str(tx_id)
+        resultado.add(s_id)
+        resultado.add(f"transaccion:{s_id}")
+    return resultado
 

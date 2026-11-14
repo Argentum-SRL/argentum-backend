@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Set, Tuple
 
 from app.services.presupuestos_excel_datos import CicloExcel, LibroDatos
-from app.services.presupuestos_excel_libro import (
+from app.services.excel_estilos import (
     ALIGN_CENTER,
     ALIGN_LEFT_INDENT,
     ALIGN_RIGHT_INDENT,
@@ -29,15 +29,15 @@ from app.services.presupuestos_excel_libro import (
     FONT_NOTA_SEC,
     FONT_TITULO_SEC,
     FONT_TOTAL,
-    _ajustar_ancho_columnas,
-    _configurar_pagina,
+    ajustar_ancho_columnas,
     aplicar_reglas_porcentaje,
+    configurar_pagina,
 )
 
 
 def _armar_hoja_ciclo(ws, ciclo: CicloExcel, datos: LibroDatos) -> None:
     """Genera la estructura visual y de fórmulas para la hoja de un ciclo."""
-    _configurar_pagina(ws)
+    configurar_pagina(ws)
     celdas_excluidas: Set[Tuple[int, int]] = set()
 
     # A1: nombre de la hoja
@@ -444,5 +444,5 @@ def _armar_hoja_ciclo(ws, ciclo: CicloExcel, datos: LibroDatos) -> None:
 
         ultima_fila = t_u
 
-    _ajustar_ancho_columnas(ws, celdas_excluidas)
+    ajustar_ancho_columnas(ws, celdas_excluidas)
 

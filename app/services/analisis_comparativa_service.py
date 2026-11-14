@@ -18,6 +18,7 @@ from app.services.analisis_ciclos_service import (
     obtener_mapa_cotizaciones,
 )
 from app.services.definiciones_service import condicion_gasto, condicion_ingreso
+from app.services.excel_estilos import mes_corto
 from app.utils.fecha import hoy_argentina
 
 
@@ -258,12 +259,28 @@ def obtener_comparativa_ciclos(
         else None
     )
 
+    tot_a = sum((Decimal(str(c["monto_a"])) for c in categorias_out), Decimal("0"))
+    tot_b = sum((Decimal(str(c["monto_b"])) for c in categorias_out), Decimal("0"))
+    diff_monto = tot_a - tot_b
+    diff_pct = (
+        round(float((diff_monto / tot_b) * Decimal("100")), 1)
+        if tot_b > Decimal("0")
+        else None
+    )
+    totales = {
+        "monto_a": round(float(tot_a), 2),
+        "monto_b": round(float(tot_b), 2),
+        "diferencia_monto": round(float(diff_monto), 2),
+        "diferencia_pct": diff_pct,
+    }
+
     return {
         "moneda_visual": moneda_visual,
         "ciclos_disponibles": [
             {
                 "clave": c["clave"],
                 "etiqueta": c["etiqueta"],
+                "nombre_corto": mes_corto(c["etiqueta"]),
                 "rango_texto": c["rango_texto"],
                 "es_actual": c["es_actual"],
                 "dias_transcurridos": c["dias_transcurridos"],
@@ -274,6 +291,7 @@ def obtener_comparativa_ciclos(
         "ciclo_a": {
             "clave": ciclo_a["clave"],
             "etiqueta": ciclo_a["etiqueta"],
+            "nombre_corto": mes_corto(ciclo_a["etiqueta"]),
             "rango_texto": ciclo_a["rango_texto"],
             "dias_transcurridos": ciclo_a["dias_transcurridos"],
             "dias_totales": ciclo_a["dias_totales"],
@@ -281,6 +299,7 @@ def obtener_comparativa_ciclos(
         "ciclo_b": {
             "clave": ciclo_b["clave"],
             "etiqueta": ciclo_b["etiqueta"],
+            "nombre_corto": mes_corto(ciclo_b["etiqueta"]),
             "rango_texto": ciclo_b["rango_texto"],
             "dias_transcurridos": ciclo_b["dias_transcurridos"],
             "dias_totales": ciclo_b["dias_totales"],
@@ -300,4 +319,5 @@ def obtener_comparativa_ciclos(
             "mayor_ahorro": mayor_ahorro,
         },
         "categorias": categorias_out,
+        "totales": totales,
     }

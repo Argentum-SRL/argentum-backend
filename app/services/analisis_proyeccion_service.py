@@ -14,6 +14,7 @@ from app.models.usuario import Usuario
 from app.services import dolar_service
 from app.services.analisis_ciclos_service import MESES_CORTOS
 from app.services.dashboard_service import get_ciclo_fechas
+from app.services.excel_estilos import mes_corto
 from app.utils.cuotas import monto_efectivo_cuota
 from app.utils.fecha import hoy_argentina
 
@@ -193,6 +194,10 @@ def _procesar_planes_cuotas(
             "saldo_pendiente": round(float(saldo_plan_dec), 2),
             "ultimo_vencimiento": ultima_cuota.fecha_vencimiento.isoformat(),
             "ultimo_mes_etiqueta": f"{MESES_CORTOS[ultima_cuota.fecha_vencimiento.month]} {str(ultima_cuota.fecha_vencimiento.year)[-2:]}",
+            "ultimo_mes_nombre_corto": mes_corto(
+                f"{MESES_CORTOS[ultima_cuota.fecha_vencimiento.month]} "
+                f"{ultima_cuota.fecha_vencimiento.year}"
+            ),
             "progreso_pct": progreso_pct,
         })
 
@@ -350,6 +355,7 @@ def obtener_proyeccion_compromisos(
         serie_mensual.append({
             "clave": b["clave"],
             "etiqueta": b["etiqueta"],
+            "nombre_corto": mes_corto(b["etiqueta"]),
             "rango_texto": b["rango_texto"],
             "monto_cuotas": round(float(c_dec), 2),
             "monto_suscripciones": round(float(s_dec), 2),
@@ -360,6 +366,20 @@ def obtener_proyeccion_compromisos(
         })
 
     compromiso_mes_actual = serie_mensual[0]["monto_total"] if serie_mensual else 0.0
+
+    tot_cuotas = sum((Decimal(str(item["monto_cuotas"])) for item in serie_mensual), Decimal("0"))
+    tot_subs = sum((Decimal(str(item["monto_suscripciones"])) for item in serie_mensual), Decimal("0"))
+    tot_tot = sum((Decimal(str(item["monto_total"])) for item in serie_mensual), Decimal("0"))
+    tot_planes = sum(item["planes_que_finalizan"] for item in serie_mensual)
+    tot_libera = sum((Decimal(str(item["monto_que_se_libera"])) for item in serie_mensual), Decimal("0"))
+
+    totales_serie = {
+        "monto_cuotas": round(float(tot_cuotas), 2),
+        "monto_suscripciones": round(float(tot_subs), 2),
+        "monto_total": round(float(tot_tot), 2),
+        "planes_que_finalizan": tot_planes,
+        "monto_que_se_libera": round(float(tot_libera), 2),
+    }
 
     return {
         "moneda_visual": moneda_visual,
@@ -376,4 +396,5 @@ def obtener_proyeccion_compromisos(
         },
         "serie_mensual": serie_mensual,
         "planes_activos": planes_activos[:15],
+        "totales_serie": totales_serie,
     }

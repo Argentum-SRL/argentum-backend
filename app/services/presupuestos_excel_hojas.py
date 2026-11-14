@@ -14,7 +14,7 @@ from openpyxl.styles import Alignment
 from openpyxl.utils import get_column_letter
 
 from app.services.presupuestos_excel_datos import LibroDatos
-from app.services.presupuestos_excel_libro import (
+from app.services.excel_estilos import (
     ALIGN_CENTER,
     ALIGN_LEFT_INDENT,
     ALIGN_RIGHT_INDENT,
@@ -36,10 +36,11 @@ from app.services.presupuestos_excel_libro import (
     FONT_NOTA_SEC,
     FONT_TITULO_SEC,
     FONT_TOTAL,
-    _ajustar_ancho_columnas,
-    _configurar_pagina,
+    TEXTO_QUE_CUENTA_COMO_GASTO,
+    ajustar_ancho_columnas,
     anio_de_hoja,
     aplicar_reglas_porcentaje,
+    configurar_pagina,
     mes_corto,
 )
 
@@ -47,7 +48,7 @@ LINEAS_COMO_LEERLO = (
     "Comparativo: cada columna es un ciclo tuyo, de cobro a cobro. Arriba, cuánto entró, cuánto salió y cuánto te sobró; abajo, cuánto gastaste en cada categoría (el celeste más fuerte marca el mes en que más gastaste) y qué parte de cada presupuesto usaste.",
     "Anual: lo mismo sumado por año, con la diferencia contra el año anterior. Fijate en «Meses con datos»: un año con pocos meses suma menos.",
     "Una hoja por mes: el resumen del ciclo, tus presupuestos tal como los armaste en Argentum, en qué gastaste por categoría comparado con el mes anterior y el detalle por subcategoría.",
-    "Qué cuenta como gasto: lo que pagaste con tus cuentas y tarjetas. No cuentan el pago del resumen de la tarjeta, las transferencias entre tus cuentas, lo que pasa a tus ahorros, metas o inversiones, ni la plata que solo pasó por tu cuenta. Los reintegros ya están descontados.",
+    TEXTO_QUE_CUENTA_COMO_GASTO,
     "Compras con tarjeta: en un pago cuentan el día de la compra; en cuotas, cada cuota cuenta en el mes en que vence.",
     "Pesos y dólares van siempre separados: los dólares tienen su propia tabla.",
     "Los totales, las diferencias y los porcentajes son fórmulas: si cambiás un número, se recalculan solos.",
@@ -58,7 +59,7 @@ LINEAS_COMO_LEERLO = (
 def _armar_hoja_comparativo(ws, datos: LibroDatos) -> None:
     """Arma la hoja 'Comparativo'."""
     ws.sheet_properties.tabColor = "1F3864"
-    _configurar_pagina(ws)
+    configurar_pagina(ws)
     celdas_excluidas: Set[Tuple[int, int]] = set()
 
     # A1 y A2
@@ -480,13 +481,13 @@ def _armar_hoja_comparativo(ws, datos: LibroDatos) -> None:
 
         ultima_fila = t_u
 
-    _ajustar_ancho_columnas(ws, celdas_excluidas)
+    ajustar_ancho_columnas(ws, celdas_excluidas)
 
 
 def _armar_hoja_anual(ws, datos: LibroDatos) -> None:
     """Arma la hoja 'Anual'."""
     ws.sheet_properties.tabColor = "2E75B6"
-    _configurar_pagina(ws)
+    configurar_pagina(ws)
     celdas_excluidas: Set[Tuple[int, int]] = set()
 
     # A1 y A2
@@ -879,13 +880,13 @@ def _armar_hoja_anual(ws, datos: LibroDatos) -> None:
 
         ultima_fila = t_u_anual
 
-    _ajustar_ancho_columnas(ws, celdas_excluidas)
+    ajustar_ancho_columnas(ws, celdas_excluidas)
 
 
 def _armar_hoja_como_leerlo(ws) -> None:
     """Arma la hoja explicativa 'Cómo leerlo'."""
     ws.sheet_properties.tabColor = "7F7F7F"
-    _configurar_pagina(ws)
+    configurar_pagina(ws)
 
     # A1: título
     ws.row_dimensions[1].height = 28
