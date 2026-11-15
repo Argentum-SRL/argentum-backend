@@ -9,6 +9,8 @@ import re
 import unicodedata
 from typing import Any, Optional
 
+from app.utils.texto import normalizar_texto as utils_normalizar_texto
+
 # Catálogo completo de 32 entidades con nueva estructura de opciones
 ENTIDADES: dict[str, dict[str, Any]] = {
     "mercadopago": {
@@ -404,4 +406,117 @@ def opcion_de_entidad(entidad_id: Optional[str], clave: Optional[str]) -> Option
         if opt["clave"] == clave:
             return opt
     return None
+
+
+ALIAS_ENTIDADES: dict[str, str] = {
+    # mercadopago
+    "mercado pago": "mercadopago",
+    "mercadopago": "mercadopago",
+    "mp": "mercadopago",
+    "merca": "mercadopago",
+    # uala
+    "uala": "uala",
+    # naranjax
+    "naranja x": "naranjax",
+    "naranjax": "naranjax",
+    "naranja": "naranjax",
+    # personalpay
+    "personal pay": "personalpay",
+    "personal": "personalpay",
+    # prex
+    "prex": "prex",
+    # paypal
+    "paypal": "paypal",
+    # cocos
+    "cocos": "cocos",
+    # arq
+    "arq": "arq",
+    "dolarapp": "arq",
+    # astropay
+    "astropay": "astropay",
+    "astro pay": "astropay",
+    # brubank
+    "brubank": "brubank",
+    "bru": "brubank",
+    # lemon
+    "lemon": "lemon",
+    "lemon cash": "lemon",
+    # cuentadni
+    "cuenta dni": "cuentadni",
+    "dni": "cuentadni",
+    # galicia
+    "galicia": "galicia",
+    "gali": "galicia",
+    # santander
+    "santander": "santander",
+    "santander rio": "santander",
+    "rio": "santander",
+    # bbva
+    "bbva": "bbva",
+    "frances": "bbva",
+    "bbva frances": "bbva",
+    # macro
+    "macro": "macro",
+    # nacion
+    "nacion": "nacion",
+    "bna": "nacion",
+    # provincia
+    "provincia": "provincia",
+    "bapro": "provincia",
+    # hipotecario
+    "hipotecario": "hipotecario",
+    # icbc": "icbc",
+    "icbc": "icbc",
+    # hsbc
+    "hsbc": "hsbc",
+    # supervielle
+    "supervielle": "supervielle",
+    # bancosantafe
+    "santa fe": "bancosantafe",
+    "nuevo banco de santa fe": "bancosantafe",
+    # credicoop
+    "credicoop": "credicoop",
+    # balanz
+    "balanz": "balanz",
+    # iol
+    "iol": "iol",
+    "invertir online": "iol",
+    "invertironline": "iol",
+}
+
+for _ent_id, _ent_data in ENTIDADES.items():
+    _id_norm = utils_normalizar_texto(_ent_id)
+    if _id_norm not in ALIAS_ENTIDADES:
+        ALIAS_ENTIDADES[_id_norm] = _ent_id
+    _nom_norm = utils_normalizar_texto(_ent_data.get("nombre", ""))
+    if _nom_norm and _nom_norm not in ALIAS_ENTIDADES:
+        ALIAS_ENTIDADES[_nom_norm] = _ent_id
+
+
+def entidad_de_texto(texto: str | None) -> str | None:
+    """
+    Identifica el ID de entidad a partir del texto ingresado por el usuario.
+    Normaliza el texto y evalúa coincidencias exactas o prefijadas por banco.
+    """
+    if not texto:
+        return None
+    t = utils_normalizar_texto(texto)
+    if not t:
+        return None
+    if t in ALIAS_ENTIDADES:
+        return ALIAS_ENTIDADES[t]
+    if t.startswith("banco de la "):
+        resto = t[len("banco de la "):].strip()
+        if resto in ALIAS_ENTIDADES:
+            return ALIAS_ENTIDADES[resto]
+    elif t.startswith("banco del "):
+        resto = t[len("banco del "):].strip()
+        if resto in ALIAS_ENTIDADES:
+            return ALIAS_ENTIDADES[resto]
+    elif t.startswith("banco "):
+        resto = t[len("banco "):].strip()
+        if resto in ALIAS_ENTIDADES:
+            return ALIAS_ENTIDADES[resto]
+    return None
+
 

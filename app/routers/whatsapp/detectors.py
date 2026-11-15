@@ -445,6 +445,10 @@ def _bloquear_mezcla_en_handlers(mensaje_texto: str, usuario, db, from_number: s
     """
     if not _debe_bloquear_mezcla_lote(mensaje_texto, usuario.id, db):
         return False
+    from app.routers.whatsapp.transferencias_texto import extraer_transferencias
+    from app.utils.fecha import hoy_argentina
+    if extraer_transferencias(mensaje_texto, hoy_argentina()) is not None:
+        return False
     m_chk = normalizar_texto(mensaje_texto)
     if re.search(r"\b(?:gaste|gasté|pague|pagué|compre|compré)\b", m_chk) or len(_numeros_de_monto(m_chk)) >= 2:
         from decimal import Decimal

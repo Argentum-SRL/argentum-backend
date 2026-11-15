@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from uuid import UUID
 from app.utils.fecha import ahora_argentina
 from decimal import Decimal
 from sqlalchemy import select
@@ -384,16 +385,40 @@ def manejar_confirmacion(
             .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
         ).scalars().first()
 
-        es_tras_directo = (
+        es_tras_directo_tx = (
             propuesta_ganadora is None
             and ultima_conv is not None
             and ultima_conv.intent_detectado == "registrar_transaccion"
-            and ultima_conv.accion_ejecutada not in (None, "cancelada", "vencida", "error", "descartado_por_duplicado")
+            and ultima_conv.accion_ejecutada not in (
+                None, "cancelada", "vencida", "error", "descartado_por_duplicado"
+            )
             and (
                 (ultima_conv.entidades and ultima_conv.entidades.get("registro_directo") is True)
                 or (ultima_conv.mensaje_bot and ultima_conv.mensaje_bot.startswith("Listo."))
             )
         )
+
+        def _es_accion_tr(acc: str | None) -> bool:
+            if not acc:
+                return False
+            s = str(acc)
+            if s.startswith("transferencia:") or s.startswith("transferencias:"):
+                return True
+            try:
+                UUID(s)
+                return True
+            except ValueError:
+                return s.isdigit()
+
+        es_tras_directo_tr = (
+            propuesta_ganadora is None
+            and ultima_conv is not None
+            and ultima_conv.intent_detectado == "transferir_fondos"
+            and _es_accion_tr(ultima_conv.accion_ejecutada)
+            and (ultima_conv.mensaje_bot and ultima_conv.mensaje_bot.startswith("Listo."))
+        )
+
+        es_tras_directo = es_tras_directo_tx or es_tras_directo_tr
 
         if es_tras_directo:
             msg_confirm = "Ya quedó anotado. Si hay algo mal, decime qué corregir."

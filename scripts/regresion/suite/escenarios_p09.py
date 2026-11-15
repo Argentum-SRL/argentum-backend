@@ -251,7 +251,7 @@ def p9b_caso_3(datos):
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "saqué 50000 del cajero"), time.perf_counter())
         prop = respuestas[-1][1] if respuestas else ""
-        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
+        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "1"), time.perf_counter())
         conf = respuestas[-1][1] if respuestas else ""
         
         bg_fin = s.execute(select(Billetera.saldo_actual).where(Billetera.nombre == "Galicia", Billetera.usuario_id == u.id)).scalar()

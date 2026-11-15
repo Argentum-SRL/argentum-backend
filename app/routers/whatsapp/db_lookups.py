@@ -551,6 +551,29 @@ def _buscar_ultimo_movimiento_whatsapp(usuario_id: UUID, db: Session) -> tuple[T
                 return txs, None
             except Exception:
                 pass
+        if accion.startswith("transferencias:"):
+            try:
+                ids_str = accion.replace("transferencias:", "").split(",")
+                uuids = [UUID(s.strip()) for s in ids_str if s.strip()]
+                trs = db.execute(
+                    select(TransferenciaInterna).where(
+                        TransferenciaInterna.id.in_(uuids),
+                        TransferenciaInterna.usuario_id == usuario_id,
+                    ).order_by(
+                        TransferenciaInterna.fecha_creacion.asc(),
+                        TransferenciaInterna.id.asc(),
+                    )
+                ).scalars().all()
+                if not trs:
+                    return None, "YA_BORRADO"
+                limite = datetime.now(timezone.utc) - timedelta(
+                    minutes=PLAZO_DESHACER_CORREGIR_MINUTOS
+                )
+                if trs[0].fecha_creacion < limite:
+                    return None, "PLAZO_VENCIDO"
+                return trs, None
+            except Exception:
+                pass
         if accion.startswith("transferencia:"):
             try:
                 tr_id = UUID(accion.replace("transferencia:", ""))

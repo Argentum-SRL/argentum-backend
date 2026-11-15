@@ -34,10 +34,6 @@ from app.routers.whatsapp.parsers import (
     _parsear_monto_argentino,
     _resolver_y_validar_fecha,
 )
-from app.routers.whatsapp.resolvers_cascada import (
-    _generar_menu_billeteras,
-    resolver_billetera_cascada,
-)
 from app.schemas.transferencia_interna import TransferenciaInternaCreate
 from app.services import transferencia_service, whatsapp_service
 from app.services.evento_service import emitir_evento_actualizacion
@@ -104,6 +100,9 @@ def _confirmar_propuesta_transferencia(
     moneda_destino = Moneda.USD if entidades.get("moneda_destino") == "USD" else Moneda.ARS
     monto_comision = Decimal(str(entidades["monto_comision"])) if entidades.get("monto_comision") else None
 
+    fecha_iso = entidades.get("fecha")
+    fecha_obj = date.fromisoformat(str(fecha_iso)) if fecha_iso else hoy_argentina()
+
     data_tr = TransferenciaInternaCreate(
         billetera_origen_id=b_orig_id,
         billetera_destino_id=b_dest_id,
@@ -114,7 +113,7 @@ def _confirmar_propuesta_transferencia(
         moneda_origen=moneda_origen,
         moneda_destino=moneda_destino,
         monto_comision=monto_comision,
-        fecha=hoy_argentina(),
+        fecha=fecha_obj,
         notas=entidades.get("notas", "Transferencia por WhatsApp"),
     )
 
@@ -136,14 +135,49 @@ def _confirmar_propuesta_transferencia(
     nom_dest = b_destino.nombre if b_destino else "destino"
 
     tipo_op = entidades.get("tipo_operacion", "transferencia")
-    if tipo_op == "extraccion":
-        msg_resp = f"Listo. Extracción de {formatear_monto(float(monto_origen), moneda_origen)} de {nom_orig} a {nom_dest} registrada."
-    elif tipo_op == "compra_usd":
-        msg_resp = f"Listo. Compra de {formatear_monto(float(monto_destino), Moneda.USD)} por {formatear_monto(float(monto_origen), Moneda.ARS)} registrada."
+    if tipo_op == "compra_usd":
+        msg_resp = (
+            f"Listo. Compra de {formatear_monto(float(monto_destino), Moneda.USD)} por "
+            f"{formatear_monto(float(monto_origen), Moneda.ARS)} registrada."
+        )
     elif tipo_op == "venta_usd":
-        msg_resp = f"Listo. Venta de {formatear_monto(float(monto_origen), Moneda.USD)} por {formatear_monto(float(monto_destino), Moneda.ARS)} registrada."
+        msg_resp = (
+            f"Listo. Venta de {formatear_monto(float(monto_origen), Moneda.USD)} por "
+            f"{formatear_monto(float(monto_destino), Moneda.ARS)} registrada."
+        )
     else:
-        msg_resp = f"Listo. Transferí {formatear_monto(float(monto_origen), moneda_origen)} de {nom_orig} a {nom_dest}."
+        monto_fmt = formatear_monto(float(monto_origen), moneda_origen)
+        fecha_nat = _formatear_fecha_natural(fecha_obj)
+        fecha_sufijo = f" ({fecha_nat})" if fecha_nat else ""
+        com_fmt = (
+            formatear_monto(float(monto_comision), moneda_origen)
+            if monto_comision
+            else ""
+        )
+        comision_sufijo = f", con {com_fmt} de comisión" if monto_comision else ""
+        msg_principal = (
+            f"Listo. Pasaste {monto_fmt} de {nom_orig} a {nom_dest}"
+            f"{fecha_sufijo}{comision_sufijo}."
+        )
+
+        lineas_extra = []
+        if entidades.get("aviso_fecha"):
+            lineas_extra.append(entidades["aviso_fecha"])
+
+        if b_origen:
+            db.refresh(b_origen)
+            if b_origen.saldo_actual < Decimal("0"):
+                lineas_extra.append(f"{b_origen.nombre} quedó en negativo.")
+
+        from app.routers.whatsapp import aviso_saldo_wpp
+        from app.services.saldo_billetera_service import movimiento_anterior_al_saldo
+        for b_chk in (b_origen, b_destino):
+            if b_chk and movimiento_anterior_al_saldo(b_chk, fecha_obj):
+                txt_av = aviso_saldo_wpp.texto_aviso_saldo_individual(b_chk)
+                if txt_av not in lineas_extra:
+                    lineas_extra.append(txt_av)
+
+        msg_resp = "\n".join([msg_principal] + lineas_extra)
 
     return tr, msg_resp, False
 
@@ -331,101 +365,6 @@ def _interpretar_transferencia(
                     }
                 return True, "propuesta", entidades, prop
 
-        # 2. Billetera origen pendiente para transferencias
-        if "billetera_origen" in estado_previo.get("datos_faltantes", []):
-            b_dest_id_str = estado_previo.get("billetera_destino_id")
-            b_dest = next((w for w in billeteras_usuario if str(w.id) == b_dest_id_str), None)
-            cands = [w for w in billeteras_usuario if w.moneda == (b_dest.moneda if b_dest else Moneda.ARS) and str(w.id) != b_dest_id_str and w.estado == EstadoBilletera.ACTIVA]
-            b_elegida = None
-            if mensaje_texto.strip().isdigit():
-                idx = int(mensaje_texto.strip()) - 1
-                if 0 <= idx < len(cands):
-                    b_elegida = cands[idx]
-            else:
-                b_match, _ = resolver_billetera_cascada(mensaje_texto.strip(), cands)
-                if b_match:
-                    b_elegida = b_match
-
-            if b_elegida and b_dest:
-                if b_elegida.id == b_dest.id:
-                    return True, "misma_billetera", {}, "La billetera de origen y destino no pueden ser la misma."
-                monto = Decimal(str(estado_previo["monto"]))
-                monto_fmt = formatear_monto(float(monto), b_elegida.moneda)
-                prop = f"Voy a transferir {monto_fmt} de {b_elegida.nombre} a {b_dest.nombre}. ¿Confirmás?"
-                entidades = {
-                    "tipo_operacion": "transferencia",
-                    "billetera_origen_id": str(b_elegida.id),
-                    "billetera_destino_id": str(b_dest.id),
-                    "billetera_origen": b_elegida.nombre,
-                    "billetera_destino": b_dest.nombre,
-                    "monto": float(monto),
-                    "monto_origen": float(monto),
-                    "monto_destino": float(monto),
-                    "moneda_origen": b_elegida.moneda.value,
-                    "moneda_destino": b_dest.moneda.value,
-                }
-                return True, "propuesta", entidades, prop
-
-    # 1. EXTRACCIÓN DE CAJERO
-    if (re.search(r"\b(?:saque|retire|extraje|fui\s+al)\b.*\b(?:cajero|banco)\b", m_norm) or
-        re.search(r"\bsaque\s+del\s+cajero\b", m_norm) or
-        re.search(r"\bsaque\s+(?:plata|dinero)\b", m_norm) or
-        re.search(r"\bextraccion(?:\s+de\s+cajero)?\b", m_norm)):
-
-        m_num = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?)\b", m_norm)
-        monto = _parsear_monto_argentino(m_num.group(1)) if m_num else None
-
-        comision = None
-        m_com = re.search(r"(?:con|mas)\s+(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\s+(?:de\s+)?comision", m_norm)
-        if m_com:
-            comision = _parsear_monto_argentino(m_com.group(1))
-
-        cash_wallets = [w for w in billeteras_usuario if w.moneda == Moneda.ARS and w.es_efectivo and w.estado == EstadoBilletera.ACTIVA]
-        if not cash_wallets:
-            return True, "no_cash", {}, "No tenés ninguna billetera de efectivo en pesos. Podés crearla desde la web de Argentum."
-
-        b_dest = cash_wallets[0] if len(cash_wallets) == 1 else None
-
-        non_cash = [w for w in billeteras_usuario if w.moneda == Moneda.ARS and not w.es_efectivo and w.estado == EstadoBilletera.ACTIVA]
-        b_orig = None
-        for w in non_cash:
-            if normalizar_texto(w.nombre) in m_norm:
-                b_orig = w
-                break
-        if not b_orig:
-            ppal = next((w for w in non_cash if w.es_principal), None)
-            if ppal:
-                b_orig = ppal
-            elif len(non_cash) == 1:
-                b_orig = non_cash[0]
-
-        if not b_orig or not b_dest or not monto:
-            cands_banco = [w for w in non_cash if w.estado == EstadoBilletera.ACTIVA]
-            menu = _generar_menu_billeteras(cands_banco, tipo="egreso")
-            return True, "slot_filling", {"intent_origen": "transferir_fondos", "tipo_operacion": "extraccion", "monto": float(monto) if monto else None, "datos_faltantes": ["billetera_origen"]}, f"¿De qué cuenta bancaria sale la plata?\n{menu}"
-
-        monto_fmt = formatear_monto(float(monto), Moneda.ARS)
-        if comision:
-            com_fmt = formatear_monto(float(comision), Moneda.ARS)
-            msg = f"Voy a registrar una extracción de {monto_fmt} de {b_orig.nombre} a {b_dest.nombre} (con {com_fmt} de comisión). ¿Confirmás?"
-        else:
-            msg = f"Voy a registrar una extracción de {monto_fmt} de {b_orig.nombre} a {b_dest.nombre}. ¿Confirmás?"
-
-        entidades = {
-            "tipo_operacion": "extraccion",
-            "billetera_origen_id": str(b_orig.id),
-            "billetera_destino_id": str(b_dest.id),
-            "billetera_origen": b_orig.nombre,
-            "billetera_destino": b_dest.nombre,
-            "monto": float(monto),
-            "monto_origen": float(monto),
-            "monto_destino": float(monto),
-            "moneda_origen": "ARS",
-            "moneda_destino": "ARS",
-            "monto_comision": float(comision) if comision else None,
-        }
-        return True, "propuesta", entidades, msg
-
     # 2. COMPRA Y VENTA DE DÓLARES
     if re.search(r"\b(?:d[oó]lares|verdes|usd|dolarice|cambie\s+pesos\s+a\s+d[oó]lares|cambie\s+d[oó]lares\s+a\s+pesos)\b", m_norm) and not any(w in m_norm for w in ["gaste", "pague", "compre una", "compre un"]):
         es_venta = bool(re.search(r"\b(?:vendi|cambie\s+d[oó]lares\s+a\s+pesos|vender)\b", m_norm))
@@ -439,7 +378,16 @@ def _interpretar_transferencia(
         ars_wallets = [w for w in billeteras_usuario if w.moneda == Moneda.ARS and w.estado == EstadoBilletera.ACTIVA]
         if not ars_wallets:
             return True, "error", {}, "No tenés ninguna billetera en pesos."
-        b_ars = next((w for w in ars_wallets if not w.es_efectivo and w.es_principal), ars_wallets[0])
+        b_ars = None
+        for w in ars_wallets:
+            if normalizar_texto(w.nombre) in m_norm:
+                b_ars = w
+                break
+        if not b_ars:
+            b_ars = next(
+                (w for w in ars_wallets if not w.es_efectivo and w.es_principal),
+                ars_wallets[0],
+            )
 
         m_cot = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\s*(?:d[oó]lares|verdes|usd)\s+a\s+(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)", m_norm)
         if m_cot:
@@ -503,212 +451,5 @@ def _interpretar_transferencia(
                     "datos_faltantes": ["cotizacion"]
                 }
                 return True, "slot_filling", entidades, pregunta
-
-    # 3. TRANSFERENCIAS ENTRE CUENTAS PROPIAS
-    # Exclusión explícita de terceros: gastos a otra persona
-    if (re.search(r"\b(?:le\s+transfer[ií]|le\s+mand[eé]|le\s+pas[eé]|le\s+pagu[eé])\b", m_norm) or
-        re.search(r"\b(?:a\s+mi\s+hermano|a\s+mi\s+hermana|a\s+mi\s+mam[aá]|a\s+mi\s+pap[aá]|a\s+un\s+amigo|a\s+juan|a\s+pedro)\b", m_norm)):
-        return False, "gasto_tercero", {}, None
-
-    if re.search(r"\b(?:pas[eé]|transfer[ií]|me\s+transfer[ií]|mand[eé]|mov[ií]|cargu[eé]|mande\s+plata|pase\s+plata)\b", m_norm):
-        if "sube" in m_norm:
-            return False, "gasto_sube", {}, None
-
-        m_num = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?)\b", m_norm)
-        monto = _parsear_monto_argentino(m_num.group(1)) if m_num else None
-
-        # Patrón "de X a Y"
-        m_de_a = re.search(r"de\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+?)\s+a\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)", m_norm)
-        b_orig = None
-        b_dest = None
-        if m_de_a:
-            nom_orig = m_de_a.group(1).strip()
-            nom_dest = m_de_a.group(2).strip()
-            b_orig, _ = resolver_billetera_cascada(nom_orig, billeteras_usuario)
-            b_dest, _ = resolver_billetera_cascada(nom_dest, billeteras_usuario)
-        else:
-            # Patrón "a Y"
-            m_a = re.search(r"a\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)", m_norm)
-            if m_a:
-                nom_dest = m_a.group(1).strip()
-                b_dest, _ = resolver_billetera_cascada(nom_dest, billeteras_usuario)
-                if b_dest:
-                    ppal = next((w for w in billeteras_usuario if w.es_principal and w.moneda == b_dest.moneda and w.id != b_dest.id), None)
-                    if ppal:
-                        b_orig = ppal
-
-        # Si no hubo coincidencia con ninguna billetera del usuario, es un gasto hacia un tercero
-        if not b_dest and not m_de_a:
-            return False, "no_es_transferencia_propia", {}, None
-
-        if b_orig and b_dest and b_orig.id == b_dest.id:
-            return True, "misma_billetera", {}, "La billetera de origen y destino no pueden ser la misma."
-
-        if b_orig and b_dest and monto:
-            if b_orig.moneda == b_dest.moneda:
-                monto_fmt = formatear_monto(float(monto), b_orig.moneda)
-                prop = f"Voy a transferir {monto_fmt} de {b_orig.nombre} a {b_dest.nombre}. ¿Confirmás?"
-                entidades = {
-                    "tipo_operacion": "transferencia",
-                    "billetera_origen_id": str(b_orig.id),
-                    "billetera_destino_id": str(b_dest.id),
-                    "billetera_origen": b_orig.nombre,
-                    "billetera_destino": b_dest.nombre,
-                    "monto": float(monto),
-                    "monto_origen": float(monto),
-                    "monto_destino": float(monto),
-                    "moneda_origen": b_orig.moneda.value,
-                    "moneda_destino": b_dest.moneda.value,
-                }
-                return True, "propuesta", entidades, prop
-
-            # Transferencia entre billeteras de distinta moneda (ARS <-> USD)
-            es_compra = (b_orig.moneda == Moneda.ARS and b_dest.moneda == Moneda.USD)
-            tipo_op = "compra_usd" if es_compra else "venta_usd"
-
-            # 1. Detectar si el usuario ya dio ambos montos o cotización explícita en el mismo mensaje
-            m_usd = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\s*(?:d[oó]lares|verdes|usd)\b", m_norm)
-            dolares_explicit = _parsear_monto_argentino(m_usd.group(1)) if m_usd else None
-
-            m_ars = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?)\s*(?:pesos|ars)\b", m_norm)
-            pesos_explicit = _parsear_monto_argentino(m_ars.group(1)) if m_ars else None
-
-            m_cotiz = None
-            for m_c in re.finditer(r"\ba\s+(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\b", m_norm):
-                val_c = _parsear_monto_argentino(m_c.group(1))
-                if val_c and val_c > Decimal("100"):
-                    m_cotiz = val_c
-                    break
-
-            m_son = re.search(r"(?:son|que\s+son|equivalen\s+a|por|recib[ií])\s+(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?)\b", m_norm)
-            segundo_monto = _parsear_monto_argentino(m_son.group(1)) if m_son else None
-
-            pesos = None
-            dolares = None
-            cotiz = None
-
-            if dolares_explicit and pesos_explicit:
-                dolares = dolares_explicit
-                pesos = pesos_explicit
-            elif dolares_explicit and monto and monto != dolares_explicit:
-                dolares = dolares_explicit
-                pesos = monto
-            elif pesos_explicit and monto and monto != pesos_explicit:
-                pesos = pesos_explicit
-                dolares = monto
-            elif dolares_explicit and m_cotiz:
-                dolares = dolares_explicit
-                cotiz = m_cotiz
-                pesos = (dolares * cotiz).quantize(Decimal("0.01"))
-            elif pesos_explicit and m_cotiz:
-                pesos = pesos_explicit
-                cotiz = m_cotiz
-                dolares = (pesos / cotiz).quantize(Decimal("0.01")) if cotiz > Decimal("0") else None
-            elif m_cotiz and monto:
-                cotiz = m_cotiz
-                if es_compra:
-                    pesos = monto
-                    dolares = (pesos / cotiz).quantize(Decimal("0.01")) if cotiz > Decimal("0") else None
-                else:
-                    dolares = monto
-                    pesos = (dolares * cotiz).quantize(Decimal("0.01"))
-            elif segundo_monto and monto and segundo_monto != monto:
-                if es_compra:
-                    pesos = monto
-                    dolares = segundo_monto
-                else:
-                    dolares = monto
-                    pesos = segundo_monto
-
-            if pesos is not None and dolares is not None and dolares > Decimal("0") and cotiz is None:
-                cotiz = (pesos / dolares).quantize(Decimal("0.01"))
-
-            # Si ya tenemos ambos montos y cotización, validar plausibilidad y armar propuesta
-            if pesos is not None and dolares is not None and cotiz is not None and cotiz > Decimal("0"):
-                cot_ref = _obtener_cotizacion_referencia_usuario(usuario, db)
-                if cot_ref is not None:
-                    rango_min = (cot_ref * FACTOR_MIN_COTIZACION_DOLAR).quantize(Decimal("0.01"))
-                    rango_max = (cot_ref * FACTOR_MAX_COTIZACION_DOLAR).quantize(Decimal("0.01"))
-                    if cotiz < rango_min or cotiz > rango_max:
-                        c_str = formatear_monto(float(cotiz), Moneda.ARS)
-                        ref_str = formatear_monto(float(cot_ref), Moneda.ARS)
-                        return (
-                            True,
-                            "absurda",
-                            {},
-                            f"La cotización de {c_str} por dólar no parece razonable (la cotización de referencia es de {ref_str}). Por favor verificá el valor e intentá de nuevo.",
-                        )
-
-                cotiz_fmt = formatear_monto(float(cotiz), Moneda.ARS)
-                pesos_fmt = formatear_monto(float(pesos), Moneda.ARS)
-                dolares_fmt = formatear_monto(float(dolares), Moneda.USD)
-
-                if es_compra:
-                    prop = f"Voy a registrar una compra de {dolares_fmt} a {cotiz_fmt}: salen {pesos_fmt} de {b_orig.nombre} y entran {dolares_fmt} a {b_dest.nombre}. ¿Confirmás?"
-                    entidades = {
-                        "tipo_operacion": "compra_usd",
-                        "billetera_origen_id": str(b_orig.id),
-                        "billetera_destino_id": str(b_dest.id),
-                        "monto": float(pesos),
-                        "monto_origen": float(pesos),
-                        "monto_destino": float(dolares),
-                        "moneda_origen": "ARS",
-                        "moneda_destino": "USD",
-                        "cotizacion": float(cotiz),
-                    }
-                else:
-                    prop = f"Voy a registrar una venta de {dolares_fmt} a {cotiz_fmt}: salen {dolares_fmt} de {b_orig.nombre} y entran {pesos_fmt} a {b_dest.nombre}. ¿Confirmás?"
-                    entidades = {
-                        "tipo_operacion": "venta_usd",
-                        "billetera_origen_id": str(b_orig.id),
-                        "billetera_destino_id": str(b_dest.id),
-                        "monto": float(dolares),
-                        "monto_origen": float(dolares),
-                        "monto_destino": float(pesos),
-                        "moneda_origen": "USD",
-                        "moneda_destino": "ARS",
-                        "cotizacion": float(cotiz),
-                    }
-                return True, "propuesta", entidades, prop
-
-            # 2. Si no se especificó cotización ni segundo monto: activar slot-filling
-            entidades = {
-                "intent_origen": "transferir_fondos",
-                "tipo_operacion": tipo_op,
-                "billetera_origen_id": str(b_orig.id),
-                "billetera_destino_id": str(b_dest.id),
-                "datos_faltantes": ["cotizacion"]
-            }
-            if es_compra:
-                if dolares_explicit:
-                    entidades["monto_usd"] = float(dolares_explicit)
-                    pregunta = "¿A qué cotización compraste o cuántos pesos pagaste?"
-                else:
-                    entidades["monto_pesos"] = float(monto)
-                    pregunta = f"¿A qué cotización compraste o cuántos dólares recibís en {b_dest.nombre}?"
-            else:
-                if dolares_explicit:
-                    entidades["monto_usd"] = float(dolares_explicit)
-                elif b_orig.moneda == Moneda.USD:
-                    entidades["monto_usd"] = float(monto)
-                else:
-                    entidades["monto_pesos"] = float(monto)
-                pregunta = f"¿A qué cotización vendiste o cuántos pesos recibís en {b_dest.nombre}?"
-
-            return True, "slot_filling", entidades, pregunta
-
-        if b_dest and monto and not b_orig:
-            entidades = {
-                "intent_origen": "transferir_fondos",
-                "tipo_operacion": "transferencia",
-                "billetera_destino_id": str(b_dest.id),
-                "billetera_destino": b_dest.nombre,
-                "monto": float(monto),
-                "datos_faltantes": ["billetera_origen"]
-            }
-            cands = [w for w in billeteras_usuario if w.moneda == b_dest.moneda and w.id != b_dest.id and w.estado == EstadoBilletera.ACTIVA]
-            menu = _generar_menu_billeteras(cands, tipo="egreso")
-            pregunta = f"¿De qué billetera sale la plata?\n{menu}"
-            return True, "slot_filling", entidades, pregunta
 
     return False, "no_match", {}, None

@@ -573,6 +573,18 @@ def procesar_resolucion_billetera_y_propuestas(ctx: ContextoMensaje) -> None:
     Evalúa si corresponde resolver transacciones y deriva a los handlers especializados.
     """
     resultado_ia = ctx.resultado_ia
+    if resultado_ia and resultado_ia.get("intent") == "transferir_fondos":
+        from app.routers.whatsapp.transferencias_flujo import manejar_transferencia_ia
+        manejar_transferencia_ia(
+            resultado_ia.get("entidades", {}),
+            ctx.mensaje_texto,
+            ctx.usuario,
+            ctx.db,
+            ctx.from_number,
+            ctx.wamid,
+        )
+        ctx.terminado = True
+        return
     entidades_actuales = resultado_ia.get("entidades", {})
     tipo_act = entidades_actuales.get("tipo") or "egreso"
     clave_bill = "billetera_destino" if tipo_act == "ingreso" else "billetera_origen"

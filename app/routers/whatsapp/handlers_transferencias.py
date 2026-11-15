@@ -62,29 +62,17 @@ def manejar_pago_resumen(
     return True
 
 
-def manejar_transferencias(
+def _despachar_resultado_tr(
+    estado_tr: str | None,
+    ents_tr: dict | None,
+    resp_tr: str | None,
     mensaje_texto: str,
     usuario: Usuario,
     db: Session,
     from_number: str,
-    wamid: str | None = None,
-    conv_activa: ConversacionWpp | None = None,
-    estado_previo: dict | None = None,
+    wamid: str | None,
+    conv_activa: ConversacionWpp | None,
 ) -> bool:
-    """
-    Detección determinística de transferencias / cajero / dólares.
-    """
-    from app.routers.whatsapp.transferencias import _interpretar_transferencia
-
-    if not estado_previo and _bloquear_mezcla_en_handlers(mensaje_texto, usuario, db, from_number, wamid):
-        return True
-
-    es_tr, estado_tr, ents_tr, resp_tr = _interpretar_transferencia(
-        mensaje_texto, usuario, db, estado_previo=estado_previo
-    )
-    if not es_tr:
-        return False
-
     if estado_tr in ("no_cash", "no_usd", "absurda", "misma_billetera"):
         nueva_conv = ConversacionWpp(
             usuario_id=usuario.id,
@@ -150,3 +138,79 @@ def manejar_transferencias(
         db.commit()
         whatsapp_service.enviar_whatsapp(from_number, resp_tr)
         return True
+
+    return False
+
+
+def manejar_transferencias(
+    mensaje_texto: str,
+    usuario: Usuario,
+    db: Session,
+    from_number: str,
+    wamid: str | None = None,
+    conv_activa: ConversacionWpp | None = None,
+    estado_previo: dict | None = None,
+) -> bool:
+    """
+    Detección determinística de transferencias / cajero / dólares.
+    """
+    import re
+    from app.routers.whatsapp.transferencias import _interpretar_transferencia
+    from app.utils.texto import normalizar_texto
+
+    # (1) Estado de cotización de dólares -> código de hoy
+    if estado_previo and (
+        estado_previo.get("tipo_operacion") in ("compra_usd", "venta_usd")
+        and "cotizacion" in estado_previo.get("datos_faltantes", [])
+    ):
+        es_tr, estado_tr, ents_tr, resp_tr = _interpretar_transferencia(
+            mensaje_texto, usuario, db, estado_previo=estado_previo
+        )
+        if es_tr:
+            return _despachar_resultado_tr(
+                estado_tr, ents_tr, resp_tr, mensaje_texto, usuario, db,
+                from_number, wamid, conv_activa
+            )
+
+    # (2) Estado del flujo nuevo (intent_origen transferir_fondos con 'paso')
+    if (
+        estado_previo
+        and estado_previo.get("intent_origen") == "transferir_fondos"
+        and "paso" in estado_previo
+    ):
+        from app.routers.whatsapp.transferencias_flujo import continuar_transferencia
+        if continuar_transferencia(
+            mensaje_texto, usuario, db, from_number, wamid, conv_activa, estado_previo
+        ):
+            return True
+
+    # (3) Bloquear mezcla en handlers como hoy
+    if not estado_previo and _bloquear_mezcla_en_handlers(
+        mensaje_texto, usuario, db, from_number, wamid
+    ):
+        return True
+
+    # (4) Compra o venta con verbo (compré/vendí/cambié/dolaricé + dólares)
+    m_norm = normalizar_texto(mensaje_texto)
+    tiene_verbo = bool(
+        re.search(r"\b(?:compr[eé]|vend[ií]|cambi[eé]|dolaric[eé])\b", m_norm)
+    )
+    tiene_dolares = bool(re.search(r"\b(?:d[oó]lares|verdes|usd)\b", m_norm))
+    es_gasto = any(w in m_norm for w in ["gaste", "pague", "compre una", "compre un"])
+
+    if tiene_verbo and tiene_dolares and not es_gasto:
+        es_tr, estado_tr, ents_tr, resp_tr = _interpretar_transferencia(
+            mensaje_texto, usuario, db, estado_previo=estado_previo
+        )
+        if es_tr:
+            return _despachar_resultado_tr(
+                estado_tr, ents_tr, resp_tr, mensaje_texto, usuario, db,
+                from_number, wamid, conv_activa
+            )
+
+    # (5) Manejar texto transferencia
+    from app.routers.whatsapp.transferencias_flujo import manejar_texto_transferencia
+    if manejar_texto_transferencia(mensaje_texto, usuario, db, from_number, wamid):
+        return True
+
+    return False

@@ -62,7 +62,13 @@ def test_mezcla_real_sigue_bloqueada():
     assert envio.call_args[0][1] == MSG_NO_MEZCLAR_TRANSFERENCIAS
 
 
-def test_dos_montos_con_punto_siguen_bloqueados():
+def test_dos_transferencias_con_punto_no_se_bloquean():
     res, envio = _llamar("pase 20.000 de galicia a macro y 5.000 de galicia a mp")
-    assert res is True
-    envio.assert_called_once()
+    assert res is False
+    envio.assert_not_called()
+
+
+def test_cajero_con_comision_no_se_bloquea():
+    res, envio = _llamar("saque 10k del cajero con 500 de comision")
+    assert res is False
+    envio.assert_not_called()

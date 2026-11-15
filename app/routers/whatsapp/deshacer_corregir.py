@@ -201,6 +201,41 @@ def _confirmar_propuesta_deshacer(
             return None, "Hubo un problema al eliminar el lote, no se borró nada, intentá de nuevo.", False
         return txs[0], f"Listo, {cant_eliminados} movimientos eliminados.", False
 
+    tr_ids = entidades.get("transferencia_ids")
+    if tr_ids:
+        uuids = [UUID(str(i)) for i in tr_ids]
+        trs = db.execute(
+            select(TransferenciaInterna)
+            .where(
+                TransferenciaInterna.id.in_(uuids),
+                TransferenciaInterna.usuario_id == usuario.id,
+            )
+            .with_for_update()
+        ).scalars().all()
+        ids_str = ",".join(str(i) for i in uuids)
+        if not trs:
+            conv_undo.accion_ejecutada = f"deshecho:transferencias:{ids_str}"
+            db.commit()
+            return None, "El movimiento ya fue eliminado.", False
+        try:
+            for tr in trs:
+                transferencia_service.eliminar_transferencia(
+                    db, usuario.id, tr.id, commit=False
+                )
+            conv_undo.accion_ejecutada = f"deshecho:transferencias:{ids_str}"
+            emitir_evento_actualizacion(db, usuario.id, "transferencias")
+            emitir_evento_actualizacion(db, usuario.id, "billeteras")
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error al anular transferencias {uuids}: {e}")
+            return (
+                None,
+                "Hubo un problema al anular las transferencias, no se modificó nada.",
+                False,
+            )
+        return trs[0], f"Listo, {len(trs)} transferencias anuladas.", False
+
     tr_id_str = entidades.get("transferencia_id")
     if tr_id_str:
         tr_id = UUID(str(tr_id_str))
@@ -582,6 +617,12 @@ def _detectar_correccion_ultimo_movimiento(
 
 def _construir_propuesta_deshacer(tx_actual: Transaccion | TransferenciaInterna | list[Transaccion], db: Session) -> str:
     if isinstance(tx_actual, list):
+        if tx_actual and isinstance(tx_actual[0], TransferenciaInterna):
+            cant = len(tx_actual)
+            return (
+                f"¿Querés anular las {cant} transferencias que "
+                f"registraste recién? ¿Confirmás?"
+            )
         cant = len(tx_actual)
         ids = [t.id for t in tx_actual]
         espejos_lote = db.query(Transaccion).filter(

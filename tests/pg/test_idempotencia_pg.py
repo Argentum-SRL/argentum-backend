@@ -185,11 +185,12 @@ def test_td9f_transferencia(db: Session, usuario_test: Usuario, client_a: TestCl
     clave = "clave-prueba-0002"
     headers = {"Idempotency-Key": clave}
 
-    # Primero de $300.000 (saldo insuficiente en A, tiene 270.000 -> 400, 0 transferencias)
+    # Primero de $300.000 y destino $299.000 (misma moneda distinto monto -> 400, 0 transferencias)
     payload_insuficiente = {
         "billetera_origen_id": str(b_a.id),
         "billetera_destino_id": str(b_b.id),
         "monto": "300000.00",
+        "monto_destino": "299000.00",
         "moneda": "ARS",
         "fecha": str(hoy),
     }

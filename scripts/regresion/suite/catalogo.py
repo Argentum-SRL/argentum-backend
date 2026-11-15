@@ -33,6 +33,7 @@ from scripts.regresion.suite.escenarios_p19 import (
     p19_caso_8,
     p19_caso_9,
 )
+from scripts.regresion.suite.catalogo_p09c import entradas_p09c
 from scripts.regresion.suite.catalogo_p19b import entradas_p19b
 from scripts.regresion.suite.escenarios_p20 import entradas_p20
 from scripts.regresion.suite.escenarios_p21 import entradas_p21
@@ -544,11 +545,17 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P9B.2", "punto": "Punto 9B", "match": "exacto",
             "nombre": "me transferí 20000 a Santander: pregunta el origen o usa la principal, según corresponda",
             "ejecutar": lambda: p9b_caso_2(datos),
-            "esperado": "Voy a transferir $20.000 de Galicia a Santander. ¿Confirmás?",
+            "esperado": (
+                "¿Desde qué cuenta pasaste los $20.000 a Santander?\n\n"
+                "1. Galicia\n2. Efectivo Pesos"
+            ),
         },
         {
             "id": "P9B.3", "punto": "Punto 9B", "match": "contiene",
-            "nombre": "saqué 50000 del cajero: transfiere de la cuenta al efectivo, cero gastos",
+            "nombre": (
+                "saqué 50000 del cajero: pregunta de qué cuenta y con 1 transfiere "
+                "al efectivo, cero gastos"
+            ),
             "ejecutar": lambda: p9b_caso_3(datos),
             "esperado": "Saldos ajustados: True | Cero gastos: True",
         },
@@ -1225,6 +1232,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "esperado": "Propuesta Galicia sin Santander con va: True | Registrado tras sí: True | Creadas: 1",
         },
     ]
+    catalogo.extend(entradas_p09c(datos))
     catalogo.extend(entradas_p19b(datos))
     catalogo.extend(entradas_p20(datos))
     catalogo.extend(entradas_p21(datos))

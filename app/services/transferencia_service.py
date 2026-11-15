@@ -154,25 +154,6 @@ def crear_transferencia(
                 detail="La moneda de la comisión debe coincidir con la billetera de origen o de destino."
             )
 
-        # Validar saldo suficiente considerando comisión
-        if billetera_comision.id == b_origen.id:
-            if b_origen.saldo_actual < (monto_origen + monto_comision):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Saldo insuficiente en {b_origen.nombre}. Disponible: {b_origen.saldo_actual}, Requerido total (transferencia + comisión): {monto_origen + monto_comision}."
-                )
-        else:
-            if b_origen.saldo_actual < monto_origen:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Saldo insuficiente en {b_origen.nombre}. Disponible: {b_origen.saldo_actual}, Solicitado: {monto_origen}."
-                )
-            if (b_destino.saldo_actual + monto_destino) < monto_comision:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Saldo insuficiente en {b_destino.nombre} para cubrir la comisión de {monto_comision} {moneda_comision.value}."
-                )
-
         # Generar transacción de egreso por la comisión (Categoría Banco -> Subcategoría Comisiones y gastos bancarios)
         from app.models.categoria import Categoria
         from app.models.subcategoria import Subcategoria
@@ -203,13 +184,6 @@ def crear_transferencia(
         # crear_transaccion descuenta el saldo de billetera_comision automáticamente
         tx_comision = transaccion_service.crear_transaccion(db, usuario_id, tx_create, commit=False)
         tx_comision_id = tx_comision.id
-    else:
-        # Sin comisión: validar saldo solo por monto_origen
-        if b_origen.saldo_actual < monto_origen:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Saldo insuficiente en {b_origen.nombre}. Disponible: {b_origen.saldo_actual}, Solicitado: {monto_origen}."
-            )
 
     # 4. Crear registro de TransferenciaInterna
     nueva_tr = TransferenciaInterna(

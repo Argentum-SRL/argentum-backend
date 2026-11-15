@@ -100,7 +100,10 @@ def manejar_deshacer(
     # Hay movimiento para deshacer: armar propuesta de confirmación
     msg_propuesta_undo = _construir_propuesta_deshacer(tx_last, db)
     if isinstance(tx_last, list):
-        entidades_undo = {"lote_ids": [str(t.id) for t in tx_last]}
+        if tx_last and isinstance(tx_last[0], TransferenciaInterna):
+            entidades_undo = {"transferencia_ids": [str(t.id) for t in tx_last]}
+        else:
+            entidades_undo = {"lote_ids": [str(t.id) for t in tx_last]}
     elif isinstance(tx_last, TransferenciaInterna):
         entidades_undo = {"transferencia_id": str(tx_last.id)}
     elif isinstance(tx_last, Transaccion) and tx_last.reintegro_de_id and tx_last.tipo_espejo == "reintegro":

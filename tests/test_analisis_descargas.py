@@ -513,7 +513,7 @@ def test_td5_proyeccion(db: Session):
 
 
 # ── TD6: Diseño ───────────────────────────────────────────────────────────────
-def test_td6_diseno(db: Session):
+def test_td6_diseno(db: Session, monkeypatch):
     user, _, _, _ = _cargar_datos_base(db)
     hoy = date(2026, 11, 14)
 
@@ -589,6 +589,7 @@ def test_td6_diseno(db: Session):
     app.dependency_overrides[get_current_user] = lambda: user
     app.dependency_overrides[get_db] = lambda: db
     try:
+        monkeypatch.setattr("app.routers.analisis.hoy_argentina", lambda: hoy)
         resp = client.get("/analisis/exportar-excel?titulo=Resumen%20del%20ciclo")
         assert resp.status_code == 200
         cd = resp.headers.get("content-disposition", "")
