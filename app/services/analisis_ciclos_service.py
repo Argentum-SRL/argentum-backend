@@ -498,3 +498,25 @@ def ids_transacciones_ventana(
         resultado.add(f"transaccion:{s_id}")
     return resultado
 
+
+def es_vista_solo_gastos(
+    categoria_id: UUID | None,
+    tarjeta_id: UUID | None,
+    naturaleza: str | None,
+) -> bool:
+    """Determina si la vista actual de Análisis corresponde exclusivamente a gastos.
+
+    Es True si se filtró por categoría, por tarjeta o si la naturaleza
+    es explícitamente de gastos ('variables', 'fijos' o 'cuotas').
+    """
+    if categoria_id is not None or tarjeta_id is not None:
+        return True
+    if naturaleza is not None and naturaleza.strip().lower() in {
+        "variables",
+        "fijos",
+        "cuotas",
+    }:
+        return True
+    return False
+
+

@@ -81,17 +81,37 @@ def armar_hoja_kpis(
     c_h2.alignment = ALIGN_CENTER
 
     kpis = resumen.get("kpis", {})
-    ingresos_val = kpis.get("ingresos_totales") or 0.0
+    solo_gastos = (
+        bool(kpis.get("solo_gastos"))
+        or kpis.get("ingresos_totales") is None
+    )
     gastos_val = kpis.get("gastos_totales") or 0.0
     prom_val = kpis.get("promedio_gasto_ciclo") or 0.0
 
-    filas_datos = [
-        (5, "Ingresos", ingresos_val, fmt_monto),
-        (6, "Egresos", gastos_val, fmt_monto),
-        (7, "Te quedó", "=B5-B6", fmt_dif),
-        (8, "% de lo que entró", '=IF(B5>0,B7/B5,"")', FMT_PCT),
-        (9, "Promedio de gastos por ciclo", prom_val, fmt_monto),
-    ]
+    if solo_gastos:
+        ref_val = kpis.get("gasto_total_referencia")
+        if ref_val is not None:
+            filas_datos = [
+                (5, "Egresos", gastos_val, fmt_monto),
+                (6, "Todo lo que gastaste", ref_val, fmt_monto),
+                (7, "% de todo lo que gastaste", '=IF(B6>0,B5/B6,"")', FMT_PCT),
+                (8, "Promedio de gastos por ciclo", prom_val, fmt_monto),
+            ]
+        else:
+            filas_datos = [
+                (5, "Egresos", gastos_val, fmt_monto),
+                (6, "Promedio de gastos por ciclo", prom_val, fmt_monto),
+            ]
+    else:
+        ing_raw = kpis.get("ingresos_totales")
+        ingresos_val = 0.0 if ing_raw is None else ing_raw
+        filas_datos = [
+            (5, "Ingresos", ingresos_val, fmt_monto),
+            (6, "Egresos", gastos_val, fmt_monto),
+            (7, "Te quedó", "=B5-B6", fmt_dif),
+            (8, "% de lo que entró", '=IF(B5>0,B7/B5,"")', FMT_PCT),
+            (9, "Promedio de gastos por ciclo", prom_val, fmt_monto),
+        ]
 
     for r_idx, lbl, val, fmt in filas_datos:
         ws.row_dimensions[r_idx].height = 18
@@ -106,14 +126,19 @@ def armar_hoja_kpis(
         c2.number_format = fmt
         c2.alignment = ALIGN_RIGHT_INDENT
 
+    ultimo_r = filas_datos[-1][0]
     frase = kpis.get("frase_resumen") or ""
     if frase:
-        c_frase = ws.cell(row=11, column=1, value=frase)
+        c_frase = ws.cell(row=ultimo_r + 2, column=1, value=frase)
         c_frase.font = FONT_NOTA_SEC
 
     modo = (moneda_modo or "solo_ars").lower()
     if modo.startswith("consolidado"):
-        c_nota = ws.cell(row=12, column=1, value="Cada movimiento se pasó con el dólar oficial del día en que se hizo.")
+        c_nota = ws.cell(
+            row=ultimo_r + 3,
+            column=1,
+            value="Cada movimiento se pasó con el dólar oficial del día en que se hizo.",
+        )
         c_nota.font = FONT_NOTA_SEC
 
     ws.freeze_panes = "A5"
@@ -126,6 +151,7 @@ def _escribir_fila_total_evolucion(
     terminadas_filas: list[int],
     fmt_monto: str,
     fmt_dif: str,
+    solo_gastos: bool = False,
 ) -> None:
     """Escribe la fila de totales de ciclos terminados en la hoja de Evolución."""
     ws.row_dimensions[tot_r].height = 20
@@ -141,6 +167,25 @@ def _escribir_fila_total_evolucion(
         cv.font = FONT_TOTAL
         cv.fill = FILL_TOTAL
         cv.border = BORDE_TOTAL
+
+    if solo_gastos:
+        if terminadas_filas:
+            formula_gas = f"=SUM({','.join(f'D{rf}' for rf in terminadas_filas)})"
+        else:
+            formula_gas = 0.0
+
+        c_tg = ws.cell(row=tot_r, column=4, value=formula_gas)
+        c_tg.font = FONT_TOTAL
+        c_tg.fill = FILL_TOTAL
+        c_tg.border = BORDE_TOTAL
+        c_tg.number_format = fmt_monto
+        c_tg.alignment = ALIGN_RIGHT_INDENT
+
+        c_te5 = ws.cell(row=tot_r, column=5, value="")
+        c_te5.font = FONT_TOTAL
+        c_te5.fill = FILL_TOTAL
+        c_te5.border = BORDE_TOTAL
+        return
 
     if terminadas_filas:
         formula_ing = f"=SUM({','.join(f'D{rf}' for rf in terminadas_filas)})"
@@ -194,16 +239,32 @@ def armar_hoja_evolucion(
     _configurar_cabecera_hoja(ws, titulo, linea_filtros)
     fmt_monto, fmt_dif, _ = _fmt_moneda(moneda_modo)
 
-    headers = [
-        "Ciclo",
-        "Desde",
-        "Hasta",
-        "Ingresos",
-        "Gastos",
-        "Te quedó",
-        "% de lo que entró",
-        "Estado",
-    ]
+    kpis = resumen.get("kpis", {})
+    solo_gastos = (
+        bool(kpis.get("solo_gastos"))
+        or kpis.get("ingresos_totales") is None
+    )
+
+    if solo_gastos:
+        headers = [
+            "Ciclo",
+            "Desde",
+            "Hasta",
+            "Gastos",
+            "Estado",
+        ]
+    else:
+        headers = [
+            "Ciclo",
+            "Desde",
+            "Hasta",
+            "Ingresos",
+            "Gastos",
+            "Te quedó",
+            "% de lo que entró",
+            "Estado",
+        ]
+
     ws.row_dimensions[4].height = 22
     for col_i, h_text in enumerate(headers, start=1):
         cell = ws.cell(row=4, column=col_i, value=h_text)
@@ -246,39 +307,60 @@ def armar_hoja_evolucion(
         c_hasta.number_format = FMT_FECHA
         c_hasta.alignment = ALIGN_CENTER
 
-        ing_val = c.get("ingresos") or 0.0
-        c_ing = ws.cell(row=r, column=4, value=ing_val)
-        c_ing.font = FONT_BASE
-        c_ing.border = BORDE_DATOS
-        c_ing.number_format = fmt_monto
-        c_ing.alignment = ALIGN_RIGHT_INDENT
+        if solo_gastos:
+            gas_val = c.get("gastos") or 0.0
+            c_gas = ws.cell(row=r, column=4, value=gas_val)
+            c_gas.font = FONT_BASE
+            c_gas.border = BORDE_DATOS
+            c_gas.number_format = fmt_monto
+            c_gas.alignment = ALIGN_RIGHT_INDENT
 
-        gas_val = c.get("gastos") or 0.0
-        c_gas = ws.cell(row=r, column=5, value=gas_val)
-        c_gas.font = FONT_BASE
-        c_gas.border = BORDE_DATOS
-        c_gas.number_format = fmt_monto
-        c_gas.alignment = ALIGN_RIGHT_INDENT
+            c_est = ws.cell(row=r, column=5, value=estado)
+            c_est.font = FONT_BASE
+            c_est.border = BORDE_DATOS
+            c_est.alignment = ALIGN_CENTER
+        else:
+            ing_raw = c.get("ingresos")
+            ing_val = 0.0 if ing_raw is None else ing_raw
+            c_ing = ws.cell(row=r, column=4, value=ing_val)
+            c_ing.font = FONT_BASE
+            c_ing.border = BORDE_DATOS
+            c_ing.number_format = fmt_monto
+            c_ing.alignment = ALIGN_RIGHT_INDENT
 
-        c_te = ws.cell(row=r, column=6, value=f"=D{r}-E{r}")
-        c_te.font = FONT_BASE
-        c_te.border = BORDE_DATOS
-        c_te.number_format = fmt_dif
-        c_te.alignment = ALIGN_RIGHT_INDENT
+            gas_val = c.get("gastos") or 0.0
+            c_gas = ws.cell(row=r, column=5, value=gas_val)
+            c_gas.font = FONT_BASE
+            c_gas.border = BORDE_DATOS
+            c_gas.number_format = fmt_monto
+            c_gas.alignment = ALIGN_RIGHT_INDENT
 
-        c_pct = ws.cell(row=r, column=7, value=f'=IF(D{r}>0,F{r}/D{r},"")')
-        c_pct.font = FONT_BASE
-        c_pct.border = BORDE_DATOS
-        c_pct.number_format = FMT_PCT
-        c_pct.alignment = ALIGN_RIGHT_INDENT
+            c_te = ws.cell(row=r, column=6, value=f"=D{r}-E{r}")
+            c_te.font = FONT_BASE
+            c_te.border = BORDE_DATOS
+            c_te.number_format = fmt_dif
+            c_te.alignment = ALIGN_RIGHT_INDENT
 
-        c_est = ws.cell(row=r, column=8, value=estado)
-        c_est.font = FONT_BASE
-        c_est.border = BORDE_DATOS
-        c_est.alignment = ALIGN_CENTER
+            c_pct = ws.cell(row=r, column=7, value=f'=IF(D{r}>0,F{r}/D{r},"")')
+            c_pct.font = FONT_BASE
+            c_pct.border = BORDE_DATOS
+            c_pct.number_format = FMT_PCT
+            c_pct.alignment = ALIGN_RIGHT_INDENT
+
+            c_est = ws.cell(row=r, column=8, value=estado)
+            c_est.font = FONT_BASE
+            c_est.border = BORDE_DATOS
+            c_est.alignment = ALIGN_CENTER
 
     tot_r = 5 + len(serie)
-    _escribir_fila_total_evolucion(ws, tot_r, terminadas_filas, fmt_monto, fmt_dif)
+    _escribir_fila_total_evolucion(
+        ws,
+        tot_r,
+        terminadas_filas,
+        fmt_monto,
+        fmt_dif,
+        solo_gastos=solo_gastos,
+    )
 
     modo = (moneda_modo or "solo_ars").lower()
     if modo.startswith("consolidado"):

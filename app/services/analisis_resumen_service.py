@@ -21,12 +21,17 @@ from app.services.analisis_ciclos_service import (
     calcular_promedios_y_tasa,
     calcular_serie_ciclos,
     convertir_movimiento,
+    es_vista_solo_gastos,
     generar_ventana_ciclos,
     obtener_fechas_con_transacciones_ventana,
     obtener_mapa_cotizaciones,
     sumar_periodo,
 )
 from app.services.analisis_insights_service import armar_frase_resumen, armar_insights
+from app.services.analisis_peso_service import (
+    calcular_gasto_referencia,
+    resolver_textos_auxiliares,
+)
 from app.services.analisis_totales_service import calcular_totales_reporte
 from app.services.definiciones_service import condicion_gasto, condicion_ingreso
 from app.utils.fecha import hoy_argentina
@@ -323,16 +328,14 @@ def obtener_resumen_analisis(
     naturaleza: Optional[str] = None,
     hoy: Optional[date] = None,
 ) -> Dict[str, Any]:
-    """
-    Orquesta la construcción del resumen completo de Análisis financiero.
-    """
+    """Orquesta la construcción del resumen completo de Análisis financiero."""
     ref_hoy = hoy or hoy_argentina()
     modo = (moneda_modo or "solo_ars").lower()
     if modo not in ("solo_ars", "solo_usd", "consolidado_ars", "consolidado_usd"):
         modo = "solo_ars"
 
     moneda_visual = "USD" if modo in ("solo_usd", "consolidado_usd") else "ARS"
-    solo_gastos = bool(categoria_id or tarjeta_id)
+    solo_gastos = es_vista_solo_gastos(categoria_id, tarjeta_id, naturaleza)
 
     ciclos_con_prev = generar_ventana_ciclos(usuario, ref_hoy, max(2, cantidad_ciclos + 1))
     cant_n = max(1, min(24, cantidad_ciclos))
@@ -371,6 +374,23 @@ def obtener_resumen_analisis(
         serie_ciclos, ref_hoy, solo_gastos
     )
 
+    gasto_total_referencia: Optional[float] = None
+    peso_sobre_gasto_total_pct: Optional[float] = None
+    if solo_gastos:
+        gasto_total_referencia, peso_sobre_gasto_total_pct = calcular_gasto_referencia(
+            db=db,
+            usuario=usuario,
+            ciclos=ciclos,
+            fecha_inicio_global=fecha_inicio_global,
+            fecha_fin_global=fecha_fin_global,
+            ref_hoy=ref_hoy,
+            modo=modo,
+            billetera_id=billetera_id,
+            gastos_filtrados=round(suma_gastos_kpi, 2),
+            fechas_con_tx=fechas_con_tx,
+            consultar_ventana_fn=_consultar_ventana,
+        )
+
     frase_resumen = armar_frase_resumen(
         solo_gastos=solo_gastos,
         alcance=alcance,
@@ -392,27 +412,14 @@ def obtener_resumen_analisis(
 
     filtros = _filtros_disponibles(db, usuario.id)
 
-    aviso_cotizacion: Optional[str] = None
-    if movs_sin_cot > 0:
-        if modo == "consolidado_ars":
-            if movs_sin_cot == 1:
-                aviso_cotizacion = "1 movimiento en dólares no se pudo pasar a pesos porque falta la cotización de ese día."
-            else:
-                aviso_cotizacion = f"{movs_sin_cot} movimientos en dólares no se pudieron pasar a pesos porque falta la cotización de esos días."
-        elif modo == "consolidado_usd":
-            if movs_sin_cot == 1:
-                aviso_cotizacion = "1 movimiento en pesos no se pudo pasar a dólares porque falta la cotización de ese día."
-            else:
-                aviso_cotizacion = f"{movs_sin_cot} movimientos en pesos no se pudieron pasar a dólares porque falta la cotización de esos días."
-
-    if solo_gastos:
-        tasa_ahorro_texto: Optional[str] = None
-    elif len(ciclos) == 1:
-        tasa_ahorro_texto = "Aparece cuando termine el ciclo."
-    elif tasa_ventana is not None and es_ult_en_curso:
-        tasa_ahorro_texto = "Sin contar el ciclo en curso."
-    else:
-        tasa_ahorro_texto = None
+    aviso_cotizacion, tasa_ahorro_texto = resolver_textos_auxiliares(
+        modo=modo,
+        movs_sin_cot=movs_sin_cot,
+        solo_gastos=solo_gastos,
+        cant_ciclos=len(ciclos),
+        tasa_ventana=tasa_ventana,
+        es_ult_en_curso=es_ult_en_curso,
+    )
 
     return {
         "moneda_modo": modo,
@@ -446,6 +453,9 @@ def obtener_resumen_analisis(
             "cantidad_operaciones": cant_ops,
             "alcance": alcance,
             "frase_resumen": frase_resumen,
+            "solo_gastos": solo_gastos,
+            "gasto_total_referencia": gasto_total_referencia,
+            "peso_sobre_gasto_total_pct": peso_sobre_gasto_total_pct,
         },
         "insights": insights,
         "serie_ciclos": serie_ciclos,

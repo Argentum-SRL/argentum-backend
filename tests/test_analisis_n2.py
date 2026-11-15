@@ -218,7 +218,14 @@ def test_tn17_proyeccion_con_tarjeta(db: Session):
     _crear_cotizacion(db, hoy, venta=Decimal("1500"))
 
     # 1. Grupo en pesos con tarjeta: cuota 150.000 vence 15/11/2026
-    tx_padre_ars = _crear_transaccion(db, user.id, b_ars.id, TipoTransaccion.EGRESO, Decimal("150000"), date(2026, 11, 15))
+    tx_padre_ars = _crear_transaccion(
+        db,
+        user.id,
+        b_ars.id,
+        TipoTransaccion.EGRESO,
+        Decimal("300000"),
+        date(2026, 11, 15),
+    )
     g_ars = GrupoCuotas(
         id=uuid4(),
         usuario_id=user.id,
@@ -227,9 +234,9 @@ def test_tn17_proyeccion_con_tarjeta(db: Session):
         moneda=Moneda.ARS,
         estado=EstadoGrupoCuotas.ACTIVO,
         descripcion="Plan Pesos",
-        cantidad_cuotas=1,
-        monto_total=Decimal("150000"),
-        total_financiado=Decimal("150000"),
+        cantidad_cuotas=2,
+        monto_total=Decimal("300000"),
+        total_financiado=Decimal("300000"),
     )
     db.add(g_ars)
     c_ars = Cuota(
@@ -241,7 +248,16 @@ def test_tn17_proyeccion_con_tarjeta(db: Session):
         fecha_vencimiento=date(2026, 11, 15),
         pagada=False,
     )
-    db.add(c_ars)
+    c_ars2 = Cuota(
+        id=uuid4(),
+        grupo_id=g_ars.id,
+        transaccion_id=tx_padre_ars.id,
+        numero_cuota=2,
+        monto_proyectado=Decimal("150000"),
+        fecha_vencimiento=date(2026, 12, 15),
+        pagada=False,
+    )
+    db.add_all([c_ars, c_ars2])
     db.commit()
 
     res_usd = obtener_proyeccion_compromisos(db, user, moneda_modo="consolidado_usd", meses=6, hoy=hoy)
@@ -251,7 +267,15 @@ def test_tn17_proyeccion_con_tarjeta(db: Session):
     user2 = _crear_usuario(db, CicloTipo.DIA_FIJO, "1")
     b2_ars = _crear_billetera(db, user2.id, Moneda.ARS)
     tarjeta2 = _crear_tarjeta(db, user2.id, b2_ars.id, percepcion=Decimal("30.00"))
-    tx_padre_usd = _crear_transaccion(db, user2.id, b2_ars.id, TipoTransaccion.EGRESO, Decimal("10"), date(2026, 11, 15), moneda=Moneda.USD)
+    tx_padre_usd = _crear_transaccion(
+        db,
+        user2.id,
+        b2_ars.id,
+        TipoTransaccion.EGRESO,
+        Decimal("20"),
+        date(2026, 11, 15),
+        moneda=Moneda.USD,
+    )
 
     g_usd = GrupoCuotas(
         id=uuid4(),
@@ -261,9 +285,9 @@ def test_tn17_proyeccion_con_tarjeta(db: Session):
         moneda=Moneda.USD,
         estado=EstadoGrupoCuotas.ACTIVO,
         descripcion="Plan Dólares",
-        cantidad_cuotas=1,
-        monto_total=Decimal("10"),
-        total_financiado=Decimal("10"),
+        cantidad_cuotas=2,
+        monto_total=Decimal("20"),
+        total_financiado=Decimal("20"),
     )
     db.add(g_usd)
     c_usd = Cuota(
@@ -275,7 +299,16 @@ def test_tn17_proyeccion_con_tarjeta(db: Session):
         fecha_vencimiento=date(2026, 11, 15),
         pagada=False,
     )
-    db.add(c_usd)
+    c_usd2 = Cuota(
+        id=uuid4(),
+        grupo_id=g_usd.id,
+        transaccion_id=tx_padre_usd.id,
+        numero_cuota=2,
+        monto_proyectado=Decimal("10"),
+        fecha_vencimiento=date(2026, 12, 15),
+        pagada=False,
+    )
+    db.add_all([c_usd, c_usd2])
     db.commit()
 
     res_ars = obtener_proyeccion_compromisos(db, user2, moneda_modo="consolidado_ars", meses=6, hoy=hoy)
@@ -290,7 +323,15 @@ def test_tn18_proyeccion_sin_tarjeta(db: Session):
     user = _crear_usuario(db, CicloTipo.DIA_FIJO, "1")
     b_ars = _crear_billetera(db, user.id, Moneda.ARS)
     _crear_cotizacion(db, hoy, venta=Decimal("1500"))
-    tx_padre = _crear_transaccion(db, user.id, b_ars.id, TipoTransaccion.EGRESO, Decimal("10"), date(2026, 11, 15), moneda=Moneda.USD)
+    tx_padre = _crear_transaccion(
+        db,
+        user.id,
+        b_ars.id,
+        TipoTransaccion.EGRESO,
+        Decimal("20"),
+        date(2026, 11, 15),
+        moneda=Moneda.USD,
+    )
 
     g_usd = GrupoCuotas(
         id=uuid4(),
@@ -300,9 +341,9 @@ def test_tn18_proyeccion_sin_tarjeta(db: Session):
         moneda=Moneda.USD,
         estado=EstadoGrupoCuotas.ACTIVO,
         descripcion="Plan sin tarjeta",
-        cantidad_cuotas=1,
-        monto_total=Decimal("10"),
-        total_financiado=Decimal("10"),
+        cantidad_cuotas=2,
+        monto_total=Decimal("20"),
+        total_financiado=Decimal("20"),
     )
     db.add(g_usd)
     c_usd = Cuota(
@@ -314,7 +355,16 @@ def test_tn18_proyeccion_sin_tarjeta(db: Session):
         fecha_vencimiento=date(2026, 11, 15),
         pagada=False,
     )
-    db.add(c_usd)
+    c_usd2 = Cuota(
+        id=uuid4(),
+        grupo_id=g_usd.id,
+        transaccion_id=tx_padre.id,
+        numero_cuota=2,
+        monto_proyectado=Decimal("10"),
+        fecha_vencimiento=date(2026, 12, 15),
+        pagada=False,
+    )
+    db.add_all([c_usd, c_usd2])
     db.commit()
 
     res = obtener_proyeccion_compromisos(db, user, moneda_modo="consolidado_ars", meses=6, hoy=hoy)

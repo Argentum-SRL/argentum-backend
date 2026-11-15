@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.grupo_cuotas import EstadoGrupoCuotas, GrupoCuotas
 from app.models.suscripcion import EstadoSuscripcion, FrecuenciaSuscripcion, Suscripcion
+from app.models.transaccion import Transaccion
 from app.models.usuario import Usuario
 from app.services import dolar_service
 from app.services.analisis_ciclos_service import MESES_CORTOS
@@ -68,6 +69,24 @@ def _armar_buckets_proyeccion(
     return ciclos
 
 
+def _resolver_nombre_plan(grupo: GrupoCuotas) -> str:
+    desc = (grupo.descripcion or "").strip()
+    if desc:
+        return desc
+    padre = getattr(grupo, "transaccion_padre", None)
+    if padre:
+        desc_padre = (getattr(padre, "descripcion", "") or "").strip()
+        if desc_padre:
+            return desc_padre
+        subcat = getattr(padre, "subcategoria", None)
+        if subcat and (getattr(subcat, "nombre", "") or "").strip():
+            return subcat.nombre.strip()
+        cat = getattr(padre, "categoria", None)
+        if cat and (getattr(cat, "nombre", "") or "").strip():
+            return cat.nombre.strip()
+    return "Compra en cuotas"
+
+
 def _procesar_planes_cuotas(
     db: Session,
     usuario_id: UUID,
@@ -78,13 +97,15 @@ def _procesar_planes_cuotas(
     tc_oficial_hoy: Decimal,
     billetera_id: Optional[UUID],
     tarjeta_id: Optional[UUID],
+    ref_hoy: date,
 ) -> tuple[List[Dict[str, Any]], Decimal]:
     stmt_grupos = (
         select(GrupoCuotas)
         .options(
             selectinload(GrupoCuotas.cuotas),
             selectinload(GrupoCuotas.tarjeta),
-            selectinload(GrupoCuotas.transaccion_padre),
+            selectinload(GrupoCuotas.transaccion_padre).selectinload(Transaccion.subcategoria),
+            selectinload(GrupoCuotas.transaccion_padre).selectinload(Transaccion.categoria),
         )
         .where(
             GrupoCuotas.usuario_id == usuario_id,
@@ -106,17 +127,33 @@ def _procesar_planes_cuotas(
             if b_padre != billetera_id and b_tarj != billetera_id:
                 continue
 
-        mon_g = (g.moneda.value if hasattr(g.moneda, "value") else str(g.moneda)).upper()
-        cuotas_pend = [c for c in g.cuotas if not c.pagada]
+        # Regla 1: cantidad_cuotas > 1
+        cant_cuotas = getattr(g, "cantidad_cuotas", 0) or 0
+        if cant_cuotas <= 1:
+            continue
+
+        # Regla 2: su transacción padre NO tiene suscripcion_id
+        tp = getattr(g, "transaccion_padre", None)
+        if tp is not None and getattr(tp, "suscripcion_id", None) is not None:
+            continue
+
+        # Regla 3: al menos una cuota pendiente (impaga y fecha_vencimiento >= ref_hoy)
+        cuotas_pend = [
+            c for c in g.cuotas
+            if not getattr(c, "pagada", False) and c.fecha_vencimiento >= ref_hoy
+        ]
         if not cuotas_pend:
             continue
 
+        mon_g = (g.moneda.value if hasattr(g.moneda, "value") else str(g.moneda)).upper()
         cuotas_pend.sort(key=lambda c: (c.fecha_vencimiento, c.numero_cuota))
         ultima_cuota = cuotas_pend[-1]
 
         if g.tarjeta:
             porcentaje_percep = Decimal(str(g.tarjeta.percepcion_moneda_extranjera))
-            tc_cuota_usd_a_ars = tc_oficial_hoy * (Decimal("1") + (porcentaje_percep / Decimal("100")))
+            tc_cuota_usd_a_ars = tc_oficial_hoy * (
+                Decimal("1") + (porcentaje_percep / Decimal("100"))
+            )
         else:
             tc_cuota_usd_a_ars = tc_oficial_hoy
 
@@ -151,31 +188,22 @@ def _procesar_planes_cuotas(
                 monto_cuota_ref_dec = m_conv
 
             venc = c.fecha_vencimiento
-            if venc < primer_ciclo_inicio:
-                ciclos[0]["cuotas_dec"] += m_conv
-                ciclos[0]["cantidad_cuotas"] += 1
-                total_cuotas_pendientes_dec += m_conv
-            elif primer_ciclo_inicio <= venc <= ultimo_ciclo_fin:
-                for b in ciclos:
-                    if b["fecha_inicio"] <= venc <= b["fecha_fin"]:
-                        b["cuotas_dec"] += m_conv
-                        b["cantidad_cuotas"] += 1
-                        total_cuotas_pendientes_dec += m_conv
-                        break
+            for b in ciclos:
+                if b["fecha_inicio"] <= venc <= b["fecha_fin"]:
+                    b["cuotas_dec"] += m_conv
+                    b["cantidad_cuotas"] += 1
+                    total_cuotas_pendientes_dec += m_conv
+                    break
 
         if saldo_plan_dec <= Decimal("0"):
             continue
 
         venc_ult = ultima_cuota.fecha_vencimiento
-        if venc_ult < primer_ciclo_inicio:
-            ciclos[0]["planes_que_finalizan"] += 1
-            ciclos[0]["liberacion_dec"] += monto_cuota_ref_dec
-        else:
-            for b in ciclos:
-                if b["fecha_inicio"] <= venc_ult <= b["fecha_fin"]:
-                    b["planes_que_finalizan"] += 1
-                    b["liberacion_dec"] += monto_cuota_ref_dec
-                    break
+        for b in ciclos:
+            if b["fecha_inicio"] <= venc_ult <= b["fecha_fin"]:
+                b["planes_que_finalizan"] += 1
+                b["liberacion_dec"] += monto_cuota_ref_dec
+                break
 
         cuotas_pagadas_cnt = max(0, g.cantidad_cuotas - len(cuotas_pend))
         progreso_pct = (
@@ -183,17 +211,22 @@ def _procesar_planes_cuotas(
             if g.cantidad_cuotas > 0
             else 0.0
         )
+        nombre_plan = _resolver_nombre_plan(g)
 
         planes_activos.append({
             "id": str(g.id),
-            "descripcion": g.descripcion,
+            "nombre": nombre_plan,
+            "descripcion": nombre_plan,
             "tarjeta_nombre": g.tarjeta.nombre if g.tarjeta else "Tarjeta",
             "cuotas_restantes": len(cuotas_pend),
             "cantidad_cuotas": g.cantidad_cuotas,
             "monto_cuota": round(float(monto_cuota_ref_dec), 2),
             "saldo_pendiente": round(float(saldo_plan_dec), 2),
             "ultimo_vencimiento": ultima_cuota.fecha_vencimiento.isoformat(),
-            "ultimo_mes_etiqueta": f"{MESES_CORTOS[ultima_cuota.fecha_vencimiento.month]} {str(ultima_cuota.fecha_vencimiento.year)[-2:]}",
+            "ultimo_mes_etiqueta": (
+                f"{MESES_CORTOS[ultima_cuota.fecha_vencimiento.month]} "
+                f"{str(ultima_cuota.fecha_vencimiento.year)[-2:]}"
+            ),
             "ultimo_mes_nombre_corto": mes_corto(
                 f"{MESES_CORTOS[ultima_cuota.fecha_vencimiento.month]} "
                 f"{ultima_cuota.fecha_vencimiento.year}"
@@ -325,7 +358,7 @@ def obtener_proyeccion_compromisos(
 
     planes_activos, total_cuotas_pendientes_dec = _procesar_planes_cuotas(
         db, usuario.id, ciclos, primer_ciclo_inicio, ultimo_ciclo_fin,
-        modo, tc_oficial_hoy, billetera_id, tarjeta_id
+        modo, tc_oficial_hoy, billetera_id, tarjeta_id, ref_hoy=ref_hoy
     )
 
     carga_mensual_suscripciones_dec = _procesar_suscripciones_futuras(

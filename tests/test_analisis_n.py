@@ -628,9 +628,9 @@ def test_tn13_proyeccion_por_ciclos(db: Session):
     res = obtener_proyeccion_compromisos(db, usuario, meses=3, hoy=hoy)
 
     serie = res["serie_mensual"]
-    # Ciclo 0 (01/11 al 30/11): debe sumar la cuota vencida del 10/09
+    # Ciclo 0 (01/11 al 30/11): la cuota vencida previa a hoy no se proyecta
     assert "01/11" in serie[0]["rango_texto"] and "30/11" in serie[0]["rango_texto"]
-    assert serie[0]["monto_cuotas"] == 10_000.0
+    assert serie[0]["monto_cuotas"] == 0.0
 
     # Ciclo 1 (01/12 al 31/12): debe sumar la cuota 3
     assert "01/12" in serie[1]["rango_texto"] and "31/12" in serie[1]["rango_texto"]
