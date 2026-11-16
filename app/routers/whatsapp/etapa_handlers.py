@@ -27,7 +27,10 @@ from app.routers.whatsapp.handlers_deshacer import (
     manejar_corregir,
     manejar_deshacer,
 )
-from app.routers.whatsapp.handlers_permitirse import manejar_consulta_permitirse
+from app.routers.whatsapp.handlers_permitirse import (
+    manejar_consulta_permitirse,
+    manejar_respuesta_pendiente_permitirse,
+)
 from app.routers.whatsapp.handlers_menus import (
     manejar_aclaracion_cuotas,
     manejar_menu_billetera,
@@ -72,6 +75,11 @@ def procesar_estados_y_handlers_deterministicos(ctx: ContextoMensaje) -> None:
 
     # 0. Chequeo determinístico de pedido de pago de resumen de tarjeta (Tarea 7)
     if manejar_pago_resumen(mensaje_texto, usuario, db, from_number, wamid=wamid):
+        ctx.terminado = True
+        return
+
+    # 0.5 Respuesta a pregunta pendiente de '¿Me lo puedo permitir?' (bloque T1)
+    if manejar_respuesta_pendiente_permitirse(ctx):
         ctx.terminado = True
         return
 

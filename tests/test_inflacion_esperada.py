@@ -189,7 +189,7 @@ def test_inflacion_esperada_rem_vigente(db: Session):
     with patch("app.services.inflacion_esperada_service.enviar_alerta_admin") as mock_alerta:
         res = inflacion_esperada(db, hoy=date(2026, 11, 3), meses=4)
         assert res is not None
-        assert res.fuente_texto == "REM de septiembre"
+        assert res.fuente_texto == "la inflación que se espera"
         assert res.es_respaldo is False
         assert len(res.tasas) == 4
         mock_alerta.assert_not_called()
@@ -221,7 +221,7 @@ def test_inflacion_esperada_respaldo_indec(db: Session):
     with patch("app.services.inflacion_esperada_service.enviar_alerta_admin") as mock_alerta:
         res = inflacion_esperada(db, hoy=date(2026, 11, 3), meses=4)
         assert res is not None
-        assert res.fuente_texto == "inflación INDEC de septiembre"
+        assert res.fuente_texto == "la última inflación del INDEC"
         assert res.es_respaldo is True
         assert res.tasas == [Decimal("3.5000")] * 4
         mock_alerta.assert_called_once()
@@ -288,7 +288,7 @@ def test_inflacion_esperada_sin_red_ni_commit(db: Session, monkeypatch):
         res = inflacion_esperada(db, hoy=date(2026, 11, 3), meses=4)
 
     assert res is not None
-    assert res.fuente_texto == "inflación INDEC de septiembre"
+    assert res.fuente_texto == "la última inflación del INDEC"
     assert res.es_respaldo is True
     assert commit_count == 0
     assert flush_count == 0

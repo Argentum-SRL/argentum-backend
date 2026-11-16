@@ -556,6 +556,10 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
     if ingreso_promedio_mensual is not None:
         margen_libre_mensual = ingreso_promedio_mensual - total_compromisos_ars - gasto_promedio_variable
 
+    # Bloque T1: si la persona usa dólares seguido, la web le ofrece poner el precio en dólares
+    from app.services.permitirse_dolares import usa_dolares_seguido
+    usa_dolares = usa_dolares_seguido(db, usuario, hoy)
+
     return {
         "saldo_disponible": saldo_disp_ars,
         "carga_mensual_comprometida": carga_comprometida_ars,
@@ -582,7 +586,10 @@ def obtener_contexto_financiero(user_id: str, db: Session) -> dict:
         "ingreso_es_estimacion_parcial": ingreso_es_estimacion_parcial,
         "gasto_promedio_variable": round(gasto_promedio_variable, 2),
         "ciclos_con_historia": ciclos_con_historia,
-        "margen_libre_mensual": round(margen_libre_mensual, 2) if margen_libre_mensual is not None else None
+        "margen_libre_mensual": (
+            round(margen_libre_mensual, 2) if margen_libre_mensual is not None else None
+        ),
+        "usa_dolares": usa_dolares,
     }
 
 
@@ -595,6 +602,10 @@ def calcular_puede_permitirse(
     tna: float | None,
     ingreso_manual: float | None = None,
     db: Session | None = None,
+    moneda: str | None = None,
 ) -> dict:
     from app.services.permitirse_service import calcular_puede_permitirse as _motor_permitirse
-    return _motor_permitirse(user_id, precio_total, modo, cantidad_cuotas, tiene_interes, tna, ingreso_manual, db)
+    return _motor_permitirse(
+        user_id, precio_total, modo, cantidad_cuotas, tiene_interes, tna, ingreso_manual, db,
+        moneda=moneda,
+    )

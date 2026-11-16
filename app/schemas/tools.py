@@ -117,6 +117,7 @@ class CanAffordRequest(BaseModel):
     tiene_interes: bool = False
     tna: float | None = None
     ingreso_manual: float | None = None
+    moneda: str | None = None
 
     @field_validator('precio_total')
     @classmethod
@@ -159,6 +160,16 @@ class CanAffordRequest(BaseModel):
             raise ValueError('La TNA debe estar entre 0.1% y 3000%')
         return v
 
+    @field_validator('moneda')
+    @classmethod
+    def moneda_valida(cls, v):
+        if v is None:
+            return None
+        v_norm = str(v).upper().strip()
+        if v_norm not in ('ARS', 'USD'):
+            raise ValueError('La moneda debe ser "ARS" o "USD"')
+        return v_norm
+
     @model_validator(mode='after')
     def validar_interes_y_modo(self) -> CanAffordRequest:
         if self.modo == 'cuotas':
@@ -192,8 +203,13 @@ class CanAffordResponseData(BaseModel):
     linea_compensar: str | None = None
     linea_frescura: str | None = None
     linea_espera: str | None = None
+    linea_cotizacion: str | None = None
+    linea_cuentas: str | None = None
+    linea_reintegro: str | None = None
+    linea_juntar: str | None = None
     libre: float
     precio_total: float
+    moneda: str = 'ARS'
     fuente_inflacion: str | None = None
 
 
@@ -231,6 +247,7 @@ class FinancialContextResponseData(BaseModel):
     gasto_promedio_variable: float
     ciclos_con_historia: int
     margen_libre_mensual: float | None = None
+    usa_dolares: bool = False
 
 
 class FinancialContextResponse(BaseModel):

@@ -228,7 +228,16 @@ def test_evaluar_mensual_exactos():
     assert res == "ahorros"
     assert def_tot == Decimal("40000.00")
     assert m_def == 2
-    assert mes_liberacion(margenes_lib, cuotas_lib, colchon_lib) == 3
+    assert mes_liberacion(margenes_lib, cuotas_lib, colchon_lib) is None
+    assert mes_liberacion(
+        margenes_lib,
+        cuotas_lib,
+        colchon_lib,
+        liberaciones=[
+            Decimal("100000"), Decimal("100000"), Decimal("0"),
+            Decimal("0"), Decimal("0"), Decimal("0"),
+        ],
+    ) == 3
 
     # 12 Ã— 10.000 margen 100.000 colchon 20.000 â†’ mes_liberacion None
     assert mes_liberacion([Decimal("100000")] * 12, [Decimal("10000")] * 12, Decimal("20000")) is None

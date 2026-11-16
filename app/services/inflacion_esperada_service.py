@@ -352,10 +352,10 @@ def inflacion_esperada(db: Session, hoy: date | None = None, meses: int = 12) ->
             mensuales.sort(key=lambda x: x[0])
             tasas = tasas_desde_rem(mensuales, prox12, desde=desde, meses=meses)
             if tasas is not None:
-                mes_nombre = MESES[rel_m - 1]
+                # Sin tecnicismos: es el dato de los analistas que consulta el Banco Central
                 return InflacionEsperada(
                     tasas=tasas,
-                    fuente_texto=f"REM de {mes_nombre}",
+                    fuente_texto="la inflación que se espera",
                     es_respaldo=False,
                 )
 
@@ -378,7 +378,7 @@ def inflacion_esperada(db: Session, hoy: date | None = None, meses: int = 12) ->
 
         return InflacionEsperada(
             tasas=tasas,
-            fuente_texto=f"inflación INDEC de {mes_nombre}",
+            fuente_texto="la última inflación del INDEC",
             es_respaldo=True,
         )
 

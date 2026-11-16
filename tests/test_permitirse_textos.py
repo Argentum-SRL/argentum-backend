@@ -5,7 +5,7 @@ tests/test_permitirse_textos.py — Pruebas unitarias de textos_permitirse y lí
 from datetime import date
 from decimal import Decimal
 
-from app.services.permitirse_textos import textos_permitirse
+from app.services.permitirse_textos import armar_respuesta_permitirse, textos_permitirse
 from app.services.tools_service import PlanCuotas
 
 
@@ -56,22 +56,16 @@ def test_mensual_ahorros_meses():
 
 
 def test_cuotas_ahorros_k_meses():
-    # cuotas ahorros total 40.000 k 2 → "Te faltarían $40.000 en 2 meses: tendrías que sacarlos de tus ahorros."
+    # cuotas ahorros con falta 40.000
     res2 = textos_permitirse({
         "modo": "cuotas",
         "resultado": "ahorros",
-        "deficit_total": Decimal("40000"),
-        "meses_deficit": 2,
+        "falta": Decimal("40000"),
     })
-    assert res2["linea_principal"] == "Te faltar\u00edan $40.000 en 2 meses: tendr\u00edas que sacarlos de tus ahorros."
-
-    res1 = textos_permitirse({
-        "modo": "cuotas",
-        "resultado": "ahorros",
-        "deficit_total": Decimal("40000"),
-        "meses_deficit": 1,
-    })
-    assert res1["linea_principal"] == "Te faltar\u00edan $40.000 en 1 mes: tendr\u00edas que sacarlos de tus ahorros."
+    assert res2["linea_principal"] == (
+        "Usando la plata de tus cuentas te faltarían $40.000: "
+        "tendrías que sacarlos de tus ahorros."
+    )
 
 
 def test_linea_liberacion():
@@ -116,8 +110,8 @@ def test_lineas_plan():
     assert res6["lineas_plan"][0] == "Son 6 cuotas de $59.105 ($354.631 en total)."
     assert res6["lineas_plan"][1] == "Pag\u00e1s $54.631 de inter\u00e9s."
 
-    # plan 12 × 10.000 con vp 105.753 y fuente "REM de septiembre"
-    # → lineas_plan ["Son 12 cuotas de $10.000.", "En plata de hoy equivalen a $105.753 (REM de septiembre)."]
+    # plan 12 × 10.000 con vp 105.753 y fuente "la inflación que se espera"
+    # → ["Son 12 cuotas de $10.000.", "Con la inflación ..., en plata de hoy ..."]
     plan12 = PlanCuotas(
         monto_cuota=Decimal("10000"),
         total=Decimal("120000"),
@@ -128,11 +122,11 @@ def test_lineas_plan():
         "modo": "cuotas",
         "cantidad_cuotas": 12,
         "plan": plan12,
-        "fuente_inflacion": "REM de septiembre",
+        "fuente_inflacion": "la inflación que se espera",
     })
     assert res12["lineas_plan"] == [
         "Son 12 cuotas de $10.000.",
-        "En plata de hoy equivalen a $105.753 (REM de septiembre).",
+        "Con la inflación que se espera, en plata de hoy equivalen a $105.753.",
     ]
 
 
@@ -198,7 +192,9 @@ def test_longitud_maxima_90_caracteres():
     })
 
     assert len(res["titulo"]) <= 90
-    assert len(res["linea_principal"]) <= 90
+    wpp = armar_respuesta_permitirse(res, {"modo": "cuotas", "cantidad_cuotas": 120})
+    for linea in wpp.split("\n"):
+        assert len(linea) <= 90, f"Línea WPP supera 90 caracteres ({len(linea)}): {linea}"
     for lp in res["lineas_plan"]:
         assert len(lp) <= 90, f"Línea de plan supera 90 caracteres ({len(lp)}): {lp}"
     if res["linea_ahorros"]:

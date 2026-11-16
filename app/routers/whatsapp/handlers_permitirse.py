@@ -13,20 +13,27 @@ import structlog
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 from app.routers.whatsapp.contexto import ContextoMensaje
 from app.routers.whatsapp.parsers import _parsear_monto_argentino, montos_de_dinero_en_texto
+from app.routers.whatsapp.permitirse_flujo import (
+    armar_estado_pregunta,
+    buscar_pregunta_pendiente,
+    leer_respuesta_pendiente,
+)
 from app.services import tools_service, whatsapp_service
 from app.utils.texto import normalizar_texto
 
 logger = structlog.get_logger(__name__)
 
+# Excluyen siempre
 EXCLUSIONES = [
-    "dolar",
-    "usd",
-    "u$s",
-    "us$",
-    "pagar",
     "fin de mes",
-    "llegar",
 ]
+
+# Excluyen solo si no hay una frase fuerte ("me puedo permitir pagar el gimnasio" sí es consulta)
+EXCLUSIONES_SIN_FRASE_FUERTE = [
+    "pagar",
+]
+
+MARCAS_DOLAR = ["dolar", "usd", "u$s", "us$"]
 
 FRASES_FUERTES = [
     "me lo puedo permitir",
@@ -35,6 +42,17 @@ FRASES_FUERTES = [
     "me las puedo permitir",
     "me puedo permitir",
     "puedo permitirme",
+    "me da para",
+    "dar el gusto",
+    "darme el gusto",
+    "llego a comprar",
+    "llego a comprarme",
+    "tengo para comprar",
+    "tengo para comprarme",
+    "me lo compro",
+    "me la compro",
+    "me alcanza la plata para",
+    "me conviene comprar",
 ]
 
 FRASES_DEBILES = [
@@ -44,12 +62,39 @@ FRASES_DEBILES = [
     "puedo gastar",
 ]
 
+FRASES_MENSUAL = ["por mes", "al mes", "mensual", "todos los meses", "cada mes"]
 
-def detectar_consulta_permitirse(texto: str) -> dict | None:
+_NUMERO = r"\d+(?:[\.,]\d+)*(?:\s*(?:mil|k|lucas?|palos?))?"
+_DOLAR = r"(?:dolares|dolar|usd|u\$s|us\$)"
+
+# Los dólares son lo que se compra ("comprar 100 dólares"): no es una consulta de permitirse
+PATRON_COMPRA_DE_DOLARES = re.compile(
+    rf"\bcomprar(?:me|te|nos)?\s+(?:unos\s+)?(?:{_NUMERO}\s*)?(?:de\s+)?{_DOLAR}"
+)
+
+# Los dólares son el precio ("de 1000 dólares", "de US$1000", "sale 1000 dólares")
+PATRON_PRECIO_EN_DOLARES = re.compile(
+    rf"(?:\bde|\bsalen?|\bcuestan?)\s+"
+    rf"(?:(?:us\$|u\$s|usd)\s*({_NUMERO})|({_NUMERO})\s*{_DOLAR})"
+)
+
+
+def _precio_en_dolares(norm: str) -> Decimal | None:
+    """El precio en dólares que trae el mensaje, o None si los dólares no van como precio."""
+    if PATRON_COMPRA_DE_DOLARES.search(norm):
+        return None
+    encontrado = PATRON_PRECIO_EN_DOLARES.search(norm)
+    if not encontrado:
+        return None
+    valor = _parsear_monto_argentino(encontrado.group(1) or encontrado.group(2))
+    return valor if valor and valor > 0 else None
+
+
+def analizar_consulta_permitirse(texto: str) -> dict | None:
     """
-    Detecta si un mensaje de WhatsApp es una consulta sobre si el usuario puede permitirse un gasto.
-    Devuelve None si no aplica o si es una frase débil sin precio.
-    Devuelve un diccionario estructurado si aplica.
+    Entiende un mensaje de WhatsApp como consulta de '¿Me lo puedo permitir?'.
+    Devuelve None si no aplica o si es una frase débil sin precio. Si aplica, devuelve todo lo
+    que entendió (precio, modo, cuotas, interés y moneda) y, en "falta", el dato que falta.
     """
     if not texto:
         return None
@@ -71,6 +116,18 @@ def detectar_consulta_permitirse(texto: str) -> dict | None:
 
     if not es_fuerte and not es_debil:
         return None
+
+    if not es_fuerte and any(excl in norm for excl in EXCLUSIONES_SIN_FRASE_FUERTE):
+        return None
+
+    # Dólares: solo valen si van como precio; si son lo que se compra, no es esta consulta
+    moneda: str = "ARS"
+    precio_dolares: Decimal | None = None
+    if any(marca in norm for marca in MARCAS_DOLAR):
+        precio_dolares = _precio_en_dolares(norm)
+        if precio_dolares is None:
+            return None
+        moneda = "USD"
 
     # d) y e) Cuotas y Precio
     # Caso especial: "N cuotas de X" (ej: "12 cuotas de 50 lucas", "12 cuotas de $50.000")
@@ -98,14 +155,20 @@ def detectar_consulta_permitirse(texto: str) -> dict | None:
     if precio is None:
         # e) Cuotas
         m_cuotas = re.search(r"\b(\d+)\s+cuotas?\b", norm, flags=re.IGNORECASE)
-        if m_cuotas:
+        # "el gimnasio" o "la cuota del ..." con "por mes" o "al mes" es un gasto de todos los meses
+        gasto_del_mes = ("el gimnasio" in norm or "la cuota del" in norm) and (
+            "por mes" in norm or "al mes" in norm
+        )
+        if gasto_del_mes and not m_cuotas:
+            modo = "mensual"
+            cantidad_cuotas = 1
+        elif m_cuotas:
             modo = "cuotas"
             cantidad_cuotas = int(m_cuotas.group(1))
         elif re.search(r"\ben\s+cuotas?\b", norm, flags=re.IGNORECASE) or re.search(r"\bcuotas?\b", norm, flags=re.IGNORECASE):
             modo = "cuotas"
             cantidad_cuotas = None
         else:
-            FRASES_MENSUAL = ["por mes", "al mes", "mensual", "todos los meses", "cada mes"]
             if any(f in norm for f in FRASES_MENSUAL):
                 modo = "mensual"
             else:
@@ -113,18 +176,23 @@ def detectar_consulta_permitirse(texto: str) -> dict | None:
             cantidad_cuotas = 1
 
         # d) Precio:
-        # Primero buscar con montos_de_dinero_en_texto
-        montos_marca = montos_de_dinero_en_texto(texto)
+        # Si el precio viene en dólares, ya se leyó arriba
+        if precio_dolares is not None:
+            precio = precio_dolares
+
+        # Si no, primero buscar con montos_de_dinero_en_texto
+        montos_marca = montos_de_dinero_en_texto(texto) if precio is None else []
         for m_str in montos_marca:
             val_m = _parsear_monto_argentino(m_str)
             if val_m and val_m > 0:
                 precio = val_m
                 break
 
-        # Si no hay ninguno: buscar números sueltos que no sean cantidad de cuotas ni porcentaje
+        # Si no hay ninguno: buscar números sueltos (con o sin sufijo) que no sean cuotas ni %
         if precio is None:
+            pat_num = r"\b\d+(?:[\.,]\d+)*(?:\s*(?:pesos|mil|lucas?|k|palos?))?\b"
             candidatos_num = []
-            for m in re.finditer(r"\b\d+(?:[\.,]\d+)*\b", norm):
+            for m in re.finditer(pat_num, norm):
                 num_token = m.group(0)
                 end_pos = m.end()
                 resto = norm[end_pos:].lstrip()
@@ -170,26 +238,41 @@ def detectar_consulta_permitirse(texto: str) -> dict | None:
 
     # g) Qué devuelve:
     # - frase débil sin precio: None (el mensaje sigue a la IA)
+    if precio is None and es_debil:
+        return None
+
+    # - frase fuerte sin precio: falta "precio"; modo cuotas sin cantidad: falta "cuotas"
+    falta: str | None = None
     if precio is None:
-        if es_debil:
-            return None
-        # - frase fuerte sin precio: {"falta": "precio"}
-        return {"falta": "precio"}
+        falta = "precio"
+    elif modo == "cuotas" and cantidad_cuotas is None:
+        falta = "cuotas"
 
-    # - modo cuotas sin cantidad: {"falta": "cuotas"}
-    if modo == "cuotas" and cantidad_cuotas is None:
-        return {"falta": "cuotas"}
-
-    # - completo
     return {
-        "falta": None,
+        "falta": falta,
         "precio": precio,
         "modo": modo,
         "cantidad_cuotas": cantidad_cuotas if modo == "cuotas" else 1,
         "tiene_interes": tiene_interes,
         "tna": tna,
         "nota_interes": nota_interes,
+        "moneda": moneda,
     }
+
+
+def detectar_consulta_permitirse(texto: str) -> dict | None:
+    """
+    Detecta si un mensaje de WhatsApp es una consulta sobre si el usuario puede permitirse un gasto.
+    Devuelve None si no aplica o si es una frase débil sin precio.
+    Si falta un dato devuelve solo {"falta": "precio"} o {"falta": "cuotas"};
+    si está completa, el diccionario con todo lo que entendió.
+    """
+    analisis = analizar_consulta_permitirse(texto)
+    if analisis is None:
+        return None
+    if analisis["falta"] is not None:
+        return {"falta": analisis["falta"]}
+    return analisis
 
 
 def armar_respuesta_permitirse(resultado: dict, consulta: dict) -> str:
@@ -211,19 +294,55 @@ def manejar_consulta_permitirse(ctx: ContextoMensaje) -> bool:
     """
     mensaje_texto = ctx.mensaje_texto
     usuario = ctx.usuario
-    db = ctx.db
-    from_number = ctx.from_number
-    wamid = ctx.wamid
 
     if not usuario:
         return False
 
-    consulta = detectar_consulta_permitirse(mensaje_texto)
+    consulta = analizar_consulta_permitirse(mensaje_texto)
     if consulta is None:
         return False
 
+    return _responder_consulta(ctx, consulta)
+
+
+def manejar_respuesta_pendiente_permitirse(ctx: ContextoMensaje) -> bool:
+    """
+    Si hay una pregunta pendiente de '¿Me lo puedo permitir?' (precio o cuotas) y el mensaje
+    es un monto o "N cuotas", completa la consulta, responde y retorna True.
+    Si el mensaje es otra cosa, cierra la pregunta y retorna False: el mensaje sigue su camino.
+    """
+    if not ctx.usuario:
+        return False
+
+    pregunta = buscar_pregunta_pendiente(ctx.db, ctx.usuario.id)
+    if pregunta is None:
+        return False
+
+    consulta = leer_respuesta_pendiente(ctx.mensaje_texto, pregunta.slot_filling_estado)
+    pregunta.slot_filling_activo = False
+    if consulta is None:
+        ctx.db.commit()
+        return False
+
+    return _responder_consulta(ctx, consulta)
+
+
+def _responder_consulta(ctx: ContextoMensaje, consulta: dict) -> bool:
+    """
+    Responde una consulta ya entendida: si falta un dato lo pregunta y deja la pregunta
+    pendiente; si está completa, calcula con la misma función que la web.
+    Siempre manda un solo mensaje.
+    """
+    mensaje_texto = ctx.mensaje_texto
+    usuario = ctx.usuario
+    db = ctx.db
+    from_number = ctx.from_number
+    wamid = ctx.wamid
+
+    estado_pregunta: dict | None = None
     if consulta.get("falta") is not None:
         msg_resp = armar_respuesta_permitirse({}, consulta)
+        estado_pregunta = armar_estado_pregunta(consulta)
     else:
         try:
             precio_total = float(consulta["precio"])
@@ -237,6 +356,7 @@ def manejar_consulta_permitirse(ctx: ContextoMensaje) -> bool:
                 tna=tna,
                 ingreso_manual=None,
                 db=db,
+                moneda=consulta.get("moneda") or "ARS",
             )
             msg_resp = armar_respuesta_permitirse(resultado, consulta)
         except Exception as e:
@@ -254,8 +374,8 @@ def manejar_consulta_permitirse(ctx: ContextoMensaje) -> bool:
         entidades={},
         accion_ejecutada="consulta",
         confianza=Decimal("1.000"),
-        slot_filling_activo=False,
-        slot_filling_estado=None,
+        slot_filling_activo=estado_pregunta is not None,
+        slot_filling_estado=estado_pregunta,
     )
     db.add(nueva_conv)
     db.commit()

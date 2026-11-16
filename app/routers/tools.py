@@ -95,6 +95,7 @@ def can_afford_endpoint(
         tna=body.tna,
         ingreso_manual=body.ingreso_manual,
         db=db,
+        moneda=body.moneda,
     )
     registrar_evento(db, current_user.id, "permitirse")
     return {
