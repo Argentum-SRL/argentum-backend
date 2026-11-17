@@ -246,7 +246,7 @@ def test_crear_transferencia_con_cotizacion(db: Session, usuario_test: Usuario):
     with pytest.raises(HTTPException) as exc2:
         transferencia_service.crear_transferencia(db, usuario_test.id, data2)
     assert exc2.value.status_code == 400
-    assert exc2.value.detail == "Para transferencias entre billeteras de distinta moneda debes ingresar el monto recibido en destino."
+    assert exc2.value.detail == "Ingresá cuánto entró en la billetera de destino."
 
     # 3. Con monto_destino 100 y sin cotización: deriva cotización (150000 / 100 = 1500.0000)
     # Reabastecer saldo para la prueba

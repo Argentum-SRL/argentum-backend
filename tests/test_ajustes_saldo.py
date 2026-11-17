@@ -458,7 +458,10 @@ def test_14_delete_billetera_con_ajuste_y_tiene_transacciones(db_session):
     with pytest.raises(HTTPException) as exc:
         delete_billetera(str(b.id), db=db_session, current_user=u)
     assert exc.value.status_code == 400
-    assert exc.value.detail == "No se puede eliminar la billetera porque tiene ajustes de saldo. Por favor, archivala."
+    assert (
+        exc.value.detail
+        == "Esta billetera tiene ajustes de saldo: no se puede eliminar. Archivala."
+    )
 
 
 # -----------------------------------------------------------------------------

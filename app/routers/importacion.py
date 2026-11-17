@@ -54,7 +54,7 @@ def procesar_archivo(
                 "success": False,
                 "error": {
                     "code": "INVALID_FILE_TYPE",
-                    "message": "El formato del archivo debe ser PDF."
+                    "message": "El archivo tiene que ser PDF."
                 }
             }
         )
@@ -254,7 +254,7 @@ def confirmar_importacion(
                 "success": False,
                 "error": {
                     "code": "IMPORTACION_YA_CONFIRMADA",
-                    "message": "Esta importación ya ha sido confirmada previamente."
+                    "message": "Esta importación ya se confirmó antes."
                 }
             }
         )
@@ -301,7 +301,7 @@ def confirmar_importacion(
                 "success": False,
                 "error": {
                     "code": "MONEDA_BILLETERA_INVALIDA",
-                    "message": "La billetera principal debe estar configurada en Pesos."
+                    "message": "La billetera principal tiene que estar en pesos."
                 }
             }
         )
@@ -330,7 +330,7 @@ def confirmar_importacion(
                     "success": False,
                     "error": {
                         "code": "MONEDA_BILLETERA_USD_INVALIDA",
-                        "message": "La billetera secundaria para gastos internacionales debe estar configurada en Dólares."
+                        "message": "La billetera secundaria tiene que estar en dólares."
                     }
                 }
             )

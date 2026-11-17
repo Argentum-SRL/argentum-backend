@@ -153,7 +153,7 @@ def autenticar_sse(request: Request) -> tuple[UUID, datetime | None]:
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token de acceso requerido",
+            detail="Entrá a tu cuenta para seguir.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -162,14 +162,14 @@ def autenticar_sse(request: Request) -> tuple[UUID, datetime | None]:
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token de acceso inválido o expirado",
+            detail="Tu sesión terminó. Volvé a entrar.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
     if not isinstance(payload, dict) or payload.get("type") != "access" or not payload.get("sub"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token de acceso inválido o expirado",
+            detail="Tu sesión terminó. Volvé a entrar.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -178,7 +178,7 @@ def autenticar_sse(request: Request) -> tuple[UUID, datetime | None]:
     except (ValueError, TypeError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token de acceso inválido o expirado",
+            detail="Tu sesión terminó. Volvé a entrar.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -191,7 +191,7 @@ def autenticar_sse(request: Request) -> tuple[UUID, datetime | None]:
         if not usuario:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="No encontramos una cuenta con esos datos.",
+                detail="No hay una cuenta con esos datos.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         rev_at = usuario.tokens_revocados_at
@@ -200,7 +200,7 @@ def autenticar_sse(request: Request) -> tuple[UUID, datetime | None]:
         if rev_at and iat_dt and iat_dt < rev_at:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Sesión revocada. Por favor iniciá sesión nuevamente.",
+                detail="Tu sesión se cerró. Volvé a entrar.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
     finally:

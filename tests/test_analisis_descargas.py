@@ -620,12 +620,12 @@ def test_td7_validaciones_422(db: Session):
         # Billetera ajena
         r3 = client.get(f"/analisis/exportar-excel?billetera_id={b_ajena.id}")
         assert r3.status_code == 422
-        assert "No encontramos esa billetera." in r3.text
+        assert "No se encontró esa billetera." in r3.text
 
         # Tarjeta ajena
         r4 = client.get(f"/analisis/exportar-excel?tarjeta_id={tc_ajena.id}")
         assert r4.status_code == 422
-        assert "No encontramos esa tarjeta." in r4.text
+        assert "No se encontró esa tarjeta." in r4.text
     finally:
         app.dependency_overrides.clear()
 

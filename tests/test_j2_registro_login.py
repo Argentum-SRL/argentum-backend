@@ -52,7 +52,7 @@ BODY_401 = {
     "success": False,
     "error": {
         "code": "UNAUTHORIZED",
-        "message": "El email o la contraseña no son correctos. Revisalos e intentá de nuevo.",
+        "message": "El email o la contraseña no son correctos. Revisalos y probá de nuevo.",
     },
 }
 
@@ -379,7 +379,10 @@ def test_r7_captcha_invalido(client, monkeypatch):
     }
     res = client.post("/auth/register", json=payload)
     assert res.status_code == 400
-    assert "La verificación de seguridad (captcha) falló o es inválida" in res.json()["error"]["message"]
+    assert (
+        res.json()["error"]["message"]
+        == "No se pudo hacer la verificación de seguridad. Probá de nuevo."
+    )
 
 
 def test_r8_registro_integrity_error(client, db_session, auth_mocks, monkeypatch):
@@ -549,7 +552,10 @@ def test_l6_login_bloqueo_cuenta_10_intentos(client, db_session):
     # Contraseña correcta → 429 con mensaje
     res_good = client.post("/auth/login", json={"email": "bloqueado@prueba.com", "password": "PasswordCorrecta123"})
     assert res_good.status_code == 429
-    assert res_good.json()["error"]["message"] == "Hubo demasiados intentos fallidos con esta cuenta. Esperá una hora o recuperá tu contraseña."
+    assert (
+        res_good.json()["error"]["message"]
+        == "Hubo muchos intentos fallidos. Esperá una hora o recuperá tu contraseña."
+    )
 
 
 def test_l7_login_cuenta_verificada_password_correcta(client, db_session):

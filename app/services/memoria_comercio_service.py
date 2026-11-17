@@ -96,7 +96,7 @@ def guardar(
     if not clave:
         raise HTTPException(
             status_code=400,
-            detail="No pudimos reconocer el comercio en esa descripción.",
+            detail="No se reconoció el comercio en esa descripción.",
         )
 
     tipo_str = tipo.value if hasattr(tipo, "value") else str(tipo).lower()

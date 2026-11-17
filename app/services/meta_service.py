@@ -45,7 +45,7 @@ def obtener_meta(db: Session, usuario_id: UUID, meta_id: UUID) -> Meta:
     meta = db.execute(query).unique().scalar_one_or_none()
     
     if not meta:
-        raise HTTPException(status_code=404, detail="No encontramos esa meta.")
+        raise HTTPException(status_code=404, detail="No se encontró esa meta.")
     return meta
 
 def recalcular_acumulado(db: Session, meta: Meta) -> Decimal:
@@ -83,7 +83,10 @@ def recalcular_acumulado(db: Session, meta: Meta) -> Decimal:
     if acumulado < Decimal("0.00"):
         raise HTTPException(
             status_code=400,
-            detail="No se puede borrar este aporte porque la meta quedaría en negativo. Borrá primero el retiro.",
+            detail=(
+                "Si se elimina este aporte, la meta queda en negativo. "
+                "Eliminá primero el retiro."
+            ),
         )
 
     meta.monto_actual = acumulado
@@ -189,8 +192,8 @@ def eliminar_meta(db: Session, usuario_id: UUID, meta_id: UUID) -> None:
     # Si tiene plata ahorrada, obligamos a retirar antes de borrar
     if meta.monto_actual > Decimal("0"):
         raise HTTPException(
-            status_code=400, 
-            detail="No se puede eliminar una meta que aún tiene fondos. Por favor, retirá el dinero primero."
+            status_code=400,
+            detail="La meta todavía tiene plata. Retirala antes de eliminarla.",
         )
 
     # Borrado real: Eliminamos movimientos y luego la meta
@@ -231,7 +234,7 @@ def registrar_movimiento(
         if not data.cotizacion_usada or data.cotizacion_usada <= Decimal("0"):
             raise HTTPException(
                 status_code=400,
-                detail="Tenés que indicar una cotización válida mayor a cero para operar entre monedas distintas."
+                detail="Ingresá una cotización mayor a 0.",
             )
 
         if data.cotizacion_usada == Decimal("1"):
@@ -273,7 +276,13 @@ def registrar_movimiento(
             if data.cotizacion_usada < min_permitido or data.cotizacion_usada > max_permitido:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"La cotización ingresada ({formatear_monto(data.cotizacion_usada, Moneda.ARS)}) difiere más del 30% de la cotización actual ({formatear_monto(cotizacion_referencia, Moneda.ARS)}). Ingresá un valor entre {formatear_monto(min_permitido, Moneda.ARS)} y {formatear_monto(max_permitido, Moneda.ARS)}."
+                    detail=(
+                        f"Esa cotización está muy lejos de la de hoy "
+                        f"({formatear_monto(cotizacion_referencia, Moneda.ARS)}). "
+                        f"Ingresá un valor entre "
+                        f"{formatear_monto(min_permitido, Moneda.ARS)} y "
+                        f"{formatear_monto(max_permitido, Moneda.ARS)}."
+                    ),
                 )
 
         # Meta en USD, Movimiento en ARS. monto_impacto = monto_ars / cotizacion
@@ -303,8 +312,8 @@ def registrar_movimiento(
         # Validar saldo suficiente en billetera
         if billetera.saldo_actual < data.monto:
             raise HTTPException(
-                status_code=400, 
-                detail=f"Saldo insuficiente en la billetera '{billetera.nombre}'."
+                status_code=400,
+                detail=f"No te alcanza el saldo de {billetera.nombre}.",
             )
             
         # Crear la transacción vinculada (EGRESO)

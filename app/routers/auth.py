@@ -140,7 +140,10 @@ def _respuesta_credenciales_invalidas(background_tasks: BackgroundTasks | None =
             "success": False,
             "error": {
                 "code": "UNAUTHORIZED",
-                "message": "El email o la contraseña no son correctos. Revisalos e intentá de nuevo.",
+                "message": (
+                    "El email o la contraseña no son correctos. "
+                    "Revisalos y probá de nuevo."
+                ),
             },
         },
         background=background_tasks,
@@ -167,7 +170,7 @@ def register(request: Request, user_in: RegisterRequest, background_tasks: Backg
     if not user_in.turnstile_token or not verificar_turnstile_token(user_in.turnstile_token, ip_origen):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="La verificación de seguridad (captcha) falló o es inválida. Por favor, intentá de nuevo.",
+            detail="No se pudo hacer la verificación de seguridad. Probá de nuevo.",
         )
 
     email_clean = normalizar_email(user_in.email)
@@ -244,7 +247,9 @@ def register(request: Request, user_in: RegisterRequest, background_tasks: Backg
 
 MAX_INTENTOS_FALLIDOS_CUENTA = 10
 VENTANA_BLOQUEO_CUENTA_MINUTOS = 60
-MENSAJE_BLOQUEO_CUENTA = "Hubo demasiados intentos fallidos con esta cuenta. Esperá una hora o recuperá tu contraseña."
+MENSAJE_BLOQUEO_CUENTA = (
+    "Hubo muchos intentos fallidos. Esperá una hora o recuperá tu contraseña."
+)
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -382,22 +387,31 @@ def verificar_recuperacion(
     """Verifica el código de recuperación y actualiza la contraseña con revocación de sesiones previas."""
     email_clean = normalizar_email(body.email)
     if not verificar_codigo_recuperacion(email_clean, body.codigo):
-        raise HTTPException(status_code=400, detail="El código que ingresaste no es válido. Revisalo o pedí uno nuevo.")
+        raise HTTPException(
+            status_code=400,
+            detail="El código no es correcto. Revisalo o pedí uno nuevo.",
+        )
 
     user = db.execute(select(Usuario).where(func.lower(Usuario.email) == email_clean)).scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="No encontramos una cuenta con esos datos.")
+        raise HTTPException(status_code=404, detail="No hay una cuenta con esos datos.")
 
     if not user.email_verificado:
         raise HTTPException(status_code=400, detail="El email de la cuenta no está verificado.")
 
     pw = body.nueva_password
     if len(pw) < 8 or len(pw) > 128:
-        raise HTTPException(status_code=400, detail="La contraseña debe tener entre 8 y 128 caracteres.")
+        raise HTTPException(
+            status_code=400,
+            detail="La contraseña tiene que tener entre 8 y 128 caracteres.",
+        )
     if not any(c.isupper() for c in pw) or not any(c.islower() for c in pw) or not any(c.isdigit() for c in pw):
         raise HTTPException(
             status_code=400,
-            detail="La contraseña debe incluir al menos una mayúscula, una minúscula y un número."
+            detail=(
+                "La contraseña tiene que tener una mayúscula, "
+                "una minúscula y un número."
+            ),
         )
 
     now = datetime.now(timezone.utc)
@@ -537,7 +551,7 @@ def enviar_codigo_email(
     if not _verificar_rate_limit_reenvio_email(email_clean):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Demasiadas solicitudes de reenvío para este email. Por favor, esperá unos minutos.",
+            detail="Pediste muchos códigos seguidos. Esperá unos minutos.",
         )
 
     user = db.execute(select(Usuario).where(func.lower(Usuario.email) == email_clean)).scalar_one_or_none()
@@ -562,7 +576,7 @@ def verificar_email_link(email: str, codigo: str, request: Request, db: Session 
     if not ok:
         query_params = urllib.parse.urlencode({
             "email": email_clean,
-            "error": error or "Este enlace de verificación no es válido o expiró.",
+            "error": error or "Este enlace venció. Pedí uno nuevo.",
         })
         return RedirectResponse(
             url=f"{settings.FRONTEND_URL}/auth/verificar-email?" + query_params
@@ -572,7 +586,7 @@ def verificar_email_link(email: str, codigo: str, request: Request, db: Session 
     if not user:
         query_params = urllib.parse.urlencode({
             "email": email_clean,
-            "error": "No encontramos una cuenta con esos datos.",
+            "error": "No hay una cuenta con esos datos.",
         })
         return RedirectResponse(
             url=f"{settings.FRONTEND_URL}/auth/verificar-email?" + query_params
@@ -627,7 +641,7 @@ def verificar_email(
 
     user = db.execute(select(Usuario).where(func.lower(Usuario.email) == email_clean)).scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="No encontramos una cuenta con esos datos.")
+        raise HTTPException(status_code=404, detail="No hay una cuenta con esos datos.")
 
     if user.estado == EstadoUsuario.INACTIVO:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=MENSAJE_CUENTA_SUSPENDIDA)
@@ -679,7 +693,10 @@ def login_google(
     email = token_info.get("email")
     if not email:
         logger.warning('[Auth][Google][Backend] Token válido pero sin email')
-        raise HTTPException(status_code=400, detail="El token de Google no contiene un email válido.")
+        raise HTTPException(
+            status_code=400,
+            detail="No se pudo entrar con Google. Probá de nuevo.",
+        )
 
     email_clean = normalizar_email(email)
     user = db.execute(select(Usuario).where(func.lower(Usuario.email) == email_clean)).scalar_one_or_none()
@@ -795,7 +812,10 @@ def solicitar_codigo_vinculacion(
     if not _verificar_rate_limit_codigo_vinculacion(user_key):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Superaste el límite de solicitudes de vinculación (máximo 5 por hora). Por favor, esperá unos minutos.",
+            detail=(
+                "Pediste muchos códigos para vincular (máximo 5 por hora). "
+                "Esperá unos minutos."
+            ),
         )
 
     codigo, expiracion_ts = whatsapp_service.generar_codigo_vinculacion(current_user.id)

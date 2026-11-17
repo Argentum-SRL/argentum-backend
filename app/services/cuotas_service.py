@@ -208,16 +208,22 @@ def cancelar_grupo(
     ).scalar_one_or_none()
 
     if not grupo:
-        raise HTTPException(status_code=404, detail="No encontramos ese grupo de cuotas.")
+        raise HTTPException(status_code=404, detail="No se encontró esa compra en cuotas.")
 
     # Marcar pagadas las cuotas cuya hija ya movió el saldo
     _marcar_pagadas_las_aplicadas(db, grupo)
 
     # 2. Si el grupo ya está COMPLETADO o CANCELADO, fallar con 400
     if grupo.estado == EstadoGrupoCuotas.CANCELADO:
-        raise HTTPException(status_code=400, detail="El grupo ya está cancelado")
+        raise HTTPException(
+            status_code=400,
+            detail="Esa compra en cuotas ya estaba cancelada.",
+        )
     if grupo.estado == EstadoGrupoCuotas.COMPLETADO:
-        raise HTTPException(status_code=400, detail="El grupo ya está completado")
+        raise HTTPException(
+            status_code=400,
+            detail="Esa compra en cuotas ya está pagada.",
+        )
 
     # 3. Obtener todas las cuotas del grupo con pagada == False (cuotas pendientes)
     cuotas_pendientes = db.execute(
@@ -269,11 +275,11 @@ def prepagar_grupo(
     ).scalar_one_or_none()
 
     if not grupo:
-        raise HTTPException(status_code=404, detail="No encontramos ese grupo de cuotas.")
+        raise HTTPException(status_code=404, detail="No se encontró esa compra en cuotas.")
 
     # 2. Si grupo.estado != EstadoGrupoCuotas.ACTIVO, raise HTTPException 400
     if grupo.estado != EstadoGrupoCuotas.ACTIVO:
-        raise HTTPException(status_code=400, detail="El grupo no está activo")
+        raise HTTPException(status_code=400, detail="Esa compra en cuotas no está activa.")
 
     # Marcar pagadas las cuotas cuya hija ya movió el saldo
     _marcar_pagadas_las_aplicadas(db, grupo)
@@ -285,7 +291,7 @@ def prepagar_grupo(
 
     # 4. Si no hay cuotas pendientes, raise HTTPException 400 "No hay cuotas pendientes"
     if not cuotas_pendientes:
-        raise HTTPException(status_code=400, detail="No hay cuotas pendientes")
+        raise HTTPException(status_code=400, detail="No quedan cuotas por pagar.")
 
     # 5. Calcular monto_total_pendiente = sum(monto_efectivo_cuota(cuota) for cuota in cuotas_pendientes)
     monto_total_pendiente = sum(monto_efectivo_cuota(cuota) for cuota in cuotas_pendientes)
@@ -296,7 +302,7 @@ def prepagar_grupo(
     ).scalar_one_or_none()
 
     if not billetera:
-        raise HTTPException(status_code=404, detail="Billetera no encontrada")
+        raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
 
     if getattr(billetera, "es_inversion", False):
         raise HTTPException(
@@ -449,7 +455,7 @@ def eliminar_cuota_individual(
         ).scalar_one_or_none()
 
     if not cuota:
-        raise HTTPException(status_code=404, detail="No encontramos esa cuota.")
+        raise HTTPException(status_code=404, detail="No se encontró esa cuota.")
 
     grupo = db.execute(
         select(GrupoCuotas).where(
@@ -459,7 +465,7 @@ def eliminar_cuota_individual(
     ).scalar_one_or_none()
 
     if not grupo:
-        raise HTTPException(status_code=404, detail="No encontramos el grupo de cuotas.")
+        raise HTTPException(status_code=404, detail="No se encontró esa compra en cuotas.")
 
     # Marcar pagadas las cuotas cuya hija ya movió el saldo
     _marcar_pagadas_las_aplicadas(db, grupo)
@@ -533,7 +539,7 @@ def actualizar_grupo(
                 )
             ).scalar_one_or_none()
             if not tarjeta:
-                raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+                raise HTTPException(status_code=404, detail="No se encontró esa tarjeta.")
         elif grupo.tarjeta_id:
             tarjeta = db.execute(
                 select(TarjetaCredito).where(
@@ -552,7 +558,7 @@ def actualizar_grupo(
                 )
             ).scalar_one_or_none()
             if not billetera:
-                raise HTTPException(status_code=404, detail="Billetera no encontrada")
+                raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
             if tarjeta is not None and billetera.id != tarjeta.billetera_id:
                 raise HTTPException(status_code=400, detail="La billetera no coincide con la tarjeta seleccionada.")
             billetera_final_id = billetera.id
@@ -568,7 +574,7 @@ def actualizar_grupo(
             if data.monto_total_nuevo - total_ya_pagado <= 0:
                 raise HTTPException(
                     status_code=400,
-                    detail="El monto nuevo es menor o igual a lo que ya pagaste. No podés reducir el monto a menos de lo ya abonado."
+                    detail="El monto nuevo tiene que ser más que lo que ya pagaste."
                 )
 
         fecha_ref = data.fecha_referencia or hoy
@@ -666,7 +672,7 @@ def actualizar_grupo(
         if monto_pendiente <= 0:
             raise HTTPException(
                 status_code=400,
-                detail="El monto nuevo es menor o igual a lo que ya pagaste. No podés reducir el monto a menos de lo ya abonado."
+                detail="El monto nuevo tiene que ser más que lo que ya pagaste."
             )
 
         cantidad_pendientes = len(pendientes)
@@ -748,14 +754,14 @@ def adelantar_grupo(
     ).scalar_one_or_none()
 
     if not grupo:
-        raise HTTPException(status_code=404, detail="No encontramos ese grupo de cuotas.")
+        raise HTTPException(status_code=404, detail="No se encontró esa compra en cuotas.")
 
     # 2. Solo para grupos con tarjeta_id y estado activo
     if not grupo.tarjeta_id:
         raise HTTPException(status_code=400, detail="Esta opción es solo para compras con tarjeta.")
 
     if grupo.estado != EstadoGrupoCuotas.ACTIVO:
-        raise HTTPException(status_code=400, detail="El grupo no está activo")
+        raise HTTPException(status_code=400, detail="Esa compra en cuotas no está activa.")
 
     tarjeta = grupo.tarjeta or db.get(TarjetaCredito, grupo.tarjeta_id)
     if not tarjeta:

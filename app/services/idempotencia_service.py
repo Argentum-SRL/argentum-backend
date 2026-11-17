@@ -39,7 +39,10 @@ def leer_clave(request: Request) -> str | None:
     if not PATRON_CLAVE.fullmatch(clave):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="La clave de la operación no es válida.",
+            detail=(
+                "No se pudo guardar. "
+                "Cerrá y volvé a abrir para cargarlo de nuevo."
+            ),
         )
     return clave
 
@@ -104,7 +107,10 @@ def ejecutar(
                 return JSONResponse(status_code=fila.codigo_http, content=fila.respuesta)
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Esta operación ya se registró con otros datos. Cerrá y volvé a abrir para cargar una nueva.",
+                detail=(
+                    "Esto ya se guardó con otros datos. "
+                    "Cerrá y volvé a abrir para cargar uno nuevo."
+                ),
             )
 
         if fila is not None and fila.codigo_http == 0:
@@ -121,11 +127,14 @@ def ejecutar(
                         return JSONResponse(status_code=fila.codigo_http, content=fila.respuesta)
                     raise HTTPException(
                         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail="Esta operación ya se registró con otros datos. Cerrá y volvé a abrir para cargar una nueva.",
+                        detail=(
+                            "Esto ya se guardó con otros datos. "
+                            "Cerrá y volvé a abrir para cargar uno nuevo."
+                        ),
                     )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Esta operación se está procesando. Probá de nuevo en un momento.",
+                detail="Se está guardando. Probá de nuevo en un momento.",
             )
 
         fila_actual = None
@@ -165,11 +174,14 @@ def ejecutar(
                     )
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="Esta operación ya se registró con otros datos. Cerrá y volvé a abrir para cargar una nueva.",
+                    detail=(
+                        "Esto ya se guardó con otros datos. "
+                        "Cerrá y volvé a abrir para cargar uno nuevo."
+                    ),
                 )
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Esta operación se está procesando. Probá de nuevo en un momento.",
+                detail="Se está guardando. Probá de nuevo en un momento.",
             )
 
         resultado = operar()

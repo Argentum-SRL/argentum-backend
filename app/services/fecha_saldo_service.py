@@ -16,6 +16,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from app.core.reglas_texto_web import fecha_dm
 from app.models.billetera import Billetera
 from app.models.rendimiento_billetera import RendimientoBilletera
 from app.models.transaccion import Transaccion
@@ -52,7 +53,7 @@ def _validar_y_obtener_billetera(
     if not billetera:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No encontramos esa billetera.",
+            detail="No se encontró esa billetera.",
         )
 
     # 1. Billetera sin punto de partida
@@ -70,8 +71,11 @@ def _validar_y_obtener_billetera(
 
     # 1b. Control de saldo registrado (decisión 4)
     if billetera.fecha_ultimo_control is not None:
-        fecha_ctrl_str = billetera.fecha_ultimo_control.strftime("%d/%m/%Y")
-        msg = f"Este saldo ya lo actualizaste el {fecha_ctrl_str}: los movimientos anteriores no lo cambian."
+        fecha_ctrl_str = fecha_dm(billetera.fecha_ultimo_control)
+        msg = (
+            f"Este saldo ya lo actualizaste el {fecha_ctrl_str}: "
+            "los movimientos anteriores no lo cambian."
+        )
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={

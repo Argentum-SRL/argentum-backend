@@ -31,7 +31,7 @@ def obtener_transferencia(db: Session, usuario_id: UUID, transferencia_id: UUID)
     ).scalar_one_or_none()
     
     if not tr:
-        raise HTTPException(status_code=404, detail="Transferencia no encontrada")
+        raise HTTPException(status_code=404, detail="No se encontró esa transferencia.")
     return tr
 
 
@@ -65,20 +65,26 @@ def crear_transferencia(
     b_destino = billeteras.get(data.billetera_destino_id)
 
     if not b_origen:
-        raise HTTPException(status_code=404, detail="No encontramos la billetera de origen.")
+        raise HTTPException(status_code=404, detail="No se encontró la billetera de origen.")
     if not b_destino:
-        raise HTTPException(status_code=404, detail="No encontramos la billetera de destino.")
+        raise HTTPException(status_code=404, detail="No se encontró la billetera de destino.")
 
     # Validar que las billeteras estén activas
     if b_origen.estado != EstadoBilletera.ACTIVA:
         raise HTTPException(
             status_code=400,
-            detail=f"La billetera de origen '{b_origen.nombre}' está archivada y no puede usarse para transferencias."
+            detail=(
+                f"La billetera {b_origen.nombre} está archivada. "
+                "Reactivala o elegí otra."
+            ),
         )
     if b_destino.estado != EstadoBilletera.ACTIVA:
         raise HTTPException(
             status_code=400,
-            detail=f"La billetera de destino '{b_destino.nombre}' está archivada y no puede usarse para transferencias."
+            detail=(
+                f"La billetera {b_destino.nombre} está archivada. "
+                "Reactivala o elegí otra."
+            ),
         )
 
     # 2. Validar montos y monedas
@@ -87,7 +93,7 @@ def crear_transferencia(
 
     monto_origen = data.monto_origen if data.monto_origen is not None else data.monto
     if monto_origen <= Decimal("0"):
-        raise HTTPException(status_code=400, detail="El monto de origen debe ser mayor a 0.")
+        raise HTTPException(status_code=400, detail="Ingresá un monto mayor a 0.")
 
     es_misma_moneda = (b_origen.moneda == b_destino.moneda)
 
@@ -97,7 +103,10 @@ def crear_transferencia(
         if data.monto_destino is not None and data.monto_destino != monto_origen:
             raise HTTPException(
                 status_code=400,
-                detail="En transferencias entre billeteras de la misma moneda, el monto de destino debe ser igual al monto de origen."
+                detail=(
+                    "Entre billeteras de la misma moneda, "
+                    "sale y entra el mismo monto."
+                ),
             )
         moneda_origen = b_origen.moneda
         moneda_destino = b_destino.moneda
@@ -131,7 +140,7 @@ def crear_transferencia(
         else:
             raise HTTPException(
                 status_code=400,
-                detail="Para transferencias entre billeteras de distinta moneda debes ingresar el monto recibido en destino."
+                detail="Ingresá cuánto entró en la billetera de destino.",
             )
 
     # 3. Manejo de comisión opcional (gasto real)
@@ -151,7 +160,10 @@ def crear_transferencia(
         else:
             raise HTTPException(
                 status_code=400,
-                detail="La moneda de la comisión debe coincidir con la billetera de origen o de destino."
+                detail=(
+                    "La comisión tiene que estar en la moneda "
+                    "de una de las dos billeteras."
+                ),
             )
 
         # Generar transacción de egreso por la comisión (Categoría Banco -> Subcategoría Comisiones y gastos bancarios)
@@ -244,12 +256,12 @@ def eliminar_transferencia(
     if not b_origen:
         raise HTTPException(
             status_code=500,
-            detail=f"Error crítico: No se encontró la billetera de origen para revertir la transferencia {tr.id}."
+            detail="No se pudo eliminar la transferencia. Probá de nuevo.",
         )
     if not b_destino:
         raise HTTPException(
             status_code=500,
-            detail=f"Error crítico: No se encontró la billetera de destino para revertir la transferencia {tr.id}."
+            detail="No se pudo eliminar la transferencia. Probá de nuevo.",
         )
 
     monto_origen = tr.monto_origen if tr.monto_origen is not None else tr.monto

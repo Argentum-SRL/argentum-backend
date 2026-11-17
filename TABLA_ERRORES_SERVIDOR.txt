@@ -1,0 +1,527 @@
+TABLA DE ERRORES DEL SERVIDOR — texto viejo => texto nuevo (fase_notif_web2, reglas REGLAS_TEXTOS_WEB.md)
+DÓNDE es archivo:línea del backend en 5bfbd39 (antes de fase_notif_web1; las líneas pueden haberse corrido unas pocas). {x} es un dato; " / " separa variantes (singular / plural). Lo que va entre paréntesis o después de "Con 1 tarjeta:" / "Con varias:" es indicación.
+Los textos de error que ya cumplen las reglas no están en la tabla y no se tocan. Un texto viejo que no está en la tabla y no cumple: se reescribe con las reglas y las formas de esta tabla ("SIN TABLA").
+
+VIEJO: Token de acceso inválido o expirado
+NUEVO: Tu sesión terminó. Volvé a entrar.
+DÓNDE: app/core/auth.py:97, app/core/auth.py:331, app/routers/notificaciones.py:170, app/routers/notificaciones.py:163, app/routers/notificaciones.py:179
+
+VIEJO: Refresh token inválido, expirado o ya utilizado
+NUEVO: Tu sesión terminó. Volvé a entrar.
+DÓNDE: app/core/auth.py:177
+
+VIEJO: Refresh token inválido
+NUEVO: Tu sesión terminó. Volvé a entrar.
+DÓNDE: app/core/auth.py:152
+
+VIEJO: No encontramos una cuenta con esos datos.
+NUEVO: No hay una cuenta con esos datos.
+DÓNDE: app/core/auth.py:302, app/routers/auth.py:389, app/routers/auth.py:630, app/routers/notificaciones.py:192
+
+VIEJO: Sesión revocada. Por favor iniciá sesión nuevamente.
+NUEVO: Tu sesión se cerró. Volvé a entrar.
+DÓNDE: app/core/auth.py:170, app/core/auth.py:325, app/routers/notificaciones.py:201
+
+VIEJO: El parámetro dias debe ser 1, 7 o 30.
+NUEVO: Elegí 1, 7 o 30 días.
+DÓNDE: app/routers/admin.py:630, app/routers/admin.py:647
+
+VIEJO: ID de informe requerido
+NUEVO: Falta elegir el informe.
+DÓNDE: app/routers/analisis.py:195, app/routers/analisis.py:211, app/routers/analisis.py:231
+
+VIEJO: Informe no encontrado
+NUEVO: No se encontró ese informe.
+DÓNDE: app/routers/analisis.py:198, app/routers/analisis.py:219, app/routers/analisis.py:234
+
+VIEJO: La cantidad de meses de proyección debe ser 6 o 12.
+NUEVO: Elegí 6 o 12 meses.
+DÓNDE: app/routers/analisis.py:290
+
+VIEJO: ID inválido para {field_name}
+NUEVO: No se encontró lo que elegiste. Volvé a elegirlo.
+DÓNDE: app/routers/analisis.py:37
+
+VIEJO: No encontramos esa billetera.
+NUEVO: No se encontró esa billetera.
+DÓNDE: app/routers/analisis.py:279, app/routers/billeteras.py:290, app/routers/billeteras.py:435, app/routers/billeteras.py:530, app/routers/billeteras.py:618, app/routers/billeteras.py:631, app/routers/billeteras.py:647, app/services/ajuste_saldo_service.py:257, app/services/ajuste_saldo_service.py:421, app/services/ajuste_saldo_service.py:515, app/services/fecha_saldo_service.py:53, app/services/pregunta_saldo_service.py:115, app/services/rendimiento_billetera_service.py:41, app/services/rendimiento_billetera_service.py:160, app/services/transaccion_service.py:239, app/services/transaccion_service.py:532, app/services/transaccion_service.py:909, app/services/transaccion_service.py:618
+
+VIEJO: No encontramos esa tarjeta.
+NUEVO: No se encontró esa tarjeta.
+DÓNDE: app/routers/analisis.py:284, app/routers/tarjetas.py:111, app/routers/tarjetas.py:130, app/services/pago_resumen_service.py:153, app/services/pago_resumen_service.py:626, app/services/tarjeta_service.py:308, app/services/tarjeta_service.py:431, app/services/tarjeta_service.py:503, app/services/tarjeta_service.py:519, app/services/tarjeta_service.py:535
+
+VIEJO: Tipo de bloque desconocido: '{b_item}'.
+NUEVO: Ese bloque no existe. Elegí otro.
+DÓNDE: app/routers/analisis.py:308
+
+VIEJO: El ciclo '{ciclo_a}' no se encuentra entre los ciclos disponibles.
+NUEVO: Ese ciclo no tiene datos. Elegí otro.
+DÓNDE: app/routers/analisis.py:333
+
+VIEJO: El ciclo '{ciclo_b}' no se encuentra entre los ciclos disponibles.
+NUEVO: Ese ciclo no tiene datos. Elegí otro.
+DÓNDE: app/routers/analisis.py:351
+
+VIEJO: La verificación de seguridad (captcha) falló o es inválida. Por favor, intentá de nuevo.
+NUEVO: No se pudo hacer la verificación de seguridad. Probá de nuevo.
+DÓNDE: app/routers/auth.py:168
+
+VIEJO: El código que ingresaste no es válido. Revisalo o pedí uno nuevo.
+NUEVO: El código no es correcto. Revisalo o pedí uno nuevo.
+DÓNDE: app/routers/auth.py:385
+
+VIEJO: La contraseña debe tener entre 8 y 128 caracteres.
+NUEVO: La contraseña tiene que tener entre 8 y 128 caracteres.
+DÓNDE: app/routers/auth.py:396
+
+VIEJO: La contraseña debe incluir al menos una mayúscula, una minúscula y un número.
+NUEVO: La contraseña tiene que tener una mayúscula, una minúscula y un número.
+DÓNDE: app/routers/auth.py:398
+
+VIEJO: Demasiadas solicitudes de reenvío para este email. Por favor, esperá unos minutos.
+NUEVO: Pediste muchos códigos seguidos. Esperá unos minutos.
+DÓNDE: app/routers/auth.py:538
+
+VIEJO: El token de Google no contiene un email válido.
+NUEVO: No se pudo entrar con Google. Probá de nuevo.
+DÓNDE: app/routers/auth.py:682
+
+VIEJO: Superaste el límite de solicitudes de vinculación (máximo 5 por hora). Por favor, esperá unos minutos.
+NUEVO: Pediste muchos códigos para vincular (máximo 5 por hora). Esperá unos minutos.
+DÓNDE: app/routers/auth.py:796
+
+VIEJO: Una billetera de efectivo no puede tener tasa
+NUEVO: Una billetera de efectivo no puede tener tasa.
+DÓNDE: app/routers/billeteras.py:354, app/routers/billeteras.py:439, app/routers/billeteras.py:444
+
+VIEJO: Las billeteras de efectivo no pueden eliminarse
+NUEVO: Las billeteras de efectivo no se pueden eliminar.
+DÓNDE: app/routers/billeteras.py:533
+
+VIEJO: No se puede eliminar la billetera porque tiene transacciones asociadas. Por favor, archivala para mantener el historial.
+NUEVO: Esta billetera tiene transacciones: no se puede eliminar. Archivala.
+DÓNDE: app/routers/billeteras.py:558
+
+VIEJO: No se puede eliminar la billetera porque tiene transferencias internas asociadas. Por favor, archivala.
+NUEVO: Esta billetera tiene transferencias: no se puede eliminar. Archivala.
+DÓNDE: app/routers/billeteras.py:564
+
+VIEJO: No se puede eliminar la billetera porque tiene suscripciones activas asociadas. Por favor, archivala o cancelá las suscripciones.
+NUEVO: Esta billetera tiene suscripciones activas: archivala o cancelá las suscripciones.
+DÓNDE: app/routers/billeteras.py:570
+
+VIEJO: No se puede eliminar la billetera porque tiene rendimientos asociados. Por favor, archivala.
+NUEVO: Esta billetera tiene rendimientos: no se puede eliminar. Archivala.
+DÓNDE: app/routers/billeteras.py:576
+
+VIEJO: No se puede eliminar la billetera porque tiene ajustes de saldo. Por favor, archivala.
+NUEVO: Esta billetera tiene ajustes de saldo: no se puede eliminar. Archivala.
+DÓNDE: app/routers/billeteras.py:582
+
+VIEJO: No podés cambiar la moneda de una billetera que ya tiene transacciones o transferencias asociadas.
+NUEVO: No se puede cambiar la moneda de una billetera con transacciones o transferencias.
+DÓNDE: app/routers/billeteras.py:499
+
+VIEJO: No podés eliminar esta billetera porque {'la tarjeta' if ...} {nombres} {'tiene' if ...} transacciones registradas. Archivá o eliminá {'esa tarjeta' if ...} primero.
+NUEVO: Con 1 tarjeta: La tarjeta {nombres} tiene transacciones. Archivala o eliminala primero. / Con varias: Las tarjetas {nombres} tienen transacciones. Archivalas o eliminalas primero.
+DÓNDE: app/routers/billeteras.py:600
+
+VIEJO: Respuesta no válida.
+NUEVO: Elegí una de las respuestas.
+DÓNDE: app/routers/consejos.py:70
+
+VIEJO: Debes especificar ambas fechas ('desde' y 'hasta') para consultar un rango personalizado.
+NUEVO: Elegí las dos fechas del rango.
+DÓNDE: app/routers/dashboard.py:47
+
+VIEJO: La fecha de inicio ('desde') no puede ser posterior a la fecha de fin ('hasta').
+NUEVO: La fecha de inicio tiene que ser antes de la de fin.
+DÓNDE: app/routers/dashboard.py:52
+
+VIEJO: Formato de ID de billetera inválido
+NUEVO: No se encontró esa billetera.
+DÓNDE: app/routers/dashboard.py:31
+
+VIEJO: Formato de fecha inválido para '{param_name}' (se requiere YYYY-MM-DD)
+NUEVO: Revisá la fecha.
+DÓNDE: app/routers/dashboard.py:40
+
+VIEJO: No encontramos ese grupo de cuotas.
+NUEVO: No se encontró esa compra en cuotas.
+DÓNDE: app/routers/grupos_cuotas.py:243, app/routers/grupos_cuotas.py:272, app/services/cuotas_service.py:210, app/services/cuotas_service.py:271, app/services/cuotas_service.py:750
+
+VIEJO: Cada cantidad de cuotas debe estar entre 1 y 120.
+NUEVO: Las cuotas tienen que ser entre 1 y 120.
+DÓNDE: app/routers/grupos_cuotas.py:175
+
+VIEJO: No encontramos esa memoria de comercio.
+NUEVO: No se encontró ese comercio.
+DÓNDE: app/routers/memoria_comercios.py:114, app/routers/memoria_comercios.py:173
+
+VIEJO: Token de acceso requerido
+NUEVO: Entrá a tu cuenta para seguir.
+DÓNDE: app/routers/notificaciones.py:154
+
+VIEJO: Tipo de ciclo no válido.
+NUEVO: Elegí cómo empieza tu mes.
+DÓNDE: app/routers/onboarding.py:271
+
+VIEJO: Tenés que ser mayor de 18 años para crear una cuenta en Argentum
+NUEVO: Tenés que ser mayor de 18 años para crear una cuenta.
+DÓNDE: app/routers/onboarding.py:64, app/services/usuario_service.py:74
+
+VIEJO: El valor de sexo no es valido.
+NUEVO: Elegí una de las opciones.
+DÓNDE: app/routers/onboarding.py:70
+
+VIEJO: Tipo de dólar no válido.
+NUEVO: Elegí qué dólar usar.
+DÓNDE: app/routers/onboarding.py:143, app/services/usuario_service.py:277
+
+VIEJO: El día debe ser un número entre 1 y 31.
+NUEVO: El día tiene que ser del 1 al 31.
+DÓNDE: app/routers/onboarding.py:194
+
+VIEJO: Error al calcular la fecha de cobro: {str(e)}
+NUEVO: No se pudo calcular la fecha de cobro. Revisá el día elegido.
+DÓNDE: app/routers/onboarding.py:212, app/routers/onboarding.py:269
+
+VIEJO: Regla de ciclo no válida.
+NUEVO: Elegí cómo empieza tu mes.
+DÓNDE: app/routers/onboarding.py:218
+
+VIEJO: Regla de ciclo no válida
+NUEVO: Elegí cómo empieza tu mes.
+DÓNDE: app/services/usuario_service.py:241
+
+VIEJO: No encontramos ese ajuste de saldo.
+NUEVO: No se encontró ese control de saldo.
+DÓNDE: app/services/ajuste_saldo_service.py:481, app/services/ajuste_saldo_service.py:484, app/services/ajuste_saldo_service.py:490
+
+VIEJO: El grupo ya está cancelado
+NUEVO: Esa compra en cuotas ya estaba cancelada.
+DÓNDE: app/services/cuotas_service.py:217
+
+VIEJO: El grupo ya está completado
+NUEVO: Esa compra en cuotas ya está pagada.
+DÓNDE: app/services/cuotas_service.py:219
+
+VIEJO: El grupo no está activo
+NUEVO: Esa compra en cuotas no está activa.
+DÓNDE: app/services/cuotas_service.py:275, app/services/cuotas_service.py:757
+
+VIEJO: No hay cuotas pendientes
+NUEVO: No quedan cuotas por pagar.
+DÓNDE: app/services/cuotas_service.py:287
+
+VIEJO: Billetera no encontrada
+NUEVO: No se encontró esa billetera.
+DÓNDE: app/services/cuotas_service.py:298, app/services/cuotas_service.py:554, app/services/suscripcion_service.py:94, app/services/suscripcion_service.py:238, app/services/tarjeta_service.py:232
+
+VIEJO: No encontramos esa cuota.
+NUEVO: No se encontró esa cuota.
+DÓNDE: app/services/cuotas_service.py:451
+
+VIEJO: No encontramos el grupo de cuotas.
+NUEVO: No se encontró esa compra en cuotas.
+DÓNDE: app/services/cuotas_service.py:461
+
+VIEJO: El monto nuevo es menor o igual a lo que ya pagaste. No podés reducir el monto a menos de lo ya abonado.
+NUEVO: El monto nuevo tiene que ser más que lo que ya pagaste.
+DÓNDE: app/services/cuotas_service.py:666, app/services/cuotas_service.py:568
+
+VIEJO: Tarjeta no encontrada
+NUEVO: No se encontró esa tarjeta.
+DÓNDE: app/services/cuotas_service.py:535, app/services/suscripcion_service.py:99, app/services/suscripcion_service.py:244, app/services/tarjeta_service.py:604, app/services/transaccion_service.py:214
+
+VIEJO: Formato de ID de categoría inválido
+NUEVO: No se encontró esa categoría.
+DÓNDE: app/services/dashboard_service.py:561
+
+VIEJO: Dolar API incompleta. Faltan: {', '.join(faltantes)}
+NUEVO: No se pudo ver el dólar de hoy. Probá en unos minutos.
+DÓNDE: app/services/dolar_service.py:76
+
+VIEJO: Respuesta invalida de Dolar API.
+NUEVO: No se pudo ver el dólar de hoy. Probá en unos minutos.
+DÓNDE: app/services/dolar_service.py:100
+
+VIEJO: El código de verificación ya no es válido. Por favor, solicitá un código nuevo.
+NUEVO: El código venció. Pedí uno nuevo.
+DÓNDE: app/services/email_service.py:325
+
+VIEJO: La clave de la operación no es válida.
+NUEVO: No se pudo guardar. Cerrá y volvé a abrir para cargarlo de nuevo.
+DÓNDE: app/services/idempotencia_service.py:40
+
+VIEJO: Esta operación ya se registró con otros datos. Cerrá y volvé a abrir para cargar una nueva.
+NUEVO: Esto ya se guardó con otros datos. Cerrá y volvé a abrir para cargar uno nuevo.
+DÓNDE: app/services/idempotencia_service.py:105, app/services/idempotencia_service.py:122, app/services/idempotencia_service.py:166
+
+VIEJO: Esta operación se está procesando. Probá de nuevo en un momento.
+NUEVO: Se está guardando. Probá de nuevo en un momento.
+DÓNDE: app/services/idempotencia_service.py:126, app/services/idempotencia_service.py:170
+
+VIEJO: No pudimos reconocer el comercio en esa descripción.
+NUEVO: No se reconoció el comercio en esa descripción.
+DÓNDE: app/services/memoria_comercio_service.py:97
+
+VIEJO: No encontramos esa meta.
+NUEVO: No se encontró esa meta.
+DÓNDE: app/services/meta_service.py:47
+
+VIEJO: No se puede borrar este aporte porque la meta quedaría en negativo. Borrá primero el retiro.
+NUEVO: Si se elimina este aporte, la meta queda en negativo. Eliminá primero el retiro.
+DÓNDE: app/services/meta_service.py:83
+
+VIEJO: No se puede eliminar una meta que aún tiene fondos. Por favor, retirá el dinero primero.
+NUEVO: La meta todavía tiene plata. Retirala antes de eliminarla.
+DÓNDE: app/services/meta_service.py:190
+
+VIEJO: Tenés que indicar una cotización válida mayor a cero para operar entre monedas distintas.
+NUEVO: Ingresá una cotización mayor a 0.
+DÓNDE: app/services/meta_service.py:231
+
+VIEJO: Saldo insuficiente en la billetera '{billetera.nombre}'.
+NUEVO: No te alcanza el saldo de {billetera.nombre}.
+DÓNDE: app/services/meta_service.py:304
+
+VIEJO: La cotización ingresada ({...}) difiere más del 30% de la cotización actual ({...}). Ingresá un valor entre {min} y {max}.
+NUEVO: Esa cotización está muy lejos de la de hoy ({referencia}). Ingresá un valor entre {min} y {max}.
+DÓNDE: app/services/meta_service.py:273
+
+VIEJO: La cotización debe ser mayor a 0.
+NUEVO: Ingresá una cotización mayor a 0.
+DÓNDE: app/services/pago_resumen_service.py:615
+
+VIEJO: El monto en pesos debe ser mayor a 0.
+NUEVO: Ingresá un monto en pesos mayor a 0.
+DÓNDE: app/services/pago_resumen_service.py:617
+
+VIEJO: La percepción debe ser mayor o igual a 0.
+NUEVO: El impuesto no puede ser negativo.
+DÓNDE: app/services/pago_resumen_service.py:619
+
+VIEJO: No hay deuda pendiente en {moneda_str}. Quedan {n} cuota(s) en otra moneda pendientes de pago.
+NUEVO: No hay nada por pagar en {pesos | dólares}. Queda 1 cuota en otra moneda. / Quedan {n} cuotas en otra moneda.
+DÓNDE: app/services/pago_resumen_service.py:228
+
+VIEJO: No encontramos la billetera seleccionada.
+NUEVO: No se encontró esa billetera.
+DÓNDE: app/services/pago_resumen_service.py:268, app/services/pago_resumen_service.py:320, app/services/pago_resumen_service.py:300
+
+VIEJO: Para pagar en pesos debés seleccionar una billetera en pesos.
+NUEVO: Para pagar en pesos, elegí una billetera en pesos.
+DÓNDE: app/services/pago_resumen_service.py:275
+
+VIEJO: El monto a pagar ({monto}) no puede superar el total a pagar del resumen ({total}).
+NUEVO: El pago ({monto}) no puede ser más que el total del resumen ({total}).
+DÓNDE: app/services/pago_resumen_service.py:241
+
+VIEJO: Para pesificar consumos en dólares debés usar una billetera en pesos.
+NUEVO: Para pagar en pesos los consumos en dólares, elegí una billetera en pesos.
+DÓNDE: app/services/pago_resumen_service.py:327
+
+VIEJO: No tenés ninguna billetera en dólares disponible para realizar este pago. Podés pesificar los consumos en dólares para pagarlos en pesos desde tu cuenta bancaria.
+NUEVO: No tenés una billetera en dólares. Podés pagar en pesos los consumos en dólares.
+DÓNDE: app/services/pago_resumen_service.py:289
+
+VIEJO: La billetera seleccionada debe ser en dólares. Si preferís pagar en pesos, elegí la opción de pesificar.
+NUEVO: Elegí una billetera en dólares, o la opción de pagar en pesos.
+DÓNDE: app/services/pago_resumen_service.py:307
+
+VIEJO: No hay dólar oficial cargado para el {fecha_ref}. Ingresá la cotización a mano.
+NUEVO: No está el dólar oficial del {fecha d/mm}. Ingresá la cotización a mano.
+DÓNDE: app/services/pago_resumen_service.py:335
+
+VIEJO: Decisión inválida: {decision}
+NUEVO: Elegí una de las opciones.
+DÓNDE: app/services/patrones_service.py:393
+
+VIEJO: Debe seleccionar al menos una categoría
+NUEVO: Elegí al menos una categoría.
+DÓNDE: app/services/presupuesto_service.py:31
+
+VIEJO: Monto límite debe ser positivo
+NUEVO: El límite tiene que ser mayor a 0.
+DÓNDE: app/services/presupuesto_service.py:497, app/services/presupuesto_service.py:651
+
+VIEJO: Ya tenés un presupuesto activo o pausado con ese nombre
+NUEVO: Ya tenés un presupuesto con ese nombre. Elegí otro.
+DÓNDE: app/services/presupuesto_service.py:510, app/services/presupuesto_service.py:611
+
+VIEJO: No encontramos ese presupuesto.
+NUEVO: No se encontró ese presupuesto.
+DÓNDE: app/services/presupuesto_service.py:587, app/services/presupuesto_service.py:729, app/services/presupuesto_service.py:741
+
+VIEJO: Solo se pueden renovar presupuestos activos
+NUEVO: Solo se puede empezar un ciclo nuevo en un presupuesto activo.
+DÓNDE: app/services/presupuesto_service.py:1009
+
+VIEJO: El presupuesto ya tiene un período activo vigente
+NUEVO: El presupuesto ya tiene un ciclo en curso.
+DÓNDE: app/services/presupuesto_service.py:1014
+
+VIEJO: Categoría no encontrada
+NUEVO: No se encontró esa categoría.
+DÓNDE: app/services/presupuesto_service.py:41, app/services/presupuesto_service.py:54
+
+VIEJO: Moneda inválida
+NUEVO: Elegí pesos o dólares.
+DÓNDE: app/services/presupuesto_service.py:518, app/services/presupuesto_service.py:620
+
+VIEJO: Periodo inválido
+NUEVO: Elegí cada cuánto se renueva.
+DÓNDE: app/services/presupuesto_service.py:522, app/services/presupuesto_service.py:633
+
+VIEJO: Tipo de renovación inválido
+NUEVO: Elegí cómo se renueva.
+DÓNDE: app/services/presupuesto_service.py:526, app/services/presupuesto_service.py:625
+
+VIEJO: Los presupuestos solo pueden asociarse a categorías de egreso
+NUEVO: Un presupuesto solo puede tener categorías de gasto.
+DÓNDE: app/services/presupuesto_service.py:44, app/services/presupuesto_service.py:57
+
+VIEJO: La subcategoría seleccionada no pertenece a la categoría indicada
+NUEVO: Esa subcategoría no es de la categoría elegida.
+DÓNDE: app/services/presupuesto_service.py:65
+
+VIEJO: Elegí una opción válida.
+NUEVO: Elegí una de las opciones.
+DÓNDE: app/services/que_es_plata_service.py:195
+
+VIEJO: El monto del rendimiento debe ser mayor a 0.
+NUEVO: Ingresá un rendimiento mayor a 0.
+DÓNDE: app/services/rendimiento_billetera_service.py:169
+
+VIEJO: El monto debe ser mayor a cero.
+NUEVO: Ingresá un monto mayor a 0.
+DÓNDE: app/services/suscripcion_service.py:79, app/services/suscripcion_service.py:341, app/services/suscripcion_service.py:303
+
+VIEJO: No encontramos esa suscripción.
+NUEVO: No se encontró esa suscripción.
+DÓNDE: app/services/suscripcion_service.py:196, app/services/suscripcion_service.py:217, app/services/suscripcion_service.py:338, app/services/suscripcion_service.py:357, app/services/suscripcion_service.py:388
+
+VIEJO: Frecuencia de suscripción no válida.
+NUEVO: Elegí cada cuánto se cobra.
+DÓNDE: app/services/suscripcion_service.py:85, app/services/suscripcion_service.py:277
+
+VIEJO: La categoría seleccionada no es válida o no es de egreso.
+NUEVO: Elegí una categoría de gasto.
+DÓNDE: app/services/suscripcion_service.py:106, app/services/suscripcion_service.py:259
+
+VIEJO: Estado de suscripción no válido.
+NUEVO: Ese estado no existe para una suscripción.
+DÓNDE: app/services/suscripcion_service.py:297
+
+VIEJO: La moneda de la tarjeta debe coincidir con la moneda de la billetera asociada.
+NUEVO: La tarjeta tiene que estar en la misma moneda que su billetera.
+DÓNDE: app/services/tarjeta_service.py:243, app/services/tarjeta_service.py:314
+
+VIEJO: No encontramos esa transacción.
+NUEVO: No se encontró esa transacción.
+DÓNDE: app/services/transaccion_service.py:126
+
+VIEJO: La moneda de la operación ({op_val}) no coincide con la moneda de la billetera ({bill_val}).
+NUEVO: La transacción es en {pesos | dólares} y la billetera en {pesos | dólares}. Elegí otra billetera.
+DÓNDE: app/services/transaccion_service.py:158
+
+VIEJO: Debés seleccionar una categoría.
+NUEVO: Elegí una categoría.
+DÓNDE: app/services/transaccion_service.py:270
+
+VIEJO: No encontramos esa categoría.
+NUEVO: No se encontró esa categoría.
+DÓNDE: app/services/transaccion_service.py:281
+
+VIEJO: No podés modificar los campos financieros de una transacción en cuotas ({campos}). Solo podés editar la descripción y la categoría.
+NUEVO: En una compra en cuotas solo se pueden cambiar la descripción y la categoría.
+DÓNDE: app/services/transaccion_service.py:564
+
+VIEJO: Transferencia no encontrada
+NUEVO: No se encontró esa transferencia.
+DÓNDE: app/services/transferencia_service.py:34
+
+VIEJO: No encontramos la billetera de origen.
+NUEVO: No se encontró la billetera de origen.
+DÓNDE: app/services/transferencia_service.py:68
+
+VIEJO: No encontramos la billetera de destino.
+NUEVO: No se encontró la billetera de destino.
+DÓNDE: app/services/transferencia_service.py:70
+
+VIEJO: La billetera de origen '{b_origen.nombre}' está archivada y no puede usarse para transferencias.
+NUEVO: La billetera {nombre} está archivada. Reactivala o elegí otra.
+DÓNDE: app/services/transferencia_service.py:74
+
+VIEJO: La billetera de destino '{b_destino.nombre}' está archivada y no puede usarse para transferencias.
+NUEVO: La billetera {nombre} está archivada. Reactivala o elegí otra.
+DÓNDE: app/services/transferencia_service.py:79
+
+VIEJO: El monto de origen debe ser mayor a 0.
+NUEVO: Ingresá un monto mayor a 0.
+DÓNDE: app/services/transferencia_service.py:90
+
+VIEJO: Error crítico: No se encontró la billetera de origen para revertir la transferencia {tr.id}.
+NUEVO: No se pudo eliminar la transferencia. Probá de nuevo.
+DÓNDE: app/services/transferencia_service.py:245
+
+VIEJO: Error crítico: No se encontró la billetera de destino para revertir la transferencia {tr.id}.
+NUEVO: No se pudo eliminar la transferencia. Probá de nuevo.
+DÓNDE: app/services/transferencia_service.py:250
+
+VIEJO: En transferencias entre billeteras de la misma moneda, el monto de destino debe ser igual al monto de origen.
+NUEVO: Entre billeteras de la misma moneda, sale y entra el mismo monto.
+DÓNDE: app/services/transferencia_service.py:98
+
+VIEJO: Para transferencias entre billeteras de distinta moneda debes ingresar el monto recibido en destino.
+NUEVO: Ingresá cuánto entró en la billetera de destino.
+DÓNDE: app/services/transferencia_service.py:132
+
+VIEJO: La moneda de la comisión debe coincidir con la billetera de origen o de destino.
+NUEVO: La comisión tiene que estar en la moneda de una de las dos billeteras.
+DÓNDE: app/services/transferencia_service.py:152
+
+VIEJO: El número de teléfono debe vincularse directamente desde WhatsApp iniciando una conversación desde la aplicación.
+NUEVO: El teléfono se vincula desde WhatsApp, con el botón Vincular de tu perfil.
+DÓNDE: app/services/usuario_service.py:206
+
+VIEJO: No encontramos al usuario.
+NUEVO: No se encontró la cuenta.
+DÓNDE: app/services/usuario_service.py:53
+
+VIEJO: Nombre y apellido son obligatorios
+NUEVO: Completá el nombre y el apellido.
+DÓNDE: app/services/usuario_service.py:60
+
+VIEJO: Tu cuenta usa Google para autenticarse. El email lo gestiona Google directamente.
+NUEVO: Entrás con Google: el email se cambia en tu cuenta de Google.
+DÓNDE: app/services/usuario_service.py:88
+
+VIEJO: Ingresá un formato de email válido.
+NUEVO: Revisá el email.
+DÓNDE: app/services/usuario_service.py:95
+
+VIEJO: Formato de imagen no permitido (jpg, jpeg, png, webp)
+NUEVO: La foto tiene que ser jpg, png o webp.
+DÓNDE: app/services/usuario_service.py:295
+
+VIEJO: La imagen no debe superar los 5MB
+NUEVO: La foto es muy pesada (máximo 5 MB). Elegí una más liviana.
+DÓNDE: app/services/usuario_service.py:301
+
+VIEJO: El día fijo debe ser un número entre 1 y 31
+NUEVO: El día tiene que ser del 1 al 31.
+DÓNDE: app/services/usuario_service.py:236
+
+VIEJO: Demasiadas solicitudes. Por favor, esperá un momento antes de volver a intentar.
+NUEVO: Hiciste muchos pedidos seguidos. Esperá un momento y probá de nuevo.
+DÓNDE: app/main.py (manejadores de errores)
+
+VIEJO: Hay campos con errores. Revisá los datos e intentá de nuevo.
+NUEVO: Hay datos con errores. Revisalos y probá de nuevo.
+DÓNDE: app/main.py (manejadores de errores)
+
+VIEJO: Error en la solicitud.
+NUEVO: No se pudo hacer el pedido. Probá de nuevo.
+DÓNDE: app/main.py (manejadores de errores)

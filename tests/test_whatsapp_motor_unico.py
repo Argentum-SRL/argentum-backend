@@ -276,7 +276,7 @@ def test_05_categoria_invalida_descarta_item(db):
         tx, motivo = _registrar_item_batch(datos, u.id, [b], [], db)
 
     assert tx is None
-    assert motivo == "No pude anotar Kiosco: Debés seleccionar una categoría."
+    assert motivo == "No pude anotar Kiosco: Elegí una categoría."
     assert b.saldo_actual == Decimal("20000.00")
     assert db.query(Transaccion).count() == tx_count_before
 

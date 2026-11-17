@@ -117,7 +117,7 @@ def marcar_leida(db: Session, usuario_id: UUID, notificacion_id: UUID) -> Notifi
         Notificacion.usuario_id == usuario_id,
     ).first()
     if not notif:
-        raise ValueError("Notificación no encontrada")
+        raise ValueError("No se encontró esa notificación.")
     notif.leida = True
     db.commit()
     db.refresh(notif)
@@ -130,7 +130,7 @@ def marcar_no_leida(db: Session, usuario_id: UUID, notificacion_id: UUID) -> Not
         Notificacion.usuario_id == usuario_id,
     ).first()
     if not notif:
-        raise ValueError("Notificación no encontrada")
+        raise ValueError("No se encontró esa notificación.")
     notif.leida = False
     db.commit()
     db.refresh(notif)
@@ -149,7 +149,7 @@ def silenciar_notificacion(
         Notificacion.usuario_id == usuario_id,
     ).first()
     if not notif:
-        raise ValueError("Notificación no encontrada")
+        raise ValueError("No se encontró esa notificación.")
     notif.silenciada_hasta = datetime.now(timezone.utc) + timedelta(hours=horas)
     db.commit()
     db.refresh(notif)
@@ -162,7 +162,7 @@ def eliminar_notificacion(db: Session, usuario_id: UUID, notificacion_id: UUID) 
         Notificacion.usuario_id == usuario_id,
     ).first()
     if not notif:
-        raise ValueError("Notificación no encontrada")
+        raise ValueError("No se encontró esa notificación.")
     db.delete(notif)
     db.commit()
 
@@ -323,7 +323,7 @@ def archivar_notificacion(db: Session, usuario_id: UUID, notificacion_id: UUID) 
         Notificacion.usuario_id == usuario_id,
     ).first()
     if not notif:
-        raise ValueError("Notificación no encontrada")
+        raise ValueError("No se encontró esa notificación.")
     notif.archivada = True
     db.commit()
     db.refresh(notif)

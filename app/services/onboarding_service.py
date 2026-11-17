@@ -51,13 +51,13 @@ def validar_ciclo(ciclo_tipo: CicloTipo, ciclo_valor: str) -> tuple[bool, str | 
         try:
             dia = int(ciclo_valor)
             if not (1 <= dia <= 31):
-                return False, "El día debe estar entre 1 y 31."
+                return False, "El día tiene que ser del 1 al 31."
         except ValueError:
-            return False, "El valor debe ser un número entero entre 1 y 31."
+            return False, "El día tiene que ser un número del 1 al 31."
     elif ciclo_tipo == CicloTipo.REGLA:
         valid_reglas = {e.value for e in CicloRegla}
         if ciclo_valor not in valid_reglas:
-            return False, "La regla seleccionada no es válida."
+            return False, "Elegí cómo empieza tu mes."
     return True, None
 
 

@@ -61,13 +61,16 @@ def post_datos_personales(
     
     edad = hoy.year - body.fecha_nacimiento.year - ((hoy.month, hoy.day) < (body.fecha_nacimiento.month, body.fecha_nacimiento.day))
     if edad < 18:
-        raise HTTPException(status_code=400, detail="Tenés que ser mayor de 18 años para crear una cuenta en Argentum")
+        raise HTTPException(
+            status_code=400,
+            detail="Tenés que ser mayor de 18 años para crear una cuenta.",
+        )
     
     # El sexo ya viene validado por el Enum en el schema (Pydantic devuelve 422)
     # Pero si queremos forzar el 400 como pide el usuario:
     from app.models.usuario import Sexo
     if body.sexo not in Sexo:
-        raise HTTPException(status_code=400, detail="El valor de sexo no es valido.")
+        raise HTTPException(status_code=400, detail="Elegí una de las opciones.")
 
     current_user.nombre = nombre
     current_user.apellido = apellido
@@ -140,7 +143,7 @@ def post_moneda(
 
     valid_dolares = ['oficial', 'blue', 'tarjeta', 'mep']
     if body.tipo_dolar and body.tipo_dolar not in valid_dolares:
-        raise HTTPException(status_code=400, detail="Tipo de dólar no válido.")
+        raise HTTPException(status_code=400, detail="Elegí qué dólar usar.")
 
     current_user.moneda_principal = body.moneda_principal
     current_user.moneda_secundaria_activa = body.moneda_secundaria_activa
@@ -191,7 +194,7 @@ async def preview_fecha_cobro(
             if not (1 <= dia <= 31):
                 raise ValueError()
         except ValueError:
-            raise HTTPException(status_code=400, detail="El día debe ser un número entre 1 y 31.")
+            raise HTTPException(status_code=400, detail="El día tiene que ser del 1 al 31.")
 
         try:
             proxima_fecha = await dias_habiles_service.calcular_proxima_fecha_cobro(dia, direccion=dir_val)
@@ -208,14 +211,17 @@ async def preview_fecha_cobro(
                 "fecha_nominal": fecha_nominal.isoformat(),
                 "fue_ajustada": fue_ajustada,
             }
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error al calcular la fecha de cobro: {str(e)}")
+        except Exception:
+            raise HTTPException(
+                status_code=500,
+                detail="No se pudo calcular la fecha de cobro. Revisá el día elegido.",
+            )
 
     elif tipo == CicloTipo.REGLA:
         from app.models.usuario import CicloRegla
         reglas_validas = {e.value for e in CicloRegla}
         if valor not in reglas_validas:
-            raise HTTPException(status_code=400, detail="Regla de ciclo no válida.")
+            raise HTTPException(status_code=400, detail="Elegí cómo empieza tu mes.")
 
         try:
             from app.services.dashboard_service import get_date_by_rule
@@ -265,10 +271,13 @@ async def preview_fecha_cobro(
                 "fecha_nominal": fecha_nominal.isoformat(),
                 "fue_ajustada": fue_ajustada,
             }
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error al calcular la fecha de cobro: {str(e)}")
+        except Exception:
+            raise HTTPException(
+                status_code=500,
+                detail="No se pudo calcular la fecha de cobro. Revisá el día elegido.",
+            )
 
-    raise HTTPException(status_code=400, detail="Tipo de ciclo no válido.")
+    raise HTTPException(status_code=400, detail="Elegí cómo empieza tu mes.")
 
 
 

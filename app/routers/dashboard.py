@@ -28,7 +28,7 @@ def _parse_billetera_ids(billetera_ids: str | None) -> list[uuid.UUID] | None:
     try:
         return [uuid.UUID(i.strip()) for i in billetera_ids.split(',') if i.strip()]
     except ValueError:
-        raise HTTPException(status_code=400, detail="Formato de ID de billetera inválido")
+        raise HTTPException(status_code=400, detail="No se encontró esa billetera.")
 
 
 def _parse_date(date_str: str | None, param_name: str) -> date | None:
@@ -37,7 +37,7 @@ def _parse_date(date_str: str | None, param_name: str) -> date | None:
     try:
         return date.fromisoformat(date_str.strip())
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Formato de fecha inválido para '{param_name}' (se requiere YYYY-MM-DD)")
+        raise HTTPException(status_code=400, detail="Revisá la fecha.")
 
 
 def _validate_date_range(desde: str | None, hasta: str | None) -> tuple[date | None, date | None]:
@@ -46,12 +46,12 @@ def _validate_date_range(desde: str | None, hasta: str | None) -> tuple[date | N
     if (fecha_desde and not fecha_hasta) or (fecha_hasta and not fecha_desde):
         raise HTTPException(
             status_code=400,
-            detail="Debes especificar ambas fechas ('desde' y 'hasta') para consultar un rango personalizado."
+            detail="Elegí las dos fechas del rango.",
         )
     if fecha_desde and fecha_hasta and fecha_desde > fecha_hasta:
         raise HTTPException(
             status_code=400,
-            detail="La fecha de inicio ('desde') no puede ser posterior a la fecha de fin ('hasta')."
+            detail="La fecha de inicio tiene que ser antes de la de fin.",
         )
     return fecha_desde, fecha_hasta
 

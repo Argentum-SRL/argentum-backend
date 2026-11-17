@@ -99,7 +99,7 @@ def test_td9a_td9b_td9c_td9d_td9e_transacciones(
     assert res_b.status_code == 422
     assert (
         _obtener_detalle(res_b)
-        == "Esta operación ya se registró con otros datos. Cerrá y volvé a abrir para cargar una nueva."
+        == "Esto ya se guardó con otros datos. Cerrá y volvé a abrir para cargar uno nuevo."
     )
 
     # Sigue 1 transacción y 265.000,00
@@ -161,15 +161,21 @@ def test_td9a_td9b_td9c_td9d_td9e_transacciones(
     assert r_sc2.status_code == 201
     assert r_sc1.json()["id"] != r_sc2.json()["id"]
 
-    # TD.9e: Encabezados no válidos -> 400 "La clave de la operación no es válida." y 0 txs
+    # TD.9e: Encabezados no válidos -> 400
     tx_count_before = db.execute(select(Transaccion)).scalars().all()
     r_inv1 = client_a.post("/transacciones", json=payload_a, headers={"Idempotency-Key": "a b"})
     assert r_inv1.status_code == 400
-    assert _obtener_detalle(r_inv1) == "La clave de la operación no es válida."
+    assert (
+        _obtener_detalle(r_inv1)
+        == "No se pudo guardar. Cerrá y volvé a abrir para cargarlo de nuevo."
+    )
 
     r_inv2 = client_a.post("/transacciones", json=payload_a, headers={"Idempotency-Key": "1234567"})
     assert r_inv2.status_code == 400
-    assert _obtener_detalle(r_inv2) == "La clave de la operación no es válida."
+    assert (
+        _obtener_detalle(r_inv2)
+        == "No se pudo guardar. Cerrá y volvé a abrir para cargarlo de nuevo."
+    )
 
     tx_count_after = db.execute(select(Transaccion)).scalars().all()
     assert len(tx_count_before) == len(tx_count_after)

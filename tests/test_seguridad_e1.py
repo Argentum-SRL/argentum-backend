@@ -137,7 +137,10 @@ def test_03_suspendido_password_incorrecta(client, db_session, usuario_test):
     res = client.post("/auth/login", json={"email": "test@argentum.app", "password": "ClaveErronea"})
     assert res.status_code == status.HTTP_401_UNAUTHORIZED
     data = res.json()
-    assert data["error"]["message"] == "El email o la contraseña no son correctos. Revisalos e intentá de nuevo."
+    assert (
+        data["error"]["message"]
+        == "El email o la contraseña no son correctos. Revisalos y probá de nuevo."
+    )
 
 
 # ── 4. Suspendido + Google login ──────────────────────────────────────────────
@@ -405,7 +408,10 @@ def test_13_limite_login_cuenta(client, db_session, usuario_test, monkeypatch):
     for i in range(10):
         res = client.post("/auth/login", json={"email": "test@argentum.app", "password": "PasswordInvalida"})
         assert res.status_code == status.HTTP_401_UNAUTHORIZED
-        assert res.json()["error"]["message"] == "El email o la contraseña no son correctos. Revisalos e intentá de nuevo."
+        assert (
+            res.json()["error"]["message"]
+            == "El email o la contraseña no son correctos. Revisalos y probá de nuevo."
+        )
 
     # Se envió exactamente 1 email de aviso (al tercer intento)
     assert mock_notif.call_count == 1
@@ -413,7 +419,10 @@ def test_13_limite_login_cuenta(client, db_session, usuario_test, monkeypatch):
     # Intento 11 con contraseña correcta -> 429
     res_11 = client.post("/auth/login", json={"email": "test@argentum.app", "password": "Clave1234"})
     assert res_11.status_code == status.HTTP_429_TOO_MANY_REQUESTS
-    assert res_11.json()["error"]["message"] == "Hubo demasiados intentos fallidos con esta cuenta. Esperá una hora o recuperá tu contraseña."
+    assert (
+        res_11.json()["error"]["message"]
+        == "Hubo muchos intentos fallidos. Esperá una hora o recuperá tu contraseña."
+    )
 
     # Mover ultimo_intento_fallido_at a 61 minutos atrás
     db_session.refresh(usuario_test)

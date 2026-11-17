@@ -272,7 +272,10 @@ def test_actualizar_datos_personales_edad(db):
     with pytest.raises(HTTPException) as exc_info:
         actualizar_datos_personales(db, usuario, datos_menor)
     assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "Tenés que ser mayor de 18 años para crear una cuenta en Argentum"
+    assert (
+        exc_info.value.detail
+        == "Tenés que ser mayor de 18 años para crear una cuenta."
+    )
 
     # 2. Intentar actualizar con una edad de 18 años o más (19 años)
     fecha_mayor = date.today() - timedelta(days=19 * 365)

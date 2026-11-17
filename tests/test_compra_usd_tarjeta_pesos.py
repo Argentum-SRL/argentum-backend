@@ -239,4 +239,7 @@ def test_egreso_debito_usd_en_billetera_pesos_falla(db: Session):
         crear_transaccion(db, usuario.id, data, commit=True)
 
     assert exc_info.value.status_code == 400
-    assert "no coincide con la moneda de la billetera" in exc_info.value.detail
+    assert (
+        exc_info.value.detail
+        == "La transacción es en dólares y la billetera en pesos. Elegí otra billetera."
+    )

@@ -99,14 +99,20 @@ def test_validacion_categoria_no_egreso_error_400(db_session):
     sub_data = SuscripcionCreate(nombre="Invalida", monto=Decimal("5000.00"), frecuencia="mensual", proximo_cobro=date(2026, 9, 1), billetera_id=b.id, categoria_id=cat_ing.id)
     with pytest.raises(HTTPException) as exc_info:
         suscripcion_service.crear_suscripcion(db_session, u.id, sub_data)
-    assert exc_info.value.status_code == 400 and "no es de egreso" in exc_info.value.detail
+    assert (
+        exc_info.value.status_code == 400
+        and exc_info.value.detail == "Elegí una categoría de gasto."
+    )
 
     # Actualización con ingreso -> 400
     sub_val = SuscripcionCreate(nombre="Valida", monto=Decimal("5000.00"), frecuencia="mensual", proximo_cobro=date(2026, 9, 1), billetera_id=b.id, categoria_id=cat_egr.id)
     sub = suscripcion_service.crear_suscripcion(db_session, u.id, sub_val)
     with pytest.raises(HTTPException) as exc_info:
         suscripcion_service.actualizar_suscripcion(db_session, u.id, sub.id, SuscripcionUpdate(categoria_id=cat_ing.id))
-    assert exc_info.value.status_code == 400 and "no es de egreso" in exc_info.value.detail
+    assert (
+        exc_info.value.status_code == 400
+        and exc_info.value.detail == "Elegí una categoría de gasto."
+    )
 
 
 def test_validacion_subcategoria_no_pertenece_error_400(db_session):

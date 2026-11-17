@@ -403,7 +403,7 @@ def test_g12_endpoint_google_rechazo(client, monkeypatch, rsa_keys):
 
     res = client.post("/auth/google", json={"token": "token-invalido-que-no-valida"})
     assert res.status_code == 400
-    assert res.json()["error"]["message"] == "No pudimos validar tu cuenta de Google. Probá de nuevo."
+    assert res.json()["error"]["message"] == "No se pudo entrar con Google. Probá de nuevo."
 
 
 # ---------------------------------------------------------------------------
@@ -440,7 +440,7 @@ def test_s2_sse_sin_cookie_con_query(usuario_test, monkeypatch):
     with pytest.raises(HTTPException) as exc_info:
         autenticar_sse(req)
     assert exc_info.value.status_code == 401
-    assert exc_info.value.detail == "Token de acceso requerido"
+    assert exc_info.value.detail == "Entrá a tu cuenta para seguir."
 
 
 def test_s3_sse_con_header_authorization(usuario_test, monkeypatch):
@@ -457,7 +457,7 @@ def test_s3_sse_con_header_authorization(usuario_test, monkeypatch):
     with pytest.raises(HTTPException) as exc_info:
         autenticar_sse(req)
     assert exc_info.value.status_code == 401
-    assert exc_info.value.detail == "Token de acceso requerido"
+    assert exc_info.value.detail == "Entrá a tu cuenta para seguir."
 
 
 def test_s4_sse_cookie_invalida_o_refresh(usuario_test, monkeypatch):
@@ -472,7 +472,7 @@ def test_s4_sse_cookie_invalida_o_refresh(usuario_test, monkeypatch):
     with pytest.raises(HTTPException) as exc1:
         autenticar_sse(req_bad)
     assert exc1.value.status_code == 401
-    assert exc1.value.detail == "Token de acceso inválido o expirado"
+    assert exc1.value.detail == "Tu sesión terminó. Volvé a entrar."
 
     # 2. Token type refresh
     now_ts = int(time.time())
@@ -489,7 +489,7 @@ def test_s4_sse_cookie_invalida_o_refresh(usuario_test, monkeypatch):
     with pytest.raises(HTTPException) as exc2:
         autenticar_sse(req_refresh)
     assert exc2.value.status_code == 401
-    assert exc2.value.detail == "Token de acceso inválido o expirado"
+    assert exc2.value.detail == "Tu sesión terminó. Volvé a entrar."
 
 
 def test_s5_sse_usuario_inexistente_o_revocado(db_session, usuario_test, monkeypatch):
@@ -505,7 +505,7 @@ def test_s5_sse_usuario_inexistente_o_revocado(db_session, usuario_test, monkeyp
     with pytest.raises(HTTPException) as exc1:
         autenticar_sse(req_inex)
     assert exc1.value.status_code == 401
-    assert exc1.value.detail == "No encontramos una cuenta con esos datos."
+    assert exc1.value.detail == "No hay una cuenta con esos datos."
 
     # 2. Sesión revocada
     usuario_test.tokens_revocados_at = datetime.now(timezone.utc) + timedelta(minutes=5)
@@ -520,7 +520,7 @@ def test_s5_sse_usuario_inexistente_o_revocado(db_session, usuario_test, monkeyp
     with pytest.raises(HTTPException) as exc2:
         autenticar_sse(req_rev)
     assert exc2.value.status_code == 401
-    assert exc2.value.detail == "Sesión revocada. Por favor iniciá sesión nuevamente."
+    assert exc2.value.detail == "Tu sesión se cerró. Volvé a entrar."
 
 
 def test_s6_sse_endpoint_get_sin_cookie(client, usuario_test, monkeypatch):

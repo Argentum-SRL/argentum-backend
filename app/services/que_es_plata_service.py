@@ -194,7 +194,7 @@ def responder(
     if opcion not in OPCIONES:
         raise HTTPException(
             status_code=400,
-            detail="Elegí una opción válida.",
+            detail="Elegí una de las opciones.",
         )
 
     def _get_cat_otros_ingreso():

@@ -38,7 +38,7 @@ def calcular_rendimiento_estimado(
     """
     billetera = db.get(Billetera, billetera_id)
     if not billetera or billetera.usuario_id != usuario_id:
-        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
+        raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
 
     hoy = hoy_argentina()
 
@@ -157,7 +157,7 @@ def confirmar_rendimiento(
     """
     billetera = db.get(Billetera, billetera_id)
     if not billetera or billetera.usuario_id != usuario_id:
-        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
+        raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
 
     if billetera.estado != EstadoBilletera.ACTIVA:
         raise HTTPException(
@@ -168,7 +168,7 @@ def confirmar_rendimiento(
     if monto <= Decimal("0"):
         raise HTTPException(
             status_code=400,
-            detail="El monto del rendimiento debe ser mayor a 0."
+            detail="Ingresá un rendimiento mayor a 0.",
         )
 
     ahora_dt = datetime.now(timezone.utc)

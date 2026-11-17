@@ -620,7 +620,10 @@ def test_td14_dh3_control_saldo_y_foto(db: Session, usuario_test: Usuario, categ
         fecha_saldo_service.previsualizar_cambio_fecha(db, usuario_test.id, billetera_1.id, date(2026, 9, 25))
     assert exc_info.value.status_code == 422
     msg_detail = exc_info.value.detail.get("detail") if isinstance(exc_info.value.detail, dict) else str(exc_info.value.detail)
-    assert msg_detail == "Este saldo ya lo actualizaste el 20/10/2026: los movimientos anteriores no lo cambian."
+    assert (
+        msg_detail
+        == "Este saldo ya lo actualizaste el 20/10: los movimientos anteriores no lo cambian."
+    )
 
     # Fixture B con control el 20/10/2026 a 50.000,00
     billetera_b = crear_fixture_b(db, usuario_test.id, f_20, "Billetera B DH3")

@@ -123,7 +123,7 @@ def obtener_transaccion(db: Session, usuario_id: UUID, transaccion_id: UUID) -> 
     ).scalar_one_or_none()
     
     if not transaccion:
-        raise HTTPException(status_code=404, detail="No encontramos esa transacción.")
+        raise HTTPException(status_code=404, detail="No se encontró esa transacción.")
     return transaccion
 
 
@@ -155,9 +155,14 @@ def _validar_moneda_coincide(moneda_operacion, billetera: Billetera) -> None:
     op_val = moneda_operacion.value if hasattr(moneda_operacion, "value") else str(moneda_operacion)
     bill_val = billetera.moneda.value if hasattr(billetera.moneda, "value") else str(billetera.moneda)
     if op_val != bill_val:
+        op_nom = "dólares" if op_val == "USD" else "pesos"
+        bill_nom = "dólares" if bill_val == "USD" else "pesos"
         raise HTTPException(
             status_code=400,
-            detail=f"La moneda de la operación ({op_val}) no coincide con la moneda de la billetera ({bill_val})."
+            detail=(
+                f"La transacción es en {op_nom} y la billetera en {bill_nom}. "
+                "Elegí otra billetera."
+            ),
         )
 
 
@@ -211,7 +216,7 @@ def _validar_tarjeta(db: Session, tarjeta_id: UUID, usuario_id: UUID) -> Tarjeta
         TarjetaCredito.usuario_id == usuario_id
     ).first()
     if not tarjeta:
-        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+        raise HTTPException(status_code=404, detail="No se encontró esa tarjeta.")
     return tarjeta
 
 
@@ -236,7 +241,7 @@ def crear_transaccion(
     billetera = billeteras.get(data.billetera_id)
 
     if not billetera:
-        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
+        raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
 
     # Coherencia semántica: un ingreso nunca puede ser débito ni crédito
     if data.tipo == TipoTransaccion.INGRESO and data.metodo_pago in (MetodoPago.DEBITO, MetodoPago.CREDITO):
@@ -267,7 +272,7 @@ def crear_transaccion(
 
     # 2. Validar categoría obligatoria
     if not data.categoria_id:
-        raise HTTPException(status_code=400, detail="Debés seleccionar una categoría.")
+        raise HTTPException(status_code=400, detail="Elegí una categoría.")
 
     from app.models.categoria import Categoria, EstadoCategoria
     categoria = db.execute(
@@ -278,7 +283,7 @@ def crear_transaccion(
     ).scalar_one_or_none()
 
     if not categoria:
-        raise HTTPException(status_code=404, detail="No encontramos esa categoría.")
+        raise HTTPException(status_code=404, detail="No se encontró esa categoría.")
 
     # 3. Validar subcategoría si se proporcionó
     if data.subcategoria_id:
@@ -529,7 +534,7 @@ def actualizar_transaccion(
     billetera_id = data.billetera_id if data.billetera_id is not None else transaccion.billetera_id
     billetera = db.get(Billetera, billetera_id)
     if not billetera or billetera.usuario_id != usuario_id:
-        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
+        raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
     
     _validar_moneda_coincide(data.moneda if data.moneda is not None else transaccion.moneda, billetera)
 
@@ -564,10 +569,9 @@ def actualizar_transaccion(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"No podés modificar los campos financieros de una transacción en cuotas "
-                    f"({', '.join(campos_financieros_modificados)}). "
-                    f"Solo podés editar la descripción y la categoría."
-                )
+                    "En una compra en cuotas solo se pueden cambiar "
+                    "la descripción y la categoría."
+                ),
             )
 
     tipo_final = data.tipo if data.tipo is not None else transaccion.tipo
@@ -615,7 +619,7 @@ def actualizar_transaccion(
         if _afecta_saldo(transaccion):
             billetera_nueva = bloqueadas.get(transaccion.billetera_id) or db.get(Billetera, transaccion.billetera_id)
             if not billetera_nueva or billetera_nueva.usuario_id != usuario_id:
-                raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
+                raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
 
             _validar_moneda_coincide(transaccion.moneda, billetera_nueva)
             impacto_nuevo = transaccion.monto if transaccion.tipo == TipoTransaccion.INGRESO else -transaccion.monto
@@ -906,7 +910,7 @@ def confirmar_transaccion_ia(
     if _afecta_saldo(transaccion):
         billetera = db.get(Billetera, transaccion.billetera_id)
         if not billetera:
-            raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
+            raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
             
         _validar_moneda_coincide(transaccion.moneda, billetera)
 

@@ -193,7 +193,7 @@ def resetear_onboarding_usuario(
                 "success": False,
                 "error": {
                     "code": "CONFIRMATION_REQUIRED",
-                    "message": "Debe confirmar explícitamente la acción de reseteo de onboarding.",
+                    "message": "Confirmá que querés reiniciar la configuración inicial.",
                 },
             },
         )
@@ -378,7 +378,12 @@ def save_diseno_decision(
                     "success": False,
                     "error": {
                         "code": "CONCURRENCY_CONFLICT",
-                        "message": f"Conflicto de concurrencia: La categoría '{payload.categoryId}' fue modificada por otro administrador ({current_entry.get('updatedBy', 'otro admin')}) a las {current_entry.get('updatedAt', '')}.",
+                        "message": (
+                            f"Otro administrador "
+                            f"({current_entry.get('updatedBy', 'otro admin')}) "
+                            f"modificó {payload.categoryId} "
+                            f"a las {current_entry.get('updatedAt', '')}."
+                        ),
                         "currentData": current_entry,
                     },
                 },
@@ -468,7 +473,12 @@ def save_diseno_especificacion(
                     "success": False,
                     "error": {
                         "code": "CONCURRENCY_CONFLICT",
-                        "message": f"Conflicto de concurrencia: La especificación para '{payload.familyId}' fue modificada por otro administrador ({current_entry.get('updatedBy', 'otro admin')}) a las {current_entry.get('updatedAt', '')}.",
+                        "message": (
+                            f"Otro administrador "
+                            f"({current_entry.get('updatedBy', 'otro admin')}) "
+                            f"modificó {payload.familyId} "
+                            f"a las {current_entry.get('updatedAt', '')}."
+                        ),
                         "currentData": current_entry,
                     },
                 },
@@ -629,7 +639,7 @@ def monitor_wpp_resumen(
     if dias not in (1, 7, 30):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="El parámetro dias debe ser 1, 7 o 30.",
+            detail="Elegí 1, 7 o 30 días.",
         )
     return monitor_wpp_service.obtener_resumen_monitor(db, dias=dias)
 
@@ -646,7 +656,7 @@ def monitor_wpp_conversaciones(
     if dias not in (1, 7, 30):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="El parámetro dias debe ser 1, 7 o 30.",
+            detail="Elegí 1, 7 o 30 días.",
         )
     return monitor_wpp_service.obtener_conversaciones_monitor(
         db, dias=dias, categoria=categoria, pagina=pagina

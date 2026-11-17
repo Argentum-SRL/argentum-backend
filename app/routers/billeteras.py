@@ -287,7 +287,7 @@ def get_billetera(
     billetera = db.execute(stmt).scalars().one_or_none()
     
     if not billetera:
-        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
+        raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
     
     # Verificamos transacciones, transferencias, rendimientos y ajustes por separado para mayor seguridad
     has_tx = db.query(exists().where(Transaccion.billetera_id == billetera_id)).scalar()
@@ -353,7 +353,7 @@ def create_billetera(
     if body.es_efectivo and body.tna is not None:
         raise HTTPException(
             status_code=400,
-            detail="Una billetera de efectivo no puede tener tasa",
+            detail="Una billetera de efectivo no puede tener tasa.",
         )
 
     if body.saldo_inicial and body.saldo_inicial > Decimal("0"):
@@ -432,18 +432,18 @@ def update_billetera(
     stmt = select(Billetera).where(Billetera.id == billetera_id, Billetera.usuario_id == current_user.id)
     billetera = db.execute(stmt).scalars().one_or_none()
     if not billetera:
-        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
+        raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
 
     es_efectivo_target = body.es_efectivo if body.es_efectivo is not None else billetera.es_efectivo
     if es_efectivo_target and body.tna is not None:
         raise HTTPException(
             status_code=400,
-            detail="Una billetera de efectivo no puede tener tasa",
+            detail="Una billetera de efectivo no puede tener tasa.",
         )
     if body.es_efectivo is True and billetera.tna is not None and body.tna is None and "tna" not in body.model_fields_set:
         raise HTTPException(
             status_code=400,
-            detail="Una billetera de efectivo no puede tener tasa",
+            detail="Una billetera de efectivo no puede tener tasa.",
         )
 
     # Validación de bank_id
@@ -498,7 +498,10 @@ def update_billetera(
         if has_tx or has_tr or has_rend or has_ajuste:
             raise HTTPException(
                 status_code=400,
-                detail="No podés cambiar la moneda de una billetera que ya tiene transacciones o transferencias asociadas."
+                detail=(
+                    "No se puede cambiar la moneda de una billetera "
+                    "con transacciones o transferencias."
+                ),
             )
 
     if billetera.es_efectivo:
@@ -527,10 +530,13 @@ def delete_billetera(
     stmt = select(Billetera).where(Billetera.id == billetera_id, Billetera.usuario_id == current_user.id)
     billetera = db.execute(stmt).scalars().one_or_none()
     if not billetera:
-        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
+        raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
 
     if billetera.es_efectivo:
-        raise HTTPException(status_code=400, detail="Las billeteras de efectivo no pueden eliminarse")
+        raise HTTPException(
+            status_code=400,
+            detail="Las billeteras de efectivo no se pueden eliminar.",
+        )
 
     # VERIFICACIÓN DE INTEGRIDAD
     from app.models.suscripcion import Suscripcion
@@ -556,32 +562,47 @@ def delete_billetera(
     
     if check_res.has_tx:
         raise HTTPException(
-            status_code=400, 
-            detail="No se puede eliminar la billetera porque tiene transacciones asociadas. Por favor, archivala para mantener el historial."
+            status_code=400,
+            detail=(
+                "Esta billetera tiene transacciones: no se puede eliminar. "
+                "Archivala."
+            ),
         )
 
     if check_res.has_tr:
         raise HTTPException(
-            status_code=400, 
-            detail="No se puede eliminar la billetera porque tiene transferencias internas asociadas. Por favor, archivala."
+            status_code=400,
+            detail=(
+                "Esta billetera tiene transferencias: no se puede eliminar. "
+                "Archivala."
+            ),
         )
 
     if check_res.has_sub:
         raise HTTPException(
             status_code=400,
-            detail="No se puede eliminar la billetera porque tiene suscripciones activas asociadas. Por favor, archivala o cancelá las suscripciones."
+            detail=(
+                "Esta billetera tiene suscripciones activas: "
+                "archivala o cancelá las suscripciones."
+            ),
         )
 
     if check_res.has_rend:
         raise HTTPException(
             status_code=400,
-            detail="No se puede eliminar la billetera porque tiene rendimientos asociados. Por favor, archivala."
+            detail=(
+                "Esta billetera tiene rendimientos: no se puede eliminar. "
+                "Archivala."
+            ),
         )
 
     if check_res.has_ajuste:
         raise HTTPException(
             status_code=400,
-            detail="No se puede eliminar la billetera porque tiene ajustes de saldo. Por favor, archivala."
+            detail=(
+                "Esta billetera tiene ajustes de saldo: no se puede eliminar. "
+                "Archivala."
+            ),
         )
 
     # Chequear las tarjetas de crédito asociadas
@@ -600,13 +621,12 @@ def delete_billetera(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"No podés eliminar esta billetera porque "
-                    f"{'la tarjeta' if len(tarjetas_bloqueantes) == 1 else 'las tarjetas'} "
-                    f"{nombres} "
-                    f"{'tiene' if len(tarjetas_bloqueantes) == 1 else 'tienen'} "
-                    f"transacciones registradas. "
-                    f"Archivá o eliminá {'esa tarjeta' if len(tarjetas_bloqueantes) == 1 else 'esas tarjetas'} primero."
-                )
+                    f"La tarjeta {nombres} tiene transacciones. "
+                    "Archivala o eliminala primero."
+                    if len(tarjetas_bloqueantes) == 1
+                    else f"Las tarjetas {nombres} tienen transacciones. "
+                    "Archivalas o eliminalas primero."
+                ),
             )
         
         # Si las tarjetas no tienen consumos ni dependencias, las eliminamos automáticamente
@@ -615,7 +635,7 @@ def delete_billetera(
     res = db.execute(delete(Billetera).where(Billetera.id == billetera_id, Billetera.usuario_id == current_user.id))
     db.commit()
     if res.rowcount == 0:
-        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
+        raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
     return
 
 
@@ -628,7 +648,7 @@ def archivar_billetera(
     stmt = select(Billetera).where(Billetera.id == billetera_id, Billetera.usuario_id == current_user.id)
     billetera = db.execute(stmt).scalars().one_or_none()
     if not billetera:
-        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
+        raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
     billetera.estado = EstadoBilletera.ARCHIVADA
     db.commit()
     db.refresh(billetera)
@@ -644,7 +664,7 @@ def desarchivar_billetera(
     stmt = select(Billetera).where(Billetera.id == billetera_id, Billetera.usuario_id == current_user.id)
     billetera = db.execute(stmt).scalars().one_or_none()
     if not billetera:
-        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
+        raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
     billetera.estado = EstadoBilletera.ACTIVA
     db.commit()
     db.refresh(billetera)

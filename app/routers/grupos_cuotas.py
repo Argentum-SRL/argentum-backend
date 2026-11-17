@@ -174,7 +174,7 @@ def simular_cuotas(
         if c < 1 or c > 120:
             raise HTTPException(
                 status_code=422,
-                detail="Cada cantidad de cuotas debe estar entre 1 y 120."
+                detail="Las cuotas tienen que ser entre 1 y 120.",
             )
 
     tna = None
@@ -240,7 +240,7 @@ def update_grupo_cuotas(
     ).scalar_one_or_none()
     
     if not grupo:
-        raise HTTPException(status_code=404, detail="No encontramos ese grupo de cuotas.")
+        raise HTTPException(status_code=404, detail="No se encontró esa compra en cuotas.")
         
     from app.services.cuotas_service import actualizar_grupo
     actualizar_grupo(db, grupo, data)
@@ -269,7 +269,7 @@ def delete_grupo_cuotas(
     ).scalar_one_or_none()
     
     if not grupo:
-        raise HTTPException(status_code=404, detail="No encontramos ese grupo de cuotas.")
+        raise HTTPException(status_code=404, detail="No se encontró esa compra en cuotas.")
         
     padre_id = grupo.transaccion_padre_id
     

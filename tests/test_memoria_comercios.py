@@ -254,7 +254,7 @@ def test_d1_2_guardar_y_buscar(db_session: Session):
             subcategoria_id=None,
         )
     assert exc2.value.status_code == 400
-    assert exc2.value.detail == "No pudimos reconocer el comercio en esa descripción."
+    assert exc2.value.detail == "No se reconoció el comercio en esa descripción."
 
 
 # -----------------------------------------------------------------------------

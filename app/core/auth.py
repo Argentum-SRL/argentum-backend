@@ -35,7 +35,9 @@ from app.core.database import get_db
 from app.models.refresh_token import RefreshToken
 from app.models.usuario import EstadoUsuario, Usuario
 
-MENSAJE_CUENTA_SUSPENDIDA = "Tu cuenta está suspendida. Escribinos a srlargentum@gmail.com si creés que es un error."
+MENSAJE_CUENTA_SUSPENDIDA = (
+    "Tu cuenta está suspendida. Escribí a soporte si creés que es un error."
+)
 
 # ---------------------------------------------------------------------------
 # Configuración
@@ -96,7 +98,7 @@ def crear_access_token(usuario_id: UUID | str, is_admin: bool = False) -> str:
 def verificar_access_token(token: str) -> str:
     credentials_exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Token de acceso inválido o expirado",
+        detail="Tu sesión terminó. Volvé a entrar.",
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
@@ -151,7 +153,7 @@ def _buscar_refresh_token(token_plain: str, db: Session) -> RefreshToken:
     if not token_id or not verifier:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Refresh token inválido",
+            detail="Tu sesión terminó. Volvé a entrar.",
         )
 
     rt = db.execute(
@@ -169,14 +171,14 @@ def _buscar_refresh_token(token_plain: str, db: Session) -> RefreshToken:
             db.commit()
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Sesión revocada. Por favor iniciá sesión nuevamente.",
+                detail="Tu sesión se cerró. Volvé a entrar.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         return rt
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Refresh token inválido, expirado o ya utilizado",
+        detail="Tu sesión terminó. Volvé a entrar.",
         headers={"WWW-Authenticate": "Bearer"},
     )
 
@@ -301,7 +303,7 @@ def get_current_user(
     if usuario is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No encontramos una cuenta con esos datos.",
+            detail="No hay una cuenta con esos datos.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -324,13 +326,13 @@ def get_current_user(
                 if iat_dt < rev_at:
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Sesión revocada. Por favor iniciá sesión nuevamente.",
+                        detail="Tu sesión se cerró. Volvé a entrar.",
                         headers={"WWW-Authenticate": "Bearer"},
                     )
         except jwt.PyJWTError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token de acceso inválido o expirado",
+                detail="Tu sesión terminó. Volvé a entrar.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 

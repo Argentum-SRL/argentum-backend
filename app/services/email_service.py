@@ -324,7 +324,7 @@ def verificar_codigo_recuperacion(email: str, codigo: str) -> bool:
                 db.commit()
                 raise HTTPException(
                     status_code=400,
-                    detail="El código de verificación ya no es válido. Por favor, solicitá un código nuevo."
+                    detail="El código venció. Pedí uno nuevo."
                 )
             db.commit()
             return False

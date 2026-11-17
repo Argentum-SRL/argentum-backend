@@ -108,7 +108,7 @@ def get_resumen_tarjeta(
     ).first()
     
     if not tarjeta:
-        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
+        raise HTTPException(status_code=404, detail="No se encontró esa tarjeta.")
 
     return resumen_tarjeta_service.calcular_resumen_actual(db, tarjeta)
 
@@ -127,7 +127,7 @@ def resumen_de_compra(
     ).first()
 
     if not tarjeta:
-        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
+        raise HTTPException(status_code=404, detail="No se encontró esa tarjeta.")
 
     fecha_cierre, fecha_vencimiento = calendario_tarjeta_service.resumen_de_compra(
         tarjeta=tarjeta,

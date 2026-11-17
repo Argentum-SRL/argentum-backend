@@ -97,7 +97,7 @@ def obtener_usuario(db: Session, usuario_id: UUID) -> Usuario:
                 "success": False,
                 "error": {
                     "code": "USER_NOT_FOUND",
-                    "message": "No encontramos al usuario.",
+                    "message": "No se encontró la cuenta.",
                 },
             },
         )
@@ -184,7 +184,7 @@ def enviar_reset_password(db: Session, usuario_id: UUID, frontend_url: str) -> N
                 "success": False,
                 "error": {
                     "code": "EMAIL_SEND_FAILED",
-                    "message": "No pudimos enviar el email. Intentá de nuevo.",
+                    "message": "No se pudo enviar el email. Probá de nuevo.",
                 },
             },
         )

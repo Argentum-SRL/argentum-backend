@@ -522,7 +522,7 @@ def test_validaciones_exactas_que_es_plata(db: Session, usuario: Usuario, billet
     # 6. opción "otra"
     with pytest.raises(HTTPException) as exc6:
         que_es_plata_service.responder(db, usuario.id, juan.id, "otra")
-    assert exc6.value.detail == "Elegí una opción válida."
+    assert exc6.value.detail == "Elegí una de las opciones."
 
     # 7. ingreso de otro usuario (404)
     otro_usuario = Usuario(

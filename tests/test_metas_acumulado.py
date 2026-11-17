@@ -406,7 +406,7 @@ def test_te5_bloqueo_acumulado_negativo_y_crear_meta_en_cero(db_session):
     assert exc_del.value.status_code == 400
     assert (
         exc_del.value.detail
-        == "No se puede borrar este aporte porque la meta quedaría en negativo. Borrá primero el retiro."
+        == "Si se elimina este aporte, la meta queda en negativo. Eliminá primero el retiro."
     )
 
     db_session.expire_all()

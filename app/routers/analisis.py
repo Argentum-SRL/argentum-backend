@@ -34,7 +34,10 @@ def _parse_optional_uuid(val: str | None, field_name: str) -> uuid.UUID | None:
     try:
         return uuid.UUID(val.strip())
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"ID inválido para {field_name}")
+        raise HTTPException(
+            status_code=400,
+            detail="No se encontró lo que elegiste. Volvé a elegirlo.",
+        )
 
 
 @router.get("/resumen")
@@ -192,10 +195,10 @@ def get_informe(
 ) -> Any:
     inf_uuid = _parse_optional_uuid(informe_id, "informe_id")
     if not inf_uuid:
-        raise HTTPException(status_code=400, detail="ID de informe requerido")
+        raise HTTPException(status_code=400, detail="Falta elegir el informe.")
     inf = analisis_informes_service.obtener_informe_usuario(db, current_user, inf_uuid)
     if not inf:
-        raise HTTPException(status_code=404, detail="Informe no encontrado")
+        raise HTTPException(status_code=404, detail="No se encontró ese informe.")
     return inf
 
 
@@ -208,7 +211,7 @@ def update_informe(
 ) -> Any:
     inf_uuid = _parse_optional_uuid(informe_id, "informe_id")
     if not inf_uuid:
-        raise HTTPException(status_code=400, detail="ID de informe requerido")
+        raise HTTPException(status_code=400, detail="Falta elegir el informe.")
     actualizado = analisis_informes_service.actualizar_informe_usuario(
         db=db,
         usuario=current_user,
@@ -216,7 +219,7 @@ def update_informe(
         datos=payload.model_dump(exclude_unset=True),
     )
     if not actualizado:
-        raise HTTPException(status_code=404, detail="Informe no encontrado")
+        raise HTTPException(status_code=404, detail="No se encontró ese informe.")
     return actualizado
 
 
@@ -228,10 +231,10 @@ def delete_informe(
 ) -> Any:
     inf_uuid = _parse_optional_uuid(informe_id, "informe_id")
     if not inf_uuid:
-        raise HTTPException(status_code=400, detail="ID de informe requerido")
+        raise HTTPException(status_code=400, detail="Falta elegir el informe.")
     ok = analisis_informes_service.eliminar_informe_usuario(db, current_user, inf_uuid)
     if not ok:
-        raise HTTPException(status_code=404, detail="Informe no encontrado")
+        raise HTTPException(status_code=404, detail="No se encontró ese informe.")
     return {"ok": True}
 
 
@@ -276,12 +279,12 @@ def exportar_excel(
     if b_uuid:
         b = db.query(Billetera).filter(Billetera.id == b_uuid, Billetera.usuario_id == current_user.id).first()
         if not b:
-            raise HTTPException(status_code=422, detail="No encontramos esa billetera.")
+            raise HTTPException(status_code=422, detail="No se encontró esa billetera.")
 
     if t_uuid:
         tc = db.query(TarjetaCredito).filter(TarjetaCredito.id == t_uuid, TarjetaCredito.usuario_id == current_user.id).first()
         if not tc:
-            raise HTTPException(status_code=422, detail="No encontramos esa tarjeta.")
+            raise HTTPException(status_code=422, detail="No se encontró esa tarjeta.")
 
     ref_hoy = hoy or hoy_argentina()
 
@@ -289,7 +292,7 @@ def exportar_excel(
     if meses not in (6, 12):
         raise HTTPException(
             status_code=422,
-            detail="La cantidad de meses de proyección debe ser 6 o 12.",
+            detail="Elegí 6 o 12 meses.",
         )
 
     # Validación de tipos de bloques solicitados
@@ -307,7 +310,7 @@ def exportar_excel(
             if b_item not in valid_bloques:
                 raise HTTPException(
                     status_code=422,
-                    detail=f"Tipo de bloque desconocido: '{b_item}'.",
+                    detail="Ese bloque no existe. Elegí otro.",
                 )
 
     # Validación de ciclos para comparativa
@@ -332,7 +335,7 @@ def exportar_excel(
             if not c_match_a:
                 raise HTTPException(
                     status_code=422,
-                    detail=f"El ciclo '{ciclo_a}' no se encuentra entre los ciclos disponibles.",
+                    detail="Ese ciclo no tiene datos. Elegí otro.",
                 )
             ciclo_a_clave = c_match_a["clave"]
 
@@ -350,7 +353,7 @@ def exportar_excel(
             if not c_match_b:
                 raise HTTPException(
                     status_code=422,
-                    detail=f"El ciclo '{ciclo_b}' no se encuentra entre los ciclos disponibles.",
+                    detail="Ese ciclo no tiene datos. Elegí otro.",
                 )
             ciclo_b_clave = c_match_b["clave"]
 

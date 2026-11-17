@@ -1030,7 +1030,10 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
             "success": False,
             "error": {
                 "code": "RATE_LIMIT_EXCEEDED",
-                "message": "Demasiadas solicitudes. Por favor, esperá un momento antes de volver a intentar.",
+                "message": (
+                    "Hiciste muchos pedidos seguidos. "
+                    "Esperá un momento y probá de nuevo."
+                ),
             }
         }
     )
@@ -1040,7 +1043,7 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     return JSONResponse(
         status_code=422,
-        content={"detail": "Hay campos con errores. Revisá los datos e intentá de nuevo."}
+        content={"detail": "Hay datos con errores. Revisalos y probá de nuevo."}
     )
 
 
@@ -1059,7 +1062,11 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         )
 
     # Si es un string simple, formatearlo
-    mensaje = exc.detail if isinstance(exc.detail, str) else "Error en la solicitud."
+    mensaje = (
+        exc.detail
+        if isinstance(exc.detail, str)
+        else "No se pudo hacer el pedido. Probá de nuevo."
+    )
     codigo = {
         400: "BAD_REQUEST",
         401: "UNAUTHORIZED",

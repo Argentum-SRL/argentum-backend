@@ -111,7 +111,7 @@ def aplicar_a_anteriores(
     """
     memoria = db.get(MemoriaComercio, data.memoria_id)
     if not memoria or memoria.usuario_id != current_user.id:
-        raise HTTPException(status_code=404, detail="No encontramos esa memoria de comercio.")
+        raise HTTPException(status_code=404, detail="No se encontró ese comercio.")
 
     res = memoria_comercio_service.aplicar_a_anteriores(
         db=db,
@@ -170,7 +170,7 @@ def eliminar_memoria(
     """
     memoria = db.get(MemoriaComercio, memoria_id)
     if not memoria or memoria.usuario_id != current_user.id:
-        raise HTTPException(status_code=404, detail="No encontramos esa memoria de comercio.")
+        raise HTTPException(status_code=404, detail="No se encontró ese comercio.")
 
     db.delete(memoria)
     db.commit()

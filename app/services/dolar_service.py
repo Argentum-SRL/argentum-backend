@@ -73,7 +73,10 @@ def _normalizar_payload(payload: list[dict[str, Any]]) -> dict[str, Any]:
 
     faltantes = [k for k in ("oficial", "blue", "tarjeta", "mep") if k not in cotizaciones]
     if faltantes:
-        raise HTTPException(status_code=502, detail=f"Dolar API incompleta. Faltan: {', '.join(faltantes)}")
+        raise HTTPException(
+            status_code=502,
+            detail="No se pudo ver el dólar de hoy. Probá en unos minutos.",
+        )
 
     return {
         "fuente": "dolarapi.com",
@@ -97,7 +100,10 @@ def get_cotizaciones_dolar() -> dict[str, Any]:
         raise HTTPException(status_code=502, detail="No se pudo consultar Dolar API.")
 
     if not isinstance(payload, list):
-        raise HTTPException(status_code=502, detail="Respuesta invalida de Dolar API.")
+        raise HTTPException(
+            status_code=502,
+            detail="No se pudo ver el dólar de hoy. Probá en unos minutos.",
+        )
 
     normalized = _normalizar_payload(payload)
     _cache.data = normalized

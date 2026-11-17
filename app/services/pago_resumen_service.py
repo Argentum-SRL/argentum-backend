@@ -12,6 +12,8 @@ from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.reglas_texto_web import fecha_dm
+
 from app.models.billetera import Billetera
 from app.models.categoria import Categoria
 from app.models.cuota import Cuota
@@ -150,7 +152,7 @@ def pagar_resumen_tarjeta(
         TarjetaCredito.usuario_id == usuario_id
     ).first()
     if not tarjeta:
-        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
+        raise HTTPException(status_code=404, detail="No se encontró esa tarjeta.")
 
     # Tarea 3.1: Moneda a pagar (por defecto la moneda de la tarjeta si no viene)
     moneda_a_pagar = moneda or tarjeta.moneda
@@ -225,9 +227,17 @@ def pagar_resumen_tarjeta(
 
     if total_a_pagar <= Decimal("0"):
         if cuotas_otra_moneda:
+            nom_moneda = "dólares" if moneda_str == "USD" else "pesos"
+            n_otra = len(cuotas_otra_moneda)
             raise HTTPException(
                 status_code=400,
-                detail=f"No hay deuda pendiente en {moneda_str}. Quedan {len(cuotas_otra_moneda)} cuota(s) en otra moneda pendientes de pago."
+                detail=(
+                    f"No hay nada por pagar en {nom_moneda}. "
+                    "Queda 1 cuota en otra moneda."
+                    if n_otra == 1
+                    else f"No hay nada por pagar en {nom_moneda}. "
+                    f"Quedan {n_otra} cuotas en otra moneda."
+                ),
             )
         raise HTTPException(status_code=400, detail="Este resumen ya está completamente saldado.")
 
@@ -240,7 +250,11 @@ def pagar_resumen_tarjeta(
             if pesificar:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"El monto a pagar ({formatear_monto(monto, moneda_a_pagar)}) no puede superar el total a pagar del resumen ({formatear_monto(total_a_pagar, moneda_a_pagar)})."
+                    detail=(
+                        f"El pago ({formatear_monto(monto, moneda_a_pagar)}) "
+                        "no puede ser más que el total del resumen "
+                        f"({formatear_monto(total_a_pagar, moneda_a_pagar)})."
+                    ),
                 )
             if diferencia_tipo == "compras_no_cargadas" and not diferencia_categoria_id:
                 raise HTTPException(
@@ -265,14 +279,17 @@ def pagar_resumen_tarjeta(
         billetera_pago_id = billetera_id or tarjeta.billetera_id
         billetera_pago = db.get(Billetera, billetera_pago_id)
         if not billetera_pago:
-            raise HTTPException(status_code=404, detail="No encontramos la billetera seleccionada.")
+            raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
         if getattr(billetera_pago, "es_inversion", False):
             raise HTTPException(
                 status_code=400,
                 detail="Esta billetera no admite pagos de tarjeta ni cuotas."
             )
         if billetera_pago.moneda != Moneda.ARS:
-            raise HTTPException(status_code=400, detail="Para pagar en pesos debés seleccionar una billetera en pesos.")
+            raise HTTPException(
+                status_code=400,
+                detail="Para pagar en pesos, elegí una billetera en pesos.",
+            )
         monto_debito = monto_pago
         moneda_debito = Moneda.ARS
     elif moneda_a_pagar == Moneda.USD:
@@ -288,7 +305,10 @@ def pagar_resumen_tarjeta(
                 if not billeteras_usd:
                     raise HTTPException(
                         status_code=400,
-                        detail="No tenés ninguna billetera en dólares disponible para realizar este pago. Podés pesificar los consumos en dólares para pagarlos en pesos desde tu cuenta bancaria."
+                        detail=(
+                            "No tenés una billetera en dólares. "
+                            "Podés pagar en pesos los consumos en dólares."
+                        ),
                     )
                 billetera_pago = billeteras_usd[0]
             else:
@@ -297,7 +317,7 @@ def pagar_resumen_tarjeta(
                     Billetera.usuario_id == usuario_id
                 ).first()
                 if not billetera_pago:
-                    raise HTTPException(status_code=404, detail="No encontramos la billetera seleccionada.")
+                    raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
                 if getattr(billetera_pago, "es_inversion", False):
                     raise HTTPException(
                         status_code=400,
@@ -306,7 +326,10 @@ def pagar_resumen_tarjeta(
                 if billetera_pago.moneda != Moneda.USD:
                     raise HTTPException(
                         status_code=400,
-                        detail="La billetera seleccionada debe ser en dólares. Si preferís pagar en pesos, elegí la opción de pesificar."
+                        detail=(
+                            "Elegí una billetera en dólares, "
+                            "o la opción de pagar en pesos."
+                        ),
                     )
             billetera_pago_id = billetera_pago.id
             monto_debito = monto_pago
@@ -317,14 +340,20 @@ def pagar_resumen_tarjeta(
             billetera_pago_id = billetera_id or tarjeta.billetera_id
             billetera_pago = db.get(Billetera, billetera_pago_id)
             if not billetera_pago:
-                raise HTTPException(status_code=404, detail="No encontramos la billetera seleccionada.")
+                raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
             if getattr(billetera_pago, "es_inversion", False):
                 raise HTTPException(
                     status_code=400,
                     detail="Esta billetera no admite pagos de tarjeta ni cuotas."
                 )
             if billetera_pago.moneda != Moneda.ARS:
-                raise HTTPException(status_code=400, detail="Para pesificar consumos en dólares debés usar una billetera en pesos.")
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Para pagar en pesos los consumos en dólares, "
+                        "elegí una billetera en pesos."
+                    ),
+                )
 
             # Cotización dólar oficial vendedor del día del pago (o del vencimiento si es posterior)
             if cotizacion_personalizada is not None and cotizacion_personalizada > Decimal("0"):
@@ -334,7 +363,10 @@ def pagar_resumen_tarjeta(
                 if cotizacion is None:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"No hay dólar oficial cargado para el {fecha_ref:%d/%m/%Y}. Ingresá la cotización a mano."
+                        detail=(
+                            f"No está el dólar oficial del {fecha_dm(fecha_ref)}. "
+                            "Ingresá la cotización a mano."
+                        ),
                     )
 
             tipo_dolar = "oficial"
@@ -612,18 +644,21 @@ def simular_pesificacion(
     Propone la cotización oficial de cierre o usa la provista, calcula monto convertido, percepción y total en pesos.
     """
     if cotizacion is not None and cotizacion <= Decimal("0"):
-        raise HTTPException(status_code=422, detail="La cotización debe ser mayor a 0.")
+        raise HTTPException(status_code=422, detail="Ingresá una cotización mayor a 0.")
     if monto_pesos is not None and monto_pesos <= Decimal("0"):
-        raise HTTPException(status_code=422, detail="El monto en pesos debe ser mayor a 0.")
+        raise HTTPException(
+            status_code=422,
+            detail="Ingresá un monto en pesos mayor a 0.",
+        )
     if monto_percepcion is not None and monto_percepcion < Decimal("0"):
-        raise HTTPException(status_code=422, detail="La percepción debe ser mayor o igual a 0.")
+        raise HTTPException(status_code=422, detail="El impuesto no puede ser negativo.")
 
     tarjeta = db.query(TarjetaCredito).filter(
         TarjetaCredito.id == tarjeta_id,
         TarjetaCredito.usuario_id == usuario_id
     ).first()
     if not tarjeta:
-        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
+        raise HTTPException(status_code=404, detail="No se encontró esa tarjeta.")
 
     if fecha_resumen is not None:
         limite_vencimiento = fecha_resumen

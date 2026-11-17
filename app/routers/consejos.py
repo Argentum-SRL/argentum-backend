@@ -69,7 +69,7 @@ def post_respuesta_consejo(
     if body.respuesta not in {"sirvio", "no_sirve", "no_avisar"}:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Respuesta no válida.",
+            detail="Elegí una de las respuestas.",
         )
 
     try:

@@ -225,7 +225,7 @@ def test_1_delete_presupuesto_activo(client, db_session, usuario_principal, cate
     # GET por ID devuelve 404
     resp_get = client.get(f"/presupuestos/{presu.id}")
     assert resp_get.status_code == 404
-    assert get_error_message(resp_get) == "No encontramos ese presupuesto."
+    assert get_error_message(resp_get) == "No se encontró ese presupuesto."
 
 
 def test_2_post_restaurar_pausado(client, db_session, usuario_principal):
@@ -305,7 +305,7 @@ def test_4_post_restaurar_eliminado_hace_91_dias(client, db_session, usuario_pri
 
     resp = client.post(f"/presupuestos/{presu.id}/restaurar", json={"estado": "activo"})
     assert resp.status_code == 404
-    assert get_error_message(resp) == "No encontramos ese presupuesto."
+    assert get_error_message(resp) == "No se encontró ese presupuesto."
 
 
 def test_5_delete_dos_veces(client, db_session, usuario_principal):
@@ -329,7 +329,7 @@ def test_5_delete_dos_veces(client, db_session, usuario_principal):
 
     resp2 = client.delete(f"/presupuestos/{presu.id}")
     assert resp2.status_code == 404
-    assert get_error_message(resp2) == "No encontramos ese presupuesto."
+    assert get_error_message(resp2) == "No se encontró ese presupuesto."
 
 
 def test_6_purgar_presupuestos_eliminados(db_session, usuario_principal, categoria_prueba):
@@ -524,7 +524,7 @@ def test_9_presupuesto_otro_usuario(client, db_session, usuario_principal, usuar
     # Usuario principal intenta borrar presupuesto de usuario_otro -> 404
     resp_del = client.delete(f"/presupuestos/{presu_otro.id}")
     assert resp_del.status_code == 404
-    assert get_error_message(resp_del) == "No encontramos ese presupuesto."
+    assert get_error_message(resp_del) == "No se encontró ese presupuesto."
 
     # Se marca eliminado para usuario_otro
     presu_otro.estado = EstadoPresupuesto.FINALIZADO
@@ -534,4 +534,4 @@ def test_9_presupuesto_otro_usuario(client, db_session, usuario_principal, usuar
     # Usuario principal intenta restaurar presupuesto de usuario_otro -> 404
     resp_rest = client.post(f"/presupuestos/{presu_otro.id}/restaurar", json={"estado": "activo"})
     assert resp_rest.status_code == 404
-    assert get_error_message(resp_rest) == "No encontramos ese presupuesto."
+    assert get_error_message(resp_rest) == "No se encontró ese presupuesto."

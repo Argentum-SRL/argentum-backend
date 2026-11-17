@@ -371,7 +371,7 @@ def test_verificar_access_token_invalido(monkeypatch):
         with pytest.raises(HTTPException) as exc_info:
             verificar_access_token(tok)
         assert exc_info.value.status_code == 401
-        assert exc_info.value.detail == "Token de acceso inválido o expirado"
+        assert exc_info.value.detail == "Tu sesión terminó. Volvé a entrar."
 
 
 def test_get_current_user_y_optional(monkeypatch, db_session, usuario_test):
@@ -392,7 +392,7 @@ def test_get_current_user_y_optional(monkeypatch, db_session, usuario_test):
     with pytest.raises(HTTPException) as exc_info:
         get_current_user(req, db=db_session, token_header=None)
     assert exc_info.value.status_code == 401
-    assert exc_info.value.detail == "Sesión revocada. Por favor iniciá sesión nuevamente."
+    assert exc_info.value.detail == "Tu sesión se cerró. Volvé a entrar."
 
     # get_optional_user con token inválido -> None
     scope_bad = {

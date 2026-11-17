@@ -229,7 +229,7 @@ def crear_tarjeta(db: Session, usuario_id: UUID, data: TarjetaCreditoCreate) -> 
     ).first()
     
     if not billetera:
-        raise HTTPException(status_code=404, detail="Billetera no encontrada")
+        raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
     
     # Validar que la billetera no sea de efectivo
     if billetera.es_efectivo:
@@ -242,7 +242,10 @@ def crear_tarjeta(db: Session, usuario_id: UUID, data: TarjetaCreditoCreate) -> 
     if data.moneda != billetera.moneda:
         raise HTTPException(
             status_code=400,
-            detail="La moneda de la tarjeta debe coincidir con la moneda de la billetera asociada."
+            detail=(
+                "La tarjeta tiene que estar en la misma moneda "
+                "que su billetera."
+            ),
         )
 
     # Deducir regla de cierre y vencimiento (Decisión 4)
@@ -305,7 +308,7 @@ def actualizar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID, data: Ta
     ).first()
     
     if not tarjeta:
-        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
+        raise HTTPException(status_code=404, detail="No se encontró esa tarjeta.")
     
     update_data = data.model_dump(exclude_unset=True)
 
@@ -313,7 +316,10 @@ def actualizar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID, data: Ta
         if tarjeta.billetera and update_data["moneda"] != tarjeta.billetera.moneda:
             raise HTTPException(
                 status_code=400,
-                detail="La moneda de la tarjeta debe coincidir con la moneda de la billetera asociada."
+                detail=(
+                "La tarjeta tiene que estar en la misma moneda "
+                "que su billetera."
+            ),
             )
         tiene_tx = db.query(Transaccion).filter(Transaccion.tarjeta_id == tarjeta.id).first()
         if tiene_tx:
@@ -428,7 +434,7 @@ def actualizar_fechas_resumen(
         TarjetaCredito.usuario_id == usuario_id
     ).first()
     if not tarjeta:
-        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
+        raise HTTPException(status_code=404, detail="No se encontró esa tarjeta.")
 
     # Validación del punto 4
     if fecha_vencimiento <= fecha_cierre or (fecha_vencimiento - fecha_cierre).days > 31:
@@ -500,7 +506,7 @@ def archivar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID) -> Tarjeta
     ).first()
     
     if not tarjeta:
-        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
+        raise HTTPException(status_code=404, detail="No se encontró esa tarjeta.")
     
     tarjeta.estado = EstadoTarjeta.ARCHIVADA
     db.commit()
@@ -516,7 +522,7 @@ def desarchivar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID) -> Tarj
     ).first()
     
     if not tarjeta:
-        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
+        raise HTTPException(status_code=404, detail="No se encontró esa tarjeta.")
     
     tarjeta.estado = EstadoTarjeta.ACTIVA
     db.commit()
@@ -532,7 +538,7 @@ def eliminar_tarjeta(db: Session, usuario_id: UUID, tarjeta_id: UUID) -> None:
     ).first()
     
     if not tarjeta:
-        raise HTTPException(status_code=404, detail="No encontramos esa tarjeta.")
+        raise HTTPException(status_code=404, detail="No se encontró esa tarjeta.")
     
     # Verificar si tiene transacciones registradas
     tiene_transacciones = db.query(Transaccion).filter(Transaccion.tarjeta_id == tarjeta_id).first()
@@ -601,7 +607,7 @@ def obtener_detalle_resumen_vencimiento(
     """
     tarjeta = db.query(TarjetaCredito).filter(TarjetaCredito.id == tarjeta_id).first()
     if not tarjeta:
-        raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+        raise HTTPException(status_code=404, detail="No se encontró esa tarjeta.")
 
     from app.models.transaccion import TipoTransaccion, EstadoVerificacionTransaccion
     from sqlalchemy import or_

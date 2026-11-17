@@ -368,5 +368,5 @@ def test_te8_sin_cotizacion_error_exacto(db: Session):
     assert exc_info.value.status_code == 400
     assert (
         exc_info.value.detail
-        == "No hay dólar oficial cargado para el 20/10/2026. Ingresá la cotización a mano."
+        == "No está el dólar oficial del 20/10. Ingresá la cotización a mano."
     )

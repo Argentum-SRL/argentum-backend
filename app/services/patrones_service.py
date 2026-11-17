@@ -390,7 +390,7 @@ def registrar_decision(
     elif dec_clean in ("mover", "movido"):
         decision_val = "movido"
     else:
-        raise HTTPException(status_code=400, detail=f"Decisión inválida: {decision}")
+        raise HTTPException(status_code=400, detail="Elegí una de las opciones.")
 
     caja_destino_val = caja_destino if decision_val == "movido" else None
 

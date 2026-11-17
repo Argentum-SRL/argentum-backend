@@ -137,4 +137,4 @@ def test_verificar_email_link_redireccion_segura_usuario_no_encontrado():
         parsed = urllib.parse.urlparse(location)
         params = urllib.parse.parse_qs(parsed.query)
         assert params["email"] == ["inexistente@test.com"]
-        assert params["error"] == ["No encontramos una cuenta con esos datos."]
+        assert params["error"] == ["No hay una cuenta con esos datos."]

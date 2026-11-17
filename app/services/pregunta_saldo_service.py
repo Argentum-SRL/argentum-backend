@@ -112,7 +112,7 @@ def saltear_pregunta(
     b_id = UUID(str(billetera_id)) if isinstance(billetera_id, str) else billetera_id
     billetera = db.get(Billetera, b_id)
     if not billetera or billetera.usuario_id != usuario_id:
-        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
+        raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
 
     billetera.pregunta_saldo_pospuesta_hasta = hoy + timedelta(days=DIAS_SALTEAR)
 

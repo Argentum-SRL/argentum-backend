@@ -15,7 +15,7 @@ from app.core.security import get_password_hash
 
 logger = logging.getLogger(__name__)
 
-TEXTO_GOOGLE_INVALIDO = "No pudimos validar tu cuenta de Google. Probá de nuevo."
+TEXTO_GOOGLE_INVALIDO = "No se pudo entrar con Google. Probá de nuevo."
 EMISORES_GOOGLE = ("accounts.google.com", "https://accounts.google.com")
 _REFETCH_MIN_SEGUNDOS = 300
 
@@ -123,7 +123,10 @@ def validar_reset_token(db: Session, token_raw: str) -> str:
                 "success": False,
                 "error": {
                     "code": "TOKEN_INVALIDO",
-                    "message": "El enlace para cambiar tu contraseña expiró. Podés pedir uno nuevo desde el inicio de sesión.",
+                    "message": (
+                        "El enlace para cambiar tu contraseña venció. "
+                        "Pedí uno nuevo al iniciar sesión."
+                    ),
                 },
             },
         )
@@ -145,7 +148,10 @@ def validar_reset_token(db: Session, token_raw: str) -> str:
                 "success": False,
                 "error": {
                     "code": "TOKEN_INVALIDO",
-                    "message": "El enlace para cambiar tu contraseña expiró. Podés pedir uno nuevo desde el inicio de sesión.",
+                    "message": (
+                        "El enlace para cambiar tu contraseña venció. "
+                        "Pedí uno nuevo al iniciar sesión."
+                    ),
                 },
             },
         )
@@ -165,7 +171,10 @@ def confirmar_reset_password(db: Session, token_raw: str, nueva_password: str) -
                 "success": False,
                 "error": {
                     "code": "TOKEN_INVALIDO",
-                    "message": "El enlace para cambiar tu contraseña expiró. Podés pedir uno nuevo desde el inicio de sesión.",
+                    "message": (
+                        "El enlace para cambiar tu contraseña venció. "
+                        "Pedí uno nuevo al iniciar sesión."
+                    ),
                 },
             },
         )
@@ -187,7 +196,10 @@ def confirmar_reset_password(db: Session, token_raw: str, nueva_password: str) -
                 "success": False,
                 "error": {
                     "code": "TOKEN_INVALIDO",
-                    "message": "El enlace para cambiar tu contraseña expiró. Podés pedir uno nuevo desde el inicio de sesión.",
+                    "message": (
+                        "El enlace para cambiar tu contraseña venció. "
+                        "Pedí uno nuevo al iniciar sesión."
+                    ),
                 },
             },
         )
@@ -201,7 +213,10 @@ def confirmar_reset_password(db: Session, token_raw: str, nueva_password: str) -
                 "success": False,
                 "error": {
                     "code": "PASSWORD_INVALIDA",
-                    "message": "La contraseña debe tener al menos 8 caracteres, incluir una mayúscula, una minúscula y un número.",
+                    "message": (
+                        "La contraseña tiene que tener 8 caracteres o más, "
+                        "mayúscula, minúscula y número."
+                    ),
                 },
             },
         )
@@ -234,7 +249,7 @@ def confirmar_reset_password(db: Session, token_raw: str, nueva_password: str) -
                 "success": False,
                 "error": {
                     "code": "INTERNAL_ERROR",
-                    "message": "Ocurrió un error al guardar la nueva contraseña. Intentá de nuevo.",
+                    "message": "No se pudo guardar la nueva contraseña. Probá de nuevo.",
                 },
             },
         )

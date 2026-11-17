@@ -537,7 +537,10 @@ def test_rutas_pregunta_saldo(client: TestClient, db: Session, usuario_test: Usu
     r4 = client.post(f"/billeteras/{b_ajena.id}/pregunta-saldo/saltear")
     assert r4.status_code == 404
     d4 = r4.json()
-    assert (d4.get("detail") or d4.get("error", {}).get("message")) == "No encontramos esa billetera."
+    assert (
+        (d4.get("detail") or d4.get("error", {}).get("message"))
+        == "No se encontró esa billetera."
+    )
 
     # 5. GET /billeteras/{id}/control-saldo?saldo=<saldo_actual> -> guardar_directo true
     r5 = client.get(f"/billeteras/{b_caja.id}/control-saldo?saldo=15000.00")

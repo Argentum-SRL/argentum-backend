@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 def _validar_categorias_presupuesto(db: Session, categorias_input: List, usuario_id: Optional[UUID] = None) -> None:
     if not categorias_input:
-        raise HTTPException(status_code=400, detail="Debe seleccionar al menos una categoría")
+        raise HTTPException(status_code=400, detail="Elegí al menos una categoría.")
 
     cat_ids = {c.categoria_id for c in categorias_input if c.categoria_id}
     subcat_ids = {c.subcategoria_id for c in categorias_input if getattr(c, 'subcategoria_id', None)}
@@ -42,12 +42,12 @@ def _validar_categorias_presupuesto(db: Session, categorias_input: List, usuario
         cats = db.execute(query).scalars().all()
         found_cat_ids = {c.id for c in cats}
         if len(found_cat_ids) != len(cat_ids):
-            raise HTTPException(status_code=404, detail="Categoría no encontrada")
+            raise HTTPException(status_code=404, detail="No se encontró esa categoría.")
         for cat in cats:
             if cat.tipo != TipoCategoria.EGRESO:
                 raise HTTPException(
-                    status_code=400, 
-                    detail="Los presupuestos solo pueden asociarse a categorías de egreso"
+                    status_code=400,
+                    detail="Un presupuesto solo puede tener categorías de gasto.",
                 )
 
     if subcat_ids:
@@ -55,12 +55,12 @@ def _validar_categorias_presupuesto(db: Session, categorias_input: List, usuario
         subs = db.execute(query).scalars().all()
         found_subcat_ids = {s.id for s in subs}
         if len(found_subcat_ids) != len(subcat_ids):
-            raise HTTPException(status_code=404, detail="Categoría no encontrada")
+            raise HTTPException(status_code=404, detail="No se encontró esa categoría.")
         for sub in subs:
             if sub.categoria and sub.categoria.tipo != TipoCategoria.EGRESO:
                 raise HTTPException(
-                    status_code=400, 
-                    detail="Los presupuestos solo pueden asociarse a categorías de egreso"
+                    status_code=400,
+                    detail="Un presupuesto solo puede tener categorías de gasto.",
                 )
         for c in categorias_input:
             if c.categoria_id and getattr(c, 'subcategoria_id', None):
@@ -68,7 +68,7 @@ def _validar_categorias_presupuesto(db: Session, categorias_input: List, usuario
                 if sub and sub.categoria_id != c.categoria_id:
                     raise HTTPException(
                         status_code=400,
-                        detail="La subcategoría seleccionada no pertenece a la categoría indicada"
+                        detail="Esa subcategoría no es de la categoría elegida.",
                     )
 
 from app.utils.formato import formatear_monto
@@ -498,7 +498,10 @@ def obtener_presupuestos(db: Session, usuario_id: UUID, estado: Optional[str] = 
 
 def crear_presupuesto(db: Session, usuario_id: UUID, data: PresupuestoCreate) -> Presupuesto:
     if data.monto <= 0:
-        raise HTTPException(status_code=400, detail="Monto límite debe ser positivo")
+        raise HTTPException(
+            status_code=400,
+            detail="El límite tiene que ser mayor a 0.",
+        )
 
     _validar_categorias_presupuesto(db, data.categorias, usuario_id)
 
@@ -513,21 +516,21 @@ def crear_presupuesto(db: Session, usuario_id: UUID, data: PresupuestoCreate) ->
     if nombre_existente:
         raise HTTPException(
             status_code=400,
-            detail="Ya tenés un presupuesto activo o pausado con ese nombre"
+            detail="Ya tenés un presupuesto con ese nombre. Elegí otro.",
         )
 
     try:
         moneda_enum = Moneda(data.moneda)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Moneda inválida")
+        raise HTTPException(status_code=400, detail="Elegí pesos o dólares.")
     try:
         periodo_enum = PeriodoPresupuestoTipo(data.periodo)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Periodo inválido")
+        raise HTTPException(status_code=400, detail="Elegí cada cuánto se renueva.")
     try:
         renovacion_enum = RenovacionPresupuesto(data.renovacion)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Tipo de renovación inválido")
+        raise HTTPException(status_code=400, detail="Elegí cómo se renueva.")
 
     # 1. Crear registro Presupuesto
     nuevo_presupuesto = Presupuesto(
@@ -588,7 +591,7 @@ def obtener_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto:
     )
     presupuesto = db.execute(query).scalar_one_or_none()
     if not presupuesto:
-        raise HTTPException(status_code=404, detail="No encontramos ese presupuesto.")
+        raise HTTPException(status_code=404, detail="No se encontró ese presupuesto.")
     hoy = hoy_argentina()
     pa = obtener_periodo_activo(db, presupuesto, hoy=hoy)
     if not pa and presupuesto.estado == EstadoPresupuesto.ACTIVO and presupuesto.renovacion == RenovacionPresupuesto.AUTOMATICA:
@@ -614,19 +617,19 @@ def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: Presup
         if nombre_existente:
             raise HTTPException(
                 status_code=400,
-                detail="Ya tenés un presupuesto activo o pausado con ese nombre"
+                detail="Ya tenés un presupuesto con ese nombre. Elegí otro.",
             )
         presupuesto.nombre = nombre_limpio
     if data.moneda is not None:
         try:
             presupuesto.moneda = Moneda(data.moneda)
         except ValueError:
-            raise HTTPException(status_code=400, detail="Moneda inválida")
+            raise HTTPException(status_code=400, detail="Elegí pesos o dólares.")
     if data.renovacion is not None:
         try:
             presupuesto.renovacion = RenovacionPresupuesto(data.renovacion)
         except ValueError:
-            raise HTTPException(status_code=400, detail="Tipo de renovación inválido")
+            raise HTTPException(status_code=400, detail="Elegí cómo se renueva.")
         
     periodo_cambio = False
     if data.periodo is not None and data.periodo != (presupuesto.periodo.value if hasattr(presupuesto.periodo, "value") else str(presupuesto.periodo)):
@@ -634,7 +637,7 @@ def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: Presup
             presupuesto.periodo = PeriodoPresupuestoTipo(data.periodo)
             periodo_cambio = True
         except ValueError:
-            raise HTTPException(status_code=400, detail="Periodo inválido")
+            raise HTTPException(status_code=400, detail="Elegí cada cuánto se renueva.")
 
     if data.categorias is not None:
         _validar_categorias_presupuesto(db, data.categorias, usuario_id)
@@ -652,7 +655,10 @@ def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: Presup
 
     if data.monto is not None:
         if data.monto <= 0:
-            raise HTTPException(status_code=400, detail="Monto límite debe ser positivo")
+            raise HTTPException(
+                status_code=400,
+                detail="El límite tiene que ser mayor a 0.",
+            )
         presupuesto.monto = data.monto
         if periodo_actual:
             periodo_actual.monto_limite = data.monto
@@ -730,7 +736,7 @@ def restaurar_presupuesto(db: Session, usuario_id: UUID, id: UUID, estado: str) 
     )
     presupuesto = db.execute(query).scalar_one_or_none()
     if not presupuesto:
-        raise HTTPException(status_code=404, detail="No encontramos ese presupuesto.")
+        raise HTTPException(status_code=404, detail="No se encontró ese presupuesto.")
 
     if presupuesto.eliminado_en is None:
         raise HTTPException(status_code=400, detail="Este presupuesto no está eliminado.")
@@ -742,7 +748,7 @@ def restaurar_presupuesto(db: Session, usuario_id: UUID, id: UUID, estado: str) 
         eliminado_en = eliminado_en.replace(tzinfo=timezone.utc)
 
     if eliminado_en < limite:
-        raise HTTPException(status_code=404, detail="No encontramos ese presupuesto.")
+        raise HTTPException(status_code=404, detail="No se encontró ese presupuesto.")
 
     presupuesto.estado = EstadoPresupuesto(estado)
     presupuesto.eliminado_en = None
@@ -1014,12 +1020,18 @@ def renovar_presupuestos(db: Session):
 def renovar_presupuesto_manual(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto:
     presupuesto = obtener_presupuesto(db, usuario_id, id)
     if presupuesto.estado != EstadoPresupuesto.ACTIVO:
-        raise HTTPException(status_code=400, detail="Solo se pueden renovar presupuestos activos")
+        raise HTTPException(
+            status_code=400,
+            detail="Solo se puede empezar un ciclo nuevo en un presupuesto activo.",
+        )
 
     hoy = hoy_argentina()
     periodo_actual = obtener_periodo_activo(db, presupuesto, hoy=hoy)
     if periodo_actual:
-        raise HTTPException(status_code=400, detail="El presupuesto ya tiene un período activo vigente")
+        raise HTTPException(
+            status_code=400,
+            detail="El presupuesto ya tiene un ciclo en curso.",
+        )
 
     asegurar_periodo(db, presupuesto, hoy, usuario=presupuesto.usuario, crear_siempre=True)
     db.commit()

@@ -478,7 +478,10 @@ def test_caso_5_pesificacion_monto_mayor_a_total(db: Session):
         )
 
     assert exc_info.value.status_code == 400
-    assert "no puede superar el total a pagar del resumen" in exc_info.value.detail
+    assert (
+        exc_info.value.detail
+        == "El pago (US$150) no puede ser más que el total del resumen (US$100)."
+    )
     assert "US$150" in exc_info.value.detail
     assert "US$100" in exc_info.value.detail
 

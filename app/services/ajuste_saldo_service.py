@@ -254,7 +254,7 @@ def previsualizar_control(
     """
     billetera = db.get(Billetera, billetera_id)
     if not billetera or billetera.usuario_id != usuario_id:
-        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
+        raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
 
     if hoy is None:
         hoy = hoy_argentina()
@@ -418,7 +418,7 @@ def registrar_control(
     billetera = billeteras.get(b_id)
 
     if not billetera:
-        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
+        raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
 
     if billetera.estado != EstadoBilletera.ACTIVA:
         raise HTTPException(
@@ -478,16 +478,16 @@ def eliminar_ajuste(
     """
     ajuste = db.get(AjusteSaldo, ajuste_id)
     if not ajuste:
-        raise HTTPException(status_code=404, detail="No encontramos ese ajuste de saldo.")
+        raise HTTPException(status_code=404, detail="No se encontró ese control de saldo.")
 
     if billetera_id is not None and str(ajuste.billetera_id) != str(billetera_id):
-        raise HTTPException(status_code=404, detail="No encontramos ese ajuste de saldo.")
+        raise HTTPException(status_code=404, detail="No se encontró ese control de saldo.")
 
     billeteras = bloquear_billeteras(db, [ajuste.billetera_id], usuario_id=usuario_id)
     billetera = billeteras.get(ajuste.billetera_id)
 
     if not billetera:
-        raise HTTPException(status_code=404, detail="No encontramos ese ajuste de saldo.")
+        raise HTTPException(status_code=404, detail="No se encontró ese control de saldo.")
 
     revertir_control_en_saldo(db, billetera, ajuste)
     db.delete(ajuste)
@@ -512,7 +512,7 @@ def listar_ajustes(
         select(Billetera).where(Billetera.id == billetera_id, Billetera.usuario_id == usuario_id)
     ).scalar_one_or_none()
     if not billetera:
-        raise HTTPException(status_code=404, detail="No encontramos esa billetera.")
+        raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
 
     return list(
         db.execute(

@@ -48,17 +48,32 @@ from app.schemas.usuario import (
 FOTOS_DIR = "media/fotos"
 logger = logging.getLogger(__name__)
 
+_TRADUCCION_PASSWORD_ERROR = {
+    "La contraseña debe tener al menos 8 caracteres.": (
+        "La contraseña tiene que tener al menos 8 caracteres."
+    ),
+    "La contraseña debe incluir al menos una letra mayúscula.": (
+        "La contraseña tiene que tener una letra mayúscula."
+    ),
+    "La contraseña debe incluir al menos una letra minúscula.": (
+        "La contraseña tiene que tener una letra minúscula."
+    ),
+    "La contraseña debe incluir al menos un número.": (
+        "La contraseña tiene que tener un número."
+    ),
+}
+
 def obtener_usuario_me(db: Session, usuario_id: UUID) -> Usuario:
     usuario = db.execute(select(Usuario).where(Usuario.id == usuario_id)).scalar_one_or_none()
     if not usuario:
-        raise HTTPException(status_code=404, detail="No encontramos al usuario.")
+        raise HTTPException(status_code=404, detail="No se encontró la cuenta.")
     return usuario
 
 def actualizar_datos_personales(
     db: Session, usuario: Usuario, datos: EditarDatosPersonales
 ) -> Usuario:
     if not datos.nombre.strip() or not datos.apellido.strip():
-        raise HTTPException(status_code=400, detail="Nombre y apellido son obligatorios")
+        raise HTTPException(status_code=400, detail="Completá el nombre y el apellido.")
     
     if datos.fecha_nacimiento:
         from app.utils.fecha import hoy_argentina
@@ -72,7 +87,10 @@ def actualizar_datos_personales(
         # Esto garantiza el cumplimiento legal sin romper la flexibilidad de la API.
         edad = hoy.year - datos.fecha_nacimiento.year - ((hoy.month, hoy.day) < (datos.fecha_nacimiento.month, datos.fecha_nacimiento.day))
         if edad < 18:
-            raise HTTPException(status_code=400, detail="Tenés que ser mayor de 18 años para crear una cuenta en Argentum")
+            raise HTTPException(
+                status_code=400,
+                detail="Tenés que ser mayor de 18 años para crear una cuenta.",
+            )
     
     usuario.nombre = datos.nombre.strip()
     usuario.apellido = datos.apellido.strip()
@@ -88,12 +106,12 @@ def actualizar_email(
     if usuario.auth_provider == AuthProvider.GOOGLE:
         raise HTTPException(
             status_code=400,
-            detail="Tu cuenta usa Google para autenticarse. El email lo gestiona Google directamente."
+            detail="Entrás con Google: el email se cambia en tu cuenta de Google.",
         )
     
     email_limpio = normalizar_email(datos.email_nuevo)
     if not email_limpio or "@" not in email_limpio or "." not in email_limpio.split("@")[-1]:
-        raise HTTPException(status_code=400, detail="Ingresá un formato de email válido.")
+        raise HTTPException(status_code=400, detail="Revisá el email.")
     
     if usuario.email and email_limpio == normalizar_email(usuario.email):
         raise HTTPException(status_code=400, detail="El email ingresado es igual a tu email actual.")
@@ -156,7 +174,8 @@ def actualizar_password(
     try:
         validar_reglas_password(datos.password_nueva)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        msg = _TRADUCCION_PASSWORD_ERROR.get(str(e), str(e))
+        raise HTTPException(status_code=400, detail=msg)
     
     usuario.password_hash = get_password_hash(datos.password_nueva)
     usuario.password_configurada = True
@@ -207,7 +226,10 @@ def actualizar_telefono(
 ) -> dict:
     raise HTTPException(
         status_code=400,
-        detail="El número de teléfono debe vincularse directamente desde WhatsApp iniciando una conversación desde la aplicación.",
+        detail=(
+            "El teléfono se vincula desde WhatsApp, "
+            "con el botón Vincular de tu perfil."
+        ),
     )
 
 
@@ -235,12 +257,15 @@ def actualizar_ciclo_financiero(
             if not (1 <= dia <= 31):
                 raise ValueError()
         except ValueError:
-            raise HTTPException(status_code=400, detail="El día fijo debe ser un número entre 1 y 31")
+            raise HTTPException(
+                status_code=400,
+                detail="El día tiene que ser del 1 al 31.",
+            )
     elif datos.ciclo_tipo == CicloTipo.REGLA:
         from app.models.usuario import CicloRegla
         reglas_validas = {e.value for e in CicloRegla}
         if datos.ciclo_valor not in reglas_validas:
-            raise HTTPException(status_code=400, detail="Regla de ciclo no válida")
+            raise HTTPException(status_code=400, detail="Elegí cómo empieza tu mes.")
     
     usuario.ciclo_tipo = datos.ciclo_tipo
     usuario.ciclo_valor = datos.ciclo_valor
@@ -276,7 +301,7 @@ def actualizar_moneda(
             tipo = "mep"
         valid_dolares = {"oficial", "blue", "tarjeta", "mep"}
         if tipo not in valid_dolares:
-            raise HTTPException(status_code=400, detail="Tipo de dólar no válido.")
+            raise HTTPException(status_code=400, detail="Elegí qué dólar usar.")
         usuario.tipo_dolar = tipo
     
     db.commit()
@@ -294,13 +319,22 @@ def actualizar_foto(
 
     extension = archivo.filename.split(".")[-1].lower()
     if extension not in ["jpg", "jpeg", "png", "webp"]:
-        raise HTTPException(status_code=400, detail="Formato de imagen no permitido (jpg, jpeg, png, webp)")
+        raise HTTPException(
+            status_code=400,
+            detail="La foto tiene que ser jpg, png o webp.",
+        )
     
     archivo.file.seek(0, os.SEEK_END)
     size = archivo.file.tell()
     archivo.file.seek(0)
     if size > 5 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="La imagen no debe superar los 5MB")
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "La foto es muy pesada (máximo 5 MB). "
+                "Elegí una más liviana."
+            ),
+        )
     
     content_type_map = {
         "jpg": "image/jpeg",

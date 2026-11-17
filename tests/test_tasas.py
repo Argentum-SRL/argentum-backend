@@ -519,7 +519,7 @@ def test_d8_correcciones_c1_a_c6(db_session):
     with pytest.raises(HTTPException) as exc_eliminar:
         eliminar_ajuste(db_session, u.id, ajuste.id, billetera_id=b2.id)
     assert exc_eliminar.value.status_code == 404
-    assert exc_eliminar.value.detail == "No encontramos ese ajuste de saldo."
+    assert exc_eliminar.value.detail == "No se encontró ese control de saldo."
 
 
 # -----------------------------------------------------------------------------

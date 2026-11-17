@@ -1,5 +1,5 @@
 REGLAS DE LOS TEXTOS DE NOTIFICACIONES DE LA WEB — ARGENTUM
-Vigentes desde el paso fase_notif_web1 (decisiones 1A, 2A y 3A de Sebastián, 16/11/2026).
+Vigentes desde el paso fase_notif_web1 (decisiones 1A, 2A y 3A de Sebastián, 16/11/2026); los errores del servidor, desde fase_notif_web2.
 
 Valen para todo texto que la web muestra sola, sin que la persona lo esté leyendo en una pantalla: los cartelitos (sileo: success, error, info, warning, action) y los avisos de la campanita (centro de notificaciones), incluido el cartelito que aparece cuando llega un aviso. Un texto nuevo o cambiado que no las cumple no se puede subir: lo frenan las pruebas automáticas (sección G). Si una regla choca con un caso nuevo, se cambia este archivo primero y después el código. Los textos de WhatsApp siguen REGLAS_TEXTOS_WHATSAPP.md; un texto que sale por los dos lados cumple los dos archivos.
 
@@ -88,9 +88,10 @@ Los datos de las plantillas de Meta (datos_template) no cambian: las plantillas 
 E. CARTELITOS
 
 1. Cada texto viejo y su texto nuevo están en TABLA_CARTELITOS_WEB.txt (aprobada con este archivo). Un cartelito nuevo sigue las reglas A a C con las mismas formas de la tabla.
-2. Todo error que viene del servidor pasa por getErrorMessage(error, '<texto propio>'), y el texto propio cumple estas reglas. Nunca se muestra error.response.data.detail ni un mensaje del servidor sin pasar por getErrorMessage. Los textos de error del servidor se arreglan en el paso fase_notif_web2.
+2. Todo error que viene del servidor pasa por getErrorMessage(error, '<texto propio>'), y el texto propio cumple estas reglas. Nunca se muestra error.response.data.detail ni un mensaje del servidor sin pasar por getErrorMessage. getErrorMessage muestra el texto del servidor solo si cumple estas reglas (problemasTextoWeb da []); si no, muestra el texto propio del lugar. ERROR_MAP (src/utils/errorMessages.ts) solo traduce los textos técnicos que el servidor no puede evitar (validaciones automáticas en inglés y errores HTTP genéricos), y sus traducciones cumplen estas reglas.
 3. Cartelito de un aviso que llega: muestra solo el título (primer renglón) del aviso.
 4. Cartelito con botón (action): el botón dice la acción con una palabra ("Deshacer").
+5. Errores del servidor (backend): todo texto que el servidor manda como error a la web cumple estas reglas: el detail de HTTPException, el message de un error con el formato del proyecto ({"error": {"message": ...}}), los mensajes de los manejadores de errores de app/main.py, las constantes que se usan como detail y los mensajes de las excepciones que un router devuelve con str(e). Los textos de cada error están en TABLA_ERRORES_SERVIDOR.txt del backend.
 
 
 F. CÓMO SE GUARDA Y SE MUESTRA UN AVISO
@@ -102,7 +103,7 @@ F. CÓMO SE GUARDA Y SE MUESTRA UN AVISO
 G. EXCEPCIONES (las únicas)
 
 1. Paneles de administración (src/pages/admin y AdminPage): pueden usar palabras técnicas de su pantalla ("scheduler", "monitor"), pero cumplen el resto.
-2. Textos de error del servidor: hasta fase_notif_web2 los controla solo getErrorMessage (E2).
+2. Webhooks de WhatsApp y Meta (app/routers/whatsapp_ia.py y app/routers/whatsapp/): sus errores los recibe Meta, no la persona.
 3. Plantillas de Meta: viven en Meta y se cambian aparte.
 
 
@@ -111,4 +112,5 @@ H. CÓMO SE CONTROLA (pruebas automáticas)
 1. Backend: app/core/reglas_texto_web.py::problemas_texto_web(texto) -> list[str]. Front: src/utils/reglasTextoWeb.ts::problemasTextoWeb(texto). Dan los mismos códigos para los mismos textos (W1 a W13).
 2. Backend: cada familia de D tiene un test que compara el texto exacto y que pasa problemas_texto_web; un test estático revisa todo texto que llega a crear_notificacion.
 3. Front: un test de Vitest recorre todo src y revisa con problemasTextoWeb cada texto de cada cartelito (también los que salen de variables, constantes y funciones); si un cartelito no se puede resolver a textos fijos ni pasa por getErrorMessage o parsearAviso, el test falla.
-4. Todo texto nuevo lleva un test que compara el texto exacto.
+4. Backend: tests/test_reglas_texto_web_errores.py revisa con problemas_texto_web todo texto de error del servidor de E5 (salvo G2).
+5. Todo texto nuevo lleva un test que compara el texto exacto.

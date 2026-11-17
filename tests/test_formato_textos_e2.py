@@ -74,7 +74,7 @@ def test_meta_service_error_cotizacion_formato():
 
         assert exc_info.value.status_code == 400
         esperado = (
-            "La cotización ingresada ($500) difiere más del 30% de la cotización actual ($1.000). "
+            "Esa cotización está muy lejos de la de hoy ($1.000). "
             "Ingresá un valor entre $700 y $1.300."
         )
         assert exc_info.value.detail == esperado

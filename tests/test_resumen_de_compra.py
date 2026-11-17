@@ -252,7 +252,7 @@ def test_resumen_de_compra_caso_5(client: TestClient, escenario: dict):
     resp = client.get(f"/tarjetas/{tarjeta_otro_id}/resumen-de-compra?fecha=2026-09-20")
     assert resp.status_code == 404
     data = resp.json()
-    assert data["error"]["message"] == "No encontramos esa tarjeta."
+    assert data["error"]["message"] == "No se encontró esa tarjeta."
 
 
 def test_resumen_de_compra_caso_6(client: TestClient, db: Session, escenario: dict):

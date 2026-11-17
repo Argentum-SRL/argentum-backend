@@ -99,7 +99,10 @@ def test_post_datos_personales_menor_de_edad(client, db_session):
         }
     )
     assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert response.json()["error"]["message"] == "Tenés que ser mayor de 18 años para crear una cuenta en Argentum"
+    assert (
+        response.json()["error"]["message"]
+        == "Tenés que ser mayor de 18 años para crear una cuenta."
+    )
 
 def test_post_datos_personales_mayor_de_edad(client, db_session):
     """Verifica que el registro de un usuario de 18+ años sea exitoso."""

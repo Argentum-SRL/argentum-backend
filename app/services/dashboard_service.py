@@ -558,7 +558,7 @@ def get_subcategorias_gasto(
     try:
         cat_uuid = uuid.UUID(categoria_id)
     except (ValueError, AttributeError):
-        raise HTTPException(status_code=400, detail="Formato de ID de categoría inválido")
+        raise HTTPException(status_code=400, detail="No se encontró esa categoría.")
 
     hoy = hoy_argentina()
     fecha_inicio, fecha_fin = get_ciclo_fechas(usuario, hoy)

@@ -76,13 +76,13 @@ def crear_suscripcion(db: Session, usuario_id: UUID, data: SuscripcionCreate) ->
         raise HTTPException(status_code=400, detail="El nombre de la suscripción no puede estar vacío.")
     
     if data.monto <= 0:
-        raise HTTPException(status_code=400, detail="El monto debe ser mayor a cero.")
+        raise HTTPException(status_code=400, detail="Ingresá un monto mayor a 0.")
 
     # 2. Validar frecuencia
     try:
         frecuencia_enum = FrecuenciaSuscripcion(data.frecuencia)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Frecuencia de suscripción no válida.")
+        raise HTTPException(status_code=400, detail="Elegí cada cuánto se cobra.")
 
     # 3. Validar exclusividad y pertenencia de billetera/tarjeta
     if data.billetera_id and data.tarjeta_id:
@@ -91,19 +91,19 @@ def crear_suscripcion(db: Session, usuario_id: UUID, data: SuscripcionCreate) ->
     if data.billetera_id:
         bill = db.query(Billetera).filter(Billetera.id == data.billetera_id, Billetera.usuario_id == usuario_id).first()
         if not bill:
-            raise HTTPException(status_code=404, detail="Billetera no encontrada")
+            raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
     
     if data.tarjeta_id:
         tarjeta = db.query(TarjetaCredito).filter(TarjetaCredito.id == data.tarjeta_id, TarjetaCredito.usuario_id == usuario_id).first()
         if not tarjeta:
-            raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+            raise HTTPException(status_code=404, detail="No se encontró esa tarjeta.")
 
     # 4. Validar categoría y subcategoría
     if data.categoria_id:
         from app.models.categoria import Categoria, TipoCategoria
         cat = db.query(Categoria).filter(Categoria.id == data.categoria_id).first()
         if not cat or cat.tipo != TipoCategoria.EGRESO:
-            raise HTTPException(status_code=400, detail="La categoría seleccionada no es válida o no es de egreso.")
+            raise HTTPException(status_code=400, detail="Elegí una categoría de gasto.")
 
     if data.subcategoria_id:
         from app.models.subcategoria import Subcategoria
@@ -193,7 +193,7 @@ def obtener_suscripcion_detalle(db: Session, usuario_id: UUID, suscripcion_id: U
         joinedload(Suscripcion.subcategoria),
     ).filter(Suscripcion.id == suscripcion_id, Suscripcion.usuario_id == usuario_id).first()
     if not suscripcion:
-        raise HTTPException(status_code=404, detail="No encontramos esa suscripción.")
+        raise HTTPException(status_code=404, detail="No se encontró esa suscripción.")
     
     hoy = hoy_argentina()
     historial_ordenado = sorted(
@@ -214,7 +214,7 @@ def obtener_suscripcion_detalle(db: Session, usuario_id: UUID, suscripcion_id: U
 def actualizar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID, data: SuscripcionUpdate) -> Suscripcion:
     suscripcion = db.query(Suscripcion).filter(Suscripcion.id == suscripcion_id, Suscripcion.usuario_id == usuario_id).first()
     if not suscripcion:
-        raise HTTPException(status_code=404, detail="No encontramos esa suscripción.")
+        raise HTTPException(status_code=404, detail="No se encontró esa suscripción.")
 
     update_data = data.model_dump(exclude_unset=True)
 
@@ -235,13 +235,13 @@ def actualizar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID, 
     if nueva_billetera_id:
         billetera_obj = db.query(Billetera).filter(Billetera.id == nueva_billetera_id, Billetera.usuario_id == usuario_id).first()
         if not billetera_obj:
-            raise HTTPException(status_code=404, detail="Billetera no encontrada")
+            raise HTTPException(status_code=404, detail="No se encontró esa billetera.")
 
     tarjeta_obj = None
     if nueva_tarjeta_id:
         tarjeta_obj = db.query(TarjetaCredito).filter(TarjetaCredito.id == nueva_tarjeta_id, TarjetaCredito.usuario_id == usuario_id).first()
         if not tarjeta_obj:
-            raise HTTPException(status_code=404, detail="Tarjeta no encontrada")
+            raise HTTPException(status_code=404, detail="No se encontró esa tarjeta.")
 
     if 'billetera_id' in update_data:
         suscripcion.billetera_id = nueva_billetera_id
@@ -256,7 +256,7 @@ def actualizar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID, 
         from app.models.categoria import Categoria, TipoCategoria
         cat = db.query(Categoria).filter(Categoria.id == nueva_cat_id).first()
         if not cat or cat.tipo != TipoCategoria.EGRESO:
-            raise HTTPException(status_code=400, detail="La categoría seleccionada no es válida o no es de egreso.")
+            raise HTTPException(status_code=400, detail="Elegí una categoría de gasto.")
 
     if nueva_sub_id:
         from app.models.subcategoria import Subcategoria
@@ -274,7 +274,7 @@ def actualizar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID, 
         try:
             suscripcion.frecuencia = FrecuenciaSuscripcion(update_data['frecuencia'])
         except ValueError:
-            raise HTTPException(status_code=400, detail="Frecuencia de suscripción no válida.")
+            raise HTTPException(status_code=400, detail="Elegí cada cuánto se cobra.")
 
     # 5. Validar fecha próximo cobro y normalizar
     cobro_inmediato = False
@@ -294,13 +294,16 @@ def actualizar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID, 
                 raise HTTPException(status_code=400, detail="No se puede reactivar una suscripción cancelada. Creá una nueva.")
             suscripcion.estado = nuevo_estado
         except ValueError:
-            raise HTTPException(status_code=400, detail="Estado de suscripción no válido.")
+            raise HTTPException(
+                status_code=400,
+                detail="Ese estado no existe para una suscripción.",
+            )
 
     # 7. Actualización de precio si viene monto en el update
     if 'monto' in update_data and update_data['monto'] is not None:
         nuevo_monto = update_data['monto']
         if nuevo_monto <= 0:
-            raise HTTPException(status_code=400, detail="El monto debe ser mayor a cero.")
+            raise HTTPException(status_code=400, detail="Ingresá un monto mayor a 0.")
         
         precio_actual = obtener_precio_vigente(db, suscripcion.id)
         nueva_moneda = update_data.get('moneda') or (precio_actual.moneda if precio_actual else 'ARS')
@@ -335,10 +338,10 @@ def actualizar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID, 
 def actualizar_precio(db: Session, usuario_id: UUID, suscripcion_id: UUID, data: ActualizarPrecioRequest) -> HistorialSuscripcion:
     suscripcion = db.query(Suscripcion).filter(Suscripcion.id == suscripcion_id, Suscripcion.usuario_id == usuario_id).first()
     if not suscripcion:
-        raise HTTPException(status_code=404, detail="No encontramos esa suscripción.")
+        raise HTTPException(status_code=404, detail="No se encontró esa suscripción.")
 
     if data.monto <= 0:
-        raise HTTPException(status_code=400, detail="El monto debe ser mayor a cero.")
+        raise HTTPException(status_code=400, detail="Ingresá un monto mayor a 0.")
 
     nuevo_precio = HistorialSuscripcion(
         suscripcion_id=suscripcion_id,
@@ -354,7 +357,7 @@ def actualizar_precio(db: Session, usuario_id: UUID, suscripcion_id: UUID, data:
 def cambiar_estado(db: Session, usuario_id: UUID, suscripcion_id: UUID, nuevo_estado: EstadoSuscripcion) -> Suscripcion:
     suscripcion = db.query(Suscripcion).filter(Suscripcion.id == suscripcion_id, Suscripcion.usuario_id == usuario_id).first()
     if not suscripcion:
-        raise HTTPException(status_code=404, detail="No encontramos esa suscripción.")
+        raise HTTPException(status_code=404, detail="No se encontró esa suscripción.")
     
     if suscripcion.estado == EstadoSuscripcion.CANCELADA and nuevo_estado == EstadoSuscripcion.ACTIVA:
         raise HTTPException(status_code=400, detail="No se puede reactivar una suscripción cancelada. Creá una nueva.")
@@ -385,7 +388,7 @@ def eliminar_suscripcion(db: Session, usuario_id: UUID, suscripcion_id: UUID) ->
     ).first()
 
     if not suscripcion:
-        raise HTTPException(status_code=404, detail="No encontramos esa suscripción.")
+        raise HTTPException(status_code=404, detail="No se encontró esa suscripción.")
 
     if suscripcion.estado != EstadoSuscripcion.CANCELADA:
         suscripcion.estado = EstadoSuscripcion.CANCELADA
