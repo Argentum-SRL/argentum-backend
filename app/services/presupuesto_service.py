@@ -20,6 +20,10 @@ from app.models.usuario import Usuario, Moneda
 from app.schemas.presupuesto import PresupuestoCreate, PresupuestoUpdate
 from app.core.politica_notificaciones import puede_salir_por_whatsapp
 from app.services.definiciones_service import condicion_gasto
+from app.services.textos_avisos_web import (
+    texto_presupuesto_limite,
+    texto_presupuesto_superado,
+)
 from app.services.whatsapp_service import enviar_whatsapp_template, enviar_whatsapp
 from app.utils.fecha import hoy_argentina
 from app.services.presupuesto_sugerencias_reglas import SUBCATEGORIAS_FIJAS
@@ -903,7 +907,9 @@ def verificar_alertas_presupuesto(
         nivel = NivelNotificacion.FINANCIERA_IMPORTANTE
         canal_web = config.presupuesto_umbral_2_web
         canal_whatsapp = config.presupuesto_umbral_2_whatsapp
-        mensaje = f"Gastaste {gastado_fmt} de {limite_fmt} en {nombre}. Superaste el límite que te pusiste."
+        mensaje = texto_presupuesto_superado(
+            nombre, usado_dec, limite, presupuesto.moneda
+        )
         datos_template = {
             "nombre_pres": nombre,
             "gastado_fmt": gastado_fmt,
@@ -914,7 +920,9 @@ def verificar_alertas_presupuesto(
         nivel = NivelNotificacion.FINANCIERA_INFORMATIVA
         canal_web = config.presupuesto_umbral_1_web
         canal_whatsapp = config.presupuesto_umbral_1_whatsapp
-        mensaje = f"Llevás gastado el {int(porcentaje)}% de tu presupuesto '{nombre}' ({gastado_fmt} de {limite_fmt})."
+        mensaje = texto_presupuesto_limite(
+            int(porcentaje), nombre, usado_dec, limite, presupuesto.moneda
+        )
         datos_template = {
             "gastado_fmt": gastado_fmt,
             "limite_fmt": limite_fmt,

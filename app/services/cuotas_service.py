@@ -9,6 +9,7 @@ from app.models.grupo_cuotas import GrupoCuotas
 from app.schemas.grupos_cuotas import GrupoCuotasUpdate
 from app.services import presupuesto_service
 from app.services.saldo_billetera_service import aplicar_impacto_saldo
+from app.services.textos_avisos_web import texto_billetera_sin_saldo
 from app.utils.cuotas import monto_efectivo_cuota
 from app.utils.fecha import hoy_argentina
 from app.core.constants import IVA_INTERESES
@@ -342,7 +343,7 @@ def prepagar_grupo(
                     usuario_id=usuario_id,
                     tipo=TipoNotificacion.SALDO_CERO,
                     nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                    mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
+                    mensaje=texto_billetera_sin_saldo(billetera.nombre),
                     entidad_tipo="billetera",
                     entidad_id=billetera.id,
                     deep_link="/app/billeteras",

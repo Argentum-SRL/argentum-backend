@@ -12,10 +12,11 @@ from app.models.notificacion import (
     TipoNotificacion,
     NivelNotificacion,
 )
+from app.core.reglas_texto_wpp import nombre_tarjeta_wpp
 from app.services import calendario_tarjeta_service, tarjeta_service
 from app.services.notificacion_service import crear_notificacion
+from app.services.textos_avisos_web import texto_resumen_impago
 from app.utils.fecha import hoy_argentina
-from app.utils.formato import formatear_monto
 
 
 def procesar_vencimientos_tarjetas(db: Session, hoy: date | None = None) -> None:
@@ -78,9 +79,12 @@ def procesar_vencimientos_tarjetas(db: Session, hoy: date | None = None) -> None
                 continue
 
             moneda_val = tarjeta.moneda.value if hasattr(tarjeta.moneda, "value") else str(tarjeta.moneda)
-            monto_fmt = formatear_monto(monto_sin_pagar, moneda_val)
-            venc_fmt = vencimiento_objetivo.strftime("%d/%m")
-            mensaje = f"¿Pagaste el resumen de {tarjeta.nombre} de {monto_fmt} que venció el {venc_fmt}?"
+            mensaje = texto_resumen_impago(
+                nombre_tarjeta_wpp(tarjeta),
+                vencimiento_objetivo,
+                monto_sin_pagar,
+                moneda_val,
+            )
             grupo = f"RESUMEN_IMPAGO_{tarjeta.id}_{vencimiento_objetivo:%Y%m%d}_{d}"
             deep_link = f"/app/billeteras/{tarjeta.billetera_id}?tab=credito&tarjeta_id={tarjeta.id}"
 

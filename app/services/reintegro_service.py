@@ -37,6 +37,7 @@ from app.models.transaccion import (
 from app.services import calendario_tarjeta_service
 from app.services.notificacion_service import crear_notificacion
 from app.services.saldo_billetera_service import aplicar_impacto_saldo
+from app.services.textos_avisos_web import texto_reintegro_pendiente
 from app.services.transaccion_service import (
     _afecta_saldo,
     _queda_pendiente_por_fecha,
@@ -45,7 +46,6 @@ from app.services.transaccion_service import (
     obtener_transaccion,
 )
 from app.utils.fecha import hoy_argentina
-from app.utils.formato import formatear_monto
 
 
 def tiene_pago_resumen_confirmado(db: Session, tarjeta_id: UUID, vencimiento: date) -> bool:
@@ -346,8 +346,9 @@ def notificar_reintegros_pendientes(db: Session, hoy: date) -> int:
         if notif_existente:
             continue
 
-        monto_str = formatear_monto(c.reintegro_esperado, c.moneda)
-        mensaje = f"¿Te llegó el reintegro de {monto_str} de {c.descripcion}?"
+        mensaje = texto_reintegro_pendiente(
+            c.reintegro_esperado, c.moneda, c.descripcion
+        )
         deep_link = f"/app/transacciones?transaccion={c.id}"
 
         crear_notificacion(

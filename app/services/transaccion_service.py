@@ -19,8 +19,8 @@ from app.schemas.transaccion import TransaccionCreate, TransaccionUpdate
 from app.services.resumen_tarjeta_service import _tabla_saldo_arrastrado_existe
 from app.services import calendario_tarjeta_service, cuotas_service, presupuesto_service
 from app.services.saldo_billetera_service import aplicar_impacto_saldo, bloquear_billeteras
+from app.services.textos_avisos_web import texto_billetera_sin_saldo
 from app.utils.fecha import hoy_argentina
-from app.utils.formato import formatear_monto
 
 from app.utils.tasas import tna_a_mensual
 from app.utils.cuotas import calcular_plan_cuotas
@@ -451,7 +451,7 @@ def crear_transaccion(
                         usuario_id=usuario_id,
                         tipo=TipoNotificacion.SALDO_CERO,
                         nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                        mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
+                        mensaje=texto_billetera_sin_saldo(billetera.nombre),
                         entidad_tipo="billetera",
                         entidad_id=billetera.id,
                         deep_link="/app/billeteras",
@@ -633,7 +633,7 @@ def actualizar_transaccion(
                             usuario_id=usuario_id,
                             tipo=TipoNotificacion.SALDO_CERO,
                             nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                            mensaje=f"Tu billetera '{billetera_nueva.nombre}' quedó sin saldo disponible.",
+                            mensaje=texto_billetera_sin_saldo(billetera_nueva.nombre),
                             entidad_tipo="billetera",
                             entidad_id=billetera_nueva.id,
                             deep_link="/app/billeteras",
@@ -925,7 +925,7 @@ def confirmar_transaccion_ia(
                         usuario_id=usuario_id,
                         tipo=TipoNotificacion.SALDO_CERO,
                         nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                        mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
+                        mensaje=texto_billetera_sin_saldo(billetera.nombre),
                         entidad_tipo="billetera",
                         entidad_id=billetera.id,
                         deep_link="/app/billeteras",

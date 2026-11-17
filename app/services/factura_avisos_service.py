@@ -9,8 +9,8 @@ from app.models.factura import Factura
 from app.models.notificacion import NivelNotificacion, TipoNotificacion
 from app.services.notificacion_scheduler_service import intentar_tomar_lock_job, liberar_lock_job
 from app.services.notificacion_service import crear_notificacion
+from app.services.textos_avisos_web import texto_factura_vence
 from app.utils.fecha import hoy_argentina
-from app.utils.formato import formatear_monto
 
 logger = logging.getLogger(__name__)
 
@@ -36,9 +36,9 @@ def _job_notificaciones_facturas(db_session_factory):
         )
         facturas_3 = db.execute(stmt_3).scalars().all()
         for f in facturas_3:
-            monto_fmt = formatear_monto(f.monto, f.moneda)
-            dd_mm = f"{f.fecha_vencimiento.day:02d}/{f.fecha_vencimiento.month:02d}"
-            mensaje = f"La factura de {f.descripcion} por {monto_fmt} vence en 3 días ({dd_mm})."
+            mensaje = texto_factura_vence(
+                f.descripcion, f.monto, f.moneda, f.fecha_vencimiento, hoy
+            )
             grupo = f"FACTURA_VENCE_{f.id}_{hoy:%Y%m%d}"
             crear_notificacion(
                 db=db,
@@ -63,8 +63,9 @@ def _job_notificaciones_facturas(db_session_factory):
         )
         facturas_hoy = db.execute(stmt_hoy).scalars().all()
         for f in facturas_hoy:
-            monto_fmt = formatear_monto(f.monto, f.moneda)
-            mensaje = f"La factura de {f.descripcion} por {monto_fmt} vence hoy."
+            mensaje = texto_factura_vence(
+                f.descripcion, f.monto, f.moneda, f.fecha_vencimiento, hoy
+            )
             grupo = f"FACTURA_VENCE_{f.id}_{hoy:%Y%m%d}"
             crear_notificacion(
                 db=db,

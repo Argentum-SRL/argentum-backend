@@ -6,8 +6,17 @@ import structlog
 from app.models.notificacion import TipoNotificacion, NivelNotificacion, Notificacion
 from app.models.configuracion_notificacion import ConfiguracionNotificacion
 from app.models.usuario import Usuario, Moneda
+from app.core.reglas_texto_wpp import nombre_tarjeta_wpp
 from app.services.notificacion_service import crear_notificacion
-from app.services import notificacion_whatsapp_service as wpp_svc
+from app.services.textos_avisos_web import (
+    texto_cuota_sin_tarjeta_vence,
+    texto_inactividad,
+    texto_resumen_ciclo,
+    texto_resumen_semanal,
+    texto_resumen_tarjeta_vence,
+    texto_suscripcion_hoy,
+    texto_suscripcion_proxima,
+)
 from app.services.whatsapp_service import enviar_whatsapp_template
 from app.utils.cuotas import monto_efectivo_cuota
 from app.utils.fecha import ahora_argentina, hoy_argentina
@@ -90,9 +99,10 @@ def _job_notificaciones_cuotas(db_session_factory):
                 if not total_resumen or float(total_resumen) <= 0:
                     continue
 
-                mensaje = (
-                    f"El resumen de tu {tarjeta.nombre} cierra el {resumen.fecha_cierre_proximo.strftime('%d/%m/%Y')} "
-                    f"y vence el {fecha_vencimiento_resumen.strftime('%d/%m/%Y')}."
+                mensaje = texto_resumen_tarjeta_vence(
+                    nombre_tarjeta_wpp(tarjeta),
+                    resumen.fecha_cierre_proximo,
+                    fecha_vencimiento_resumen,
                 )
 
                 grupo_override = f"RESUMEN_TARJETA_{tarjeta.id}_{hoy.strftime('%Y%m%d')}"
@@ -137,9 +147,13 @@ def _job_notificaciones_cuotas(db_session_factory):
 
                 moneda_cuota = getattr(grupo, 'moneda', None) or getattr(cuota, 'moneda', None) or "ARS"
                 monto_fmt = formatear_monto(monto, moneda_cuota)
-                mensaje = (
-                    f"Tu cuota {numero}/{cantidad} de '{descripcion}' vence el {fecha_objetivo.strftime('%d/%m/%Y')} ({monto_fmt}). "
-                    f"Acordate de tener el saldo disponible."
+                mensaje = texto_cuota_sin_tarjeta_vence(
+                    numero,
+                    cantidad,
+                    descripcion,
+                    fecha_objetivo,
+                    monto,
+                    moneda_cuota,
                 )
 
                 crear_notificacion(
@@ -280,7 +294,7 @@ def _job_notificaciones_suscripciones(db_session_factory):
                     monto = float(precio.monto) if precio else 0.0
                     moneda = precio.moneda if precio else "ARS"
                     monto_fmt = formatear_monto(monto, moneda)
-                    mensaje = f"Hoy se cobra la suscripción '{s.nombre}' por {monto_fmt}"
+                    mensaje = texto_suscripcion_hoy(s.nombre, monto, moneda)
 
                     crear_notificacion(
                         db=db,
@@ -304,7 +318,9 @@ def _job_notificaciones_suscripciones(db_session_factory):
                         monto = float(precio.monto) if precio else 0.0
                         moneda = precio.moneda if precio else "ARS"
                         monto_fmt = formatear_monto(monto, moneda)
-                        mensaje = f"La suscripción '{s.nombre}' se cobrará en {anticipacion} días ({monto_fmt})"
+                        mensaje = texto_suscripcion_proxima(
+                            s.nombre, monto, moneda, s.proximo_cobro, hoy
+                        )
 
                         crear_notificacion(
                             db=db,
@@ -381,13 +397,14 @@ def _job_notificaciones_inactividad(db_session_factory):
                 ).first()
 
                 if not recent_notif:
-                    mensaje = f"¿Todo bien? Hace {dias} días que no registrás nada. Registrar tus gastos te ayuda a entender mejor en qué se va tu plata."
+                    mensaje = texto_inactividad(dias)
                     crear_notificacion(
                         db=db,
                         usuario_id=usuario_id,
                         tipo=TipoNotificacion.INACTIVIDAD,
                         nivel=NivelNotificacion.SOFT,
                         mensaje=mensaje,
+                        deep_link="/app/transacciones",
                         canal_web=config.inactividad_web,
                         canal_whatsapp=config.inactividad_whatsapp,
                         datos_template={"dias": dias},
@@ -693,29 +710,11 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                     str_ingresos = formatear_monto(ingresos_ars, Moneda.ARS, con_decimales=False)
                     str_egresos = formatear_monto(egresos_ars, Moneda.ARS, con_decimales=False)
                     str_balance = f"{signo_ars}{formatear_monto(balance_ars, Moneda.ARS, con_decimales=False)}"
-                    mensaje = wpp_svc.formatear_resumen_ciclo(
-                        total_ingresos=ingresos_ars,
-                        total_egresos=egresos_ars,
-                        balance=balance_ars,
-                        categoria_top=cat_top.nombre if cat_top else None,
-                        monto_categoria_top=float(cat_top.total) if cat_top else None,
-                        gastos_hormiga=gastos_hormiga,
-                        moneda=Moneda.ARS,
-                    )
                 elif hay_usd and not hay_ars:
                     signo_usd = "+" if balance_usd >= 0 else ""
                     str_ingresos = formatear_monto(ingresos_usd, Moneda.USD)
                     str_egresos = formatear_monto(egresos_usd, Moneda.USD)
                     str_balance = f"{signo_usd}{formatear_monto(balance_usd, Moneda.USD)}"
-                    mensaje = wpp_svc.formatear_resumen_ciclo(
-                        total_ingresos=ingresos_usd,
-                        total_egresos=egresos_usd,
-                        balance=balance_usd,
-                        categoria_top=cat_top.nombre if cat_top else None,
-                        monto_categoria_top=float(cat_top.total) if cat_top else None,
-                        gastos_hormiga=gastos_hormiga,
-                        moneda=Moneda.USD,
-                    )
                 else:
                     signo_ars = "+" if balance_ars >= 0 else ""
                     str_bal_ars = f"{signo_ars}{formatear_monto(balance_ars, Moneda.ARS, con_decimales=False)}"
@@ -725,18 +724,15 @@ def _job_resumen_cierre_ciclo(db_session_factory):
                     str_egresos = f"{formatear_monto(egresos_ars, Moneda.ARS, con_decimales=False)} + {formatear_monto(egresos_usd, Moneda.USD)}"
                     str_balance = f"{str_bal_ars} y {str_bal_usd}"
 
-                    lineas = [
-                        f"*Cerraste el ciclo*\n",
-                        f"Ingresos: {str_ingresos}",
-                        f"Egresos: {str_egresos}",
-                        f"Balance: {str_balance}",
-                    ]
-                    if cat_top and cat_top.total:
-                        lineas.append(f"\nMás gastaste en *{cat_top.nombre}*: {formatear_monto(float(cat_top.total), moneda_top)}")
-                    if gastos_hormiga:
-                        for g in gastos_hormiga[:2]:
-                            lineas.append(f"• {g['categoria']}: {formatear_monto(g['total'], moneda_top)} en {g['cantidad']} compras")
-                    mensaje = "\n".join(lineas)
+                mensaje = texto_resumen_ciclo(
+                    ingresos_ars=ingresos_ars if hay_ars else None,
+                    gastos_ars=egresos_ars if hay_ars else None,
+                    ingresos_usd=ingresos_usd if hay_usd else None,
+                    gastos_usd=egresos_usd if hay_usd else None,
+                    categoria_top=cat_top.nombre if cat_top else None,
+                    monto_categoria_top=float(cat_top.total) if cat_top else None,
+                    gastos_hormiga=gastos_hormiga,
+                )
 
                 datos_template = {
                     "ingresos": str_ingresos,
@@ -894,16 +890,13 @@ def _job_resumen_semanal(db_session_factory):
                     str_egresos = f"{formatear_monto(egresos_ars, Moneda.ARS, con_decimales=False)} + {formatear_monto(egresos_usd, Moneda.USD)}"
                     str_balance = f"{str_bal_ars} y {str_bal_usd}"
 
-                if top_categoria:
-                    mensaje = (
-                        f"Tu semana financiera: ingresaste {str_ingresos} y gastaste {str_egresos} "
-                        f"(balance {str_balance}). Tu mayor gasto fue en {top_categoria}."
-                    )
-                else:
-                    mensaje = (
-                        f"Tu semana financiera: ingresaste {str_ingresos} y gastaste {str_egresos} "
-                        f"(balance {str_balance})."
-                    )
+                mensaje = texto_resumen_semanal(
+                    ingresos_ars=ingresos_ars if hay_ars else None,
+                    gastos_ars=egresos_ars if hay_ars else None,
+                    ingresos_usd=ingresos_usd if hay_usd else None,
+                    gastos_usd=egresos_usd if hay_usd else None,
+                    categoria_top=top_categoria,
+                )
 
                 datos_template = {
                     "ingresos": str_ingresos,

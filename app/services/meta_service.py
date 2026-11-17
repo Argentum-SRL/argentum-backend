@@ -16,6 +16,7 @@ from app.schemas.meta import MetaCreate, MetaUpdate
 from app.schemas.movimiento_meta import MovimientoMetaCreate
 from app.services.saldo_billetera_service import aplicar_impacto_saldo, bloquear_billeteras
 from app.services import presupuesto_service
+from app.services.textos_avisos_web import texto_meta_cumplida
 from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 
@@ -374,7 +375,9 @@ def registrar_movimiento(
                     usuario_id=usuario_id,
                     tipo=TipoNotificacion.META_ALCANZADA,
                     nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                    mensaje=f"¡Completaste tu meta '{meta.nombre}'! Ahorraste {formatear_monto(meta.monto_objetivo, meta.moneda)}.",
+                    mensaje=texto_meta_cumplida(
+                        meta.nombre, meta.monto_objetivo, meta.moneda
+                    ),
                     entidad_tipo="meta",
                     entidad_id=meta.id,
                     deep_link="/app/metas",

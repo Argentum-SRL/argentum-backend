@@ -258,9 +258,9 @@ def test_job_dia_vencimiento_y_sin_transacciones(db: Session):
     assert len(notifs) == 1
 
     mensaje_esperado = (
-        "¿Pagaste el resumen de Visa de "
-        + formatear_monto(Decimal("85539.63"), "ARS")
-        + " que venció el 02/10?"
+        "El resumen de tu Visa Cuenta Banco venció el 2/10: "
+        + formatear_monto(Decimal("85539.63"), "ARS", con_decimales=False)
+        + ".\n¿Ya lo pagaste?"
     )
     assert notifs[0].mensaje == mensaje_esperado
     assert notifs[0].canal_web is True

@@ -24,6 +24,7 @@ from app.services.suscripcion_service import (
 from app.services.dolar_service import obtener_cotizacion_por_fecha
 from app.services import calendario_tarjeta_service, cuotas_service
 from app.services.saldo_billetera_service import aplicar_impacto_saldo
+from app.services.textos_avisos_web import texto_cobros_suscripcion_faltaban
 from app.utils.fecha import hoy_argentina, TZ_ARGENTINA
 
 logger = logging.getLogger(__name__)
@@ -390,7 +391,9 @@ def procesar_cobros_suscripciones(
                     usuario_id=suscripcion.usuario_id,
                     tipo=TipoNotificacion.SUSCRIPCION_HOY,
                     nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                    mensaje=f"Anotamos {periodos_cobrados} cobros de '{suscripcion.nombre}' que estaban pendientes.",
+                    mensaje=texto_cobros_suscripcion_faltaban(
+                        periodos_cobrados, suscripcion.nombre
+                    ),
                     entidad_tipo="suscripcion",
                     entidad_id=suscripcion.id,
                     grupo_agrupacion_override=f"SUSCRIPCION_ATRASADA_{suscripcion.id}_{hoy.strftime('%Y%m%d')}",

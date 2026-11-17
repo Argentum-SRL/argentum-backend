@@ -917,7 +917,9 @@ def test_7_avisos_job(db_session: Session, fixtures_comunes, monkeypatch):
     )
 
     fac_3_id = fac_3.id
-    dd_mm = f"{fac_3.fecha_vencimiento.day:02d}/{fac_3.fecha_vencimiento.month:02d}"
+    vence_dm = (
+        f"{fac_3.fecha_vencimiento.day}/{fac_3.fecha_vencimiento.month:02d}"
+    )
 
     class TestSessionProxy:
         def __init__(self, s):
@@ -937,8 +939,10 @@ def test_7_avisos_job(db_session: Session, fixtures_comunes, monkeypatch):
     ).all()
     assert len(notifs) == 2
 
-    esperado_3 = f"La factura de EPE Vence 3 por $45.678,90 vence en 3 días ({dd_mm})."
-    esperado_hoy = "La factura de EPE Vence Hoy por $45.678,90 vence hoy."
+    esperado_3 = (
+        f"La factura de EPE Vence 3 de $45.678,90 vence el {vence_dm}."
+    )
+    esperado_hoy = "La factura de EPE Vence Hoy de $45.678,90 vence hoy."
 
     mensajes = [n.mensaje for n in notifs]
     assert esperado_3 in mensajes

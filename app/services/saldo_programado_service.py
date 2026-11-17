@@ -20,6 +20,7 @@ from app.services.notificacion_service import (
     crear_notificacion,
 )
 from app.services.saldo_billetera_service import aplicar_impacto_saldo, bloquear_billeteras
+from app.services.textos_avisos_web import texto_billetera_sin_saldo
 from app.services.transaccion_service import _afecta_saldo, _validar_moneda_coincide
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ def aplicar_movimientos_con_fecha_llegada(db: Session) -> int:
                             usuario_id=tx.usuario_id,
                             tipo=TipoNotificacion.SALDO_CERO,
                             nivel=NivelNotificacion.FINANCIERA_IMPORTANTE,
-                            mensaje=f"Tu billetera '{billetera.nombre}' quedó sin saldo disponible.",
+                            mensaje=texto_billetera_sin_saldo(billetera.nombre),
                             entidad_tipo="billetera",
                             entidad_id=billetera.id,
                             deep_link="/app/billeteras",

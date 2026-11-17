@@ -55,7 +55,7 @@ def test_notificacion_schema_strips_urls():
     }
     notif = NotificacionRead(**raw_data)
     assert notif.mensaje == (
-        "Se cambió la contraseña de tu cuenta de Argentum. "
+        "Se cambió la contraseña de tu cuenta de Argentum.\n"
         "Si no fuiste vos, cambiala ya."
     )
     assert "https://" not in notif.mensaje

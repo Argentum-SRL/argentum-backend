@@ -25,29 +25,30 @@ def normalizar_texto(texto: str | None) -> str:
     return s
 
 
+_LINK_MD = r"\[([^\]]+)\]\(https?://[^\)]+\)"
+_LINK = (
+    r"(?:,\s*)?(?:desde|en|ingresando a|a través de|accediendo a|"
+    r"haciendo clic en|haciendo click en|visita|visitando)?\s*:?\s*"
+    r"(?:https?://|www\.)\S+"
+)
+
+
 def limpiar_mensaje_web(mensaje: str | None) -> str:
-    """
-    Remueve enlaces/URLs y frases introductorias a enlaces de los mensajes
-    para la versión web (centro de notificaciones en la app).
-    """
+    """Saca links del texto de la campanita renglón por renglón, sin juntar renglones.
+    Un renglón que quedó sin link y sin puntuación final termina con punto.
+    Saca renglones vacíos."""
     if not mensaje:
         return ""
-    texto = str(mensaje)
-    # Enlaces en formato markdown [texto](url) -> texto
-    texto = re.sub(r"\[([^\]]+)\]\(https?://[^\)]+\)", r"\1", texto)
-    # Remover patrones como: ", desde https://...", " desde https://...", "https://...", "www...."
-    texto = re.sub(
-        r"(?:,\s*)?(?:desde|en|ingresando a|a través de|accediendo a|haciendo clic en|haciendo click en|visita|visitando)?\s*:?\s*(?:https?://|www\.)\S+",
-        "",
-        texto,
-        flags=re.IGNORECASE,
-    ).strip()
-    # Limpiar dos puntos o comas que hayan quedado huérfanas al final
-    texto = re.sub(r"[:,]+$", "", texto).strip()
-    # Limpiar espacios dobles
-    texto = re.sub(r"\s+", " ", texto)
-    # Asegurar puntuación final si hay contenido y no termina con puntuación
-    if texto and not texto.endswith((".", "!", "?")):
-        texto += "."
-    return texto
+    salida: list[str] = []
+    for linea in str(mensaje).replace("\r\n", "\n").split("\n"):
+        sin_md = re.sub(_LINK_MD, r"\1", linea)
+        limpia = re.sub(_LINK, "", sin_md, flags=re.IGNORECASE)
+        limpia = re.sub(r"[ \t]+", " ", limpia).strip()
+        if limpia != re.sub(r"[ \t]+", " ", sin_md).strip():
+            limpia = re.sub(r"[:,]+$", "", limpia).strip()
+            if limpia and not limpia.endswith((".", "!", "?")):
+                limpia += "."
+        if limpia:
+            salida.append(limpia)
+    return "\n".join(salida)
 

@@ -32,6 +32,7 @@ from app.models.importacion import ImportacionResumen, CorreccionImportacion
 from app.core.security import get_password_hash, verify_password, normalizar_email
 from app.services import email_service, whatsapp_service
 from app.services.storage_service import storage_service
+from app.services.textos_avisos_web import texto_cambio_email
 from app.utils.telefono import normalizar_telefono_ar
 from app.services.auth_service import verify_google_token
 from app.schemas.usuario import (
@@ -118,7 +119,8 @@ def actualizar_email(
             usuario_id=usuario.id,
             tipo=TipoNotificacion.CAMBIO_EMAIL,
             nivel=NivelNotificacion.CRITICA,
-            mensaje="Tu email fue actualizado. Si no fuiste vos, contactanos de inmediato.",
+            mensaje=texto_cambio_email(),
+            deep_link="/app/perfil",
             canal_web=True,
             canal_whatsapp=True,
             canal_email=False,

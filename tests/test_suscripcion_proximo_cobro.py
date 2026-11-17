@@ -380,7 +380,9 @@ def test_caso_7_cobros_pendientes_reales(db_session, datos_base):
         select(Notificacion).where(Notificacion.usuario_id == u.id)
     ).scalars().all()
     assert len(notifs) == 1
-    assert notifs[0].mensaje == "Anotamos 2 cobros de 'Club La Nacion' que estaban pendientes."
+    assert notifs[0].mensaje == (
+        "Se anotaron 2 cobros de Club La Nacion que faltaban."
+    )
 
 
 def test_caso_8_idempotencia_dos_corridas_caso_7(db_session, datos_base):
