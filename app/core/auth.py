@@ -36,7 +36,7 @@ from app.models.refresh_token import RefreshToken
 from app.models.usuario import EstadoUsuario, Usuario
 
 MENSAJE_CUENTA_SUSPENDIDA = (
-    "Tu cuenta está suspendida. Escribí a soporte si creés que es un error."
+    "Tu cuenta está suspendida. Si creés que es un error, escribí a srlargentum@gmail.com."
 )
 
 # ---------------------------------------------------------------------------

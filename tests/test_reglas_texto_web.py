@@ -279,6 +279,51 @@ VECTORES_WEB: list[tuple[str, list[str]]] = [
             'W12_RENGLONES',
         ],
     ),
+    (
+        (
+            'Tu cuenta está suspendida. Si creés que es un error, '
+            'escribí a srlargentum@gmail.com.'
+        ),
+        [],
+    ),
+    (
+        'Entrá a miargentum.com.',
+        [
+            'W11_LINK',
+        ],
+    ),
+    (
+        'Escribí a x@y.com.',
+        [],
+    ),
+    (
+        'Escribí a x@y.com o entrá a www.miargentum.com.',
+        [
+            'W11_LINK',
+        ],
+    ),
+    (
+        'Algo salió mal de nuestro lado.',
+        [
+            'W2_PALABRA:primera persona',
+        ],
+    ),
+    (
+        'Revisá nuestras sugerencias.',
+        [
+            'W2_PALABRA:primera persona',
+        ],
+    ),
+    (
+        'Lo hacemos nosotros.',
+        [
+            'W2_PALABRA:primera persona',
+        ],
+    ),
+    (
+        'Algo salió mal. Probá de nuevo en unos minutos.',
+        [],
+    ),
 ]
 
 

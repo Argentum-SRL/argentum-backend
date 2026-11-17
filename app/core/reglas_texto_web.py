@@ -11,6 +11,8 @@ MAXIMO_RENGLONES_WEB = 7
 # Bordes de palabra con letras unicode (igual que (?<![\p{L}\p{N}_]) en el front).
 _A = r"(?<![^\W])"
 _Z = r"(?![^\W])"
+# Emails de contacto permitidos: se excluyen solo al buscar links (W11_LINK).
+_MAIL = r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"
 
 # (expresión, nombre, distingue mayúsculas)
 PALABRAS_WEB = [
@@ -38,7 +40,8 @@ PALABRAS_WEB = [
     ),
     (
         r"(?:pudimos|enviamos|mandamos|cambiamos|anotamos|encontramos|contactanos|registramos"
-        r"|vamos a|anoté|saqué|guardé|borré|eliminé|voy a)",
+        r"|vamos a|anoté|saqué|guardé|borré|eliminé|voy a"
+        r"|nuestr[oa]s?|nosotros)",
         "primera persona",
         False,
     ),
@@ -108,7 +111,8 @@ def problemas_texto_web(texto: str) -> list[str]:
         res.append("W9_FECHA")
     if re.search(r"[\U0001F300-\U0001FAFF☀-➿️]", texto):
         res.append("W10_EMOJI")
-    if re.search(r"https?://|www\.|\.com(?![^\W])", texto, re.IGNORECASE):
+    texto_sin_mails = re.sub(_MAIL, " ", texto)
+    if re.search(r"https?://|www\.|\.com(?![^\W])", texto_sin_mails, re.IGNORECASE):
         res.append("W11_LINK")
     if len(lineas) > MAXIMO_RENGLONES_WEB:
         res.append("W12_RENGLONES")

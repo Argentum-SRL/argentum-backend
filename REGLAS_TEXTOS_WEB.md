@@ -1,5 +1,5 @@
 REGLAS DE LOS TEXTOS DE NOTIFICACIONES DE LA WEB — ARGENTUM
-Vigentes desde el paso fase_notif_web1 (decisiones 1A, 2A y 3A de Sebastián, 16/11/2026); los errores del servidor, desde fase_notif_web2.
+Vigentes desde el paso fase_notif_web1 (decisiones 1A, 2A y 3A de Sebastián, 16/11/2026); los errores del servidor, desde fase_notif_web2; el mail de contacto y "nuestro" en primera persona, desde fase_notif_web3.
 
 Valen para todo texto que la web muestra sola, sin que la persona lo esté leyendo en una pantalla: los cartelitos (sileo: success, error, info, warning, action) y los avisos de la campanita (centro de notificaciones), incluido el cartelito que aparece cuando llega un aviso. Un texto nuevo o cambiado que no las cumple no se puede subir: lo frenan las pruebas automáticas (sección G). Si una regla choca con un caso nuevo, se cambia este archivo primero y después el código. Los textos de WhatsApp siguen REGLAS_TEXTOS_WHATSAPP.md; un texto que sale por los dos lados cumple los dos archivos.
 
@@ -14,13 +14,13 @@ A. LAS 8 REGLAS
 4. Error = qué no se pudo y qué hacer: "No se pudo eliminar la meta. Probá de nuevo.". Siempre "No se pudo" (o "No se pudieron" si la cosa va en plural), nunca "Error al", "No pudimos" ni "Intentá de nuevo". Si hay otra salida mejor que probar de nuevo, se dice esa: "No se puede eliminar una tarjeta con transacciones. Archivala.".
 5. Faltan datos = qué completar, en positivo: "Ingresá un monto mayor a 0.", "Elegí una categoría.". Nunca "Seleccioná", "Debe", "válido", "inválido", "requerido", "excede".
 6. Las palabras de la pantalla (decisión 1A): la cosa se llama como en el menú, el título o el botón de la pantalla donde está la persona (Billeteras → "billetera"; Transacciones → "transacción"; botón Eliminar → "eliminada"; Presupuestos, Metas, Suscripciones, Tarjetas, Informes). Los nombres de los campos, como en el formulario. Un aviso de la campanita usa la palabra de la pantalla a la que lleva al tocarlo.
-7. Habla la app, no una persona: impersonal ("Se cambió...", "No se pudo...", "Te va a llegar un código..."). Nunca primera persona, ni singular ni plural ("anoté", "guardé", "voy a", "pudimos", "enviamos", "te mandamos", "vamos a"). Siempre "vos" (nunca "tú": tienes, puedes, quieres, dime, escribe, envía, elige, ingresa, intenta, verifica).
+7. Habla la app, no una persona: impersonal ("Se cambió...", "No se pudo...", "Te va a llegar un código..."). Nunca primera persona, ni singular ni plural ("anoté", "guardé", "voy a", "pudimos", "enviamos", "te mandamos", "vamos a", "nuestro", "nuestra", "nuestros", "nuestras", "nosotros": nunca "de nuestro lado"). Siempre "vos" (nunca "tú": tienes, puedes, quieres, dime, escribe, envía, elige, ingresa, intenta, verifica).
 8. Mismo formato en toda la web (sección C).
 
 
 B. PALABRAS PROHIBIDAS
 
-"con éxito", "exitosamente", "correctamente", "Por favor", "realizar", "gestionar", "procesar", "operación", "válido", "inválido", "Error al", "debe/debés/deben", "requerido", "exceder", "ha sido/han sido", "intentá", tuteo, primera persona (regla 7), "la web", siglas (REM, TNA, CFT, ARS, USD; "US$" sí, es como se ve un monto en dólares). "Listo" no puede ser la primera palabra. La tasa se dice "tasa ... por año" (nunca TNA).
+"con éxito", "exitosamente", "correctamente", "Por favor", "realizar", "gestionar", "procesar", "operación", "válido", "inválido", "Error al", "debe/debés/deben", "requerido", "exceder", "ha sido/han sido", "intentá", tuteo, primera persona (regla 7, también "nuestro/a/os/as" y "nosotros"), "la web", siglas (REM, TNA, CFT, ARS, USD; "US$" sí, es como se ve un monto en dólares). "Listo" no puede ser la primera palabra. La tasa se dice "tasa ... por año" (nunca TNA).
 
 
 C. FORMATO
@@ -32,7 +32,7 @@ C. FORMATO
 5. Fechas: "hoy", "mañana", "ayer" o "d/mm" con el día sin cero y el mes con dos dígitos ("4/12", "22/11", "9/10"). Nunca el año, nunca "04/12", nunca "anteayer" ni "el 9 de octubre".
 6. Tarjetas como en el menú de tarjetas: nombre_tarjeta_wpp(tarjeta) del backend ("Visa Galicia •••• 1506").
 7. Sin raya larga (—, –), sin plurales con paréntesis ("movimiento(s)": se elige singular o plural según el número), sin emojis, sin texto sin rellenar (None, null, undefined, nan, llaves).
-8. Sin links escritos: lo que se toca es el aviso entero (deep_link) o un botón del cartelito.
+8. Sin links escritos: lo que se toca es el aviso entero (deep_link) o un botón del cartelito. Un mail de contacto sí se escribe tal cual, porque no es un link: "Tu cuenta está suspendida. Si creés que es un error, escribí a srlargentum@gmail.com." (el control saca los mails antes de buscar links).
 
 
 D. AVISOS DE LA CAMPANITA: TEXTOS EXACTOS
