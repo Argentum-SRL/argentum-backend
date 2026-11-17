@@ -21,9 +21,16 @@ logger = logging.getLogger(__name__)
 from decimal import Decimal
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 
-TEXTO_AVISO_PAGOS = "Si te acordás para qué era, decime «era el súper» y lo cambio."
-TEXTO_AVISO_COBROS = "Si te acordás qué era, decime «era un regalo» y lo cambio."
-TEXTO_PREGUNTA_COBRO = "¿Qué era? 1) Me pagaron 2) Me devolvieron parte de un gasto 3) Solo pasó por mi cuenta"
+TEXTO_AVISO_PAGOS = (
+    "Si te acordás para qué era, decime _era el súper_ y lo cambio."
+)
+TEXTO_AVISO_COBROS = (
+    "Si te acordás qué era, decime _era un regalo_ y lo cambio."
+)
+TEXTO_PREGUNTA_COBRO = (
+    "¿Qué era? 1) Me pagaron 2) Me devolvieron parte de un gasto "
+    "3) Solo pasó por mi cuenta"
+)
 
 
 def agregar_aviso_personas(

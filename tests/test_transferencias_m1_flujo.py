@@ -380,7 +380,7 @@ def test_f3_pregunta_origen_y_overdraft(db, usuario, datos_base, mensajes_wpp):
     assert res1 is True
     assert len(mensajes_wpp) == 1
     assert mensajes_wpp[0] == (
-        "¿Desde qué cuenta pasaste los $20.000 a Santander?\n\n"
+        "¿Desde qué cuenta pasaste los $20.000 a Santander?\n"
         "1. Galicia\n"
         "2. Efectivo Pesos\n"
         "3. Mercado Pago"
@@ -404,7 +404,7 @@ def test_f4_cajero_pregunta_banco(db, usuario, datos_base, mensajes_wpp):
     assert res1 is True
     assert len(mensajes_wpp) == 1
     assert mensajes_wpp[0] == (
-        "¿De qué cuenta sacaste los $10.000?\n\n"
+        "¿De qué cuenta sacaste los $10.000?\n"
         "1. Galicia\n"
         "2. Mercado Pago\n"
         "3. Santander"
@@ -470,7 +470,7 @@ def test_f8_cuenta_no_cargada_era_otra(db, usuario, datos_base, mensajes_wpp):
     assert res2 is True
     assert len(mensajes_wpp) == 2
     assert mensajes_wpp[1] == (
-        "¿A qué cuenta pasaste los $20.000 de Galicia?\n\n"
+        "¿A qué cuenta pasaste los $20.000 de Galicia?\n"
         "1. Efectivo Pesos\n"
         "2. Mercado Pago\n"
         "3. Santander"
@@ -497,8 +497,8 @@ def test_f9_cuenta_no_cargada_pago_persona_y_deshacer(
     assert res2 is True
     assert len(mensajes_wpp) == 2
     assert mensajes_wpp[1] == (
-        "Listo. $20.000 en Pagos a personas desde Galicia — registrado.\n"
-        "Si te acordás para qué era, decime «era el súper» y lo cambio."
+        "Listo, anoté $20.000 en Pagos a personas desde Galicia.\n"
+        "Si te acordás para qué era, decime _era el súper_ y lo cambio."
     )
 
     txs = db.execute(select(Transaccion)).scalars().all()
@@ -515,10 +515,7 @@ def test_f9_cuenta_no_cargada_pago_persona_y_deshacer(
     res3 = simular_mensaje("borrá eso", usuario, db)
     assert res3 is True
     assert len(mensajes_wpp) == 3
-    assert mensajes_wpp[2] == (
-        "¿Querés eliminar el último movimiento de $20.000 en "
-        "Pagos a personas desde Galicia? ¿Confirmás?"
-    )
+    assert mensajes_wpp[2] == "¿Borro $20.000 en Pagos a personas desde Galicia?"
 
 
 def test_f10_origen_no_cargado_opcion_invalida(db, usuario, datos_base, mensajes_wpp):
@@ -555,7 +552,7 @@ def test_f12_fecha_el_lunes(db, usuario, datos_base, mensajes_wpp):
     res = simular_mensaje("pasé 20k de galicia a santander el lunes", usuario, db)
     assert res is True
     assert len(mensajes_wpp) == 1
-    assert mensajes_wpp[0] == "Listo. Pasaste $20.000 de Galicia a Santander (el 9 de noviembre)."
+    assert mensajes_wpp[0] == "Listo. Pasaste $20.000 de Galicia a Santander (9/11)."
 
 
 def test_f13_fecha_mas_de_60_dias(db, usuario, datos_base, mensajes_wpp):
@@ -564,7 +561,7 @@ def test_f13_fecha_mas_de_60_dias(db, usuario, datos_base, mensajes_wpp):
     assert len(mensajes_wpp) == 1
     assert mensajes_wpp[0] == (
         "Listo. Pasaste $20.000 de Galicia a Santander.\n"
-        "No puedo registrar movimientos de más de 60 días atrás. Va a quedar con fecha de hoy."
+        "Solo anoto hasta 60 días para atrás: va con fecha de hoy."
     )
 
     tr = db.execute(select(TransferenciaInterna)).scalar_one()
@@ -577,8 +574,7 @@ def test_f14_fecha_futura(db, usuario, datos_base, mensajes_wpp):
     assert len(mensajes_wpp) == 1
     assert mensajes_wpp[0] == (
         "Listo. Pasaste $20.000 de Galicia a Santander.\n"
-        "No puedo registrar movimientos con fecha futura porque "
-        "todavía no ocurrieron. Va a quedar con fecha de hoy."
+        "Todavía no pasó esa fecha: va con fecha de hoy."
     )
 
 
@@ -592,7 +588,7 @@ def test_f15_aviso_anterior_al_saldo(db, usuario, datos_base, mensajes_wpp):
     assert len(mensajes_wpp) == 1
     assert mensajes_wpp[0] == (
         "Listo. Pasaste $20.000 de Galicia a Santander (ayer).\n"
-        "Ojo: es anterior a tu saldo de «Santander» (14/11) y no lo modifica."
+        "Ojo: es de antes del 14/11: cuenta en el mes, pero no cambia tu saldo."
     )
 
     b_g = datos_base["galicia"]
@@ -622,14 +618,12 @@ def test_f16_multiples_transferencias_y_deshacer(db, usuario, datos_base, mensaj
     res2 = simular_mensaje("borrá eso", usuario, db)
     assert res2 is True
     assert len(mensajes_wpp) == 2
-    assert mensajes_wpp[1] == (
-        "¿Querés anular las 2 transferencias que registraste recién? ¿Confirmás?"
-    )
+    assert mensajes_wpp[1] == "¿Borro los 2 pases que anotaste recién?"
 
     res3 = simular_mensaje("sí", usuario, db)
     assert res3 is True
     assert len(mensajes_wpp) == 3
-    assert mensajes_wpp[2] == "Listo, 2 transferencias anuladas."
+    assert mensajes_wpp[2] == "Listo, borré los 2 pases."
 
     trs_post = db.execute(select(TransferenciaInterna)).scalars().all()
     assert len(trs_post) == 0
@@ -662,7 +656,7 @@ def test_f18_distinta_moneda_pregunta_cotizacion(db, usuario, datos_base, mensaj
     res = simular_mensaje("pasé 100 dólares a galicia", usuario, db)
     assert res is True
     assert len(mensajes_wpp) == 1
-    assert mensajes_wpp[0] == "¿A qué cotización vendiste o cuántos pesos recibís en Galicia?"
+    assert mensajes_wpp[0] == "¿A cuánto vendiste o cuántos pesos entraron en Galicia?"
 
     trs = db.execute(select(TransferenciaInterna)).scalars().all()
     assert len(trs) == 0
@@ -683,7 +677,7 @@ def test_f18b_distinta_moneda_con_cuenta_usd_existente(
     b_galicia_usd = Billetera(
         id=uuid4(),
         usuario_id=usuario.id,
-        nombre="Galicia USD",
+        nombre="Galicia Dólares",
         moneda=Moneda.USD,
         saldo_inicial=Decimal("0.00"),
         saldo_actual=Decimal("0.00"),
@@ -701,14 +695,17 @@ def test_f18b_distinta_moneda_con_cuenta_usd_existente(
     res = simular_mensaje("pasé 100 dólares a galicia", usuario, db)
     assert res is True
     assert len(mensajes_wpp) == 1
-    assert mensajes_wpp[0] == "Listo. Pasaste US$100 de Efectivo Dólares a Galicia USD."
+    assert mensajes_wpp[0] == "Listo. Pasaste US$100 de Efectivo Dólares a Galicia Dólares."
 
 
 def test_f19_misma_cuenta(db, usuario, datos_base, mensajes_wpp):
     res = simular_mensaje("pasé 10 mil de galicia a galicia", usuario, db)
     assert res is True
     assert len(mensajes_wpp) == 1
-    assert mensajes_wpp[0] == "La billetera de origen y destino no pueden ser la misma."
+    assert mensajes_wpp[0] == (
+        "Pusiste la misma cuenta de los dos lados. "
+        "¿A qué otra cuenta lo pasaste?"
+    )
 
 
 def test_f20_le_pase_no_transferencia(db, usuario, datos_base, mensajes_wpp):
@@ -764,7 +761,7 @@ def test_f24_confirmacion_tras_directo_y_deshacer(db, usuario, datos_base, mensa
     res2 = simular_mensaje("sí", usuario, db)
     assert res2 is True
     assert len(mensajes_wpp) == 2
-    assert mensajes_wpp[1] == "Ya quedó anotado. Si hay algo mal, decime qué corregir."
+    assert mensajes_wpp[1] == "Ya lo había anotado."
 
     conv = db.execute(
         select(ConversacionWpp).order_by(ConversacionWpp.fecha.desc())
@@ -774,14 +771,12 @@ def test_f24_confirmacion_tras_directo_y_deshacer(db, usuario, datos_base, mensa
     res3 = simular_mensaje("deshacer", usuario, db)
     assert res3 is True
     assert len(mensajes_wpp) == 3
-    assert mensajes_wpp[2] == (
-        "¿Querés anular la transferencia de $20.000 de Galicia a Santander? ¿Confirmás?"
-    )
+    assert mensajes_wpp[2] == "¿Borro el pase de $20.000 de Galicia a Santander?"
 
     res4 = simular_mensaje("sí", usuario, db)
     assert res4 is True
     assert len(mensajes_wpp) == 4
-    assert mensajes_wpp[3] == "Listo, movimiento eliminado."
+    assert mensajes_wpp[3] == "Listo, lo borré."
 
     b_g = datos_base["galicia"]
     b_s = datos_base["santander"]
@@ -809,7 +804,7 @@ def test_f25_camino_ia_propuesta_y_confirmacion(db, usuario, datos_base, mensaje
     )
     assert len(mensajes_wpp) == 1
     assert mensajes_wpp[0] == (
-        "Voy a transferir $20.000 de Galicia a Santander (ayer). ¿Confirmás?"
+        "¿Paso $20.000 de Galicia a Santander (ayer)?"
     )
 
     trs = db.execute(select(TransferenciaInterna)).scalars().all()
@@ -849,7 +844,7 @@ def test_f26_camino_ia_cuenta_no_cargada_destino(db, usuario, datos_base, mensaj
     res2 = simular_mensaje("1", usuario, db)
     assert res2 is True
     assert len(mensajes_wpp) == 2
-    assert mensajes_wpp[1] == "Creé Macro. Voy a transferir $20.000 de Galicia a Macro. ¿Confirmás?"
+    assert mensajes_wpp[1] == "Creé Macro. ¿Paso $20.000 de Galicia a Macro?"
 
     res3 = simular_mensaje("sí", usuario, db)
     assert res3 is True
@@ -873,7 +868,7 @@ def test_f27_camino_ia_cuenta_desconocida(db, usuario, datos_base, mensajes_wpp)
     )
     assert len(mensajes_wpp) == 1
     assert mensajes_wpp[0] == (
-        "No encontré la cuenta «Juan». Mandámelo así: «pasé 20 mil de Galicia a Mercado Pago»."
+        "No encontré la cuenta Juan. Mandámelo así: _pasé 20 mil de Galicia a Mercado Pago_."
     )
 
     trs = db.execute(select(TransferenciaInterna)).scalars().all()
@@ -909,7 +904,7 @@ def test_f28_etapa_resolucion_desvio_transferir_fondos(
     assert ctx.terminado is True
     assert len(mensajes_wpp) == 1
     assert mensajes_wpp[0] == (
-        "Voy a transferir $20.000 de Galicia a Santander (ayer). ¿Confirmás?"
+        "¿Paso $20.000 de Galicia a Santander (ayer)?"
     )
     for m in mensajes_wpp:
         assert "tarjeta" not in m.lower()
@@ -934,7 +929,7 @@ def test_f30_camino_ia_sin_cuentas(db, usuario, datos_base, mensajes_wpp):
     )
     assert len(mensajes_wpp) == 1
     assert mensajes_wpp[0] == (
-        "Decime de qué cuenta a qué cuenta. Por ejemplo: «pasé 20 mil de Galicia a Mercado Pago»."
+        "Decime de qué cuenta a qué cuenta. Por ejemplo: _pasé 20 mil de Galicia a Mercado Pago_."
     )
 
 
@@ -976,7 +971,7 @@ def test_f31_alias_bna_ambigua(db, usuario, datos_base, mensajes_wpp):
     assert res is True
     assert len(mensajes_wpp) == 1
     assert mensajes_wpp[0] == (
-        "¿Desde qué cuenta pasaste los $20.000 a Galicia?\n\n"
+        "¿Desde qué cuenta pasaste los $20.000 a Galicia?\n"
         "1. Banco Nación\n"
         "2. Nación Ahorro"
     )
@@ -1016,8 +1011,8 @@ def test_f33_compra_dolares_con_banco_nombrado(db, usuario, datos_base, mensajes
     assert res is True
     assert len(mensajes_wpp) == 1
     assert mensajes_wpp[0] == (
-        "Voy a registrar una compra de US$100 a $1.500: "
-        "salen $150.000 de Santander y entran US$100 a Efectivo Dólares. ¿Confirmás?"
+        "Salen $150.000 de Santander y entran US$100 a Efectivo Dólares (a $1.500).\n"
+        "¿Anoto la compra?"
     )
 
 
@@ -1036,7 +1031,7 @@ def test_f35_pregunta_origen_alias_mp(db, usuario, datos_base, mensajes_wpp):
     assert res is True
     assert len(mensajes_wpp) == 1
     assert mensajes_wpp[0] == (
-        "¿Desde qué cuenta pasaste los $20.000 a Mercado Pago?\n\n"
+        "¿Desde qué cuenta pasaste los $20.000 a Mercado Pago?\n"
         "1. Galicia\n"
         "2. Efectivo Pesos\n"
         "3. Santander"
@@ -1067,7 +1062,7 @@ def test_f37_solo_origen_pregunta_destino(db, usuario, datos_base, mensajes_wpp)
     assert res is True
     assert len(mensajes_wpp) == 1
     assert mensajes_wpp[0] == (
-        "¿A qué cuenta pasaste los $20.000 de Galicia?\n\n"
+        "¿A qué cuenta pasaste los $20.000 de Galicia?\n"
         "1. Efectivo Pesos\n"
         "2. Mercado Pago\n"
         "3. Santander"

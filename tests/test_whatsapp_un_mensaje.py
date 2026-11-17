@@ -139,9 +139,12 @@ def test_d3_buzon_con_aviso_y_callback(monkeypatch):
 
     cb = MagicMock()
     with buzon_de_respuesta("5491112345678") as buzon:
-        enviar_whatsapp("5491112345678", "Listo. $5.000 en Súper desde Galicia — registrado.")
+        enviar_whatsapp(
+            "5491112345678",
+            "Listo, anoté $5.000 en Súper desde Galicia.",
+        )
         buzon.agregar_aviso(
-            "Ojo: el resumen de Visa de $50.000 (venció 04/11) figura sin pagar.",
+            "Ojo: el resumen de Visa de $50.000 venció el 04/11 y sigue sin pagar.",
             "recordatorio_impago",
             al_enviar=cb,
         )
@@ -149,8 +152,8 @@ def test_d3_buzon_con_aviso_y_callback(monkeypatch):
     assert mock_enviar.call_count == 1
     args, kwargs = mock_enviar.call_args
     esperado_texto = (
-        "Listo. $5.000 en Súper desde Galicia — registrado.\n"
-        "Ojo: el resumen de Visa de $50.000 (venció 04/11) figura sin pagar."
+        "Listo, anoté $5.000 en Súper desde Galicia.\n"
+        "Ojo: el resumen de Visa de $50.000 venció el 04/11 y sigue sin pagar."
     )
     assert kwargs.get("texto") == esperado_texto
     assert kwargs.get("aviso_tipo") == "recordatorio_impago"
@@ -305,7 +308,7 @@ def test_d9_orquestador_respuesta_y_recordatorio_impago(db_session, monkeypatch)
     monkeypatch.setattr("app.routers.whatsapp_ia.procesar_resolucion_billetera_y_propuestas", lambda ctx: None)
 
     def _mock_despacho(ctx):
-        ctx.resultado_ia = {"respuesta_usuario": "Listo. $5.000 en Súper desde Galicia — registrado."}
+        ctx.resultado_ia = {"respuesta_usuario": "Listo, anoté $5.000 en Súper desde Galicia."}
 
     monkeypatch.setattr("app.routers.whatsapp_ia.procesar_despacho_y_respuesta", _mock_despacho)
     monkeypatch.setattr(
@@ -330,8 +333,8 @@ def test_d9_orquestador_respuesta_y_recordatorio_impago(db_session, monkeypatch)
     assert mock_enviar_reg.call_count == 1
     _, kwargs = mock_enviar_reg.call_args
     esperado = (
-        "Listo. $5.000 en Súper desde Galicia — registrado.\n"
-        "Ojo: el resumen de Visa de $50.000 (venció 04/11) figura sin pagar."
+        "Listo, anoté $5.000 en Súper desde Galicia.\n"
+        "Ojo: el resumen de Visa Cuenta Galicia de $50.000 venció el 04/11 y sigue sin pagar."
     )
     assert kwargs.get("texto") == esperado
     assert kwargs.get("wamid_entrante") == "wamid.in1"
@@ -351,7 +354,7 @@ def test_d10_orquestador_rate_limit_rafaga_una_vez(db_session, monkeypatch):
     mock_enviar_reg = MagicMock(return_value=True)
     monkeypatch.setattr("app.services.whatsapp_service._enviar_registrado", mock_enviar_reg)
 
-    motivo = "Estás enviando muchos mensajes seguidos. Por favor, esperá un momento antes de volver a escribir."
+    motivo = "Estás mandando muchos mensajes seguidos. Esperá un minuto y seguimos."
     monkeypatch.setattr(
         "app.routers.whatsapp_ia._verificar_rate_limit_registrado",
         lambda tel, es_medio=False: (False, motivo),
@@ -402,7 +405,10 @@ def test_d11_tope_ia_una_vez_por_dia(db_session, monkeypatch):
 
     procesar_llamada_ia_y_normalizacion(ctx1)
     assert mock_enviar.call_count == 1
-    assert mock_enviar.call_args[0][1] == TEXTO_TOPE_MENSAJES_USUARIO
+    assert mock_enviar.call_args[0][1] == (
+        "Por hoy llegué al máximo de mensajes. "
+        "Mañana seguimos; mientras, cargá en miargentum.com"
+    )
 
     ctx2 = ContextoMensaje(
         datos_mensaje={},

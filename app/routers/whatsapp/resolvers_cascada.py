@@ -8,6 +8,7 @@ import re
 from decimal import Decimal
 
 from app.core.constants import MAX_MONTO_INTEGRIDAD
+from app.core.reglas_texto_wpp import nombre_tarjeta_wpp
 from app.models.billetera import Billetera
 from app.models.tarjeta_credito import TarjetaCredito
 from app.models.usuario import Moneda
@@ -334,34 +335,27 @@ def _generar_menu_billeteras(billeteras: list[Billetera], tipo: str = "egreso", 
     """
     if encabezado is None:
         if tipo == "ingreso":
-            encabezado = "¿A qué billetera entró la plata?"
+            encabezado = "¿A qué cuenta entró?"
         else:
-            encabezado = "¿Desde qué billetera salió la plata?"
+            encabezado = "¿De qué cuenta salió?"
 
-    total = len(billeteras)
-    limite = 8
-    mostradas = billeteras[:limite]
-
-    lineas = [f"{encabezado}\n"]
+    mostradas = billeteras[:8]
+    lineas = [encabezado]
     for i, b in enumerate(mostradas, 1):
         lineas.append(f"{i}. {b.nombre}")
-
-    if total > limite:
-        lineas.append("\nPodés responder con el número o escribir el nombre de la billetera.")
 
     return "\n".join(lineas)
 
 def _generar_menu_tarjetas(tarjetas: list[TarjetaCredito]) -> str:
-    """Genera menú de selección de tarjetas de crédito sin datos sensibles ni saldos."""
-    lineas = ["¿Con qué tarjeta de crédito fue?"]
+    """Genera menú de selección de tarjetas sin datos sensibles ni saldos."""
+    lineas = ["¿Con qué tarjeta fue?"]
     for idx, t in enumerate(tarjetas[:8], 1):
-        nom_b = t.billetera.nombre if t.billetera else ""
-        red_disp = t.red.value.capitalize() if hasattr(t.red, "value") else str(t.red).capitalize()
-        apo_disp = f' "{t.apodo}"' if getattr(t, "apodo", None) else ""
-        if nom_b:
-            lineas.append(f"{idx}. {t.nombre}{apo_disp} ({red_disp} - {nom_b})")
+        nom_t = nombre_tarjeta_wpp(t) or t.nombre
+        apodo = getattr(t, "apodo", None)
+        if apodo:
+            lineas.append(f"{idx}. {nom_t} ({apodo})")
         else:
-            lineas.append(f"{idx}. {t.nombre}{apo_disp} ({red_disp})")
+            lineas.append(f"{idx}. {nom_t}")
     return "\n".join(lineas)
 
 def _validar_item_movimiento(
@@ -380,40 +374,55 @@ def _validar_item_movimiento(
     desc = ai_service.sanitizar_descripcion(datos.get("descripcion"), tipo=datos.get("tipo", "egreso")) or _nombre_corto_categoria(datos.get("categoria")) or "un movimiento"
     monto_raw = datos.get("monto")
     if monto_raw is None:
-        return None, f"No se pudo registrar {desc} porque no tiene un monto válido."
+        return None, f"No pude anotar {desc}: el monto no está claro."
     try:
         monto_decimal = Decimal(str(monto_raw))
     except Exception:
-        return None, f"No se pudo registrar {desc} porque el monto no es válido."
+        return None, f"No pude anotar {desc}: el monto no está claro."
 
     if monto_decimal <= Decimal("0"):
-        return None, f"No se pudo registrar {desc} porque el monto debe ser mayor a cero."
+        return None, f"No pude anotar {desc}: el monto no está claro."
     if monto_decimal > MAX_MONTO_INTEGRIDAD:
-        return None, f"No se pudo registrar {desc} porque el monto supera el límite permitido."
+        return None, f"No pude anotar {desc}: el monto es muy grande."
 
     moneda_solicitada_str = datos.get("moneda")
     if moneda_solicitada_str:
         moneda_solicitada = Moneda.USD if moneda_solicitada_str == "USD" else Moneda.ARS
     else:
-        moneda_solicitada = Moneda.USD if (billetera_nombre and "usd" in billetera_nombre.lower()) else Moneda.ARS
+        moneda_solicitada = (
+            Moneda.USD
+            if (billetera_nombre and "usd" in billetera_nombre.lower())
+            else Moneda.ARS
+        )
 
     if billetera_moneda and moneda_solicitada != billetera_moneda:
         moneda_sol_str = "dólares" if moneda_solicitada == Moneda.USD else "pesos"
         moneda_bill_str = "dólares" if billetera_moneda == Moneda.USD else "pesos"
-        monto_fmt = formatear_monto(monto_decimal, moneda_solicitada)
-        nom_b = billetera_nombre or "seleccionada"
+        monto_fmt = formatear_monto(
+            monto_decimal, moneda_solicitada, con_decimales=False
+        )
+        nom_b = billetera_nombre or "esa cuenta"
         motivo = (
-            f"No se pudo registrar {desc} de {monto_fmt} porque es en {moneda_sol_str} "
-            f"y la billetera {nom_b} es en {moneda_bill_str}."
+            f"No pude anotar {desc} ({monto_fmt}): "
+            f"es en {moneda_sol_str} y {nom_b} es en {moneda_bill_str}."
         )
         return None, motivo
 
     if billeteras_activas_usuario is not None:
-        tiene_moneda = any(b.moneda == moneda_solicitada for b in billeteras_activas_usuario)
+        tiene_moneda = any(
+            b.moneda == moneda_solicitada for b in billeteras_activas_usuario
+        )
         if not tiene_moneda:
-            moneda_sol_str = "dólares" if moneda_solicitada == Moneda.USD else "pesos"
-            monto_fmt = formatear_monto(monto_decimal, moneda_solicitada)
-            motivo = f"No se pudo registrar {desc} de {monto_fmt} porque es en {moneda_sol_str} y no tenés ninguna billetera en {moneda_sol_str}."
+            moneda_sol_str = (
+                "dólares" if moneda_solicitada == Moneda.USD else "pesos"
+            )
+            monto_fmt = formatear_monto(
+                monto_decimal, moneda_solicitada, con_decimales=False
+            )
+            motivo = (
+                f"No pude anotar {desc} ({monto_fmt}): "
+                f"no tenés cuentas en {moneda_sol_str}."
+            )
             return None, motivo
 
     item_valido = dict(datos)

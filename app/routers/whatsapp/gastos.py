@@ -11,8 +11,9 @@ import structlog
 from sqlalchemy.orm import Session
 
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
-from app.models.usuario import Usuario, Moneda
-from app.routers.whatsapp.parsers import _fmt
+from app.core.reglas_texto_wpp import ejemplo_wpp
+from app.models.usuario import Moneda, Usuario
+from app.utils.formato import formatear_monto
 from app.services import gastos_consulta_service, whatsapp_service
 from app.services.dashboard_service import get_ciclo_fechas
 from app.utils.fecha import hoy_argentina
@@ -21,9 +22,9 @@ logger = structlog.get_logger("whatsapp")
 
 ETIQUETAS_PERIODO = {
     "hoy": "Hoy", "ayer": "Ayer", "semana": "Esta semana", "semana_pasada": "La semana pasada",
-    "mes": "Este mes", "mes_pasado": "El mes pasado", "ciclo": "En este ciclo",
+    "mes": "Este mes", "mes_pasado": "El mes pasado", "ciclo": "Este mes",
 }
-MSG_FALLA_GASTOS = "No pude consultar tus gastos en este momento. Probá de nuevo en unos minutos."
+MSG_FALLA_GASTOS = "No pude ver tus gastos ahora. Probá de nuevo en unos minutos."
 
 _TABLA_SIN_TILDES = str.maketrans("áéíóúüÁÉÍÓÚÜ", "aeiouuaeiouu")
 _RE_TRIGGER = re.compile(r"\bcuanto\b.*\b(?:gaste|gastado|gastaste|gastamos|se me fue|se me fueron)\b")
@@ -129,23 +130,36 @@ def _formatear_respuesta_gastos(
     desde: date | None = None, hasta: date | None = None,
 ) -> str:
     etiqueta_salida = etiqueta
-    if desde and hasta and etiqueta in ("Este mes", "En este ciclo", "El mes pasado"):
-        etiqueta_salida = f"{etiqueta} ({desde.strftime('%d/%m')} al {hasta.strftime('%d/%m')})"
+    if desde and etiqueta == "Este mes":
+        etiqueta_salida = f"Este mes (desde el {desde.strftime('%d/%m')})"
+    elif desde and hasta and etiqueta == "El mes pasado":
+        f_d = desde.strftime('%d/%m')
+        f_h = hasta.strftime('%d/%m')
+        etiqueta_salida = f"El mes pasado (del {f_d} al {f_h})"
     partes = []
     if ars_cant > 0:
-        partes.append(f"{_fmt(ars_total)} ({ars_cant} {'movimiento' if ars_cant == 1 else 'movimientos'})")
+        ars_fmt = formatear_monto(ars_total, Moneda.ARS, con_decimales=False)
+        sust = 'gasto' if ars_cant == 1 else 'gastos'
+        partes.append(f"{ars_fmt} en {ars_cant} {sust}")
     if usd_cant > 0:
-        partes.append(f"{_fmt(usd_total, Moneda.USD)} ({usd_cant} {'movimiento' if usd_cant == 1 else 'movimientos'})")
+        usd_fmt = formatear_monto(usd_total, Moneda.USD, con_decimales=False)
+        sust = 'gasto' if usd_cant == 1 else 'gastos'
+        partes.append(f"{usd_fmt} en {usd_cant} {sust}")
     if not partes:
         if concepto_txt and por_descripcion:
-            return f"{etiqueta_salida} no encontré gastos que mencionen {concepto_txt}."
+            return f"{etiqueta_salida} no encontré gastos de {concepto_txt}."
         if concepto_txt:
-            return f"{etiqueta_salida} no registraste gastos en {concepto_txt}."
-        return f"{etiqueta_salida} no registraste gastos."
+            return f"{etiqueta_salida} no anotaste gastos en {concepto_txt}."
+        return f"{etiqueta_salida} no anotaste gastos."
     sufijo = f" en {concepto_txt}" if concepto_txt else ""
     msg = f"{etiqueta_salida} gastaste {' y '.join(partes)}{sufijo}."
     if not concepto_txt and ars_cant > 0 and len(top) >= 2:
-        msg += " Lo que más pesó: " + " | ".join(f"{nombre} {_fmt(monto)}" for nombre, monto in top) + "."
+        items_top = [
+            f"{nombre} ({formatear_monto(monto, Moneda.ARS, con_decimales=False)})"
+            for nombre, monto in top
+        ]
+        top_txt = ", ".join(items_top[:-1]) + f" y {items_top[-1]}"
+        msg += f"\nLo que más pesó: {top_txt}."
     return msg
 
 
@@ -167,7 +181,7 @@ def manejar_consulta_gastos(mensaje_texto: str, usuario: Usuario, db: Session, f
             if cat:
                 categoria_id, subcategoria_id, concepto_txt = cat["categoria_id"], cat["subcategoria_id"], cat["nombre"]
             else:
-                texto_desc, concepto_txt, por_descripcion = concepto, f"«{concepto}»", True
+                texto_desc, concepto_txt, por_descripcion = concepto, ejemplo_wpp(concepto), True
         res = gastos_consulta_service.calcular_gastos_periodo(
             db, usuario.id, desde, hasta,
             categoria_id=categoria_id, subcategoria_id=subcategoria_id, texto_descripcion=texto_desc,

@@ -25,7 +25,11 @@ from app.routers.whatsapp.resolvers_cascada import (
     _generar_menu_billeteras,
     resolver_billetera_cascada,
 )
-from app.routers.whatsapp.verificacion_texto_ia import TextoIA, verificar_texto_ia
+from app.routers.whatsapp.verificacion_texto_ia import (
+    TEXTO_IA_NO_VERIFICADO,
+    TextoIA,
+    verificar_texto_ia,
+)
 from app.services import whatsapp_service
 from app.utils.formato import formatear_monto
 
@@ -76,11 +80,16 @@ def procesar_despacho_y_respuesta(ctx: ContextoMensaje) -> None:
             resultado_ia["slot_filling"] = False
         elif estado_meta == "no_encontrada":
             nombre_disp = meta_ia or "esa"
-            resultado_ia["respuesta_usuario"] = f"No encontré ninguna meta con el nombre '{nombre_disp}'. Podés consultar tus metas con 'mis metas'."
+            resultado_ia["respuesta_usuario"] = (
+                f"No encontré la meta {nombre_disp}. "
+                "Preguntame _mis metas_ para verlas."
+            )
             resultado_ia["slot_filling"] = False
         elif estado_meta == "ambigua":
-            nombres = ", ".join(f"'{m.nombre}'" for m in cands)
-            resultado_ia["respuesta_usuario"] = f"Encontré más de una meta parecida: {nombres}. ¿A cuál querés aportar?"
+            lineas_amb = ["¿A cuál meta?"] + [
+                f"{i}. {m.nombre}" for i, m in enumerate(cands, 1)
+            ]
+            resultado_ia["respuesta_usuario"] = "\n".join(lineas_amb)
             resultado_ia["slot_filling"] = True
             resultado_ia["entidades"]["intent_origen"] = "aportar_meta"
             resultado_ia["entidades"]["meta_ambigua_cands"] = [str(m.id) for m in cands]
@@ -92,18 +101,34 @@ def procesar_despacho_y_respuesta(ctx: ContextoMensaje) -> None:
             if bill_ia:
                 billetera_obj, _ = resolver_billetera_cascada(bill_ia, bills_mon)
             if not billetera_obj:
-                billetera_obj = next((b for b in bills_mon if b.es_principal), None) or (bills_mon[0] if len(bills_mon) == 1 else None)
+                billetera_obj = next((b for b in bills_mon if b.es_principal), None) or (
+                    bills_mon[0] if len(bills_mon) == 1 else None
+                )
             if not billetera_obj:
-                enc = f"¿Desde qué billetera querés aportar a '{meta_obj.nombre}'?"
-                resultado_ia["respuesta_usuario"] = _generar_menu_billeteras(bills_mon, tipo="egreso", encabezado=enc)
+                enc = f"¿De qué cuenta sale el aporte a {meta_obj.nombre}?"
+                resultado_ia["respuesta_usuario"] = _generar_menu_billeteras(
+                    bills_mon, tipo="egreso", encabezado=enc
+                )
                 resultado_ia["slot_filling"] = True
             elif billetera_obj.saldo_actual < monto_val:
-                monto_disp = formatear_monto(float(billetera_obj.saldo_actual), billetera_obj.moneda)
-                resultado_ia["respuesta_usuario"] = f"Saldo insuficiente en la billetera '{billetera_obj.nombre}'. Tenés {monto_disp}."
+                monto_disp = formatear_monto(
+                    float(billetera_obj.saldo_actual),
+                    billetera_obj.moneda,
+                    con_decimales=False,
+                )
+                resultado_ia["respuesta_usuario"] = (
+                    f"No te alcanza: {billetera_obj.nombre} tiene {monto_disp}. "
+                    "Elegí otra cuenta o un monto menor."
+                )
                 resultado_ia["slot_filling"] = False
             else:
-                monto_fmt = formatear_monto(float(monto_val), meta_obj.moneda)
-                resultado_ia["respuesta_usuario"] = f"Voy a aportar {monto_fmt} a tu meta '{meta_obj.nombre}' desde {billetera_obj.nombre}. ¿Confirmás?"
+                monto_fmt = formatear_monto(
+                    float(monto_val), meta_obj.moneda, con_decimales=False
+                )
+                resultado_ia["respuesta_usuario"] = (
+                    f"¿Aporto {monto_fmt} a tu meta {meta_obj.nombre} "
+                    f"desde {billetera_obj.nombre}?"
+                )
                 resultado_ia["entidades"] = {
                     "meta_id": str(meta_obj.id),
                     "meta_nombre": meta_obj.nombre,
@@ -166,11 +191,16 @@ def procesar_despacho_y_respuesta(ctx: ContextoMensaje) -> None:
 
     # Verificación de números en textos generados por la IA antes de persistir y enviar (Decisión 4)
     if "respuesta_usuario" in resultado_ia:
-        resultado_ia["respuesta_usuario"] = verificar_texto_ia(
+        era_texto_ia = isinstance(resultado_ia["respuesta_usuario"], TextoIA)
+        verificado = verificar_texto_ia(
             resultado_ia["respuesta_usuario"],
             mensaje_texto,
             intent=intent_detectado,
         )
+        if era_texto_ia and verificado != TEXTO_IA_NO_VERIFICADO:
+            resultado_ia["respuesta_usuario"] = TextoIA(verificado)
+        else:
+            resultado_ia["respuesta_usuario"] = verificado
 
     tiempo_ms, hub_error = _metricas_respuesta(ctx, resultado_ia)
     nueva_conv = ConversacionWpp(
@@ -209,7 +239,11 @@ def procesar_despacho_y_respuesta(ctx: ContextoMensaje) -> None:
         db.commit()
 
     if aviso_montos_faltantes and aviso_montos_faltantes not in resultado_ia["respuesta_usuario"]:
-        resultado_ia["respuesta_usuario"] = f"{resultado_ia['respuesta_usuario']}\n{aviso_montos_faltantes}"
+        con_aviso = f"{resultado_ia['respuesta_usuario']}\n{aviso_montos_faltantes}"
+        if isinstance(resultado_ia["respuesta_usuario"], TextoIA):
+            resultado_ia["respuesta_usuario"] = TextoIA(con_aviso)
+        else:
+            resultado_ia["respuesta_usuario"] = con_aviso
         nueva_conv.mensaje_bot = resultado_ia["respuesta_usuario"]
         db.flush()
         db.commit()

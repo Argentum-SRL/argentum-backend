@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models.billetera import Billetera
 from app.models.transaccion import MetodoPago, Transaccion
+from app.utils.formato import formatear_monto
 from app.services.saldo_billetera_service import (
     fecha_creacion_billetera,
     fecha_punto_partida,
@@ -37,24 +38,44 @@ def formatear_fecha_ddmmaaaa(f: date | datetime) -> str:
     return f_date.strftime("%d/%m/%Y")
 
 
-def texto_aviso_saldo_individual(billetera: Billetera, fecha_efectiva: date | None = None) -> str:
-    """Genera el texto exacto de aviso para 1 movimiento individual."""
+def texto_aviso_saldo_individual(
+    billetera: Billetera,
+    fecha_efectiva: date | None = None,
+) -> str:
+    """Genera el texto de aviso para 1 movimiento anterior al saldo."""
     if fecha_efectiva is None:
-        fecha_efectiva = fecha_punto_partida(billetera) or fecha_creacion_billetera(billetera)
+        fecha_efectiva = (
+            fecha_punto_partida(billetera)
+            or fecha_creacion_billetera(billetera)
+        )
     f_str = formatear_fecha_ddmm(fecha_efectiva)
-    nom = recortar_nombre_billetera(billetera.nombre)
-    return f"Ojo: es anterior a tu saldo de «{nom}» ({f_str}) y no lo modifica."
+    return (
+        f"Ojo: es de antes del {f_str}: cuenta en el mes, "
+        "pero no cambia tu saldo."
+    )
 
 
-def texto_aviso_saldo_lote(billetera: Billetera, cantidad: int, fecha_efectiva: date | None = None) -> str:
-    """Genera el texto exacto de aviso en lote para una billetera dada."""
+def texto_aviso_saldo_lote(
+    billetera: Billetera,
+    cantidad: int,
+    fecha_efectiva: date | None = None,
+) -> str:
+    """Genera el texto de aviso en lote para una cuenta dada."""
     if cantidad == 1:
-        return texto_aviso_saldo_individual(billetera, fecha_efectiva=fecha_efectiva)
+        return texto_aviso_saldo_individual(
+            billetera,
+            fecha_efectiva=fecha_efectiva,
+        )
     if fecha_efectiva is None:
-        fecha_efectiva = fecha_punto_partida(billetera) or fecha_creacion_billetera(billetera)
+        fecha_efectiva = (
+            fecha_punto_partida(billetera)
+            or fecha_creacion_billetera(billetera)
+        )
     f_str = formatear_fecha_ddmm(fecha_efectiva)
-    nom = recortar_nombre_billetera(billetera.nombre)
-    return f"Ojo: {cantidad} son anteriores a tu saldo de «{nom}» ({f_str}) y no lo modifican."
+    return (
+        f"Ojo: son de antes del {f_str}: cuentan en el mes, "
+        "pero no cambian tu saldo."
+    )
 
 
 def obtener_aviso_saldo(
@@ -74,30 +95,34 @@ def obtener_aviso_saldo(
     if billetera_defecto and billetera_defecto.id:
         billeteras_obj[billetera_defecto.id] = billetera_defecto
 
-    # Conteo de movimientos válidos por billetera
+    # Conteo y montos de movimientos anteriores al saldo por cuenta
     conteo_por_billetera: dict[UUID, int] = {}
+    anteriores_detalle: list[tuple[Billetera, Any, Any]] = []
+    total_lista = len(movimientos)
 
     for mov in movimientos:
-        # Extraer fecha, metodo_pago y billetera
         if isinstance(mov, dict):
             fecha = mov.get("fecha")
             metodo_pago = mov.get("metodo_pago")
             b_item = mov.get("billetera")
             b_id = mov.get("billetera_id") or (b_item.id if b_item else None)
+            monto = mov.get("monto")
+            moneda = mov.get("moneda")
         else:
             fecha = getattr(mov, "fecha", None)
             metodo_pago = getattr(mov, "metodo_pago", None)
             b_item = getattr(mov, "billetera", None)
-            b_id = getattr(mov, "billetera_id", None) or (b_item.id if b_item else None)
+            b_id = getattr(mov, "billetera_id", None) or (
+                b_item.id if b_item else None
+            )
+            monto = getattr(mov, "monto", None)
+            moneda = getattr(mov, "moneda", None)
 
         if not fecha:
             continue
-
-        # Excluir crédito inmediatamente
         if metodo_pago == MetodoPago.CREDITO or str(metodo_pago).lower() == "credito":
             continue
 
-        # Resolver billetera
         b = b_item
         if not b and b_id:
             if b_id in billeteras_obj:
@@ -106,45 +131,71 @@ def obtener_aviso_saldo(
                 b = db.get(Billetera, b_id)
                 if b:
                     billeteras_obj[b_id] = b
-
         if not b and billetera_defecto:
             b = billetera_defecto
-
         if not b:
             continue
 
-        # Verificar si cumple movimiento_anterior_al_saldo
         if movimiento_anterior_al_saldo(b, fecha, metodo_pago):
             b_key = b.id or UUID(int=0)
             billeteras_obj[b_key] = b
             conteo_por_billetera[b_key] = conteo_por_billetera.get(b_key, 0) + 1
+            anteriores_detalle.append((b, monto, moneda or b.moneda))
 
     total_movimientos = sum(conteo_por_billetera.values())
     if total_movimientos == 0:
         return None
 
     cant_billeteras = len(conteo_por_billetera)
-
-    if total_movimientos == 1:
-        # 1 movimiento
-        b_id = next(iter(conteo_por_billetera))
-        b = billeteras_obj[b_id]
-        f_pp = fecha_punto_partida(b) or fecha_creacion_billetera(b)
-        f_str = formatear_fecha_ddmm(f_pp)
-        nom = recortar_nombre_billetera(b.nombre)
-        return f"Ojo: es anterior a tu saldo de «{nom}» ({f_str}) y no lo modifica."
+    todos_anteriores = total_movimientos == total_lista
 
     if cant_billeteras == 1:
-        # Varios, todos de una misma billetera
         b_id = next(iter(conteo_por_billetera))
         b = billeteras_obj[b_id]
         f_pp = fecha_punto_partida(b) or fecha_creacion_billetera(b)
         f_str = formatear_fecha_ddmm(f_pp)
-        nom = recortar_nombre_billetera(b.nombre)
-        return f"Ojo: {total_movimientos} son anteriores a tu saldo de «{nom}» ({f_str}) y no lo modifican."
+        if total_lista == 1:
+            return (
+                f"Ojo: es de antes del {f_str}: cuenta en el mes, "
+                "pero no cambia tu saldo."
+            )
+        if todos_anteriores:
+            return (
+                f"Ojo: son de antes del {f_str}: cuentan en el mes, "
+                "pero no cambian tu saldo."
+            )
+        if total_movimientos == 1:
+            _, monto_uno, mon_uno = anteriores_detalle[0]
+            if monto_uno is not None:
+                m_fmt = formatear_monto(monto_uno, mon_uno, con_decimales=False)
+                quien = f"el de {m_fmt}"
+            else:
+                quien = "1"
+            return (
+                f"Ojo: {quien} es de antes del {f_str}: cuenta en el mes, "
+                "pero no cambia tu saldo."
+            )
+        return (
+            f"Ojo: {total_movimientos} son de antes del {f_str}: "
+            "cuentan en el mes, pero no cambian tu saldo."
+        )
 
-    # Varios de distintas billeteras
-    return f"Ojo: {total_movimientos} son anteriores a tu saldo y no lo modifican."
+    fechas_pp = {
+        fecha_punto_partida(billeteras_obj[bid])
+        or fecha_creacion_billetera(billeteras_obj[bid])
+        for bid in conteo_por_billetera
+    }
+    if len(fechas_pp) == 1 and todos_anteriores:
+        f_unica = next(iter(fechas_pp))
+        f_str = formatear_fecha_ddmm(f_unica)
+        return (
+            f"Ojo: son de antes del {f_str}: cuentan en el mes, "
+            "pero no cambian tus saldos."
+        )
+    return (
+        f"Ojo: {total_movimientos} son de antes de que cargaras tus saldos: "
+        "cuentan en el mes, pero no los cambian."
+    )
 
 
 def obtener_aviso_saldo_individual(

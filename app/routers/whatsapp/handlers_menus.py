@@ -56,6 +56,7 @@ from app.routers.whatsapp.parsers import (
 )
 from app.services import calendario_tarjeta_service, suscripcion_service, whatsapp_service
 from app.core.catalogo_suscripciones import buscar_servicio_por_texto
+from app.core.reglas_texto_wpp import ejemplo_wpp
 from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
 from app.utils.formato import formatear_monto
 from app.utils.texto import normalizar_texto
@@ -76,10 +77,8 @@ def manejar_numero_aislado(
     if not (mensaje_texto.strip().isdigit() and not (conv_activa and conv_activa.slot_filling_activo) and not estado_previo):
         return False
 
-    msg_numero_suelto = (
-        "Mandaste solo un número. Si querés registrar un movimiento, "
-        "escribí el monto y el concepto (por ejemplo: 'gasté 5000 en el kiosco')."
-    )
+    ex_num = ejemplo_wpp("5000 kiosco")
+    msg_numero_suelto = f"Mandaste solo un número. Decime en qué, por ejemplo: {ex_num}."
     whatsapp_service.enviar_whatsapp(from_number, msg_numero_suelto)
     nueva_conv = ConversacionWpp(
         usuario_id=usuario.id,
@@ -122,7 +121,10 @@ Si no aplica, retorna False. Si aplica, persiste ConversacionWpp, envía la resp
             tarjeta_elegida = tarjetas_opciones[num - 1]
             es_sel = True
         else:
-            whatsapp_service.enviar_whatsapp(from_number, f'Opción inválida. Elegí un número del 1 al {len(tarjetas_opciones)}.')
+            whatsapp_service.enviar_whatsapp(
+                from_number,
+                f"Ese número no está en la lista. Elegí del 1 al {len(tarjetas_opciones)}.",
+            )
             return True
     else:
         t_match, cands = resolver_tarjeta_cascada(mensaje_limpio, tarjetas_opciones)
@@ -130,12 +132,14 @@ Si no aplica, retorna False. Si aplica, persiste ConversacionWpp, envía la resp
             tarjeta_elegida = t_match
             es_sel = True
         elif len(cands) > 1:
-            menu = _generar_menu_tarjetas(cands)
-            whatsapp_service.enviar_whatsapp(from_number, f'¿A cuál te referís?\n{menu}')
+            menu = _generar_menu_tarjetas(cands, encabezado="¿Con qué tarjeta fue?")
+            whatsapp_service.enviar_whatsapp(from_number, menu)
             return True
         else:
-            menu = _generar_menu_tarjetas(tarjetas_opciones)
-            whatsapp_service.enviar_whatsapp(from_number, f'No encontré esa tarjeta entre las tuyas.\n\n{menu}')
+            menu = _generar_menu_tarjetas(
+                tarjetas_opciones, encabezado="No encontré esa tarjeta. Elegí una:"
+            )
+            whatsapp_service.enviar_whatsapp(from_number, menu)
             return True
     if es_sel and tarjeta_elegida:
         cant_cuotas = int(estado_prev_tarj.get('cantidad_cuotas', 1))
@@ -154,7 +158,17 @@ Si no aplica, retorna False. Si aplica, persiste ConversacionWpp, envía la resp
             estado_prev_tarj['datos_faltantes'] = [d for d in estado_prev_tarj['datos_faltantes'] if 'tarjeta' not in d]
         conv_activa.slot_filling_activo = False
         db.flush()
-        propuesta_msg = _construir_propuesta_credito(estado_prev_tarj, tarjeta_elegida, cant_cuotas, monto_cuota, monto_total, primer_v, se_asumio_tarjeta=False)
+        propuesta_msg = _construir_propuesta_credito(
+            estado_prev_tarj,
+            tarjeta_elegida,
+            cant_cuotas,
+            monto_cuota,
+            monto_total,
+            primer_v,
+            se_asumio_tarjeta=False,
+            db=db,
+            usuario_id=usuario.id,
+        )
         nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=propuesta_msg, intent_detectado='registrar_transaccion', entidades=estado_prev_tarj, accion_ejecutada=None, confianza=Decimal('1.000'), slot_filling_activo=False, slot_filling_estado=None)
         db.add(nueva_conv)
         db.commit()
@@ -174,7 +188,7 @@ Si no aplica, retorna False. Si aplica, persiste ConversacionWpp, envía la resp
     es_total = any((w in m_txt_norm for w in ['total', 'el total', 'en total', 'es el total', 'los dos', 'todo']))
     es_por_cuota = any((w in m_txt_norm for w in ['cuota', 'cada cuota', 'por cuota', 'cada una', 'de cada cuota', 'por mes', 'cada mes']))
     if not es_total and (not es_por_cuota):
-        whatsapp_service.enviar_whatsapp(from_number, "Por favor decime si ese monto es 'el total' o 'por cuota'.")
+        whatsapp_service.enviar_whatsapp(from_number, "Decime si es el total o cada cuota.")
         return True
     monto_base = Decimal(str(estado_prev_cuotas['monto']))
     cant_cuotas = int(estado_prev_cuotas.get('cantidad_cuotas', 1))
@@ -206,7 +220,17 @@ Si no aplica, retorna False. Si aplica, persiste ConversacionWpp, envía la resp
         estado_prev_cuotas['tarjeta_billetera_id'] = str(tarjeta_obj.billetera_id)
         conv_activa.slot_filling_activo = False
         db.flush()
-        propuesta_msg = _construir_propuesta_credito(estado_prev_cuotas, tarjeta_obj, cant_cuotas, monto_cuota, monto_total, primer_v, se_asumio_tarjeta=False)
+        propuesta_msg = _construir_propuesta_credito(
+            estado_prev_cuotas,
+            tarjeta_obj,
+            cant_cuotas,
+            monto_cuota,
+            monto_total,
+            primer_v,
+            se_asumio_tarjeta=False,
+            db=db,
+            usuario_id=usuario.id,
+        )
         nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=propuesta_msg, intent_detectado='registrar_transaccion', entidades=estado_prev_cuotas, accion_ejecutada=None, confianza=Decimal('1.000'), slot_filling_activo=False, slot_filling_estado=None)
         db.add(nueva_conv)
         db.commit()
@@ -237,7 +261,10 @@ Si aplica y procesa la selección o error de rango/moneda, persiste y retorna Tr
             billetera_elegida = billeteras_activas[numero - 1]
             es_seleccion = True
         else:
-            whatsapp_service.enviar_whatsapp(from_number, f'Opción inválida. Elegí un número del 1 al {max_opciones}.')
+            whatsapp_service.enviar_whatsapp(
+                from_number,
+                f"Ese número no está en la lista. Elegí del 1 al {max_opciones}.",
+            )
             return True
     else:
         b_match, cands = resolver_billetera_cascada(mensaje_limpio, billeteras_activas)
@@ -246,7 +273,7 @@ Si aplica y procesa la selección o error de rango/moneda, persiste y retorna Tr
             es_seleccion = True
         elif len(cands) > 1:
             menu_acotado = _generar_menu_billeteras(cands, tipo=tipo_mov)
-            whatsapp_service.enviar_whatsapp(from_number, f'¿A cuál te referís?\n{menu_acotado}')
+            whatsapp_service.enviar_whatsapp(from_number, menu_acotado)
             return True
         else:
             todas = _obtener_billeteras_activas(usuario.id, db)
@@ -254,8 +281,10 @@ Si aplica y procesa la selección o error de rango/moneda, persiste y retorna Tr
             if b_otra and b_otra.moneda != moneda_sel:
                 nom_otra = 'dólares' if b_otra.moneda == Moneda.USD else 'pesos'
                 nom_mov = 'pesos' if moneda_sel == Moneda.ARS else 'dólares'
-                menu = _generar_menu_billeteras(billeteras_activas, tipo=tipo_mov)
-                whatsapp_service.enviar_whatsapp(from_number, f'No podés usar una billetera en {nom_otra} para un movimiento en {nom_mov}.\n{menu}')
+                sust_m = 'el ingreso' if tipo_mov == 'ingreso' else 'el gasto'
+                enc_m = f'{b_otra.nombre} es en {nom_otra} y {sust_m} es en {nom_mov}. Elegí otra:'
+                menu = _generar_menu_billeteras(billeteras_activas, tipo=tipo_mov, encabezado=enc_m)
+                whatsapp_service.enviar_whatsapp(from_number, menu)
                 return True
     if es_seleccion and billetera_elegida:
         if estado_previo_bill.get('tipo_flujo') == 'lote_slot_filling':
@@ -272,17 +301,22 @@ Si aplica y procesa la selección o error de rango/moneda, persiste y retorna Tr
                 todas_igual = all((op.get('moneda', 'ARS') == mon_r and op.get('tipo', 'egreso') == tipo_r for op in ops_restantes))
                 bills_mon = _obtener_billeteras_activas(usuario.id, db, moneda=Moneda.USD if mon_r == 'USD' else Moneda.ARS)
                 if todas_igual:
-                    enc = '¿A qué billetera entraron los ingresos?' if tipo_r == 'ingreso' else '¿Desde qué billetera salieron los gastos?'
+                    enc = (
+                        '¿A qué cuenta entraron los ingresos?'
+                        if tipo_r == 'ingreso'
+                        else '¿De qué cuenta salieron los gastos?'
+                    )
                     pregunta_sgte = _generar_menu_billeteras(bills_mon, tipo=tipo_r, encabezado=enc)
                     nuevas_pend = [op['id'] for op in ops_restantes]
                 else:
                     op_sgte = ops_restantes[0]
-                    m_fmt = formatear_monto(float(op_sgte['monto']), Moneda.USD if mon_r == 'USD' else Moneda.ARS)
+                    mon_sgte = Moneda.USD if mon_r == 'USD' else Moneda.ARS
+                    m_fmt = formatear_monto(float(op_sgte['monto']), mon_sgte, con_decimales=False)
                     c_disp = _nombre_corto_categoria(op_sgte.get('categoria'))
                     if tipo_r == 'ingreso':
-                        enc = f'¿A qué billetera entró el ingreso de {m_fmt} en {c_disp}?'
+                        enc = f'¿A qué cuenta entraron los {m_fmt} de {c_disp}?'
                     else:
-                        enc = f'¿Desde qué billetera salió el gasto de {m_fmt} en {c_disp}?'
+                        enc = f'¿De qué cuenta salieron los {m_fmt} de {c_disp}?'
                     pregunta_sgte = _generar_menu_billeteras(bills_mon, tipo=tipo_r, encabezado=enc)
                     nuevas_pend = [op_sgte['id']]
                 estado_previo_bill['ops_pendientes_ids'] = nuevas_pend
@@ -302,14 +336,22 @@ Si aplica y procesa la selección o error de rango/moneda, persiste y retorna Tr
             entidades_lote['transacciones_adicionales'] = [dict(o) for o in ops_todas[1:]]
             hay_lote_dup, m_dup, mon_dup, cat_dup = _detectar_duplicados_en_lote(entidades_lote)
             if hay_lote_dup:
-                m_dup_fmt = formatear_monto(float(m_dup), Moneda.USD if mon_dup == 'USD' else Moneda.ARS)
-                pregunta_lote = f'Mandaste 2 movimientos iguales de {m_dup_fmt} en {cat_dup} desde {billetera_elegida.nombre}. ¿Son dos gastos distintos o se te repitió?'
+                mon_lote_dup = Moneda.USD if mon_dup == 'USD' else Moneda.ARS
+                m_dup_fmt = formatear_monto(float(m_dup), mon_lote_dup, con_decimales=False)
+                pregunta_lote = f'Mandaste 2 veces {m_dup_fmt} en {cat_dup}. ¿Anoto los dos?'
                 intent_val = 'verificar_lote_duplicado'
                 slot_activo_val = True
                 slot_estado_val = {**entidades_lote, 'tipo_flujo': 'verificacion_lote_duplicado', 'billetera_resuelta_nombre': billetera_elegida.nombre, 'datos_faltantes': ['confirmar_lote']}
                 propuesta_msg = pregunta_lote
             else:
-                propuesta_msg = _construir_propuesta_transaccion(entidades_lote, billetera_nombre=billetera_elegida.nombre, se_asumio_principal=False, billeteras_usuario=_obtener_billeteras_activas(usuario.id, db))
+                propuesta_msg = _construir_propuesta_transaccion(
+                    entidades_lote,
+                    billetera_nombre=billetera_elegida.nombre,
+                    se_asumio_principal=False,
+                    billeteras_usuario=_obtener_billeteras_activas(usuario.id, db),
+                    db=db,
+                    usuario_id=usuario.id,
+                )
                 intent_val = 'registrar_transaccion'
                 slot_activo_val = False
                 slot_estado_val = None
@@ -337,8 +379,10 @@ Si aplica y procesa la selección o error de rango/moneda, persiste y retorna Tr
         if tipo_mov == 'egreso':
             sub_cobrada, tx_cobrada = _buscar_suscripcion_cobrada_periodo_actual(usuario.id, Decimal(str(estado_previo_bill['monto'])), estado_previo_bill.get('servicio') or estado_previo_bill.get('descripcion') or estado_previo_bill.get('concepto') or mensaje_texto, db)
         if sub_cobrada and tx_cobrada:
-            m_fmt = formatear_monto(float(tx_cobrada.monto), tx_cobrada.moneda)
-            propuesta_msg = f'Aviso: ya se cobró automáticamente {m_fmt} de {sub_cobrada.nombre} este período. ¿Es un gasto aparte o querés cancelarlo?'
+            m_fmt = formatear_monto(float(tx_cobrada.monto), tx_cobrada.moneda, con_decimales=False)
+            propuesta_msg = (
+                f'{sub_cobrada.nombre} ({m_fmt}) ya se cobró solo este mes. ¿Lo anoto igual?'
+            )
             intent_val = 'verificar_duplicado_suscripcion'
             slot_activo_val = True
             slot_estado_val = {**estado_previo_bill, 'tipo_flujo': 'verificacion_duplicado_suscripcion', 'suscripcion_id': str(sub_cobrada.id), 'servicio_nombre': sub_cobrada.nombre, 'billetera_resuelta_nombre': billetera_elegida.nombre, 'datos_faltantes': ['confirmar_gasto_aparte']}
@@ -356,13 +400,23 @@ Si aplica y procesa la selección o error de rango/moneda, persiste y retorna Tr
             if tx_dup:
                 hora_dup = tx_dup.fecha_creacion.astimezone(TZ_ARGENTINA).strftime('%H:%M')
                 cat_disp = _nombre_corto_categoria(estado_previo_bill.get('categoria'))
-                m_fmt = formatear_monto(float(estado_previo_bill['monto']), moneda_sel)
-                propuesta_msg = f'A las {hora_dup} ya registraste {m_fmt} en {cat_disp}. ¿Es un movimiento nuevo o se te repitió?'
+                m_dup_val = float(estado_previo_bill['monto'])
+                m_fmt = formatear_monto(m_dup_val, moneda_sel, con_decimales=False)
+                propuesta_msg = (
+                    f'A las {hora_dup} ya anotaste {m_fmt} en {cat_disp}. ¿Lo anoto otra vez?'
+                )
                 intent_val = 'verificar_duplicado'
                 slot_activo_val = True
                 slot_estado_val = {**estado_previo_bill, 'tipo_flujo': 'verificacion_duplicado', 'billetera_resuelta_nombre': billetera_elegida.nombre, 'hora_anterior': hora_dup, 'datos_faltantes': ['confirmar_duplicado']}
             else:
-                propuesta_msg = _construir_propuesta_transaccion(estado_previo_bill, billetera_elegida.nombre, se_asumio_principal=False, billetera_moneda=billetera_elegida.moneda)
+                propuesta_msg = _construir_propuesta_transaccion(
+                    estado_previo_bill,
+                    billetera_elegida.nombre,
+                    se_asumio_principal=False,
+                    billetera_moneda=billetera_elegida.moneda,
+                    db=db,
+                    usuario_id=usuario.id,
+                )
                 intent_val = 'registrar_transaccion'
                 slot_activo_val = False
                 slot_estado_val = None
@@ -394,7 +448,6 @@ def manejar_verificaciones_slot_filling(
     Si no aplica o el usuario ignora la pregunta con otro mensaje, retorna False.
     """
     from app.routers.whatsapp.registro import _registrar_movimiento_directo
-    from app.routers.whatsapp.constantes import MESES_ES_GEN
 
     conv_activa_dup = _buscar_slot_filling_activo(usuario.id, db)
     if conv_activa_dup and conv_activa_dup.slot_filling_estado:
@@ -413,7 +466,7 @@ def manejar_verificaciones_slot_filling(
             elif _es_descarte_duplicado(mensaje_texto):
                 conv_activa_dup.slot_filling_activo = False
                 conv_activa_dup.accion_ejecutada = 'descartado_por_duplicado'
-                msg_desc = 'Listo, no anoto nada.'
+                msg_desc = 'Listo, no lo anoto.'
                 nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=msg_desc, intent_detectado='cancelar', entidades={}, accion_ejecutada='descartado_por_duplicado', confianza=Decimal('1.000'), slot_filling_activo=False, slot_filling_estado=None)
                 db.add(nueva_conv)
                 db.commit()
@@ -444,7 +497,7 @@ def manejar_verificaciones_slot_filling(
             elif _es_descarte_duplicado(mensaje_texto):
                 conv_activa_dup.slot_filling_activo = False
                 conv_activa_dup.accion_ejecutada = 'descartado_por_duplicado'
-                msg_desc = 'Listo, no anoto nada.'
+                msg_desc = 'Listo, no lo anoto.'
                 nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=msg_desc, intent_detectado='cancelar', entidades={}, accion_ejecutada='descartado_por_duplicado', confianza=Decimal('1.000'), slot_filling_activo=False, slot_filling_estado=None)
                 db.add(nueva_conv)
                 db.commit()
@@ -464,7 +517,7 @@ def manejar_verificaciones_slot_filling(
             elif _es_cancelacion(mensaje_texto) or _es_descarte_duplicado(mensaje_texto):
                 conv_activa_dup.slot_filling_activo = False
                 conv_activa_dup.accion_ejecutada = 'descartado_por_duplicado'
-                msg_desc = 'Listo, cancelado.'
+                msg_desc = 'Listo, no lo anoto.'
                 nueva_conv = ConversacionWpp(usuario_id=usuario.id, wamid=wamid, mensaje_usuario=mensaje_texto, tipo_mensaje=TipoMensajeWpp.TEXTO, transcripcion=None, mensaje_bot=msg_desc, intent_detectado='cancelar', entidades={}, accion_ejecutada='cancelada', confianza=Decimal('1.000'), slot_filling_activo=False, slot_filling_estado=None)
                 db.add(nueva_conv)
                 db.commit()
@@ -472,19 +525,41 @@ def manejar_verificaciones_slot_filling(
                 return True
         elif tipo_flujo == 'ambiguedad_suscripcion':
             norm_amb = normalizar_texto(mensaje_texto)
+            if norm_amb in (
+                'cancelar', 'cancela', 'cancelalo', 'deja', 'dejá',
+                'dejalo', 'olvidate', 'olvidalo', 'no importa',
+                'no quiero', 'no hace falta',
+            ):
+                return False
             srv_nom = conv_activa_dup.slot_filling_estado.get('servicio')
-            if any((w in norm_amb for w in ['suscripcion', 'suscripción', 'me suscribi', 'me suscribí', 'es una suscripcion', 'es suscripcion', 'abono'])):
+            es_si_sub = _es_confirmacion(mensaje_texto) or any(
+                w in norm_amb
+                for w in [
+                    'suscripcion', 'suscripción', 'me suscribi', 'me suscribí',
+                    'es una suscripcion', 'es suscripcion', 'abono', 'todos los meses',
+                ]
+            )
+            es_no_gasto = _es_cancelacion(mensaje_texto) or any(
+                w in norm_amb
+                for w in [
+                    'gasto', 'unico', 'único', 'gasto unico',
+                    'es un gasto', 'una vez', 'de una vez',
+                ]
+            )
+            if es_si_sub:
                 srv_cat = buscar_servicio_por_texto(srv_nom) if srv_nom else None
+                msg_frec = (
+                    f'¿Cada cuánto se paga {srv_nom}? Mensual, bimestral, '
+                    'trimestral, semestral o anual.'
+                )
                 if srv_cat and srv_cat.get('frecuencia_sugerida'):
                     frec_tipica = srv_cat['frecuencia_sugerida']
-                    msg_frec = f'¿Con qué frecuencia se paga {srv_nom}? (lo habitual es {frec_tipica}: mensual, bimestral, trimestral, semestral o anual)'
-                else:
-                    msg_frec = f'¿Con qué frecuencia se paga {srv_nom}? (mensual, bimestral, trimestral, semestral o anual)'
+                    msg_frec = f'Lo habitual es {frec_tipica}.\n{msg_frec}'
                 conv_activa_dup.slot_filling_estado = {'tipo_flujo': 'crear_suscripcion_frecuencia', 'servicio': srv_nom, 'monto': conv_activa_dup.slot_filling_estado.get('monto'), 'moneda': conv_activa_dup.slot_filling_estado.get('moneda', 'ARS')}
                 db.commit()
                 whatsapp_service.enviar_whatsapp(from_number, msg_frec)
                 return True
-            elif any((w in norm_amb for w in ['gasto', 'unico', 'único', 'gasto unico', 'es un gasto'])):
+            elif es_no_gasto:
                 msg_monto = f'¿Cuánto gastaste en {srv_nom}?'
                 conv_activa_dup.slot_filling_estado = {'tipo_flujo': 'pedir_monto_gasto', 'concepto': srv_nom, 'categoria': 'Entretenimiento'}
                 db.commit()
@@ -501,11 +576,21 @@ def manejar_verificaciones_slot_filling(
                     if not billetera_obj:
                         billetera_obj = db.query(Billetera).filter(Billetera.usuario_id == usuario.id).first()
                     proximo_cobro = suscripcion_service.calcular_siguiente_cobro(hoy_argentina(), frec)
-                    fecha_fmt = f'{proximo_cobro.day} de {MESES_ES_GEN[proximo_cobro.month - 1]}'
+                    fecha_fmt = proximo_cobro.strftime('%d/%m')
                     mon_enum = Moneda.USD if moneda_val == 'USD' else Moneda.ARS
-                    monto_fmt = formatear_monto(float(monto_val), mon_enum)
+                    monto_fmt = formatear_monto(float(monto_val), mon_enum, con_decimales=False)
+                    frec_txt = {
+                        'mensual': 'por mes', 'bimestral': 'cada 2 meses',
+                        'trimestral': 'cada 3 meses', 'semestral': 'cada 6 meses',
+                        'anual': 'por año',
+                    }.get(frec, frec)
                     medio_pago_txt = f'desde {billetera_obj.nombre}' if billetera_obj else ''
-                    propuesta_msg = f'Voy a programar la suscripción a {srv_nom}: {monto_fmt} {frec} {medio_pago_txt}, primer cobro el {fecha_fmt}. ¿Confirmás?'
+                    desde_suf = f' {medio_pago_txt}' if medio_pago_txt else ''
+                    propuesta_msg = (
+                        f'{srv_nom}: {monto_fmt} {frec_txt}{desde_suf}, '
+                        f'primer cobro el {fecha_fmt}.\n'
+                        '¿Anoto la suscripción?'
+                    )
                     conv_activa_dup.slot_filling_activo = False
                     conv_activa_dup.accion_ejecutada = 'propuesta_creada'
                     db.flush()
@@ -524,11 +609,20 @@ def manejar_verificaciones_slot_filling(
                     whatsapp_service.enviar_whatsapp(from_number, msg_monto)
                     return True
             else:
-                whatsapp_service.enviar_whatsapp(from_number, 'Por favor elegí una frecuencia: mensual, bimestral, trimestral, semestral o anual.')
+                if _es_cancelacion(mensaje_texto):
+                    return False
+                whatsapp_service.enviar_whatsapp(
+                    from_number,
+                    'Decime una: mensual, bimestral, trimestral, semestral o anual.',
+                )
                 return True
         elif tipo_flujo == 'duplicado_suscripcion_existente':
             norm_dup = normalizar_texto(mensaje_texto)
-            if any((w in norm_dup for w in ['otra', 'otra igual', 'crear otra', 'si', 'sí', 'registrar otra'])):
+            es_sumar_otra = _es_confirmacion(mensaje_texto) or any(
+                w in norm_dup
+                for w in ['otra', 'otra igual', 'crear otra', 'si', 'sí', 'registrar otra']
+            )
+            if es_sumar_otra:
                 srv_nom = conv_activa_dup.slot_filling_estado.get('servicio')
                 monto_val = conv_activa_dup.slot_filling_estado.get('monto')
                 moneda_val = conv_activa_dup.slot_filling_estado.get('moneda', 'ARS')
@@ -537,11 +631,20 @@ def manejar_verificaciones_slot_filling(
                 if not billetera_obj:
                     billetera_obj = db.query(Billetera).filter(Billetera.usuario_id == usuario.id).first()
                 proximo_cobro = suscripcion_service.calcular_siguiente_cobro(hoy_argentina(), frec)
-                fecha_fmt = f'{proximo_cobro.day} de {MESES_ES_GEN[proximo_cobro.month - 1]}'
+                fecha_fmt = proximo_cobro.strftime('%d/%m')
                 mon_enum = Moneda.USD if moneda_val == 'USD' else Moneda.ARS
-                monto_fmt = formatear_monto(float(monto_val), mon_enum)
+                monto_fmt = formatear_monto(float(monto_val), mon_enum, con_decimales=False)
+                frec_txt = {
+                    'mensual': 'por mes', 'bimestral': 'cada 2 meses',
+                    'trimestral': 'cada 3 meses', 'semestral': 'cada 6 meses',
+                    'anual': 'por año',
+                }.get(frec, frec)
                 medio_pago_txt = f'desde {billetera_obj.nombre}' if billetera_obj else ''
-                propuesta_msg = f'Voy a programar la suscripción a {srv_nom}: {monto_fmt} {frec} {medio_pago_txt}, primer cobro el {fecha_fmt}. ¿Confirmás?'
+                desde_suf = f' {medio_pago_txt}' if medio_pago_txt else ''
+                propuesta_msg = (
+                    f'{srv_nom}: {monto_fmt} {frec_txt}{desde_suf}, primer cobro el {fecha_fmt}.\n'
+                    '¿Anoto la suscripción?'
+                )
                 conv_activa_dup.slot_filling_activo = False
                 conv_activa_dup.accion_ejecutada = 'propuesta_creada'
                 db.flush()

@@ -21,10 +21,8 @@ from app.routers.whatsapp.constantes import (
     FACTOR_MIN_COTIZACION_DOLAR,
 )
 from app.routers.whatsapp.db_lookups import _obtener_cotizacion_referencia_usuario
-from app.routers.whatsapp.parsers import (
-    _formatear_fecha_natural,
-    _parsear_monto_argentino,
-)
+from app.core.reglas_texto_wpp import fecha_corta_wpp
+from app.routers.whatsapp.parsers import _parsear_monto_argentino
 from app.routers.whatsapp.transferencias_cuentas import resolver_cuenta
 from app.schemas.transferencia_interna import TransferenciaInternaCreate
 from app.services import transferencia_service, whatsapp_service
@@ -276,27 +274,25 @@ def resolver_transferencia_distinta_moneda(
             rango_min = (cot_ref * FACTOR_MIN_COTIZACION_DOLAR).quantize(Decimal("0.01"))
             rango_max = (cot_ref * FACTOR_MAX_COTIZACION_DOLAR).quantize(Decimal("0.01"))
             if cotiz < rango_min or cotiz > rango_max:
-                c_str = formatear_monto(float(cotiz), Moneda.ARS)
-                ref_str = formatear_monto(float(cot_ref), Moneda.ARS)
+                c_str = formatear_monto(float(cotiz), Moneda.ARS, con_decimales=False)
+                ref_str = formatear_monto(float(cot_ref), Moneda.ARS, con_decimales=False)
                 msg_err = (
-                    f"La cotización de {c_str} por dólar no parece razonable "
-                    f"(la cotización de referencia es de {ref_str}). "
-                    f"Por favor verificá el valor e intentá de nuevo."
+                    f"¿{c_str} por dólar? Hoy el dólar está a {ref_str}. "
+                    "Revisá el número y mandámelo de nuevo."
                 )
                 _guardar_conversacion_sin_efecto(
                     usuario, db, mensaje_texto, msg_err, wamid, from_number
                 )
                 return True
 
-        cotiz_fmt = formatear_monto(float(cotiz), Moneda.ARS)
-        pesos_fmt = formatear_monto(float(pesos), Moneda.ARS)
-        dolares_fmt = formatear_monto(float(dolares), Moneda.USD)
+        cotiz_fmt = formatear_monto(float(cotiz), Moneda.ARS, con_decimales=False)
+        pesos_fmt = formatear_monto(float(pesos), Moneda.ARS, con_decimales=False)
+        dolares_fmt = formatear_monto(float(dolares), Moneda.USD, con_decimales=False)
 
         if es_compra:
             prop = (
-                f"Voy a registrar una compra de {dolares_fmt} a {cotiz_fmt}: "
-                f"salen {pesos_fmt} de {b_orig.nombre} y entran {dolares_fmt} a "
-                f"{b_dest.nombre}. ¿Confirmás?"
+                f"Salen {pesos_fmt} de {b_orig.nombre} y entran {dolares_fmt} "
+                f"a {b_dest.nombre} (a {cotiz_fmt}).\n¿Anoto la compra?"
             )
             entidades = {
                 "tipo_operacion": "compra_usd",
@@ -311,9 +307,8 @@ def resolver_transferencia_distinta_moneda(
             }
         else:
             prop = (
-                f"Voy a registrar una venta de {dolares_fmt} a {cotiz_fmt}: "
-                f"salen {dolares_fmt} de {b_orig.nombre} y entran {pesos_fmt} a "
-                f"{b_dest.nombre}. ¿Confirmás?"
+                f"Salen {dolares_fmt} de {b_orig.nombre} y entran {pesos_fmt} "
+                f"a {b_dest.nombre} (a {cotiz_fmt}).\n¿Anoto la venta?"
             )
             entidades = {
                 "tipo_operacion": "venta_usd",
@@ -341,12 +336,11 @@ def resolver_transferencia_distinta_moneda(
     if es_compra:
         if dolares_explicit:
             entidades_sf["monto_usd"] = float(dolares_explicit)
-            pregunta = "¿A qué cotización compraste o cuántos pesos pagaste?"
+            pregunta = "¿A cuánto compraste o cuántos pesos pagaste?"
         else:
             entidades_sf["monto_pesos"] = float(monto) if monto else 0.0
             pregunta = (
-                f"¿A qué cotización compraste o cuántos dólares "
-                f"recibís en {b_dest.nombre}?"
+                f"¿A cuánto compraste o cuántos dólares entraron en {b_dest.nombre}?"
             )
     else:
         if dolares_explicit:
@@ -355,7 +349,7 @@ def resolver_transferencia_distinta_moneda(
             entidades_sf["monto_usd"] = float(monto) if monto else 0.0
         else:
             entidades_sf["monto_pesos"] = float(monto) if monto else 0.0
-        pregunta = f"¿A qué cotización vendiste o cuántos pesos recibís en {b_dest.nombre}?"
+        pregunta = f"¿A cuánto vendiste o cuántos pesos entraron en {b_dest.nombre}?"
 
     _guardar_conversacion_slot_filling(
         usuario, db, mensaje_texto, pregunta, entidades_sf, wamid, from_number
@@ -563,7 +557,7 @@ def _manejar_multiples_transferencias(
             usuario,
             db,
             mensaje_texto,
-            "Hubo un problema al procesar las transferencias.",
+            "Hubo un problema y no anoté nada. Probá de nuevo en un rato.",
             wamid,
             from_number,
         )
@@ -571,13 +565,16 @@ def _manejar_multiples_transferencias(
 
     # Construct unified message
     frases = []
+    hoy = hoy_argentina()
     for it, b_o, b_d in items_resueltos:
-        monto_fmt = formatear_monto(float(it["monto"]), b_o.moneda)
-        fecha_obj = it.get("fecha") or hoy_argentina()
-        fecha_nat = _formatear_fecha_natural(fecha_obj)
-        fecha_sufijo = f" ({fecha_nat})" if fecha_nat else ""
+        monto_fmt = formatear_monto(float(it["monto"]), b_o.moneda, con_decimales=False)
+        fecha_obj = it.get("fecha") or hoy
+        f_corta = fecha_corta_wpp(fecha_obj, hoy)
+        fecha_sufijo = f" ({f_corta})" if f_corta else ""
         com = it.get("comision")
-        com_fmt = formatear_monto(float(com), b_o.moneda) if com else ""
+        com_fmt = (
+            formatear_monto(float(com), b_o.moneda, con_decimales=False) if com else ""
+        )
         com_sufijo = f", con {com_fmt} de comisión" if com else ""
         frases.append(
             f"{monto_fmt} de {b_o.nombre} a {b_d.nombre}{fecha_sufijo}{com_sufijo}"

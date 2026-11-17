@@ -60,7 +60,11 @@ def p12_caso_1(datos):
             {"uid": u.id}
         ).mappings().first()
         intent = row["intent_detectado"] if row else None
-        tiene_datos_reales = "En este ciclo llevás ingresados" in resp and "(balance:" in resp
+        tiene_datos_reales = (
+            "Este mes (desde el " in resp
+            and "entraron " in resp
+            and "gastaste " in resp
+        )
         return f"Intent: {intent} | Datos reales: {tiene_datos_reales}"
     return run_isolated(test)
 
@@ -87,10 +91,10 @@ def p12_caso_2(datos):
         ).mappings().first()
         intent = row["intent_detectado"] if row else None
         tiene_cotizacion = (
-            "Cotizaciones del dólar:" in resp
-            and "Dólar Blue: $1.450" in resp
-            and "MEP: $1.400" in resp
-            and "Oficial: $1.050" in resp
+            "Dólar hoy:" in resp
+            and "- Blue: $1.450" in resp
+            and "- MEP: $1.400" in resp
+            and "- Oficial: $1.050" in resp
         )
         return f"Intent: {intent} | Cotizacion fija ok: {tiene_cotizacion}"
     return run_isolated(test)
@@ -112,19 +116,27 @@ def p12_caso_3(datos):
         db = Session()
         try:
             from app.services.dashboard_service import get_dashboard_resumen
-            from app.routers.whatsapp.parsers import _fmt
+            from app.utils.formato import formatear_monto
             resumen = get_dashboard_resumen(db, u)
             disp = resumen["disponible_real"]
-            ars_total_str = _fmt(disp["ars"]["saldo_billeteras"])
-            ars_disp_str = _fmt(disp["ars"]["disponible"])
+            ars_total_str = formatear_monto(
+                disp["ars"]["saldo_billeteras"], Moneda.ARS, con_decimales=False
+            )
+            ars_disp_str = formatear_monto(
+                disp["ars"]["disponible"], Moneda.ARS, con_decimales=False
+            )
             datos_reales = (
                 "LLM_INVENTADO_999" not in resp
                 and ars_total_str in resp
                 and ars_disp_str in resp
             )
             if disp["usd"]["saldo_billeteras"] > 0 or disp["usd"]["disponible"] > 0:
-                usd_tot_str = _fmt(disp["usd"]["saldo_billeteras"], Moneda.USD)
-                usd_disp_str = _fmt(disp["usd"]["disponible"], Moneda.USD)
+                usd_tot_str = formatear_monto(
+                    disp["usd"]["saldo_billeteras"], Moneda.USD, con_decimales=False
+                )
+                usd_disp_str = formatear_monto(
+                    disp["usd"]["disponible"], Moneda.USD, con_decimales=False
+                )
                 datos_reales = datos_reales and (usd_tot_str in resp) and (usd_disp_str in resp)
         finally:
             db.close()
@@ -165,7 +177,7 @@ def p12_caso_5(datos):
             {"uid": u.id}
         ).mappings().first()
         intent = row["intent_detectado"] if row else None
-        falla_esperada = "No pude consultar tu saldo en este momento. Probá de nuevo en unos minutos."
+        falla_esperada = "No pude ver tu saldo ahora. Probá de nuevo en unos minutos."
         falla_ok = (resp == falla_esperada) and ("LLM_INVENTADO_999" not in resp)
         return f"Intent: {intent} | Falla manejada: {falla_ok}"
     return run_isolated(test)
@@ -185,7 +197,9 @@ def p12_caso_6(datos):
             {"uid": u.id}
         ).mappings().first()
         intent = row["intent_detectado"] if row else None
-        falla_esperada = "No pude calcular tu balance en este momento. Probá de nuevo en unos minutos."
+        falla_esperada = (
+            "No pude ver tus ingresos y gastos ahora. Probá de nuevo en unos minutos."
+        )
         falla_ok = (resp == falla_esperada) and ("LLM_INVENTADO_999" not in resp)
         return f"Intent: {intent} | Falla manejada: {falla_ok}"
     return run_isolated(test)
@@ -205,7 +219,9 @@ def p12_caso_7(datos):
             {"uid": u.id}
         ).mappings().first()
         intent = row["intent_detectado"] if row else None
-        falla_esperada = "No pude calcular tu proyección en este momento. Probá de nuevo en unos minutos."
+        falla_esperada = (
+            "No pude ver cómo llegás a fin de mes ahora. Probá de nuevo en unos minutos."
+        )
         falla_ok = (resp == falla_esperada) and ("LLM_INVENTADO_999" not in resp)
         return f"Intent: {intent} | Falla manejada: {falla_ok}"
     return run_isolated(test)
@@ -225,7 +241,7 @@ def p12_caso_8(datos):
             {"uid": u.id}
         ).mappings().first()
         intent = row["intent_detectado"] if row else None
-        falla_esperada = "No pude obtener la cotización del dólar en este momento. Probá de nuevo en unos minutos."
+        falla_esperada = "No pude ver el dólar ahora. Probá de nuevo en unos minutos."
         falla_ok = (resp == falla_esperada) and ("LLM_INVENTADO_999" not in resp)
         return f"Intent: {intent} | Falla manejada: {falla_ok}"
     return run_isolated(test)
@@ -245,7 +261,7 @@ def p12_caso_9(datos):
             {"uid": u.id}
         ).mappings().first()
         intent = row["intent_detectado"] if row else None
-        falla_esperada = "No pude obtener la cotización del dólar en este momento. Probá de nuevo en unos minutos."
+        falla_esperada = "No pude ver el dólar ahora. Probá de nuevo en unos minutos."
         falla_ok = (resp == falla_esperada) and ("LLM_INVENTADO_999" not in resp)
         return f"Intent: {intent} | Falla manejada: {falla_ok}"
     return run_isolated(test)
@@ -267,17 +283,17 @@ def p12_caso_10(datos):
         db = Session()
         try:
             from app.services.ai_service import construir_contexto_financiero
-            from app.routers.whatsapp.parsers import _fmt
+            from app.utils.formato import formatear_monto
             ctx = construir_contexto_financiero(u, db)
             metas = sorted(ctx.get("metas_activas", []), key=lambda x: x["nombre"])
             if not metas:
                 datos_reales = (resp == "No tenés metas activas.") and ("LLM_INVENTADO_999" not in resp)
             else:
-                datos_reales = ("LLM_INVENTADO_999" not in resp) and resp.startswith("Tus metas activas:")
+                datos_reales = ("LLM_INVENTADO_999" not in resp) and resp.startswith("Tus metas:")
                 for m in metas[:8]:
                     mon = Moneda.USD if m["moneda"] == "USD" else Moneda.ARS
-                    obj_str = _fmt(m["objetivo"], mon)
-                    acum_str = _fmt(m["acumulado"], mon)
+                    obj_str = formatear_monto(m["objetivo"], mon, con_decimales=False)
+                    acum_str = formatear_monto(m["acumulado"], mon, con_decimales=False)
                     datos_reales = datos_reales and (m["nombre"] in resp) and (obj_str in resp) and (acum_str in resp)
         finally:
             db.close()
@@ -301,17 +317,20 @@ def p12_caso_11(datos):
         db = Session()
         try:
             from app.services.ai_service import construir_contexto_financiero
-            from app.routers.whatsapp.parsers import _fmt
+            from app.utils.formato import formatear_monto
             ctx = construir_contexto_financiero(u, db)
             presupuestos = sorted(ctx.get("presupuestos_activos", []), key=lambda x: x["nombre"])
             if not presupuestos:
                 datos_reales = (resp == "No tenés presupuestos activos.") and ("LLM_INVENTADO_999" not in resp)
             else:
-                datos_reales = ("LLM_INVENTADO_999" not in resp) and resp.startswith("Tus presupuestos activos:")
+                datos_reales = (
+                    ("LLM_INVENTADO_999" not in resp)
+                    and resp.startswith("Tus presupuestos:")
+                )
                 for p in presupuestos[:8]:
                     mon = Moneda.USD if p["moneda"] == "USD" else Moneda.ARS
-                    lim_str = _fmt(p["limite"], mon)
-                    usado_str = _fmt(p["monto_usado"], mon)
+                    lim_str = formatear_monto(p["limite"], mon, con_decimales=False)
+                    usado_str = formatear_monto(p["monto_usado"], mon, con_decimales=False)
                     datos_reales = datos_reales and (p["nombre"] in resp) and ("usaste" in resp) and (usado_str in resp) and (lim_str in resp)
         finally:
             db.close()
@@ -333,7 +352,7 @@ def p12_caso_12(datos):
             {"uid": u.id}
         ).mappings().first()
         intent = row["intent_detectado"] if row else None
-        falla_esperada = "No pude consultar tus metas en este momento. Probá de nuevo en unos minutos."
+        falla_esperada = "No pude ver tus metas ahora. Probá de nuevo en unos minutos."
         falla_ok = (resp == falla_esperada) and ("LLM_INVENTADO_999" not in resp)
         return f"Intent: {intent} | Falla manejada: {falla_ok}"
     return run_isolated(test)
@@ -353,7 +372,7 @@ def p12_caso_13(datos):
             {"uid": u.id}
         ).mappings().first()
         intent = row["intent_detectado"] if row else None
-        falla_esperada = "No pude consultar tus presupuestos en este momento. Probá de nuevo en unos minutos."
+        falla_esperada = "No pude ver tus presupuestos ahora. Probá de nuevo en unos minutos."
         falla_ok = (resp == falla_esperada) and ("LLM_INVENTADO_999" not in resp)
         return f"Intent: {intent} | Falla manejada: {falla_ok}"
     return run_isolated(test)

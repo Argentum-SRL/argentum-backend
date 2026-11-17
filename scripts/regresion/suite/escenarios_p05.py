@@ -171,11 +171,12 @@ def p5_caso_6_concurrente(datos):
 
     resp_c6 = []
     lock = threading.Lock()
-    def mock_envio(to, msg):
+    def mock_envio(to, msg, **kwargs):
+        lleva_ia = bool(kwargs.get("lleva_texto_ia", False))
         with lock:
             resp_c6.append(msg)
             if _colector_salidas is not None:
-                _colector_salidas.registrar_mensaje(msg)
+                _colector_salidas.registrar_mensaje(msg, lleva_texto_ia=lleva_ia)
 
     def _mock_buscar_concurrente(tel, db_sess):
         usr = db_sess.query(Usuario).filter(Usuario.email == USUARIO_PRUEBAS_EMAIL).first()
@@ -267,8 +268,12 @@ def p5_caso_6_concurrente(datos):
             raise RuntimeError(f"Limpieza falló: saldo billetera {b_actual.saldo_actual} != original {saldo_original}")
 
     # Verificar que exactamente 1 confirmó con éxito y 1 fue rechazada por ya confirmada
-    exitos = [r for r in resp_c6 if "registrado" in r.lower()]
-    dups = [r for r in resp_c6 if "ya fue confirmada" in r.lower() or "no tenés ninguna operación pendiente" in r.lower()]
+    exitos = [r for r in resp_c6 if "listo, anoté" in r.lower()]
+    dups = [
+        r for r in resp_c6
+        if "ya estaba anotado" in r.lower()
+        or "no tengo nada pendiente" in r.lower()
+    ]
     return f"Exitos={len(exitos)}, Rechazados_por_concurrencia={len(dups)}"
 
 

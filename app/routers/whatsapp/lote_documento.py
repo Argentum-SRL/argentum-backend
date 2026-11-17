@@ -20,10 +20,8 @@ from app.routers.whatsapp.extraccion_documento import (
     ResultadoExtraccion,
     parsear_fecha_documento,
 )
-from app.routers.whatsapp.parsers import (
-    _formatear_fecha_natural,
-    _resolver_y_validar_fecha,
-)
+from app.core.reglas_texto_wpp import fecha_corta_wpp
+from app.routers.whatsapp.parsers import _resolver_y_validar_fecha
 from app.routers.whatsapp.propuestas import _construir_propuesta_transaccion
 from app.routers.whatsapp.resolvers_cascada import resolver_billetera_cascada
 from app.services import duplicados_service
@@ -293,11 +291,11 @@ def preparar_rendimientos(
         except Exception:
             continue
 
-        monto_fmt = formatear_monto(float(monto_dec), Moneda.ARS)
+        monto_fmt = formatear_monto(float(monto_dec), Moneda.ARS, con_decimales=False)
 
         if not billetera_elegida:
             avisos.append(
-                f"Vi un rendimiento de {monto_fmt} que no pude anotar (billetera o fecha dudosa). Cargalo desde Billeteras."
+                f"Vi un rendimiento de {monto_fmt} que no pude anotar. Cargalo en miargentum.com"
             )
             continue
 
@@ -305,15 +303,20 @@ def preparar_rendimientos(
         fecha_obj = parsear_fecha_documento(fecha_raw) if fecha_raw else None
         if not fecha_obj or fecha_obj > hoy or (hoy - fecha_obj).days > 60:
             avisos.append(
-                f"Vi un rendimiento de {monto_fmt} que no pude anotar (billetera o fecha dudosa). Cargalo desde Billeteras."
+                f"Vi un rendimiento de {monto_fmt} que no pude anotar. Cargalo en miargentum.com"
             )
             continue
 
         if ancla is not None and fecha_obj <= ancla:
             if billetera_elegida.id not in billeteras_aviso_cobertura:
                 billeteras_aviso_cobertura.add(billetera_elegida.id)
-                f_nat_ancla = _formatear_fecha_natural(ancla)
-                hasta_str = f"hasta {f_nat_ancla}" if f_nat_ancla else "hasta hoy"
+                f_ancla = fecha_corta_wpp(ancla, hoy)
+                if not f_ancla:
+                    hasta_str = "hasta hoy"
+                elif f_ancla == "ayer":
+                    hasta_str = "hasta ayer"
+                else:
+                    hasta_str = f"hasta el {f_ancla}"
                 avisos.append(
                     f"Ya tenías cargados los rendimientos de {billetera_elegida.nombre} {hasta_str}."
                 )
@@ -327,17 +330,24 @@ def preparar_rendimientos(
         ).scalar_one_or_none()
 
         if existe_db or fecha_obj in fechas_usadas:
-            f_nat = _formatear_fecha_natural(fecha_obj) or "hoy"
-            fecha_existente = f_nat[3:] if f_nat.startswith("el ") else f_nat
+            f_c = fecha_corta_wpp(fecha_obj, hoy)
+            if not f_c:
+                de_fecha = "de hoy"
+            elif f_c == "ayer":
+                de_fecha = "de ayer"
+            else:
+                de_fecha = f"del {f_c}"
             avisos.append(
-                f"Ya tenías el rendimiento del {fecha_existente} en {billetera_elegida.nombre}."
+                f"Ya tenías el rendimiento {de_fecha} en {billetera_elegida.nombre}."
             )
             continue
 
         fechas_usadas.add(fecha_obj)
-        f_nat_prop = _formatear_fecha_natural(fecha_obj) or "hoy"
+        f_p = fecha_corta_wpp(fecha_obj, hoy)
+        f_par = f" ({f_p})" if f_p else ""
         avisos.append(
-            f"Además anoto el rendimiento de {monto_fmt} en {billetera_elegida.nombre} ({f_nat_prop}); no cuenta como ingreso."
+            f"Además anoto el rendimiento de {monto_fmt} "
+            f"en {billetera_elegida.nombre}{f_par}: no es un ingreso."
         )
         rendimientos_a_anotar.append({
             "billetera_id": str(billetera_elegida.id),
@@ -361,46 +371,51 @@ def formatear_lineas_omitidos(omitidos: list[dict[str, Any]] | None) -> list[str
 
     lineas: list[str] = []
 
-    # 1. pase_propio
-    pases = [o for o in omitidos if (o.get("motivo") if isinstance(o, dict) else getattr(o, "motivo", None)) == "pase_propio"]
+    pases = [
+        o for o in omitidos
+        if (o.get("motivo") if isinstance(o, dict) else getattr(o, "motivo", None)) == "pase_propio"
+    ]
     if pases:
         n = len(pases)
-        montos_str = []
+        cab = "Salteé un pase entre tus cuentas. Mandame cada uno aparte:" if n == 1 else (
+            f"Salteé {n} pases entre tus cuentas. Mandame cada uno aparte:"
+        )
+        lineas.append(cab)
         for p in pases:
             m_val = p.get("monto") if isinstance(p, dict) else getattr(p, "monto", None)
             m_mon = p.get("moneda", "ARS") if isinstance(p, dict) else getattr(p, "moneda", "ARS")
-            montos_str.append(formatear_monto(m_val, m_mon))
-        montos_unidos = ", ".join(montos_str)
-        if n == 1:
-            lineas.append(f"Salteé 1 pase entre tus cuentas ({montos_unidos}). Si querés registrarlos, mandame cada uno como una transferencia entre tus cuentas.")
-        else:
-            lineas.append(f"Salteé {n} pases entre tus cuentas ({montos_unidos}). Si querés registrarlos, mandame cada uno como una transferencia entre tus cuentas.")
+            m_f = formatear_monto(m_val, m_mon, con_decimales=False)
+            lineas.append(f"- {m_f}")
 
-    # 2. credito
-    creditos = [o for o in omitidos if (o.get("motivo") if isinstance(o, dict) else getattr(o, "motivo", None)) == "credito"]
+    creditos = [
+        o for o in omitidos
+        if (o.get("motivo") if isinstance(o, dict) else getattr(o, "motivo", None)) == "credito"
+    ]
     if creditos:
         n = len(creditos)
-        items_str = []
+        cab = (
+            "Salteé un pago con tarjeta. Mandámelo escrito, con la tarjeta y las cuotas:"
+            if n == 1
+            else f"Salteé {n} pagos con tarjeta. Mandámelos escritos, con la tarjeta y las cuotas:"
+        )
+        lineas.append(cab)
         for c in creditos:
             desc = (c.get("descripcion") if isinstance(c, dict) else getattr(c, "descripcion", None)) or "Gasto"
             m_val = c.get("monto") if isinstance(c, dict) else getattr(c, "monto", None)
             m_mon = c.get("moneda", "ARS") if isinstance(c, dict) else getattr(c, "moneda", "ARS")
-            m_fmt = formatear_monto(m_val, m_mon)
-            items_str.append(f"{desc} {m_fmt}")
-        items_unidos = ", ".join(items_str)
-        if n == 1:
-            lineas.append(f"Salteé 1 pago con tarjeta de crédito ({items_unidos}): necesito la tarjeta y las cuotas. Mandámelo escrito.")
-        else:
-            lineas.append(f"Salteé {n} pagos con tarjeta de crédito ({items_unidos}): necesito la tarjeta y las cuotas. Mandámelo escrito.")
+            m_fmt = formatear_monto(m_val, m_mon, con_decimales=False)
+            lineas.append(f"- {desc} {m_fmt}")
 
-    # 3. no_aprobado
-    no_aprobados = [o for o in omitidos if (o.get("motivo") if isinstance(o, dict) else getattr(o, "motivo", None)) == "no_aprobado"]
+    no_aprobados = [
+        o for o in omitidos
+        if (o.get("motivo") if isinstance(o, dict) else getattr(o, "motivo", None)) == "no_aprobado"
+    ]
     if no_aprobados:
         n = len(no_aprobados)
         if n == 1:
-            lineas.append("Salteé 1 movimiento que no figura como aprobado.")
+            lineas.append("Salteé uno que no figura como aprobado.")
         else:
-            lineas.append(f"Salteé {n} movimientos que no figuran como aprobados.")
+            lineas.append(f"Salteé {n} que no figuran como aprobados.")
 
     return lineas
 
@@ -420,6 +435,8 @@ def armar_resultado_ia_documento(
     omitidos: list[dict[str, Any]] | None = None,
     es_pdf: bool = False,
     extraccion: Any = None,
+    db: Session | None = None,
+    usuario_id: UUID | None = None,
 ) -> dict[str, Any]:
     """
     Construye el dict resultado_ia para un documento o imagen con extracción estructurada.
@@ -429,10 +446,10 @@ def armar_resultado_ia_documento(
     lineas_omitidos = formatear_lineas_omitidos(omitidos)
 
     if solo_rendimientos:
-        if camino == "A":
-            msg_solo = "Veo solo rendimientos y eso lo calculo yo. Mandame los gastos o ingresos que quieras anotar."
-        else:
-            msg_solo = "Veo solo rendimientos. Los cargás desde Billeteras o mandame los gastos o ingresos que quieras anotar."
+        msg_solo = (
+            "Veo solo rendimientos: cargalos en miargentum.com "
+            "o mandame gastos o ingresos."
+        )
         return {
             "intent": "duplicado",
             "confianza": 0.90,
@@ -444,9 +461,8 @@ def armar_resultado_ia_documento(
     tiene_comunes = bool(entidades and entidades.get("monto") is not None)
     tiene_rendimientos = bool(rendimientos_a_anotar)
 
-    # Caso: Solo hay omitidos (sin comunes ni rendimientos a anotar)
     if not tiene_comunes and not tiene_rendimientos and omitidos:
-        msg_solo = "No encontré movimientos para anotar en la imagen."
+        msg_solo = "No encontré gastos para anotar en la foto."
         if lineas_omitidos:
             msg_solo += "\n" + "\n".join(lineas_omitidos)
         return {
@@ -458,13 +474,12 @@ def armar_resultado_ia_documento(
         }
 
     if not tiene_comunes and not tiene_rendimientos:
-        # Todos son duplicados: no se propone nada ni queda confirmable
         return {
             "intent": "duplicado",
             "confianza": 0.90,
             "slot_filling": False,
             "entidades": {},
-            "respuesta_usuario": "Ya tenías cargado todo lo que veo en la imagen.",
+            "respuesta_usuario": "Ya tenías cargado todo lo que hay en la foto.",
         }
 
     # Decisión 1 (Fase 4c2b2b): Factura con vencimiento
@@ -498,40 +513,44 @@ def armar_resultado_ia_documento(
             entidades["monto"] = float(vencimientos_list[0]["monto"])
             entidades["fecha"] = hoy_argentina().isoformat()
 
+    lineas_antes: list[str] = []
+    hoy = hoy_argentina()
+    if duplicados:
+        for d in duplicados:
+            desc = d.get("descripcion") or "Gasto"
+            fc = fecha_corta_wpp(d["fecha"], hoy) if d.get("fecha") else ""
+            fecha_str = fc if fc else "hoy"
+            m_fmt = formatear_monto(
+                float(d["monto"]), d.get("moneda", "ARS"), con_decimales=False
+            )
+            lineas_antes.append(f"Ya tenías cargado: {desc} ({m_fmt}, {fecha_str}).")
+
+    if avisos_rendimientos:
+        lineas_antes.extend(avisos_rendimientos)
+
+    if lineas_omitidos:
+        lineas_antes.extend(lineas_omitidos)
+
+    if total_vistos > 10:
+        lineas_antes.append(
+            f"Vi {total_vistos} movimientos y anoto los primeros 10. "
+            "Mandame otra foto con el resto."
+        )
+
     texto_propuesta = _construir_propuesta_transaccion(
         entidades,
         billetera_nombre=billetera_nombre,
         se_asumio_principal=se_asumio_principal,
         billeteras_usuario=billeteras_usuario,
+        db=db,
+        usuario_id=usuario_id,
     )
 
-    # Decisión 7: Factura de servicios (solo si no tiene vencimientos)
     if documento_tipo == "factura_servicio" and not entidades.get("factura"):
-        texto_propuesta += "\nSi todavía no la pagaste, respondé no y no la cargo."
+        texto_propuesta += " Si todavía no la pagaste, decime que no."
 
-    # Decisión 5: Avisos de movimientos duplicados descartados
-    if duplicados:
-        for d in duplicados:
-            desc = d.get("descripcion") or "Gasto"
-            f_nat = _formatear_fecha_natural(d["fecha"]) if d.get("fecha") else None
-            fecha_str = f_nat if f_nat else "hoy"
-            m_fmt = formatear_monto(float(d["monto"]), d.get("moneda", "ARS"))
-            texto_propuesta += f"\nYa tenías cargado: {desc} ({fecha_str}, {m_fmt})."
-        texto_propuesta += "\nSi es otro movimiento igual, mandámelo escrito."
-
-    # Avisos de rendimientos (Decisiones 4, 5, 6 y 9)
-    if avisos_rendimientos:
-        for av in avisos_rendimientos:
-            texto_propuesta += f"\n{av}"
-
-    # Líneas de omitidos (Decisión 5: se agregan antes del aviso del tope de 10)
-    if lineas_omitidos:
-        for om_line in lineas_omitidos:
-            texto_propuesta += f"\n{om_line}"
-
-    # Decisión 3: Tope de 10 movimientos
-    if total_vistos > 10:
-        texto_propuesta += f"\nVi {total_vistos} movimientos y cargo los primeros 10. Mandame otra captura con el resto."
+    if lineas_antes:
+        texto_propuesta = "\n".join(lineas_antes + [texto_propuesta])
 
     if rendimientos_a_anotar:
         entidades["rendimientos"] = rendimientos_a_anotar

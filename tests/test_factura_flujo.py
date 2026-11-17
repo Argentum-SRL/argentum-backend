@@ -33,20 +33,15 @@ def test_texto_propuesta_un_vencimiento_fechas_y_asuncion():
     # Asumida
     txt_fut_asum = texto_propuesta_factura(ent_fut, billetera_nombre="Galicia", se_asumio_principal=True)
     esp_fut_asum = (
-        f"Factura de Aguas Santafesinas por $12.345,67, vence el {f_fut}.\n"
-        f"¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy en Agua desde Galicia.\n"
-        f"Si fue con otra, decime cuál.\n"
-        f"Si me decís que no, te la anoto en la web para que no se te pase."
+        f"Factura de Aguas Santafesinas: $12.345,67, vence el {f_fut}. ¿Ya la pagaste?\n"
+        "Sí: la anoto como gasto de hoy desde Galicia.\n"
+        "No: la guardo en miargentum.com y ahí te aviso antes de que venza."
     )
     assert txt_fut_asum == esp_fut_asum
 
     # No asumida
     txt_fut_no_asum = texto_propuesta_factura(ent_fut, billetera_nombre="Galicia", se_asumio_principal=False)
-    esp_fut_no_asum = (
-        f"Factura de Aguas Santafesinas por $12.345,67, vence el {f_fut}.\n"
-        f"¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy en Agua desde Galicia.\n"
-        f"Si me decís que no, te la anoto en la web para que no se te pase."
-    )
+    esp_fut_no_asum = esp_fut_asum
     assert txt_fut_no_asum == esp_fut_no_asum
 
     # 2. hoy
@@ -64,19 +59,14 @@ def test_texto_propuesta_un_vencimiento_fechas_y_asuncion():
     }
     txt_hoy_asum = texto_propuesta_factura(ent_hoy, billetera_nombre="Galicia", se_asumio_principal=True)
     esp_hoy_asum = (
-        "Factura de Aguas Santafesinas por $12.345,67, vence hoy.\n"
-        "¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy en Agua desde Galicia.\n"
-        "Si fue con otra, decime cuál.\n"
-        "Si me decís que no, te la anoto en la web para que no se te pase."
+        "Factura de Aguas Santafesinas: $12.345,67, vence hoy. ¿Ya la pagaste?\n"
+        "Sí: la anoto como gasto de hoy desde Galicia.\n"
+        "No: la guardo en miargentum.com y ahí te aviso antes de que venza."
     )
     assert txt_hoy_asum == esp_hoy_asum
 
     txt_hoy_no_asum = texto_propuesta_factura(ent_hoy, billetera_nombre="Galicia", se_asumio_principal=False)
-    esp_hoy_no_asum = (
-        "Factura de Aguas Santafesinas por $12.345,67, vence hoy.\n"
-        "¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy en Agua desde Galicia.\n"
-        "Si me decís que no, te la anoto en la web para que no se te pase."
-    )
+    esp_hoy_no_asum = esp_hoy_asum
     assert txt_hoy_no_asum == esp_hoy_no_asum
 
     # 3. hoy - 3
@@ -96,19 +86,14 @@ def test_texto_propuesta_un_vencimiento_fechas_y_asuncion():
     }
     txt_pas_asum = texto_propuesta_factura(ent_pas, billetera_nombre="Galicia", se_asumio_principal=True)
     esp_pas_asum = (
-        f"Factura de Aguas Santafesinas por $12.345,67, venció el {f_pas}.\n"
-        f"¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy en Agua desde Galicia.\n"
-        f"Si fue con otra, decime cuál.\n"
-        f"Si me decís que no, te la anoto en la web para que no se te pase."
+        f"Factura de Aguas Santafesinas: $12.345,67, venció el {f_pas}. ¿Ya la pagaste?\n"
+        "Sí: la anoto como gasto de hoy desde Galicia.\n"
+        "No: la guardo en miargentum.com y ahí te aviso antes de que venza."
     )
     assert txt_pas_asum == esp_pas_asum
 
     txt_pas_no_asum = texto_propuesta_factura(ent_pas, billetera_nombre="Galicia", se_asumio_principal=False)
-    esp_pas_no_asum = (
-        f"Factura de Aguas Santafesinas por $12.345,67, venció el {f_pas}.\n"
-        f"¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy en Agua desde Galicia.\n"
-        f"Si me decís que no, te la anoto en la web para que no se te pase."
-    )
+    esp_pas_no_asum = esp_pas_asum
     assert txt_pas_no_asum == esp_pas_no_asum
 
 
@@ -138,9 +123,9 @@ def test_texto_propuesta_cuotas():
     txt_2_iguales = texto_propuesta_factura(ent_2_iguales, billetera_nombre="Galicia", se_asumio_principal=True)
     esp_2_iguales = (
         f"Factura de EPE en 2 cuotas de $77.597,44: vencen el {f1} y el {f2}.\n"
-        f"¿Ya pagaste la primera? Si me decís que sí, la anoto como gasto de hoy en Luz desde Galicia y te anoto la segunda en la web.\n"
-        f"Si fue con otra, decime cuál.\n"
-        f"Si me decís que no, te anoto las dos en la web para que no se te pasen."
+        "¿Ya pagaste la primera?\n"
+        "Sí: la anoto como gasto de hoy desde Galicia y guardo la otra en miargentum.com.\n"
+        "No: guardo las 2 en miargentum.com y ahí te aviso antes de que venzan."
     )
     assert txt_2_iguales == esp_2_iguales
 
@@ -162,10 +147,10 @@ def test_texto_propuesta_cuotas():
     }
     txt_2_distintas = texto_propuesta_factura(ent_2_distintas, billetera_nombre="Galicia", se_asumio_principal=True)
     esp_2_distintas = (
-        f"Factura de EPE en 2 cuotas: $50.000 que vence el {f1} y $60.000 que vence el {f2}.\n"
-        f"¿Ya pagaste la primera? Si me decís que sí, la anoto como gasto de hoy en Luz desde Galicia y te anoto la segunda en la web.\n"
-        f"Si fue con otra, decime cuál.\n"
-        f"Si me decís que no, te anoto las dos en la web para que no se te pasen."
+        f"Factura de EPE en 2 cuotas: $50.000 el {f1} y $60.000 el {f2}.\n"
+        "¿Ya pagaste la primera?\n"
+        "Sí: la anoto como gasto de hoy desde Galicia y guardo la otra en miargentum.com.\n"
+        "No: guardo las 2 en miargentum.com y ahí te aviso antes de que venzan."
     )
     assert txt_2_distintas == esp_2_distintas
 
@@ -191,8 +176,9 @@ def test_texto_propuesta_cuotas():
     txt_3_iguales = texto_propuesta_factura(ent_3_iguales, billetera_nombre="Galicia", se_asumio_principal=False)
     esp_3_iguales = (
         f"Factura de EPE en 3 cuotas de $25.000: vencen el {f1}, el {f2} y el {f3}.\n"
-        f"¿Ya pagaste la primera? Si me decís que sí, la anoto como gasto de hoy en Luz desde Galicia y te anoto las otras 2 en la web.\n"
-        f"Si me decís que no, te anoto las 3 en la web para que no se te pasen."
+        "¿Ya pagaste la primera?\n"
+        "Sí: la anoto como gasto de hoy desde Galicia y guardo las otras 2 en miargentum.com.\n"
+        "No: guardo las 3 en miargentum.com y ahí te aviso antes de que venzan."
     )
     assert txt_3_iguales == esp_3_iguales
 

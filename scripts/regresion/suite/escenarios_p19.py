@@ -84,7 +84,7 @@ def p19_caso_1(datos):
             _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
 
         resp1 = respuestas[-1][1] if respuestas else ""
-        propuesta_ok = "Galicia" in resp1 and "¿Va?" in resp1 and "$4.500" in resp1
+        propuesta_ok = "Galicia" in resp1 and "¿Anoto" in resp1 and "$4.500" in resp1
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
@@ -147,12 +147,12 @@ def p19_caso_2(datos):
             _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
 
         resp1 = respuestas[-1][1] if respuestas else ""
-        propuesta_ok = "3 movimientos" in resp1 and "¿Va?" in resp1
+        propuesta_ok = "3 gastos" in resp1 and "¿Anoto" in resp1
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
-        registrado_ok = "Listo, 3" in resp2 and "Galicia" in resp2
+        registrado_ok = "Listo, anoté 3" in resp2 and "Galicia" in resp2
 
         txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         txs_creadas = txs_despues - txs_antes
@@ -232,16 +232,13 @@ def p19_caso_3(datos):
             _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
 
         resp1 = respuestas[-1][1] if respuestas else ""
-        propuesta_2_ok = "2 movimientos" in resp1 and "¿Va?" in resp1
-        linea_dup_ok = (
-            "Ya tenías cargado: Panadería Artesanal (hoy, $2.000)." in resp1
-            and "Si es otro movimiento igual, mandámelo escrito." in resp1
-        )
+        propuesta_2_ok = "2 gastos" in resp1 and "¿Anoto" in resp1
+        linea_dup_ok = "Ya tenías cargado: Panadería Artesanal ($2.000, hoy)." in resp1
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
-        registrados_ok = "Listo, 2" in resp2
+        registrados_ok = "Listo, anoté 2" in resp2
 
         txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         txs_creadas = txs_despues - txs_con_previa
@@ -324,13 +321,13 @@ def p19_caso_4(datos):
             _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
 
         resp1 = respuestas[-1][1] if respuestas else ""
-        resp_dup_ok = resp1 == "Ya tenías cargado todo lo que veo en la imagen."
+        resp_dup_ok = resp1 == "Ya tenías cargado todo lo que hay en la foto."
 
         # El usuario responde 'sí' pero no hay propuesta pendiente
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
-        sin_pendientes_ok = "No tenés ninguna" in resp2 or "no entendí" in resp2.lower()
+        sin_pendientes_ok = "No tengo nada pendiente" in resp2 or "no te entendí" in resp2.lower()
 
         txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         txs_creadas = txs_despues - txs_con_previas
@@ -374,8 +371,11 @@ def p19_caso_5(datos):
             _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
 
         resp1 = respuestas[-1][1] if respuestas else ""
-        propuesta_10_ok = "10 movimientos" in resp1 and "¿Va?" in resp1
-        aviso_tope_ok = "Vi 12 movimientos y cargo los primeros 10. Mandame otra captura con el resto." in resp1
+        propuesta_10_ok = "10 gastos" in resp1 and "¿Anoto" in resp1
+        aviso_tope_ok = (
+            "Vi 12 movimientos y anoto los primeros 10. "
+            "Mandame otra foto con el resto." in resp1
+        )
 
         return f"Propuesta 10 movs: {propuesta_10_ok} | Aviso tope 12: {aviso_tope_ok}"
 
@@ -396,12 +396,12 @@ def p19_caso_6(datos):
             _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
 
         resp1 = respuestas[-1][1] if respuestas else ""
-        texto_ilegible_ok = resp1 == "No pude leer el comprobante. Mandame los datos en texto."
+        texto_ilegible_ok = resp1 == "No pude leer la foto. Escribime los datos."
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
-        nada_pendiente_ok = "No tenés ninguna" in resp2 or "no entendí" in resp2.lower()
+        nada_pendiente_ok = "No tengo nada pendiente" in resp2 or "no te entendí" in resp2.lower()
 
         txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         txs_creadas = txs_despues - txs_antes
@@ -450,17 +450,16 @@ def p19_caso_7(datos):
 
         resp1 = respuestas[-1][1] if respuestas else ""
         esperado_resp1 = (
-            f"Factura de Edesur por $14.200, vence el {f_str}.\n"
-            "¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy en Servicios desde Galicia.\n"
-            "Si fue con otra, decime cuál.\n"
-            "Si me decís que no, te la anoto en la web para que no se te pase."
+            f"Factura de Edesur: $14.200, vence el {f_str}. ¿Ya la pagaste?\n"
+            "Sí: la anoto como gasto de hoy desde Galicia.\n"
+            "No: la guardo en miargentum.com y ahí te aviso antes de que venza."
         )
         linea_factura_ok = resp1 == esperado_resp1
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
-        esperado_resp2 = "Listo. $14.200 en Vivienda desde Galicia — registrado."
+        esperado_resp2 = "Listo, anoté $14.200 en Vivienda desde Galicia."
 
         fac_ids_desp = set(conn.execute(select(Factura.id).where(Factura.usuario_id == u.id)).scalars().all())
         facs_creadas = len(fac_ids_desp - fac_ids_antes)
@@ -551,7 +550,7 @@ def p19_caso_9(datos):
             _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
 
         resp1 = respuestas[-1][1] if respuestas else ""
-        propuesta_ok = "Galicia" in resp1 and "Santander" not in resp1 and "¿Va?" in resp1
+        propuesta_ok = "Galicia" in resp1 and "Santander" not in resp1 and "¿Anoto" in resp1
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())

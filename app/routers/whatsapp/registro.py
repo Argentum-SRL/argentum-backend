@@ -50,14 +50,14 @@ from app.routers.whatsapp.detectors import (
     _detectar_ambiguedad_suscripcion,
     _es_senial_gasto_suelto,
 )
+from app.core.reglas_texto_wpp import fecha_corta_wpp, nombre_tarjeta_wpp
 from app.routers.whatsapp.parsers import (
-    _fmt,
-    _formatear_fecha_natural,
     _nombre_corto_categoria,
     _parsear_monto_argentino,
     _resolver_fecha_transaccion,
     _resolver_y_validar_fecha,
 )
+from app.utils.fecha import hoy_argentina
 from app.routers.whatsapp.propuestas import _unir_items_multilinea
 from app.routers.whatsapp.resolvers_cascada import (
     _detectar_duplicados_en_lote,
@@ -101,16 +101,16 @@ def _registrar_item_batch(
     desc = ai_service.sanitizar_descripcion(datos.get("descripcion"), tipo=datos.get("tipo", "egreso")) or _nombre_corto_categoria(datos.get("categoria")) or "un movimiento"
     monto_raw = datos.get("monto")
     if monto_raw is None:
-        return None, f"No se pudo registrar {desc} porque no tiene un monto válido."
+        return None, f"No pude anotar {desc}: el monto no está claro."
     try:
         monto_decimal = Decimal(str(monto_raw))
     except Exception:
-        return None, f"No se pudo registrar {desc} porque el monto no es válido."
+        return None, f"No pude anotar {desc}: el monto no está claro."
 
     if monto_decimal <= Decimal("0"):
-        return None, f"No se pudo registrar {desc} porque el monto debe ser mayor a cero."
+        return None, f"No pude anotar {desc}: el monto no está claro."
     if monto_decimal > MAX_MONTO_INTEGRIDAD:
-        return None, f"No se pudo registrar {desc} porque el monto supera el límite permitido."
+        return None, f"No pude anotar {desc}: el monto es muy grande."
 
     # 1. Tarjeta de crédito si aplica
     tarjeta_id_raw = datos.get("tarjeta_id")
@@ -182,20 +182,22 @@ def _registrar_item_batch(
 
     if not billetera_item:
         nom_m = "dólares" if moneda_sol == Moneda.USD else "pesos"
-        return None, f"No se pudo registrar {desc} porque no tenés una billetera en {nom_m}."
+        return None, f"No pude anotar {desc}: no tenés cuentas en {nom_m}."
 
     if billetera_item.moneda != moneda_sol:
         nom_m_sol = "dólares" if moneda_sol == Moneda.USD else "pesos"
         nom_m_b = "dólares" if billetera_item.moneda == Moneda.USD else "pesos"
-        m_fmt = formatear_monto(monto_decimal, moneda_sol)
-        return None, f"No se pudo registrar {desc} de {m_fmt} porque es en {nom_m_sol} y la billetera {billetera_item.nombre} es en {nom_m_b}."
+        m_fmt = formatear_monto(monto_decimal, moneda_sol, con_decimales=False)
+        return None, (
+            f"No pude anotar {desc} ({m_fmt}): "
+            f"es en {nom_m_sol} y {billetera_item.nombre} es en {nom_m_b}."
+        )
 
     billetera_db = db.execute(
         select(Billetera).where(Billetera.id == billetera_item.id).with_for_update()
     ).scalars().first()
-
     if not billetera_db:
-        return None, f"Billetera {billetera_item.nombre} no encontrada."
+        return None, f"No encontré la cuenta {billetera_item.nombre}."
 
     tipo_item = datos.get("tipo") or "egreso"
 
@@ -233,7 +235,7 @@ def _registrar_item_batch(
         )
         return tx, None
     except HTTPException as e:
-        return None, f"No se pudo registrar {desc}: {str(e.detail).rstrip('.')}."
+        return None, f"No pude anotar {desc}: {str(e.detail).rstrip('.')}."
 
 
 def _formatear_confirmacion_lote_unificada(
@@ -247,22 +249,24 @@ def _formatear_confirmacion_lote_unificada(
     signo -/+, categoría o subcategoría y fecha natural.
     """
     total_registrados = len(txs_todas)
-    mov_palabra = "movimientos" if total_registrados != 1 else "movimiento"
-    reg_palabra = "Registrados." if total_registrados != 1 else "Registrado."
-
+    hoy = hoy_argentina()
     billeteras_todas = _obtener_billeteras_activas(usuario_id, db)
     tarjetas_todas = _obtener_tarjetas_activas(usuario_id, db)
     b_map = {b.id: b for b in billeteras_todas}
     t_map = {t.id: t for t in tarjetas_todas}
 
     b_ids = [t.billetera_id for t in txs_todas if t.metodo_pago != MetodoPago.CREDITO]
-    todas_misma_billetera = len(set(b_ids)) <= 1 and not any(t.metodo_pago == MetodoPago.CREDITO for t in txs_todas)
+    todas_misma_billetera = (
+        len(set(b_ids)) <= 1
+        and not any(t.metodo_pago == MetodoPago.CREDITO for t in txs_todas)
+    )
     mismo_tipo = len(set(t.tipo for t in txs_todas)) == 1
-    tipos_mezclados = any(t.tipo == TipoTransaccion.INGRESO for t in txs_todas) and any(t.tipo == TipoTransaccion.EGRESO for t in txs_todas)
+    tipos_mezclados = (
+        any(t.tipo == TipoTransaccion.INGRESO for t in txs_todas)
+        and any(t.tipo == TipoTransaccion.EGRESO for t in txs_todas)
+    )
 
     def _cat_disp_item(item_d: dict | None, tx_item: Transaccion) -> str:
-        if item_d and item_d.get("categoria"):
-            return _nombre_corto_categoria(item_d["categoria"])
         if tx_item.subcategoria_id:
             s_obj = db.get(Subcategoria, tx_item.subcategoria_id)
             if s_obj:
@@ -271,68 +275,55 @@ def _formatear_confirmacion_lote_unificada(
             c_obj = db.get(Categoria, tx_item.categoria_id)
             if c_obj:
                 return c_obj.nombre
+        if item_d and item_d.get("categoria"):
+            return _nombre_corto_categoria(item_d["categoria"])
         return _nombre_corto_categoria(tx_item.descripcion) or "Otros"
 
-    items_dict = items_info if items_info and len(items_info) == len(txs_todas) else [None] * len(txs_todas)
+    items_dict = (
+        items_info if items_info and len(items_info) == len(txs_todas) else [None] * len(txs_todas)
+    )
+    items_str: list[str] = []
+    for t, it_d in zip(txs_todas, items_dict):
+        m_fmt = formatear_monto(float(t.monto), t.moneda, con_decimales=False)
+        cat_d = _cat_disp_item(it_d, t)
+        f_corta = fecha_corta_wpp(t.fecha, hoy)
+        f_suf = f" · {f_corta}" if f_corta else ""
+        ing_suf = " (ingreso)" if (tipos_mezclados and t.tipo == TipoTransaccion.INGRESO) else ""
+
+        if todas_misma_billetera and b_ids:
+            items_str.append(f"{m_fmt} en {cat_d}{ing_suf}{f_suf}")
+        elif t.metodo_pago == MetodoPago.CREDITO:
+            t_obj = t_map.get(t.tarjeta_id)
+            t_nom = nombre_tarjeta_wpp(t_obj) if t_obj else "tarjeta"
+            items_str.append(f"{m_fmt} en {cat_d}, en un pago · {t_nom}{f_suf}")
+        else:
+            b_obj = b_map.get(t.billetera_id)
+            b_nom = b_obj.nombre if b_obj else ""
+            b_suf = f" · {b_nom}" if b_nom else ""
+            items_str.append(f"{m_fmt} en {cat_d}{ing_suf}{b_suf}{f_suf}")
 
     if todas_misma_billetera and b_ids:
         b_comun = b_map.get(b_ids[0])
-        nom_b = b_comun.nombre if b_comun else "tu billetera"
+        nom_b = b_comun.nombre if b_comun else "tu cuenta"
         if mismo_tipo:
-            tipo_comun = txs_todas[0].tipo
-            origen_str = f" a {nom_b}" if tipo_comun == TipoTransaccion.INGRESO else f" desde {nom_b}"
-            items_str = []
-            for t, it_d in zip(txs_todas, items_dict):
-                m_fmt = formatear_monto(float(t.monto), t.moneda)
-                cat_d = _cat_disp_item(it_d, t)
-                f_nat = _formatear_fecha_natural(t.fecha)
-                f_disp = f" ({f_nat})" if f_nat else ""
-                items_str.append(f"{m_fmt} en {cat_d}{f_disp}")
-            encabezado = f"Listo, {total_registrados} {mov_palabra}{origen_str}:"
-            return _unir_items_multilinea(items_str, encabezado, reg_palabra)
+            es_ing = txs_todas[0].tipo == TipoTransaccion.INGRESO
+            sust = ("ingreso" if total_registrados == 1 else "ingresos") if es_ing else (
+                "gasto" if total_registrados == 1 else "gastos"
+            )
+            prep = "en" if es_ing else "desde"
+            encabezado = f"Listo, anoté {total_registrados} {sust} {prep} {nom_b}:"
         else:
-            items_str = []
-            for t, it_d in zip(txs_todas, items_dict):
-                m_fmt = formatear_monto(float(t.monto), t.moneda)
-                cat_d = _cat_disp_item(it_d, t)
-                f_nat = _formatear_fecha_natural(t.fecha)
-                f_disp = f" ({f_nat})" if f_nat else ""
-                signo = "+" if t.tipo == TipoTransaccion.INGRESO else "-"
-                items_str.append(f"*{signo}{m_fmt}* en {cat_d}{f_disp}")
-            encabezado = f"Listo, {total_registrados} {mov_palabra} en *{nom_b}*:"
-            return _unir_items_multilinea(items_str, encabezado, reg_palabra)
+            encabezado = f"Listo, anoté {total_registrados} movimientos en {nom_b}:"
     else:
-        items_str = []
-        for t, it_d in zip(txs_todas, items_dict):
-            m_fmt = formatear_monto(float(t.monto), t.moneda)
-            cat_d = _cat_disp_item(it_d, t)
-            f_nat = _formatear_fecha_natural(t.fecha)
-            f_disp = f" ({f_nat})" if f_nat else ""
-
-            if t.metodo_pago == MetodoPago.CREDITO:
-                t_obj = t_map.get(t.tarjeta_id)
-                t_nom = t_obj.nombre if t_obj else "crédito"
-                items_str.append(f"1 cuota de {m_fmt} en {cat_d} con tarjeta {t_nom}{f_disp}")
-            elif tipos_mezclados:
-                b_obj = b_map.get(t.billetera_id)
-                b_nom = b_obj.nombre if b_obj else ""
-                if t.tipo == TipoTransaccion.INGRESO:
-                    dest_s = f" a {b_nom}" if b_nom else ""
-                    items_str.append(f"+{m_fmt} en {cat_d}{dest_s}{f_disp}")
-                else:
-                    orig_s = f" desde {b_nom}" if b_nom else ""
-                    items_str.append(f"-{m_fmt} en {cat_d}{orig_s}{f_disp}")
-            else:
-                b_obj = b_map.get(t.billetera_id)
-                b_nom = b_obj.nombre if b_obj else ""
-                if t.tipo == TipoTransaccion.INGRESO:
-                    dest_s = f" a {b_nom}" if b_nom else ""
-                    items_str.append(f"{m_fmt} en {cat_d}{dest_s}{f_disp}")
-                else:
-                    orig_s = f" desde {b_nom}" if b_nom else ""
-                    items_str.append(f"{m_fmt} en {cat_d}{orig_s}{f_disp}")
-        encabezado = f"Listo, {total_registrados} {mov_palabra}:"
-        return _unir_items_multilinea(items_str, encabezado, reg_palabra)
+        if mismo_tipo:
+            es_ing = txs_todas[0].tipo == TipoTransaccion.INGRESO
+            sust = ("ingreso" if total_registrados == 1 else "ingresos") if es_ing else (
+                "gasto" if total_registrados == 1 else "gastos"
+            )
+            encabezado = f"Listo, anoté {total_registrados} {sust}:"
+        else:
+            encabezado = f"Listo, anoté {total_registrados} movimientos:"
+    return _unir_items_multilinea(items_str, encabezado)
 
 
 def _anotar_rendimientos_confirmados(
@@ -378,9 +369,9 @@ def _anotar_rendimientos_confirmados(
                 b_nom_r = r_item.get("billetera_nombre")
                 if not b_nom_r:
                     b_obj_r = db.get(Billetera, b_id_r)
-                    b_nom_r = b_obj_r.nombre if b_obj_r else "tu billetera"
-                m_fmt_r = formatear_monto(float(m_r), Moneda.ARS)
-                texto_res += f"\nRendimiento de {m_fmt_r} anotado en {b_nom_r}."
+                    b_nom_r = b_obj_r.nombre if b_obj_r else "tu cuenta"
+                m_fmt_r = formatear_monto(float(m_r), Moneda.ARS, con_decimales=False)
+                texto_res += f"\nAnoté el rendimiento de {m_fmt_r} en {b_nom_r}."
             except HTTPException as e_rend:
                 detail = e_rend.detail.rstrip(".")
                 texto_res += f"\nNo pude anotar el rendimiento: {detail}."
@@ -454,9 +445,8 @@ def _confirmar_propuesta_transaccion(
                     pass
 
         if recien_ejecutada:
-            return None, "Esa operación ya fue confirmada.", True
-        else:
-            return None, "No tenés ninguna operación pendiente para confirmar.", False
+            return None, "Ya estaba anotado.", True
+        return None, "No tengo nada pendiente para confirmar.", False
 
     if usar_entidades_actuales:
         entidades = dict(entidades_actuales)  # type: ignore
@@ -468,7 +458,7 @@ def _confirmar_propuesta_transaccion(
 
     monto = entidades.get("monto")
     if monto is None:
-        return None, "No pude procesar la operación.", False
+        return None, "No pude anotar eso.", False
 
     monto_decimal = Decimal(str(monto))
     tipo_val = entidades.get("tipo") or "egreso"
@@ -517,7 +507,7 @@ def _confirmar_propuesta_transaccion(
                     descartadas.append(mot_ad)
 
         if not txs_registradas:
-            return None, "No se pudo registrar ningún movimiento.", False
+            return None, "No pude anotar ninguno.", False
 
         if conv_previa:
             conv_previa.accion_ejecutada = f"lote:{','.join(str(t.id) for t in txs_registradas)}"
@@ -527,7 +517,6 @@ def _confirmar_propuesta_transaccion(
             emitir_evento_actualizacion(db, usuario.id, "tarjetas")
         db.flush()
 
-        total_registrados = len(txs_registradas)
         msg_resp = _formatear_confirmacion_lote_unificada(
             txs_registradas, usuario.id, db, items_registrados
         )
@@ -540,7 +529,7 @@ def _confirmar_propuesta_transaccion(
         for bid in billeteras_tocadas:
             b_chk = b_map.get(bid)
             if b_chk and b_chk.saldo_actual < 0:
-                msg_resp += f"\nLa billetera quedó en negativo."
+                msg_resp += f"\n{b_chk.nombre} quedó en negativo."
 
         msg_resp += _anotar_rendimientos_confirmados(db, usuario, entidades)
         from app.routers.whatsapp.factura_wpp import linea_facturas_pagadas
@@ -566,7 +555,7 @@ def _confirmar_propuesta_transaccion(
             select(TarjetaCredito).where(TarjetaCredito.id == tarjeta_id, TarjetaCredito.usuario_id == usuario.id)
         ).scalars().first()
         if not tarjeta:
-            return None, "Tarjeta no encontrada.", False
+            return None, "No encontré esa tarjeta.", False
 
         cant_cuotas = int(entidades.get("cantidad_cuotas", 1))
         monto_total = Decimal(str(entidades.get("monto_total", monto_decimal)))
@@ -619,17 +608,32 @@ def _confirmar_propuesta_transaccion(
         emitir_evento_actualizacion(db, usuario.id, "tarjetas")
         db.commit()
 
-        _, primer_v = calendario_tarjeta_service.resumen_de_compra(tarjeta, fecha_obj, proximo_resumen=False)
+        _, primer_v = calendario_tarjeta_service.resumen_de_compra(
+            tarjeta, fecha_obj, proximo_resumen=False
+        )
         venc_mes = MESES_ES_GEN[primer_v.month - 1]
-        venc_anio = primer_v.year
-        cat_disp = _nombre_corto_categoria(entidades.get("categoria"))
+        sub_db = db.get(Subcategoria, subcat_id) if subcat_id else None
+        cat_db = db.get(Categoria, cat_id) if cat_id else None
+        cat_disp = (
+            sub_db.nombre
+            if sub_db
+            else (cat_db.nombre if cat_db else _nombre_corto_categoria(entidades.get("categoria")))
+        )
+        nom_t = nombre_tarjeta_wpp(tarjeta)
 
         if cant_cuotas > 1:
-            monto_cuota_fmt = formatear_monto(float(monto_cuota), tarjeta.moneda)
-            msg_resp = f"Listo. {cant_cuotas} cuotas de {monto_cuota_fmt} en {cat_disp} con tarjeta {tarjeta.nombre} — registrado. Va a ingresar en el resumen de {venc_mes} {venc_anio}."
+            cuota_fmt = formatear_monto(float(monto_cuota), tarjeta.moneda)
+            msg_resp = (
+                f"Listo, anoté {cant_cuotas} cuotas de {cuota_fmt} en {cat_disp} "
+                f"con la {nom_t}.\n"
+                f"La primera entra en el resumen de {venc_mes}."
+            )
         else:
-            total_fmt = formatear_monto(float(monto_total), tarjeta.moneda)
-            msg_resp = f"Listo. 1 cuota de {total_fmt} en {cat_disp} con tarjeta {tarjeta.nombre} — registrado. Va a ingresar en el resumen de {venc_mes} {venc_anio}."
+            total_fmt = formatear_monto(float(monto_total), tarjeta.moneda, con_decimales=False)
+            msg_resp = (
+                f"Listo, anoté {total_fmt} en {cat_disp} con la {nom_t}, en un pago.\n"
+                f"Entra en el resumen de {venc_mes}."
+            )
 
         if transaccion and transaccion.id:
             from app.routers.whatsapp.factura_wpp import linea_facturas_pagadas
@@ -660,14 +664,14 @@ def _confirmar_propuesta_transaccion(
             billetera_id = billeteras_moneda[0].id
 
     if not billetera_id:
-        return None, "No pude resolver la billetera.", False
+        return None, "No encontré esa cuenta.", False
 
     billetera = db.execute(
         select(Billetera).where(Billetera.id == billetera_id).with_for_update()
     ).scalars().first()
 
     if not billetera or billetera.moneda != moneda_solicitada:
-        return None, "La moneda de la billetera no coincide.", False
+        return None, "Esa cuenta es en otra moneda.", False
 
     categoria_id, subcategoria_id = _resolver_categoria_y_subcategoria(
         entidades.get("categoria"), usuario.id, db, tipo=tipo_val
@@ -731,9 +735,12 @@ def _confirmar_propuesta_transaccion(
     db.flush()
 
     if transaccion.moneda_original == Moneda.USD and transaccion.monto_original is not None:
-        monto_str = f"{formatear_monto(float(transaccion.monto_original), Moneda.USD)} ({formatear_monto(float(transaccion.monto), Moneda.ARS)})"
+        m_u = formatear_monto(float(transaccion.monto_original), Moneda.USD, con_decimales=False)
+        m_a = formatear_monto(float(transaccion.monto), Moneda.ARS, con_decimales=False)
+        monto_str = f"{m_u} ({m_a})"
     else:
-        monto_str = formatear_monto(float(transaccion.monto), transaccion.moneda)
+        m_tx = float(transaccion.monto)
+        monto_str = formatear_monto(m_tx, transaccion.moneda, con_decimales=False)
     bill_nombre = billetera.nombre
 
     if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
@@ -743,40 +750,36 @@ def _confirmar_propuesta_transaccion(
     else:
         cat_nombre = None
         if transaccion.categoria_id:
-            cat = db.execute(select(Categoria).where(Categoria.id == transaccion.categoria_id)).scalars().first()
+            cat = db.execute(
+                select(Categoria).where(Categoria.id == transaccion.categoria_id)
+            ).scalars().first()
             cat_nombre = cat.nombre if cat else None
         subcat_nombre = None
         if transaccion.subcategoria_id:
-            subcat = db.execute(select(Subcategoria).where(Subcategoria.id == transaccion.subcategoria_id)).scalars().first()
+            subcat = db.execute(
+                select(Subcategoria).where(Subcategoria.id == transaccion.subcategoria_id)
+            ).scalars().first()
             subcat_nombre = subcat.nombre if subcat else None
-        nombre_categoria_display = subcat_nombre or cat_nombre or _nombre_corto_categoria(entidades.get("categoria")) or "Otros"
+        nombre_cat = (
+            subcat_nombre
+            or cat_nombre
+            or _nombre_corto_categoria(entidades.get("categoria"))
+            or "Otros"
+        )
 
-        fecha_nat = _formatear_fecha_natural(transaccion.fecha)
-        fecha_disp = f" ({fecha_nat})" if fecha_nat else ""
-
+        f_corta = fecha_corta_wpp(transaccion.fecha, hoy_argentina())
         if transaccion.tipo == TipoTransaccion.INGRESO:
-            partes = [f"Listo. Ingreso de {monto_str}"]
-            if nombre_categoria_display:
-                partes.append(f"en {nombre_categoria_display}")
-            if bill_nombre:
-                partes.append(f"a {bill_nombre}{fecha_disp}")
-            partes.append("— registrado.")
+            detalle = f"{nombre_cat}, {f_corta}" if f_corta else nombre_cat
+            msg_resp = f"Listo, anoté un ingreso de {monto_str} en {bill_nombre} ({detalle})."
         else:
-            partes = [f"Listo. {monto_str}"]
-            if nombre_categoria_display:
-                partes.append(f"en {nombre_categoria_display}")
-            if bill_nombre:
-                partes.append(f"desde {bill_nombre}{fecha_disp}")
-            partes.append("— registrado.")
-        msg_resp = " ".join(partes)
+            f_disp = f" ({f_corta})" if f_corta else ""
+            msg_resp = f"Listo, anoté {monto_str} en {nombre_cat} desde {bill_nombre}{f_disp}."
 
     if descartadas:
         msg_resp += "\n" + "\n".join(descartadas)
 
-    # REGLA DE PRIVACIDAD: Los saldos no se muestran tras registrar un movimiento,
-    # salvo que el usuario los pida explícitamente (privacidad de pantalla).
     if billetera.saldo_actual < 0:
-        msg_resp += "\nLa billetera quedó en negativo."
+        msg_resp += f"\n{billetera.nombre} quedó en negativo."
 
     msg_resp += _anotar_rendimientos_confirmados(db, usuario, entidades)
 
@@ -951,18 +954,31 @@ def _registrar_directo_si_corresponde(
     tx_creada, msg_resp, _ = _confirmar_propuesta_transaccion(usuario, db, propuesta_id=fila.id)
 
     descartes = []
-    for l in (fila.mensaje_bot or "").split("\n"):
-        l_s = l.strip()
-        if l_s.startswith("No se pudo registrar") and l_s not in descartes:
+    avisos_fecha = []
+    for linea in (fila.mensaje_bot or "").split("\n"):
+        l_s = linea.strip()
+        if l_s.startswith("No pude anotar") and l_s not in descartes:
             descartes.append(l_s)
-    for l in msg_resp.split("\n"):
-        l_s = l.strip()
-        if l_s.startswith("No se pudo registrar") and l_s not in descartes:
+        elif (
+            l_s.startswith("Todavía no pasó esa fecha:")
+            or l_s.startswith("Solo anoto hasta 60 días para atrás:")
+        ) and l_s not in avisos_fecha:
+            avisos_fecha.append(l_s)
+    for linea in msg_resp.split("\n"):
+        l_s = linea.strip()
+        if l_s.startswith("No pude anotar") and l_s not in descartes:
             descartes.append(l_s)
 
-    resto = [l for l in msg_resp.split("\n") if not l.strip().startswith("No se pudo registrar")]
+    resto = [ln for ln in msg_resp.split("\n") if not ln.strip().startswith("No pude anotar")]
     if descartes:
         msg_resp = "\n".join(descartes + resto)
+    if avisos_fecha:
+        lineas_msg = msg_resp.split("\n")
+        idx_ojo = next(
+            (i for i, ln in enumerate(lineas_msg) if ln.strip().startswith("Ojo:")),
+            len(lineas_msg),
+        )
+        msg_resp = "\n".join(lineas_msg[:idx_ojo] + avisos_fecha + lineas_msg[idx_ojo:])
 
     if not tx_creada:
         fila.accion_ejecutada = "error"
@@ -970,10 +986,6 @@ def _registrar_directo_si_corresponde(
         db.flush()
         db.commit()
         return False, msg_resp
-
-    asumio = se_asumio_principal or (bool(fila.entidades.get("_asumio_principal")) if fila.entidades else False)
-    if asumio and "Si fue con otra, decime cuál." not in msg_resp:
-        msg_resp += "\nSi fue con otra, decime cuál."
 
     if fila.entidades is not None:
         entidades_copy = dict(fila.entidades)
@@ -995,7 +1007,7 @@ def _registrar_movimiento_directo(
     """Registra directamente un movimiento confirmado como nuevo o lote (Tareas 3.3 y 4.1)."""
     monto = entidades.get("monto")
     if monto is None:
-        return None, "No pude procesar la operación."
+        return None, "No pude anotar eso."
     monto_decimal = Decimal(str(monto))
     tipo_val = entidades.get("tipo") or "egreso"
     moneda_sol = Moneda.USD if entidades.get("moneda") == "USD" else Moneda.ARS
@@ -1007,7 +1019,7 @@ def _registrar_movimiento_directo(
             select(TarjetaCredito).where(TarjetaCredito.id == tarjeta_id, TarjetaCredito.usuario_id == usuario.id)
         ).scalars().first()
         if not tarjeta:
-            return None, "Tarjeta no encontrada."
+            return None, "No encontré esa tarjeta."
 
         cant_cuotas = int(entidades.get("cantidad_cuotas", 1))
         monto_total = Decimal(str(entidades.get("monto_total", monto_decimal)))
@@ -1055,17 +1067,32 @@ def _registrar_movimiento_directo(
         emitir_evento_actualizacion(db, usuario.id, "tarjetas")
         db.commit()
 
-        _, primer_v = calendario_tarjeta_service.resumen_de_compra(tarjeta, fecha_obj, proximo_resumen=False)
+        _, primer_v = calendario_tarjeta_service.resumen_de_compra(
+            tarjeta, fecha_obj, proximo_resumen=False
+        )
         venc_mes = MESES_ES_GEN[primer_v.month - 1]
-        venc_anio = primer_v.year
-        cat_disp = _nombre_corto_categoria(entidades.get("categoria"))
+        sub_db = db.get(Subcategoria, subcat_id) if subcat_id else None
+        cat_db = db.get(Categoria, cat_id) if cat_id else None
+        cat_disp = (
+            sub_db.nombre
+            if sub_db
+            else (cat_db.nombre if cat_db else _nombre_corto_categoria(entidades.get("categoria")))
+        )
+        nom_t = nombre_tarjeta_wpp(tarjeta)
 
         if cant_cuotas > 1:
-            monto_cuota_fmt = formatear_monto(float(monto_cuota), tarjeta.moneda)
-            msg_resp = f"Listo. {cant_cuotas} cuotas de {monto_cuota_fmt} en {cat_disp} con tarjeta {tarjeta.nombre} — registrado. Va a ingresar en el resumen de {venc_mes} {venc_anio}."
+            cuota_fmt = formatear_monto(float(monto_cuota), tarjeta.moneda)
+            msg_resp = (
+                f"Listo, anoté {cant_cuotas} cuotas de {cuota_fmt} en {cat_disp} "
+                f"con la {nom_t}.\n"
+                f"La primera entra en el resumen de {venc_mes}."
+            )
         else:
-            total_fmt = formatear_monto(float(monto_total), tarjeta.moneda)
-            msg_resp = f"Listo. 1 cuota de {total_fmt} en {cat_disp} con tarjeta {tarjeta.nombre} — registrado. Va a ingresar en el resumen de {venc_mes} {venc_anio}."
+            total_fmt = formatear_monto(float(monto_total), tarjeta.moneda, con_decimales=False)
+            msg_resp = (
+                f"Listo, anoté {total_fmt} en {cat_disp} con la {nom_t}, en un pago.\n"
+                f"Entra en el resumen de {venc_mes}."
+            )
 
         if tx and tx.id:
             from app.routers.whatsapp.factura_wpp import linea_facturas_pagadas
@@ -1092,11 +1119,13 @@ def _registrar_movimiento_directo(
             billetera_id = billeteras_moneda[0].id
 
     if not billetera_id:
-        return None, "No pude resolver la billetera."
+        return None, "No encontré esa cuenta."
 
-    billetera = db.execute(select(Billetera).where(Billetera.id == billetera_id).with_for_update()).scalars().first()
+    billetera = db.execute(
+        select(Billetera).where(Billetera.id == billetera_id).with_for_update()
+    ).scalars().first()
     if not billetera:
-        return None, "Billetera no encontrada."
+        return None, "No encontré esa cuenta."
 
     cat_id, subcat_id = _resolver_categoria_y_subcategoria(entidades.get("categoria"), usuario.id, db, tipo=tipo_val)
     fecha_obj = _resolver_fecha_transaccion(entidades.get("fecha"))
@@ -1148,7 +1177,7 @@ def _registrar_movimiento_directo(
     emitir_evento_actualizacion(db, usuario.id, "billeteras")
     db.flush()
 
-    monto_str = formatear_monto(float(tx.monto), tx.moneda)
+    monto_str = formatear_monto(float(tx.monto), tx.moneda, con_decimales=False)
     bill_nombre = billetera.nombre
 
     if adicionales and isinstance(adicionales, list) and len(adicionales) > 0:
@@ -1158,40 +1187,31 @@ def _registrar_movimiento_directo(
     else:
         cat_nombre = None
         if tx.categoria_id:
-            cat = db.execute(select(Categoria).where(Categoria.id == tx.categoria_id)).scalars().first()
+            cat = db.execute(
+                select(Categoria).where(Categoria.id == tx.categoria_id)
+            ).scalars().first()
             cat_nombre = cat.nombre if cat else None
         subcat_nombre = None
         if tx.subcategoria_id:
-            subcat = db.execute(select(Subcategoria).where(Subcategoria.id == tx.subcategoria_id)).scalars().first()
+            subcat = db.execute(
+                select(Subcategoria).where(Subcategoria.id == tx.subcategoria_id)
+            ).scalars().first()
             subcat_nombre = subcat.nombre if subcat else None
-        nombre_categoria_display = subcat_nombre or cat_nombre or "Otros"
+        nombre_cat = subcat_nombre or cat_nombre or "Otros"
 
-        fecha_nat = _formatear_fecha_natural(tx.fecha)
-        fecha_disp = f" ({fecha_nat})" if fecha_nat else ""
-
+        f_corta = fecha_corta_wpp(tx.fecha, hoy_argentina())
         if tx.tipo == TipoTransaccion.INGRESO:
-            partes = [f"Listo. Ingreso de {monto_str}"]
-            if nombre_categoria_display:
-                partes.append(f"en {nombre_categoria_display}")
-            if bill_nombre:
-                partes.append(f"a {bill_nombre}{fecha_disp}")
-            partes.append("— registrado.")
+            detalle = f"{nombre_cat}, {f_corta}" if f_corta else nombre_cat
+            msg_resp = f"Listo, anoté un ingreso de {monto_str} en {bill_nombre} ({detalle})."
         else:
-            partes = [f"Listo. {monto_str}"]
-            if nombre_categoria_display:
-                partes.append(f"en {nombre_categoria_display}")
-            if bill_nombre:
-                partes.append(f"desde {bill_nombre}{fecha_disp}")
-            partes.append("— registrado.")
-        msg_resp = " ".join(partes)
+            f_disp = f" ({f_corta})" if f_corta else ""
+            msg_resp = f"Listo, anoté {monto_str} en {nombre_cat} desde {bill_nombre}{f_disp}."
 
     if descartadas:
         msg_resp += "\n" + "\n".join(descartadas)
 
-    # REGLA DE PRIVACIDAD: Los saldos no se muestran tras registrar un movimiento,
-    # salvo que el usuario los pida explícitamente (privacidad de pantalla).
     if billetera.saldo_actual < 0:
-        msg_resp += "\nLa billetera quedó en negativo."
+        msg_resp += f"\n{billetera.nombre} quedó en negativo."
 
     tx_ids = [t.id for t in ([tx] + adicionales_registradas) if t and t.id]
     if tx_ids:

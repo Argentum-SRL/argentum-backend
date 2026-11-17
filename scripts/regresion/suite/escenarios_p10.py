@@ -77,9 +77,9 @@ def p10_caso_1(datos):
         txs_sub = db.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id, Transaccion.suscripcion_id == sub.id)).scalar() if sub else 0
 
         return (
-            f"Pregunta frecuencia: {'¿Con qué frecuencia' in resp1}\n"
-            f"Propuesta: {'Voy a programar la suscripción a Disney+' in resp2}\n"
-            f"Confirmación: {'Listo. Suscripción a Disney+' in resp3}\n"
+            f"Pregunta frecuencia: {'¿Cada cuánto se paga' in resp1}\n"
+            f"Propuesta: {'Disney+: $5.000 por mes desde Galicia' in resp2}\n"
+            f"Confirmación: {'Listo, anoté Disney+:' in resp3}\n"
             f"Sub creada: {sub is not None and sub.estado == EstadoSuscripcion.ACTIVA}\n"
             f"Txs cobro generadas: {txs_sub}"
         )
@@ -118,8 +118,8 @@ def p10_caso_3(datos):
 
         sub = db.execute(select(Suscripcion).where(Suscripcion.usuario_id == u.id, Suscripcion.nombre == "Netflix")).scalars().first()
         return (
-            f"Propuesta: {'Voy a programar la suscripción a Netflix: $9.000 mensual' in resp_prop}\n"
-            f"Confirmación: {'Listo. Suscripción a Netflix' in resp_conf}\n"
+            f"Propuesta: {'Netflix: $9.000 por mes desde Galicia' in resp_prop}\n"
+            f"Confirmación: {'Listo, anoté Netflix: $9.000 por mes desde Galicia.' in resp_conf}\n"
             f"Frecuencia mensual: {sub is not None and sub.frecuencia == FrecuenciaSuscripcion.MENSUAL}"
         )
     return run_isolated(test)
@@ -211,8 +211,8 @@ def p10_caso_7(datos):
 
         db.refresh(sub)
         return (
-            f"Pregunta confirmación: {'¿Confirmás dar de baja la suscripción a Netflix' in resp_prop}\n"
-            f"Confirmación: {'Listo, dimos de baja tu suscripción a Netflix.' in resp_conf}\n"
+            f"Pregunta confirmación: {'¿Doy de baja Netflix' in resp_prop}\n"
+            f"Confirmación: {'Listo, di de baja Netflix.' in resp_conf}\n"
             f"Estado final: {sub.estado.value}"
         )
     return run_isolated(test)
@@ -250,7 +250,7 @@ def p10_caso_8(datos):
         precio_vigente = suscripcion_service.obtener_precio_vigente(db, sub.id)
         return (
             f"Propuesta muestra ambos: {'de $9.000 a $12.000' in resp_prop}\n"
-            f"Confirmación: {'actualicé el precio de Netflix a $12.000' in resp_conf}\n"
+            f"Confirmación: {'Listo, Netflix ahora es $12.000.' in resp_conf}\n"
             f"Precio en base: {precio_vigente.monto if precio_vigente else None}"
         )
     return run_isolated(test)
@@ -327,8 +327,8 @@ def p10_caso_10(datos):
         resp_reg = respuestas[-1][1] if respuestas else ""
 
         return (
-            f"Aviso cobro previo: {'ya se cobró automáticamente' in resp_aviso and 'este período' in resp_aviso}\n"
-            f"Registro tras confirmación: {'registrado' in resp_reg}"
+            f"Aviso cobro previo: {'ya se cobró solo este mes. ¿Lo anoto igual?' in resp_aviso}\n"
+            f"Registro tras confirmación: {'Listo, anoté' in resp_reg}"
         )
     return run_isolated(test)
 
@@ -353,7 +353,7 @@ def p10_caso_11(datos):
         resp = respuestas[-1][1] if respuestas else ""
 
         return (
-            f"Aviso existente: {'Ya tenés una suscripción activa a Netflix' in resp and '¿Querés registrar otra igual o te referías a la existente?' in resp}"
+            f"Aviso existente: {'Ya tenés Netflix' in resp and '¿Querés sumar otra?' in resp}"
         )
     return run_isolated(test)
 
@@ -371,7 +371,7 @@ def p10_caso_12(datos):
         resp = respuestas[-1][1] if respuestas else ""
 
         return (
-            f"Propuesta servicio no-catálogo: {'Voy a programar la suscripción a Gimnasio del barrio: $15.000 mensual' in resp}"
+            f"Propuesta servicio no-catálogo: {'Gimnasio del barrio: $15.000 por mes' in resp}"
         )
     return run_isolated(test)
 
@@ -395,6 +395,6 @@ def p10_caso_13(datos):
         _limpiar_subs(conn, u.id)
         return (
             f"Cat: {cat.nombre if cat else ''} / {subcat.nombre if subcat else ''} | "
-            f"Conf: {'La anoté en Ocio / Deportes y gimnasio' in resp_conf}"
+            f"Conf: {'Listo, anoté' in resp_conf and '45.000' in resp_conf}"
         )
     return run_isolated(test)

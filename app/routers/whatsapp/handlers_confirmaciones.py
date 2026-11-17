@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from uuid import UUID
+from app.core.reglas_texto_wpp import ejemplo_wpp
 from app.utils.fecha import ahora_argentina
 from decimal import Decimal
 from sqlalchemy import select
@@ -83,20 +84,23 @@ def manejar_saludo(
         mon_enum = Moneda.USD if mon_saludo == "USD" else Moneda.ARS
         cat_disp = _nombre_corto_categoria(cat_saludo) if cat_saludo else ""
         if monto_saludo is not None:
-            monto_fmt = formatear_monto(float(monto_saludo), mon_enum)
-            if cat_disp:
-                linea_pend = f"Tenías una operación a medias (anotar {monto_fmt} en {cat_disp}). Podés completarla o empezar de nuevo."
-            else:
-                linea_pend = f"Tenías una operación a medias de {monto_fmt}. Podés completarla o empezar de nuevo."
+            monto_fmt = formatear_monto(float(monto_saludo), mon_enum, con_decimales=False)
+            en_cat = f" en {cat_disp}" if cat_disp else ""
+            msg_saludo = (
+                f"¡Hola! Quedó a medias anotar {monto_fmt}{en_cat}.\n"
+                "Contestá la pregunta de arriba o mandame otro gasto."
+            )
         else:
-            linea_pend = "Tenías una operación a medias. Podés completarla o empezar de nuevo."
-        msg_saludo = f"Hola. {linea_pend}\nTambién podés registrar otro gasto, ingreso o consultar tus saldos."
-        # Desactivar para que el saludo no arrastre ni reactive nada
+            ex_g = ejemplo_wpp("gasté 5000 en el kiosco")
+            ex_c = ejemplo_wpp("cuánta plata tengo")
+            msg_saludo = f"¡Hola! Mandame un gasto, como {ex_g}, o preguntá {ex_c}."
         conv_activa_saludo.slot_filling_activo = False
         conv_activa_saludo.accion_ejecutada = "interrumpida_por_saludo"
         db.flush()
     else:
-        msg_saludo = "Hola. Podés registrar gastos, ingresos o consultar tus saldos y proyecciones. Por ejemplo: 'gasté 5000 en el kiosco'."
+        ex_g = ejemplo_wpp("gasté 5000 en el kiosco")
+        ex_c = ejemplo_wpp("cuánta plata tengo")
+        msg_saludo = f"¡Hola! Mandame un gasto, como {ex_g}, o preguntá {ex_c}."
 
     nueva_conv = ConversacionWpp(
         usuario_id=usuario.id,
@@ -276,9 +280,24 @@ def manejar_confirmacion(
         )
         db.add(nueva_conv)
         db.commit()
-        whatsapp_service.enviar_whatsapp(from_number, msg_confirm)
+        enviado_mem = False
         if tx_corregida:
-            preguntar_memoria_tras_correccion(usuario, db, from_number, tx_corregida, cambios)
+            solo_cat = bool(
+                cambios
+                and "categoria_id" in cambios
+                and not any(k in cambios for k in ("monto", "billetera_id", "fecha"))
+            )
+            enviado_mem = preguntar_memoria_tras_correccion(
+                usuario,
+                db,
+                from_number,
+                tx_corregida,
+                cambios,
+                prefijo_confirmacion=msg_confirm,
+                solo_categoria=solo_cat,
+            )
+        if not enviado_mem:
+            whatsapp_service.enviar_whatsapp(from_number, msg_confirm)
         return True
 
     elif intent_ganador == "memoria_comercio":
@@ -394,7 +413,10 @@ def manejar_confirmacion(
             )
             and (
                 (ultima_conv.entidades and ultima_conv.entidades.get("registro_directo") is True)
-                or (ultima_conv.mensaje_bot and ultima_conv.mensaje_bot.startswith("Listo."))
+                or (
+                    ultima_conv.mensaje_bot
+                    and ultima_conv.mensaje_bot.startswith(("Listo, anoté", "Listo."))
+                )
             )
         )
 
@@ -415,13 +437,16 @@ def manejar_confirmacion(
             and ultima_conv is not None
             and ultima_conv.intent_detectado == "transferir_fondos"
             and _es_accion_tr(ultima_conv.accion_ejecutada)
-            and (ultima_conv.mensaje_bot and ultima_conv.mensaje_bot.startswith("Listo."))
+            and (
+                ultima_conv.mensaje_bot
+                and ultima_conv.mensaje_bot.startswith(("Listo. Pasaste", "Listo, anoté", "Listo."))
+            )
         )
 
         es_tras_directo = es_tras_directo_tx or es_tras_directo_tr
 
         if es_tras_directo:
-            msg_confirm = "Ya quedó anotado. Si hay algo mal, decime qué corregir."
+            msg_confirm = "Ya lo había anotado."
             nueva_conv = ConversacionWpp(
                 usuario_id=usuario.id,
                 wamid=wamid,

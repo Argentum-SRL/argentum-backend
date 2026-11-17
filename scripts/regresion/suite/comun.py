@@ -43,6 +43,7 @@ from app.routers.whatsapp.propuestas import _construir_propuesta_transaccion
 from app.routers.whatsapp.registro import _confirmar_propuesta_transaccion
 from app.routers.whatsapp.db_lookups import _resolver_categoria_y_subcategoria
 from app.services import ai_service
+from app.core.reglas_texto_wpp import problemas_texto_wpp
 from app.models.suscripcion import Suscripcion, EstadoSuscripcion, FrecuenciaSuscripcion
 from app.models.historial_suscripcion import HistorialSuscripcion
 from app.schemas.suscripcion import SuscripcionCreate
@@ -286,6 +287,7 @@ class ColectorSalidas:
     def __init__(self, ruta_json: str):
         self.ruta_json = ruta_json
         self.salidas: dict[str, dict] = {}
+        self.salidas_detalle: dict[str, list[tuple[str, bool]]] = {}
         self.escenario_actual: str | None = None
         self._mensajes_escenario: list[str] = []
         self._lock = threading.Lock()
@@ -294,11 +296,14 @@ class ColectorSalidas:
         with self._lock:
             self.escenario_actual = escenario_id
             self._mensajes_escenario = []
+            self.salidas_detalle[escenario_id] = []
 
-    def registrar_mensaje(self, mensaje: str):
+    def registrar_mensaje(self, mensaje: str, lleva_texto_ia: bool = False):
         with self._lock:
             if self.escenario_actual:
                 self._mensajes_escenario.append(mensaje)
+                lista = self.salidas_detalle.setdefault(self.escenario_actual, [])
+                lista.append((mensaje, bool(lleva_texto_ia)))
 
     def registrar_salida_escenario(self, escenario_id: str, movimientos: list[dict], conversaciones: list[dict]):
         with self._lock:
@@ -320,6 +325,28 @@ class ColectorSalidas:
             json.dump(self.salidas, f, ensure_ascii=False, indent=2)
 
 _colector_salidas: ColectorSalidas | None = None
+
+
+def revisar_reglas_textos_suite(
+    salidas_por_escenario: dict[str, list],
+) -> list[tuple[str, str, list[str]]]:
+    """Aplica problemas_texto_wpp a mensajes no-IA de la suite."""
+    hallazgos: list[tuple[str, str, list[str]]] = []
+    for eid, items in salidas_por_escenario.items():
+        for item in items:
+            if isinstance(item, dict):
+                texto = item.get("texto", "")
+                es_ia = bool(item.get("lleva_texto_ia", False))
+            elif isinstance(item, tuple):
+                texto, es_ia = item[0], bool(item[1])
+            else:
+                texto, es_ia = str(item), False
+            if es_ia:
+                continue
+            cods = problemas_texto_wpp(texto)
+            if cods:
+                hallazgos.append((eid, texto, cods))
+    return hallazgos
 
 
 def _normalizar_accion_ejecutada(accion: str | None) -> str | None:
@@ -445,9 +472,10 @@ def run_isolated(fn):
 
     def _mock_envio(numero, payload, **kwargs):
         texto = kwargs.get("texto", "")
+        lleva_ia = bool(kwargs.get("lleva_texto_ia", False))
         respuestas.append((numero, texto))
         if _colector_salidas is not None:
-            _colector_salidas.registrar_mensaje(texto)
+            _colector_salidas.registrar_mensaje(texto, lleva_texto_ia=lleva_ia)
 
         wamid_ent = kwargs.get("wamid_entrante")
         partes = kwargs.get("partes", 1)

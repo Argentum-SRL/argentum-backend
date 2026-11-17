@@ -315,7 +315,7 @@ def test_pa_juan(db: Session):
     assert r_cuotas["resultado"] == "justo"
     assert (
         r_cuotas["linea_principal"]
-        == "Cada mes vas a usar unos $100.000 de la plata que ya tenés en tus cuentas."
+        == "De cada cuota, unos $100.000 salen de la plata que ya tenés en tus cuentas."
     )
     assert r_cuotas["linea_cuentas"] == "Te alcanza para las 6 cuotas."
     assert r_cuotas["linea_liberacion"] is None

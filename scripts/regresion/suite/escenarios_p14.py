@@ -84,7 +84,7 @@ def p14_caso_1(datos):
         from app.routers.whatsapp.db_lookups import _buscar_propuesta_confirmable_mas_reciente
         prop_pendiente = _buscar_propuesta_confirmable_mas_reciente(u.id, db)
 
-        resp_ok = resp.startswith("Listo.") and ("¿Va?" not in resp)
+        resp_ok = resp.startswith("Listo, anoté") and ("¿Anoto" not in resp)
 
         return (
             f"Resp ok: {resp_ok} | Txs: {txs_creadas} | Saldo: {saldo_diff} | "
@@ -117,7 +117,7 @@ def p14_caso_2(datos):
 
         accion_val = row["accion_ejecutada"] if row else ""
         es_lote_accion = accion_val.startswith("lote:") and len(accion_val.replace("lote:", "").split(",")) == 2
-        resp_ok = resp.startswith("Listo, 2 movimientos")
+        resp_ok = resp.startswith("Listo, anoté 2 gastos")
 
         return f"Resp ok: {resp_ok} | Txs: {txs_creadas} | Accion lote: {es_lote_accion}"
     return run_isolated(test)
@@ -145,7 +145,7 @@ def p14_caso_3(datos):
 
         db.refresh(b_db)
         saldo_diff = b_db.saldo_actual - s0
-        resp_ok = resp.startswith("Listo.") and ("¿Va?" not in resp)
+        resp_ok = resp.startswith("Listo, anoté un ingreso") and ("¿Anoto" not in resp)
 
         return f"Resp ok: {resp_ok} | Txs: {txs_creadas} | Saldo: +{saldo_diff}"
     return run_isolated(test)
@@ -173,10 +173,10 @@ def p14_caso_4(datos):
         tx_final = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         txs_despues_si = tx_final - tx_intermedio
 
-        pide_conf = ("¿Va?" in resp1 or "¿Confirmás?" in resp1 or "Voy a anotar" in resp1)
+        pide_conf = ("¿Las anoto?" in resp1 or "¿Lo anoto?" in resp1)
         return (
             f"Pide conf: {pide_conf} | Txs antes de si: {txs_antes_si} | "
-            f"Txs despues de si: {txs_despues_si > 0} | Confirma ok: {'Listo' in resp2}"
+            f"Txs despues de si: {txs_despues_si > 0} | Confirma ok: {'Listo, anoté' in resp2}"
         )
     return run_isolated(test)
 
@@ -202,7 +202,7 @@ def p14_caso_5(datos):
 
         tx_final = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
 
-        pregunta_dup = "¿Es un movimiento nuevo o se te repitió?" in resp_dup or "ya registraste" in resp_dup
+        pregunta_dup = "¿Lo anoto otra vez?" in resp_dup
         txs_totales = tx_final - tx_antes
 
         return f"Pregunta duplicado: {pregunta_dup} | Txs totales: {txs_totales}"
@@ -225,7 +225,7 @@ def p14_caso_6(datos):
         tx_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         txs_creadas = tx_despues - tx_antes
 
-        resp_head_esperada = "Voy a anotar $5.000 en Kiosco desde Galicia. ¿Va?\nSi fue con otra, decime cuál."
+        resp_head_esperada = "¿Anoto $5.000 en Kiosco desde Galicia?"
         coincide_head = (resp.strip() == resp_head_esperada.strip())
 
         return f"Coincide con HEAD: {coincide_head} | Txs creadas: {txs_creadas}"
@@ -252,7 +252,7 @@ def p14_caso_7(datos):
         tx_final = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         txs_nuevas = tx_final - tx_medio
 
-        esperado = "Ya quedó anotado. Si hay algo mal, decime qué corregir."
+        esperado = "Ya lo había anotado."
         resp_ok = (resp_si.strip() == esperado.strip())
 
         return f"Resp ok: {resp_ok} | Txs nuevas: {txs_nuevas}"
@@ -290,7 +290,7 @@ def p14_caso_8(datos):
 
         txs_restantes = tx_despues - tx_antes
         saldo_restaurado = (b_db.saldo_actual == s0)
-        conf_ok = "Listo" in resp_conf and ("eliminad" in resp_conf or "borrad" in resp_conf or "anulad" in resp_conf)
+        conf_ok = "Listo" in resp_conf and "borré" in resp_conf
 
         return f"Deshacer ok: {conf_ok} | Txs restantes: {txs_restantes} | Saldo restaurado: {saldo_restaurado}"
     return run_isolated(test)
@@ -431,8 +431,8 @@ def p14_caso_12(datos):
         b_db = db.get(Billetera, b_gal.id)
         db.refresh(b_db)
 
-        pregunta_ok = "¿Desde qué billetera" in resp_preg
-        registro_ok = resp_reg.startswith("Listo.") and ("¿Va?" not in resp_reg)
+        pregunta_ok = "¿De qué cuenta salió?" in resp_preg
+        registro_ok = resp_reg.startswith("Listo, anoté") and ("¿Anoto" not in resp_reg)
 
         return (
             f"Pregunta ok: {pregunta_ok} | Txs antes eleccion: {txs_antes_eleccion} | "
@@ -465,7 +465,7 @@ def p14_caso_14(datos):
         from app.routers.whatsapp.db_lookups import _buscar_propuesta_confirmable_mas_reciente
         prop_pendiente = _buscar_propuesta_confirmable_mas_reciente(u.id, db)
 
-        msg_esperado = "No se puede registrar ningún movimiento." in resp
+        msg_esperado = "No pude anotar ninguno." in resp
 
         return f"Msg ok: {msg_esperado} | Txs creadas: {txs_creadas} | Propuesta pendiente: {prop_pendiente is None}"
     return run_isolated(test)
@@ -491,9 +491,13 @@ def p14_caso_15(datos):
         tx_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         txs_creadas = tx_despues - tx_antes
 
-        aviso_descarte = "No se pudo registrar" in resp and "dólares" in resp
-        listo_ok = "Listo." in resp and "¿Va?" not in resp
-        orden_ok = resp.find("No se pudo registrar") < resp.find("Listo.") if (aviso_descarte and listo_ok) else False
+        aviso_descarte = "No pude anotar" in resp and "dólares" in resp
+        listo_ok = "Listo, anoté" in resp and "¿Anoto" not in resp
+        orden_ok = (
+            resp.find("No pude anotar") < resp.find("Listo, anoté")
+            if (aviso_descarte and listo_ok)
+            else False
+        )
 
         return f"Aviso descarte: {aviso_descarte} | Listo ok: {listo_ok} | Orden ok: {orden_ok} | Txs: {txs_creadas}"
     return run_isolated(test)
@@ -530,7 +534,7 @@ def p14_caso_13(datos):
         tx_despues_menu = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         txs_antes_si = tx_despues_menu - tx_antes
 
-        pide_conf = ("¿Va?" in resp1 or "¿Confirmás?" in resp1) and "Listo." not in resp1
+        pide_conf = "¿Anoto" in resp1 and "Listo" not in resp1
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
@@ -538,7 +542,7 @@ def p14_caso_13(datos):
 
         tx_despues_si = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         txs_despues = tx_despues_si - tx_antes
-        confirma_ok = "Listo." in resp2
+        confirma_ok = "Listo, anoté" in resp2
 
         return f"Pide conf: {pide_conf} | Txs antes si: {txs_antes_si} | Txs despues si: {txs_despues} | Confirma ok: {confirma_ok}"
     return run_isolated(test)
@@ -575,7 +579,7 @@ def p14_caso_16(datos):
         tx_despues_menu = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         txs_antes_si = tx_despues_menu - tx_antes
 
-        pide_conf = ("¿Va?" in resp1 or "¿Confirmás?" in resp1) and "Listo." not in resp1
+        pide_conf = "¿Anoto" in resp1 and "Listo" not in resp1
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
@@ -583,7 +587,7 @@ def p14_caso_16(datos):
 
         tx_despues_si = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         txs_despues = tx_despues_si - tx_antes
-        confirma_ok = "Listo." in resp2
+        confirma_ok = "Listo, anoté" in resp2
 
         return f"Pide conf: {pide_conf} | Txs antes si: {txs_antes_si} | Txs despues si: {txs_despues} | Confirma ok: {confirma_ok}"
     return run_isolated(test)
@@ -620,7 +624,7 @@ def p14_caso_17(datos):
         tx_despues_menu = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         txs_creadas = tx_despues_menu - tx_antes
 
-        registra_directo = "Listo." in resp1 and ("¿Va?" not in resp1 and "¿Confirmás?" not in resp1)
+        registra_directo = "Listo, anoté" in resp1 and "¿Anoto" not in resp1
 
         return f"Registra directo: {registra_directo} | Txs: {txs_creadas}"
     return run_isolated(test)

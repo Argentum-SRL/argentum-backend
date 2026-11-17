@@ -16,8 +16,8 @@ from app.services.whatsapp_service import BuzonSalida, _buzon_actual_cv
 
 
 def test_t5_textos_exactos():
-    assert TEXTO_AVISO_PAGOS == "Si te acordás para qué era, decime «era el súper» y lo cambio."
-    assert TEXTO_AVISO_COBROS == "Si te acordás qué era, decime «era un regalo» y lo cambio."
+    assert TEXTO_AVISO_PAGOS == "Si te acordás para qué era, decime _era el súper_ y lo cambio."
+    assert TEXTO_AVISO_COBROS == "Si te acordás qué era, decime _era un regalo_ y lo cambio."
     assert TEXTO_PREGUNTA_COBRO == "¿Qué era? 1) Me pagaron 2) Me devolvieron parte de un gasto 3) Solo pasó por mi cuenta"
 
     assert len(TEXTO_AVISO_PAGOS) <= 90

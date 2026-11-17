@@ -48,8 +48,8 @@ def entradas_p09c(datos: dict[str, Any]) -> list[dict[str, Any]]:
             "nombre": "pasé 20k de galicia a macro: opción 3 registra pago a persona",
             "ejecutar": lambda: p9c_caso_3(datos),
             "esperado": (
-                "Listo. $20.000 en Pagos a personas desde Galicia — registrado.\n"
-                "Si te acordás para qué era, decime «era el súper» y lo cambio. | "
+                "Listo, anoté $20.000 en Pagos a personas desde Galicia.\n"
+                "Si te acordás para qué era, decime _era el súper_ y lo cambio. | "
                 "Transferencias nuevas: 0 | Gastos nuevos: 1 | Llegó a la IA: False"
             ),
         },
@@ -59,8 +59,8 @@ def entradas_p09c(datos: dict[str, Any]) -> list[dict[str, Any]]:
             "ejecutar": lambda: p9c_caso_4(datos),
             "esperado": (
                 "Listo. Pasaste $20.000 de Galicia a Santander y $5.000 de Santander a "
-                "Efectivo Pesos. | ¿Querés anular las 2 transferencias que registraste recién? "
-                "¿Confirmás? | Listo, 2 transferencias anuladas. | Saldos intactos: True | "
+                "Efectivo Pesos. | ¿Borro los 2 pases que anotaste recién? | "
+                "Listo, borré los 2 pases. | Saldos intactos: True | "
                 "Llegó a la IA: False"
             ),
         },
@@ -78,7 +78,7 @@ def entradas_p09c(datos: dict[str, Any]) -> list[dict[str, Any]]:
             "nombre": "distinta moneda pregunta cotización sin llamar a IA",
             "ejecutar": lambda: p9c_caso_6(datos),
             "esperado": (
-                "¿A qué cotización vendiste o cuántos pesos recibís en Galicia? | "
+                "¿A cuánto vendiste o cuántos pesos entraron en Galicia? | "
                 "Llegó a la IA: False"
             ),
         },

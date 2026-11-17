@@ -232,18 +232,22 @@ class TestArmarRespuestaPermitirse:
             "Te entra bien.\n"
             "Son 6 cuotas de $50.000.\n"
             "Cada mes te quedar\u00edan al menos $50.000 despu\u00e9s de tus gastos de siempre.\n"
-            "Lo calcul\u00e9 sin inter\u00e9s. Si tiene inter\u00e9s, decime la tasa anual (TNA)."
+            "Lo calcul\u00e9 sin inter\u00e9s. Si tiene, decime cu\u00e1nto por a\u00f1o "
+            "(por ejemplo, 60%)."
         )
         assert armar_respuesta_permitirse(res_sin_int, cons_sin_int) == esp_sin_int
 
     def test_12_faltas(self):
         assert (
             armar_respuesta_permitirse({}, {"falta": "precio"})
-            == 'Decime cuánto sale. Por ejemplo: "¿me puedo permitir algo de 300.000 en 6 cuotas?"'
+            == "Decime cuánto sale. Por ejemplo: _¿me puedo permitir algo de 300.000 en 6 cuotas?_"
         )
         assert (
             armar_respuesta_permitirse({}, {"falta": "cuotas"})
-            == 'Decime en cuántas cuotas. Por ejemplo: "¿me puedo permitir algo de 300.000 en 6 cuotas?"'
+            == (
+                "Decime en cuántas cuotas. Por ejemplo: "
+                "_¿me puedo permitir algo de 300.000 en 6 cuotas?_"
+            )
         )
 
 

@@ -246,3 +246,6 @@ Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_12-11.md (versi
 - Archivos: analisis_ciclos_service, analisis_resumen_service, analisis_insights_service, analisis_comparativa_service, analisis_proyeccion_service, analisis_informes_service y analisis_excel_service. Sin re-exports ni imports adentro de funciones.
 ### Textos sin tecnicismos (12/11/2026)
 - Ningún texto que ve el usuario usa jerga técnica ni financiera (KPI, delta, REM, drill-down, tasa, etc.): todo en palabras simples. En Análisis lo controlan tests/test_analisis_n.py (TN16) y src/pages/app/analisis/sinTecnicismos.test.ts del front.
+### Textos del bot de WhatsApp
+- Todo mensaje sigue REGLAS_TEXTOS_WHATSAPP.md; todo texto nuevo se escribe primero ahí.
+- Controles: reglas_texto_wpp.py, plugin_reglas_texto.py, test_reglas_texto_estatico.py y suite.

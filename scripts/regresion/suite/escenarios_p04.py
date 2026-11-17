@@ -149,7 +149,10 @@ def p4_caso_6(datos):
             {"uid": u.id}
         ).mappings().first()
         intent = row["intent_detectado"] if row else None
-        patron = r"^(?:En este ciclo(?:\s*\(\d\d/\d\d\s+al\s+\d\d/\d\d\))?|Hoy)\s+(?:gastaste|no registraste gastos|no encontré gastos)"
+        patron = (
+            r"^(?:Este mes(?:\s*\(desde el \d\d/\d\d\))?|Hoy)\s+"
+            r"(?:gastaste|no anotaste gastos|no encontré gastos)"
+        )
         msg_ok = bool(re.match(patron, resp))
         return f"Intent: {intent} | Respuesta ok: {msg_ok}"
     return run_isolated(test)

@@ -112,7 +112,7 @@ def test_mensaje_wpp_caso_sin_cobro_en_ciclo():
     esperado = (
         "Llegarías al 30/11 con entre -$100.000 y $100.000.\n"
         "En 1 de tus últimos 3 meses no te alcanzó.\n"
-        "Puede que no hayas cargado todo: el rango ya lo tiene en cuenta."
+        "Como puede faltar algo por cargar, te doy un número más bajo y uno más alto."
     )
     assert mensaje_wpp(res) == esperado
 

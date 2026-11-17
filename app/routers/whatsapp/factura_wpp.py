@@ -19,7 +19,6 @@ from app.routers.whatsapp.db_lookups import (
     _resolver_categoria_y_subcategoria,
 )
 from app.routers.whatsapp.detectors import _es_cancelacion
-from app.routers.whatsapp.parsers import _nombre_corto_categoria
 from app.services import whatsapp_service
 from app.services.factura_service import crear_factura_pendiente
 from app.utils.fecha import hoy_argentina
@@ -54,15 +53,12 @@ def texto_propuesta_factura(
         else Moneda.ARS
     )
 
-    cat_display = _nombre_corto_categoria(entidades.get("categoria"))
-    en_cat = f" en {cat_display}" if cat_display else ""
     bill = (
         billetera_nombre
         or entidades.get("billetera")
         or entidades.get("billetera_origen")
-        or "tu billetera"
+        or "tu cuenta"
     )
-    linea_asumida = "\nSi fue con otra, decime cuál." if se_asumio_principal else ""
 
     hoy = hoy_argentina()
 
@@ -81,10 +77,9 @@ def texto_propuesta_factura(
             cuando = f"venció el {f_str}"
 
         return (
-            f"Factura de {empresa} por {m_str}, {cuando}.\n"
-            f"¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy{en_cat} desde {bill}."
-            f"{linea_asumida}\n"
-            f"Si me decís que no, te la anoto en la web para que no se te pase."
+            f"Factura de {empresa}: {m_str}, {cuando}. ¿Ya la pagaste?\n"
+            f"Sí: la anoto como gasto de hoy desde {bill}.\n"
+            "No: la guardo en miargentum.com y ahí te aviso antes de que venza."
         )
 
     # N cuotas (N >= 2)
@@ -94,12 +89,17 @@ def texto_propuesta_factura(
 
     if montos_iguales:
         m_str = formatear_monto(float(montos[0]), moneda_prop)
-        fechas_str = [date.fromisoformat(v["fecha"]).strftime("%d/%m") for v in vencimientos]
+        fechas_str = [
+            date.fromisoformat(v["fecha"]).strftime("%d/%m") for v in vencimientos
+        ]
         fechas_texto = _formatear_lista_fechas(fechas_str)
-        linea_cuotas = f"Factura de {empresa} en {n} cuotas de {m_str}: vencen {fechas_texto}."
+        linea_cuotas = (
+            f"Factura de {empresa} en {n} cuotas de {m_str}: vencen {fechas_texto}."
+        )
     else:
         items = [
-            f"{formatear_monto(float(v['monto']), moneda_prop)} que vence el {date.fromisoformat(v['fecha']).strftime('%d/%m')}"
+            f"{formatear_monto(float(v['monto']), moneda_prop)} "
+            f"el {date.fromisoformat(v['fecha']).strftime('%d/%m')}"
             for v in vencimientos
         ]
         if n == 2:
@@ -108,14 +108,13 @@ def texto_propuesta_factura(
             cuotas_texto = ", ".join(items[:-1]) + f" y {items[-1]}"
         linea_cuotas = f"Factura de {empresa} en {n} cuotas: {cuotas_texto}."
 
-    resto = "la segunda" if n == 2 else f"las otras {n - 1}"
-    todas = "las dos" if n == 2 else f"las {n}"
+    resto = "la otra" if n == 2 else f"las otras {n - 1}"
 
     return (
         f"{linea_cuotas}\n"
-        f"¿Ya pagaste la primera? Si me decís que sí, la anoto como gasto de hoy{en_cat} desde {bill} y te anoto {resto} en la web."
-        f"{linea_asumida}\n"
-        f"Si me decís que no, te anoto {todas} en la web para que no se te pasen."
+        "¿Ya pagaste la primera?\n"
+        f"Sí: la anoto como gasto de hoy desde {bill} y guardo {resto} en miargentum.com.\n"
+        f"No: guardo las {n} en miargentum.com y ahí te aviso antes de que venzan."
     )
 
 
@@ -155,9 +154,8 @@ def registrar_cuotas_restantes(
     if len(vencimientos) == 2:
         m2 = formatear_monto(float(vencimientos[1]["monto"]), moneda)
         f2 = date.fromisoformat(vencimientos[1]["fecha"]).strftime("%d/%m")
-        return f"\nTe anoté la segunda cuota ({m2}, vence el {f2}) en la web."
-    else:
-        return f"\nTe anoté las otras {len(vencimientos) - 1} cuotas en la web."
+        return f"\nGuardé la segunda cuota ({m2}, vence el {f2}) en miargentum.com."
+    return f"\nGuardé las otras {len(vencimientos) - 1} cuotas en miargentum.com."
 
 
 def manejar_factura_no_pagada(
@@ -216,15 +214,21 @@ def manejar_factura_no_pagada(
     )
 
     if todas_ya_existian:
-        msg_resp = "Esa factura ya la tenía anotada."
+        msg_resp = "Ya tenía guardada esa factura."
     elif len(vencimientos) >= 2:
-        msg_resp = f"Listo, te anoto las {len(vencimientos)} cuotas en la web. Te aviso 3 días antes y el día de cada vencimiento."
+        msg_resp = (
+            f"Listo, guardé las {len(vencimientos)} cuotas en miargentum.com. "
+            "Ahí te aviso antes de cada una."
+        )
     else:
         v_fecha = date.fromisoformat(vencimientos[0]["fecha"])
         if v_fecha < hoy_argentina():
-            msg_resp = "Listo, te la anoto en la web como vencida."
+            msg_resp = "Listo, la guardé en miargentum.com como vencida."
         else:
-            msg_resp = "Listo, te la anoto en la web. Te aviso 3 días antes y el día del vencimiento."
+            msg_resp = (
+                "Listo, la guardé en miargentum.com. "
+                "Ahí te aviso 3 días antes y el día que vence."
+            )
 
     propuesta.accion_ejecutada = "factura_pendiente"
 

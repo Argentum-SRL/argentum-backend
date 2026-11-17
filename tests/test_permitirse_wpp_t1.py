@@ -215,7 +215,7 @@ def test_w3_pregunta_precio_pendiente_y_cierre(db: Session, usuario_wpp: Usuario
         assert manejar_consulta_permitirse(_ctx(db, usuario_wpp, "¿me lo puedo permitir?", "w1"))
         mock_envio.assert_called_once()
         assert mock_envio.call_args[0][1] == (
-            'Decime cuánto sale. Por ejemplo: "¿me puedo permitir algo de 300.000 en 6 cuotas?"'
+            "Decime cuánto sale. Por ejemplo: _¿me puedo permitir algo de 300.000 en 6 cuotas?_"
         )
         assert buscar_pregunta_pendiente(db, usuario_wpp.id) is not None
 

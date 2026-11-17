@@ -18,10 +18,8 @@ from app.core.constants import MAX_MONTO_INTEGRIDAD
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 from app.models.transaccion import Transaccion
 from app.models.usuario import Moneda, Usuario
-from app.routers.whatsapp.parsers import (
-    _formatear_fecha_natural,
-    _parsear_monto_argentino,
-)
+from app.core.reglas_texto_wpp import ejemplo_wpp, fecha_corta_wpp
+from app.routers.whatsapp.parsers import _parsear_monto_argentino
 from app.services import reintegro_service, whatsapp_service
 from app.services.evento_service import emitir_evento_actualizacion
 from app.services.que_es_plata_service import gastos_para_vincular
@@ -188,7 +186,7 @@ def manejar_reintegro_wpp(
     libres = [c for c in coinciden if c not in con_recibido]
 
     if not libres:
-        msg = "Esa compra ya tiene su reintegro cargado. Para cambiarlo, entrá a la web de Argentum."
+        msg = "Esa compra ya tiene su reintegro. Para cambiarlo, entrá a miargentum.com"
         nueva_conv = ConversacionWpp(
             usuario_id=usuario.id,
             wamid=wamid,
@@ -211,7 +209,7 @@ def manejar_reintegro_wpp(
     if monto is not None:
         aptas = [c for c in libres if getattr(c, "_disponible", c.monto) >= monto]
         if not aptas:
-            msg = "El reintegro no puede ser mayor que la compra."
+            msg = "El reintegro no puede ser más que la compra."
             nueva_conv = ConversacionWpp(
                 usuario_id=usuario.id,
                 wamid=wamid,
@@ -233,7 +231,8 @@ def manejar_reintegro_wpp(
     else:
         aptas = [c for c in libres if c.reintegro_esperado is not None and c.reintegro_esperado > 0]
         if not aptas:
-            msg = "¿Cuánto te devolvieron? Decímelo con el monto, por ejemplo «me devolvieron 25000 del súper»."
+            ex_r = ejemplo_wpp("me devolvieron 25000 del súper")
+            msg = f"¿Cuánto te devolvieron? Por ejemplo: {ex_r}."
             nueva_conv = ConversacionWpp(
                 usuario_id=usuario.id,
                 wamid=wamid,
@@ -260,17 +259,17 @@ def manejar_reintegro_wpp(
         return True
 
     # Varias compras aptas: preguntar con menú numerado (hasta 5)
-    lineas = ["¿De cuál compra?"]
+    lineas = ["¿De qué compra?"]
     compras_5 = aptas[:5]
     compras_ids = []
+    hoy = hoy_argentina()
     for idx, c in enumerate(compras_5, start=1):
         nom = nombre_compra(c)
-        m_fmt = formatear_monto(c.monto, Moneda.ARS)
-        f_nat = _formatear_fecha_natural(c.fecha)
-        f_str = f" ({f_nat})" if f_nat else ""
-        lineas.append(f"{idx}) {nom} {m_fmt}{f_str}")
+        m_fmt = formatear_monto(c.monto, Moneda.ARS, con_decimales=False)
+        f_corta = fecha_corta_wpp(c.fecha, hoy)
+        f_str = f" · {f_corta}" if f_corta else ""
+        lineas.append(f"{idx}. {nom} {m_fmt}{f_str}")
         compras_ids.append(str(c.id))
-    lineas.append("Respondé con el número.")
     msg = "\n".join(lineas)
 
     nueva_conv = ConversacionWpp(
@@ -306,11 +305,15 @@ def registrar_reintegro_wpp(
     """
     previo = float(compra.reintegro_esperado) if compra.reintegro_esperado is not None else None
     monto_final = monto if monto is not None else compra.reintegro_esperado
-    f_nat = _formatear_fecha_natural(compra.fecha)
-    f_str = f" ({f_nat})" if f_nat else ""
+    f_corta = fecha_corta_wpp(compra.fecha, hoy_argentina())
+    f_str = f" ({f_corta})" if f_corta else ""
     nombre = nombre_compra(compra)
-    monto_fmt = formatear_monto(monto_final, Moneda.ARS)
-    texto = f"Listo, anoté la devolución de {monto_fmt} de «{nombre}»{f_str}. Si no era esa, decime «borrá eso»."
+    monto_fmt = formatear_monto(monto_final, Moneda.ARS, con_decimales=False)
+    ex_b = ejemplo_wpp("borrá eso")
+    texto = (
+        f"Listo, anoté el reintegro de {monto_fmt} de {nombre}{f_str}.\n"
+        f"Si no era esa compra, decime {ex_b}."
+    )
 
     try:
         reintegro_service.registrar_o_actualizar_reintegro(

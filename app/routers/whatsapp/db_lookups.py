@@ -72,7 +72,10 @@ def _verificar_rate_limit_registrado(telefono_norm: str, es_medio: bool = False)
             ventana_segundos=VENTANA_RATE_LIMIT_WPP_SEGUNDOS,
         )
         if not permitido_medio:
-            return False, "Estás enviando muchos audios o comprobantes seguidos. Por favor, esperá un minuto antes de enviar otro."
+            return (
+                False,
+                "Estás mandando muchos audios o fotos seguidos. Esperá un minuto y seguimos.",
+            )
 
     # 2. Chequeo de mensajes totales por minuto
     permitido_msg, _, _ = verificar_rate_limit(
@@ -82,7 +85,10 @@ def _verificar_rate_limit_registrado(telefono_norm: str, es_medio: bool = False)
         ventana_segundos=VENTANA_RATE_LIMIT_WPP_SEGUNDOS,
     )
     if not permitido_msg:
-        return False, "Estás enviando muchos mensajes seguidos. Por favor, esperá un momento antes de volver a escribir."
+        return (
+            False,
+            "Estás mandando muchos mensajes seguidos. Esperá un minuto y seguimos.",
+        )
 
     return True, None
 

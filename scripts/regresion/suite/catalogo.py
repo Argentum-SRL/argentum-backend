@@ -3,19 +3,52 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from scripts.regresion.suite.escenarios_p03 import *
-from scripts.regresion.suite.escenarios_p04 import *
-from scripts.regresion.suite.escenarios_p05 import *
-from scripts.regresion.suite.escenarios_p06_p07 import *
-from scripts.regresion.suite.escenarios_p08 import *
-from scripts.regresion.suite.escenarios_p09 import *
-from scripts.regresion.suite.escenarios_p10 import *
-from scripts.regresion.suite.escenarios_p11 import *
-from scripts.regresion.suite.escenarios_p12 import *
-from scripts.regresion.suite.escenarios_p13 import *
-from scripts.regresion.suite.escenarios_p14 import *
-from scripts.regresion.suite.escenarios_p16 import *
-from scripts.regresion.suite.escenarios_p17 import *
+from scripts.regresion.suite.escenarios_p03 import (
+    p3_caso_1, p3_caso_2, p3_caso_3, p3_caso_4, p3_caso_5,
+    p3_caso_6, p3_caso_7, p3_caso_8, p3_caso_9, p3_caso_10,
+)
+from scripts.regresion.suite.escenarios_p04 import (
+    p4_caso_1, p4_caso_2, p4_caso_3, p4_caso_4, p4_caso_5,
+    p4_caso_6, p4_caso_7, p4_caso_8, p4_variante_no,
+)
+from scripts.regresion.suite.escenarios_p05 import (
+    p5_caso_1, p5_caso_2, p5_caso_3, p5_caso_4, p5_caso_5,
+    p5_caso_6_concurrente, p5_caso_7, p5_caso_cuotas,
+)
+from scripts.regresion.suite.escenarios_p06_p07 import (
+    p6_ejecutar_caso, p7_ejecutar_caso,
+)
+from scripts.regresion.suite.escenarios_p08 import (
+    p8_caso_1, p8_caso_2, p8_caso_3, p8_caso_4, p8_caso_5,
+    p8_caso_5b, p8_caso_5c, p8_caso_5d, p8_caso_6, p8_caso_7,
+    p8_caso_8, p8_caso_9, p8_caso_10, p8_caso_11,
+)
+from scripts.regresion.suite.escenarios_p09 import (
+    p9_caso_1, p9_caso_2, p9_caso_3, p9_caso_4, p9_caso_5, p9_caso_6,
+    p9_caso_7, p9_caso_8, p9_caso_9, p9_caso_10, p9_caso_11, p9_caso_12,
+    p9b_caso_1, p9b_caso_2, p9b_caso_3, p9b_caso_4, p9b_caso_5,
+    p9b_caso_6, p9b_caso_7, p9b_caso_8, p9b_caso_9, p9b_caso_10,
+    p9b_caso_11, p9b_caso_12, p9b_caso_13, p9b_caso_14, p9b_caso_15,
+    p9b_caso_16, p9b_caso_17, p9b_caso_18, p9b_caso_19, p9b_caso_20,
+)
+from scripts.regresion.suite.escenarios_p10 import (
+    p10_caso_1, p10_caso_2, p10_caso_3, p10_caso_4, p10_caso_5,
+    p10_caso_6, p10_caso_7, p10_caso_8, p10_caso_9, p10_caso_10,
+    p10_caso_11, p10_caso_12,
+)
+from scripts.regresion.suite.escenarios_p11 import (
+    p11_caso_1, p11_caso_2, p11_caso_3, p11_caso_4, p11_caso_5,
+    p11_caso_6, p11_caso_7, p11_caso_8, p11_caso_9, p11_caso_10,
+    p11_caso_11, p11_caso_12, p11_caso_13,
+)
+from scripts.regresion.suite.escenarios_p12 import (
+    p12_caso_1, p12_caso_2, p12_caso_3, p12_caso_4, p12_caso_5,
+    p12_caso_6, p12_caso_7, p12_caso_8, p12_caso_9, p12_caso_10,
+    p12_caso_11, p12_caso_12, p12_caso_13,
+)
+from scripts.regresion.suite.escenarios_p13 import (
+    p13_caso_1, p13_caso_2, p13_caso_3, p13_caso_4, p13_caso_5,
+)
 from scripts.regresion.suite.escenarios_p18 import (
     p18_caso_1,
     p18_caso_2,
@@ -34,6 +67,7 @@ from scripts.regresion.suite.escenarios_p19 import (
     p19_caso_9,
 )
 from scripts.regresion.suite.catalogo_p09c import entradas_p09c
+from scripts.regresion.suite.catalogo_p16_p17 import entradas_p16_p17
 from scripts.regresion.suite.catalogo_p18b import entradas_p18b
 from scripts.regresion.suite.catalogo_p19b import entradas_p19b
 from scripts.regresion.suite.escenarios_p20 import entradas_p20
@@ -49,87 +83,99 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
     if ayer is None:
         ayer = hoy - timedelta(days=1)
 
-    MESES = [
-        "enero", "febrero", "marzo", "abril", "mayo", "junio",
-        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
-    ]
+    from app.core.reglas_texto_wpp import fecha_corta_wpp
     fecha_p63 = hoy - timedelta(days=20)
-    frase_p63 = f"el {fecha_p63.day} de {MESES[fecha_p63.month - 1]}"
-    if fecha_p63.year != hoy.year:
-        frase_p63 += f" de {fecha_p63.year}"
+    frase_p63 = fecha_corta_wpp(fecha_p63, hoy)
 
     catalogo = [
         {
             "id": "P3.1", "punto": "Punto 3", "match": "exacto",
             "nombre": "Usuario con billetera principal dice 'gasté 5000 en el kiosco' sin nombrar billetera",
             "ejecutar": lambda: p3_caso_1(datos),
-            "esperado": "Listo. $5.000 en Kiosco desde Galicia — registrado.\nSi fue con otra, decime cuál.",
+            "esperado": "Listo, anoté $5.000 en Kiosco desde Galicia.",
         },
         {
             "id": "P3.2", "punto": "Punto 3", "match": "exacto",
             "nombre": "Usuario sin billetera principal, lo mismo",
             "ejecutar": lambda: p3_caso_2(datos),
-            "esperado": "¿Desde qué billetera salió la plata?\n\n1. Efectivo Pesos\n2. Galicia\n3. Santander",
+            "esperado": (
+                "¿De qué cuenta salió?\n1. Efectivo Pesos\n2. Galicia\n3. Santander"
+            ),
         },
         {
             "id": "P3.3", "punto": "Punto 3", "match": "exacto",
             "nombre": "Responde '2' a un menú de billeteras",
             "ejecutar": lambda: p3_caso_3(datos),
-            "esperado": "Listo. $5.000 en Kiosco desde Galicia — registrado.",
+            "esperado": "Listo, anoté $5.000 en Kiosco desde Galicia.",
         },
         {
             "id": "P3.4", "punto": "Punto 3", "match": "exacto",
             "nombre": "Responde con el nombre de la billetera en vez del número",
             "ejecutar": lambda: p3_caso_4(datos),
-            "esperado": "Listo. $5.000 en Kiosco desde Santander — registrado.",
+            "esperado": "Listo, anoté $5.000 en Kiosco desde Santander.",
         },
         {
             "id": "P3.5", "punto": "Punto 3", "match": "exacto",
             "nombre": "Responde un número fuera de rango",
             "ejecutar": lambda: p3_caso_5(datos),
-            "esperado": "Opción inválida. Elegí un número del 1 al 3.",
+            "esperado": "Ese número no está en la lista. Elegí del 1 al 3.",
         },
         {
             "id": "P3.6", "punto": "Punto 3", "match": "exacto",
             "nombre": "Manda un número sin ninguna pregunta pendiente",
             "ejecutar": lambda: p3_caso_6(datos),
-            "esperado": "Mandaste solo un número. Si querés registrar un movimiento, escribí el monto y el concepto (por ejemplo: 'gasté 5000 en el kiosco').",
+            "esperado": (
+                "Mandaste solo un número. Decime en qué, por ejemplo: _5000 kiosco_."
+            ),
         },
         {
             "id": "P3.7", "punto": "Punto 3", "match": "exacto",
             "nombre": "Responde a un menú 31 minutos después",
             "ejecutar": lambda: p3_caso_7(datos),
-            "esperado": "Esa operación ya venció. Podés volver a mandarla.",
+            "esperado": "Pasó mucho tiempo y lo descarté. Mandámelo de nuevo.",
         },
         {
             "id": "P3.8", "punto": "Punto 3", "match": "exacto",
             "nombre": "Recibe una propuesta y responde 'no, fue en Santander'",
             "ejecutar": lambda: p3_caso_8(datos),
-            "esperado": "Voy a anotar $5.000 en Kiosco desde Santander. ¿Va?",
+            "esperado": "¿Anoto $5.000 en Kiosco desde Santander?",
         },
         {
             "id": "P3.9", "punto": "Punto 3", "match": "exacto",
             "nombre": "Dice 'cobré 800000 de sueldo' y elige billetera de destino",
             "ejecutar": lambda: p3_caso_9(datos),
-            "esperado": "¿A qué billetera entró la plata?\n\n1. Efectivo Pesos\n2. Galicia\n3. Santander\n---\nListo. Ingreso de $800.000 en Sueldo a Efectivo Pesos — registrado.",
+            "esperado": (
+                "¿A qué cuenta entró?\n1. Efectivo Pesos\n2. Galicia\n3. Santander\n---\n"
+                "Listo, anoté un ingreso de $800.000 en Efectivo Pesos (Sueldo)."
+            ),
         },
         {
             "id": "P3.10", "punto": "Punto 3", "match": "exacto",
             "nombre": "Usuario con una sola billetera en pesos dice 'gasté 5000'",
             "ejecutar": lambda: p3_caso_10(datos),
-            "esperado": "Listo. $5.000 en Otros desde Efectivo Pesos — registrado.\nLa billetera quedó en negativo.",
+            "esperado": (
+                "Listo, anoté $5.000 en Otros desde Efectivo Pesos.\n"
+                "Efectivo Pesos quedó en negativo."
+            ),
         },
         {
             "id": "P4.1", "punto": "Punto 4", "match": "exacto",
             "nombre": "Operación a medias y manda 'hola'",
             "ejecutar": lambda: p4_caso_1(datos),
-            "esperado": "Hola. Tenías una operación a medias (anotar $5.000 en Kiosco). Podés completarla o empezar de nuevo.\nTambién podés registrar otro gasto, ingreso o consultar tus saldos.",
+            "esperado": (
+                "¡Hola! Quedó a medias anotar $5.000 en Kiosco.\n"
+                "Contestá la pregunta de arriba o mandame otro gasto."
+            ),
         },
         {
             "id": "P4.2", "punto": "Punto 4", "match": "exacto",
             "nombre": "Operación a medias y manda un gasto distinto",
             "ejecutar": lambda: p4_caso_2(datos),
-            "esperado": "Descarté la de $5.000 en Kiosco. Para los $12.000 en Verdulería:\n\n¿Desde qué billetera salió la plata?\n\n1. Efectivo Pesos\n2. Galicia\n3. Santander",
+            "esperado": (
+                "Dejé sin anotar los $5.000 de Kiosco.\n"
+                "Vamos con los $12.000 de Verdulería:\n\n"
+                "¿De qué cuenta salió?\n1. Efectivo Pesos\n2. Galicia\n3. Santander"
+            ),
         },
         {
             "id": "P4.3", "punto": "Punto 4", "match": "exacto",
@@ -141,13 +187,16 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P4.4", "punto": "Punto 4", "match": "exacto",
             "nombre": "Tras cancelar manda 'dale' (verifica 0 txs en BD)",
             "ejecutar": lambda: p4_caso_4(datos),
-            "esperado": "No tenés ninguna operación pendiente para confirmar. (txs_creadas=0)",
+            "esperado": "No tengo nada pendiente para confirmar. (txs_creadas=0)",
         },
         {
             "id": "P4.5", "punto": "Punto 4", "match": "exacto",
             "nombre": "Manda 'buenas' sin nada pendiente",
             "ejecutar": lambda: p4_caso_5(datos),
-            "esperado": "Hola. Podés registrar gastos, ingresos o consultar tus saldos y proyecciones. Por ejemplo: 'gasté 5000 en el kiosco'.",
+            "esperado": (
+                "¡Hola! Mandame un gasto, como _gasté 5000 en el kiosco_, "
+                "o preguntá _cuánta plata tengo_."
+            ),
         },
         {
             "id": "P4.6", "punto": "Punto 4", "match": "exacto",
@@ -159,13 +208,13 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P4.7", "punto": "Punto 4", "match": "exacto",
             "nombre": "Responde 31 minutos después",
             "ejecutar": lambda: p4_caso_7(datos),
-            "esperado": "Esa operación ya venció. Podés volver a mandarla.",
+            "esperado": "Pasó mucho tiempo y lo descarté. Mandámelo de nuevo.",
         },
         {
             "id": "P4.8", "punto": "Punto 4", "match": "exacto",
             "nombre": "Manda 'sí' sin nada pendiente",
             "ejecutar": lambda: p4_caso_8(datos),
-            "esperado": "No tenés ninguna operación pendiente para confirmar.",
+            "esperado": "No tengo nada pendiente para confirmar.",
         },
         {
             "id": "P4.VAR1", "punto": "Punto 4", "match": "exacto",
@@ -177,13 +226,13 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P4.VAR2", "punto": "Punto 4", "match": "exacto",
             "nombre": "Variante de no: 'no, fue en Santander'",
             "ejecutar": lambda: p4_variante_no(datos, "no, fue en Santander", billetera_propuesta="Galicia"),
-            "esperado": "Voy a anotar $5.000 en Kiosco desde Santander. ¿Va?",
+            "esperado": "¿Anoto $5.000 en Kiosco desde Santander?",
         },
         {
             "id": "P4.VAR3", "punto": "Punto 4", "match": "exacto",
             "nombre": "Variante de no: 'no fue en galicia'",
             "ejecutar": lambda: p4_variante_no(datos, "no fue en galicia", billetera_propuesta="Santander"),
-            "esperado": "Voy a anotar $5.000 en Kiosco desde Galicia. ¿Va?",
+            "esperado": "¿Anoto $5.000 en Kiosco desde Galicia?",
         },
         {
             "id": "P4.VAR4", "punto": "Punto 4", "match": "exacto",
@@ -207,31 +256,31 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P5.1", "punto": "Punto 5", "match": "contiene",
             "nombre": "Gasto repetido a los cinco minutos",
             "ejecutar": lambda: p5_caso_1(datos),
-            "esperado": "¿Es un movimiento nuevo o se te repitió?",
+            "esperado": "ya anotaste $5.000 en Kiosco. ¿Lo anoto otra vez?",
         },
         {
             "id": "P5.2", "punto": "Punto 5", "match": "contiene",
             "nombre": "Ante la pregunta de duplicado, responde que es nuevo",
             "ejecutar": lambda: p5_caso_2(datos),
-            "esperado": "Listo. $5.000 en Kiosco desde Galicia — registrado.",
+            "esperado": "Listo, anoté $5.000 en Kiosco desde Galicia.",
         },
         {
             "id": "P5.3", "punto": "Punto 5", "match": "exacto",
             "nombre": "Ante la pregunta de duplicado, responde que es un error",
             "ejecutar": lambda: p5_caso_3(datos),
-            "esperado": "Listo, no anoto nada.",
+            "esperado": "Listo, no lo anoto.",
         },
         {
             "id": "P5.4", "punto": "Punto 5", "match": "exacto",
             "nombre": "Gasto igual de hace dos horas (>1h)",
             "ejecutar": lambda: p5_caso_4(datos),
-            "esperado": "Listo. $5.000 en Kiosco desde Galicia — registrado.\nSi fue con otra, decime cuál.",
+            "esperado": "Listo, anoté $5.000 en Kiosco desde Galicia.",
         },
         {
             "id": "P5.5", "punto": "Punto 5", "match": "exacto",
             "nombre": "Mismo monto, otra categoría (sin advertencia)",
             "ejecutar": lambda: p5_caso_5(datos),
-            "esperado": "Listo. $5.000 en Farmacia desde Galicia — registrado.",
+            "esperado": "Listo, anoté $5.000 en Farmacia desde Galicia.",
         },
         {
             "id": "P5.6", "punto": "Punto 5", "match": "exacto",
@@ -243,13 +292,13 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P5.7", "punto": "Punto 5", "match": "exacto",
             "nombre": "Lote con dos movimientos idénticos",
             "ejecutar": lambda: p5_caso_7(datos),
-            "esperado": "Mandaste 2 movimientos iguales de $5.000 en Kiosco desde Galicia. ¿Son dos gastos distintos o se te repitió?",
+            "esperado": "Mandaste 2 veces $5.000 en Kiosco. ¿Anoto los dos?",
         },
         {
             "id": "P5.CUOTAS", "punto": "Punto 5", "match": "exacto",
             "nombre": "Cuotas de tarjeta no disparan falso positivo de duplicado",
             "ejecutar": lambda: p5_caso_cuotas(datos),
-            "esperado": "Listo. $5.000 en Kiosco desde Galicia — registrado.\nSi fue con otra, decime cuál.",
+            "esperado": "Listo, anoté $5.000 en Kiosco desde Galicia.",
         },
         {
             "id": "P6.1", "punto": "Punto 6", "match": "exacto",
@@ -257,7 +306,12 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto hoy", {
                 "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Galicia", "fecha": hoy.isoformat()
             }),
-            "esperado": "Propuesta:\nVoy a anotar $5.000 en Kiosco desde Galicia. ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Galicia — registrado.",
+            "esperado": (
+                "Propuesta:\n"
+                "¿Anoto $5.000 en Kiosco desde Galicia?\n"
+                "Confirmación:\n"
+                "Listo, anoté $5.000 en Kiosco desde Galicia."
+            ),
         },
         {
             "id": "P6.2", "punto": "Punto 6", "match": "exacto",
@@ -265,7 +319,12 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto ayer", {
                 "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Galicia", "fecha": ayer.isoformat()
             }),
-            "esperado": "Propuesta:\nVoy a anotar $5.000 en Kiosco desde Galicia (ayer). ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Galicia (ayer) — registrado.",
+            "esperado": (
+                "Propuesta:\n"
+                "¿Anoto $5.000 en Kiosco desde Galicia (ayer)?\n"
+                "Confirmación:\n"
+                "Listo, anoté $5.000 en Kiosco desde Galicia (ayer)."
+            ),
         },
         {
             "id": "P6.3", "punto": "Punto 6", "match": "exacto",
@@ -273,7 +332,12 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto 31 agosto", {
                 "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Galicia", "fecha": fecha_p63.isoformat()
             }),
-            "esperado": f"Propuesta:\nVoy a anotar $5.000 en Kiosco desde Galicia ({frase_p63}). ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Galicia ({frase_p63}) — registrado.",
+            "esperado": (
+                "Propuesta:\n"
+                f"¿Anoto $5.000 en Kiosco desde Galicia ({frase_p63})?\n"
+                "Confirmación:\n"
+                f"Listo, anoté $5.000 en Kiosco desde Galicia ({frase_p63})."
+            ),
         },
         {
             "id": "P6.4", "punto": "Punto 6", "match": "exacto",
@@ -281,7 +345,13 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto 3 meses", {
                 "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Galicia", "fecha": "2026-06-03"
             }),
-            "esperado": "Propuesta:\nNo puedo registrar movimientos de más de 60 días atrás. Va a quedar con fecha de hoy.\nVoy a anotar $5.000 en Kiosco desde Galicia. ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Galicia — registrado.",
+            "esperado": (
+                "Propuesta:\n"
+                "Solo anoto hasta 60 días para atrás: va con fecha de hoy.\n"
+                "¿Anoto $5.000 en Kiosco desde Galicia?\n"
+                "Confirmación:\n"
+                "Listo, anoté $5.000 en Kiosco desde Galicia."
+            ),
         },
         {
             "id": "P6.5", "punto": "Punto 6", "match": "exacto",
@@ -289,7 +359,13 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto futuro", {
                 "monto": 5000, "moneda": "ARS", "tipo": "egreso", "categoria": "Kiosco", "billetera_origen": "Galicia", "fecha": "2030-03-15"
             }),
-            "esperado": "Propuesta:\nNo puedo registrar movimientos con fecha futura porque todavía no ocurrieron. Va a quedar con fecha de hoy.\nVoy a anotar $5.000 en Kiosco desde Galicia. ¿Va?\nConfirmación:\nListo. $5.000 en Kiosco desde Galicia — registrado.",
+            "esperado": (
+                "Propuesta:\n"
+                "Todavía no pasó esa fecha: va con fecha de hoy.\n"
+                "¿Anoto $5.000 en Kiosco desde Galicia?\n"
+                "Confirmación:\n"
+                "Listo, anoté $5.000 en Kiosco desde Galicia."
+            ),
         },
         {
             "id": "P6.6", "punto": "Punto 6", "match": "exacto",
@@ -297,7 +373,13 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto USD", {
                 "monto": 50, "moneda": "USD", "tipo": "egreso", "categoria": "Otros", "billetera_origen": "Efectivo Dólares", "fecha": hoy.isoformat()
             }, forzar_cero=True),
-            "esperado": "Propuesta:\nVoy a anotar US$50 en Otros desde Efectivo Dólares. ¿Va?\nConfirmación:\nListo. US$50 en Otros desde Efectivo Dólares — registrado.\nLa billetera quedó en negativo.",
+            "esperado": (
+                "Propuesta:\n"
+                "¿Anoto US$50 en Otros desde Efectivo Dólares?\n"
+                "Confirmación:\n"
+                "Listo, anoté US$50 en Otros desde Efectivo Dólares.\n"
+                "Efectivo Dólares quedó en negativo."
+            ),
         },
         {
             "id": "P6.7", "punto": "Punto 6", "match": "exacto",
@@ -309,7 +391,19 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
                     {"monto": 10, "moneda": "USD", "tipo": "egreso", "categoria": "Farmacia", "fecha": hoy.isoformat()}
                 ]
             }, forzar_cero=True),
-            "esperado": "Propuesta:\nNo se pudo registrar Farmacia de US$10 porque es en dólares y la billetera Efectivo Pesos es en pesos.\nVoy a anotar 2 movimientos desde Efectivo Pesos:\n\n- $1.000 en Kiosco\n- $2.000 en Panadería (ayer)\n\n¿Va?\nConfirmación:\nListo, 2 movimientos desde Efectivo Pesos:\n\n- $1.000 en Kiosco\n- $2.000 en Panadería (ayer)\n\nRegistrados.\nLa billetera quedó en negativo.",
+            "esperado": (
+                "Propuesta:\n"
+                "No pude anotar Farmacia (US$10): "
+                "es en dólares y Efectivo Pesos es en pesos.\n"
+                "¿Anoto estos 2 gastos desde Efectivo Pesos?\n"
+                "- $1.000 en Kiosco\n"
+                "- $2.000 en Panadería · ayer\n"
+                "Confirmación:\n"
+                "Listo, anoté 2 gastos desde Efectivo Pesos:\n"
+                "- $1.000 en Kiosco\n"
+                "- $2.000 en Panadería · ayer\n"
+                "Efectivo Pesos quedó en negativo."
+            ),
         },
         {
             "id": "P6.8", "punto": "Punto 6", "match": "exacto",
@@ -317,7 +411,13 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Gasto negativo", {
                 "monto": 5000000, "moneda": "ARS", "tipo": "egreso", "categoria": "Supermercado", "billetera_origen": "Galicia", "fecha": hoy.isoformat()
             }),
-            "esperado": "Propuesta:\nVoy a anotar $5.000.000 en Supermercado desde Galicia. ¿Va?\nConfirmación:\nListo. $5.000.000 en Supermercado desde Galicia — registrado.\nLa billetera quedó en negativo.",
+            "esperado": (
+                "Propuesta:\n"
+                "¿Anoto $5.000.000 en Supermercado desde Galicia?\n"
+                "Confirmación:\n"
+                "Listo, anoté $5.000.000 en Supermercado desde Galicia.\n"
+                "Galicia quedó en negativo."
+            ),
         },
         {
             "id": "P6.9", "punto": "Punto 6", "match": "exacto",
@@ -325,7 +425,12 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "ejecutar": lambda: p6_ejecutar_caso(datos, "Ingreso", {
                 "monto": 80000, "moneda": "ARS", "tipo": "ingreso", "categoria": "Sueldo", "billetera_destino": "Galicia", "fecha": hoy.isoformat()
             }),
-            "esperado": "Propuesta:\nVoy a registrar un ingreso de $80.000 en Sueldo a Galicia. ¿Va?\nConfirmación:\nListo. Ingreso de $80.000 en Sueldo a Galicia — registrado.",
+            "esperado": (
+                "Propuesta:\n"
+                "¿Anoto un ingreso de $80.000 en Galicia (Sueldo)?\n"
+                "Confirmación:\n"
+                "Listo, anoté un ingreso de $80.000 en Galicia (Sueldo)."
+            ),
         },
         {
             "id": "P6.10", "punto": "Punto 6", "match": "exacto",
@@ -336,7 +441,16 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
                     {"monto": 20, "moneda": "USD", "tipo": "egreso", "categoria": "Supermercado", "fecha": hoy.isoformat()}
                 ]
             }),
-            "esperado": "Propuesta:\nNo se pudo registrar Farmacia de US$10 porque es en dólares y la billetera Efectivo Pesos es en pesos.\nNo se pudo registrar Supermercado de US$20 porque es en dólares y la billetera Efectivo Pesos es en pesos.\nNo se puede registrar ningún movimiento.\nConfirmación:\nNO_APLICA",
+            "esperado": (
+                "Propuesta:\n"
+                "No pude anotar Farmacia (US$10): "
+                "es en dólares y Efectivo Pesos es en pesos.\n"
+                "No pude anotar Supermercado (US$20): "
+                "es en dólares y Efectivo Pesos es en pesos.\n"
+                "No pude anotar ninguno.\n"
+                "Confirmación:\n"
+                "NO_APLICA"
+            ),
         },
         {
             "id": "P7.1", "punto": "Punto 7", "match": "exacto",
@@ -384,31 +498,53 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P8.1", "punto": "Punto 8", "match": "exacto",
             "nombre": "Registrar un gasto y decir 'borrá eso', confirmar, verificar borrado y reversión de saldo",
             "ejecutar": lambda: p8_caso_1(datos),
-            "esperado": "Propuesta:\n¿Querés eliminar el último movimiento de $5.000 en Kiosco desde Galicia? ¿Confirmás?\nConfirmación:\nListo, movimiento eliminado.\nBorrado: True | Saldo restaurado: True",
+            "esperado": (
+                "Propuesta:\n"
+                "¿Borro $5.000 en Kiosco desde Galicia?\n"
+                "Confirmación:\n"
+                "Listo, lo borré.\n"
+                "Borrado: True | Saldo restaurado: True"
+            ),
         },
         {
             "id": "P8.2", "punto": "Punto 8", "match": "exacto",
             "nombre": "Decir 'borrá eso' sin nada registrado",
             "ejecutar": lambda: p8_caso_2(datos),
-            "esperado": "No tenés ningún movimiento reciente registrado por WhatsApp para deshacer. Podés gestionarlo desde la web de Argentum.",
+            "esperado": (
+                "No anotaste nada por acá en los últimos 30 minutos. "
+                "Borralo en miargentum.com"
+            ),
         },
         {
             "id": "P8.3", "punto": "Punto 8", "match": "exacto",
             "nombre": "Decir 'borrá eso' dos veces seguidas",
             "ejecutar": lambda: p8_caso_3(datos),
-            "esperado": "No hay nada para deshacer.",
+            "esperado": "No hay nada para borrar.",
         },
         {
             "id": "P8.4", "punto": "Punto 8", "match": "exacto",
             "nombre": "Registrar gasto y decir 'eran 3.000 no 30.000', confirmar, verificar monto y saldo",
             "ejecutar": lambda: p8_caso_4(datos),
-            "esperado": "Propuesta:\nVoy a corregir el último movimiento:\nAntes: $30.000 en Supermercado desde Galicia\nAhora: $3.000 en Supermercado desde Galicia\n¿Confirmás?\nConfirmación:\nListo, movimiento corregido.\nMonto corregido: True | Saldo ajustado (+27k): True",
+            "esperado": (
+                "Propuesta:\n"
+                "¿Lo cambio de $30.000 a $3.000?\n"
+                "Confirmación:\n"
+                "Listo, quedó $3.000 en Supermercado desde Galicia.\n"
+                "Monto corregido: True | Saldo ajustado (+27k): True"
+            ),
         },
         {
             "id": "P8.5", "punto": "Punto 8", "match": "exacto",
             "nombre": "Registrar un gasto y decir 'eso era supermercado', verificar la categoría",
             "ejecutar": lambda: p8_caso_5(datos),
-            "esperado": "Propuesta:\nVoy a corregir el último movimiento:\nAntes: $5.000 en Kiosco desde Galicia\nAhora: $5.000 en Supermercado desde Galicia\n¿Confirmás?\nConfirmación:\nListo, movimiento corregido.\n\n¿Siempre que diga \"kiosco\" lo pongo en Supermercado? Respondé sí o no.\nCategoría final: Supermercado",
+            "esperado": (
+                "Propuesta:\n"
+                "¿Lo cambio de Kiosco a Supermercado?\n"
+                "Confirmación:\n"
+                "Listo, lo pasé a Supermercado.\n"
+                "¿Siempre que digas _kiosco_ lo pongo ahí?\n"
+                "Categoría final: Supermercado"
+            ),
         },
         {
             "id": "P8.5b", "punto": "Punto 8", "match": "exacto",
@@ -426,43 +562,73 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P8.5d", "punto": "Punto 8", "match": "exacto",
             "nombre": "Confirmar memoria y aplicar a movimientos anteriores ('sí' y 'sí')",
             "ejecutar": lambda: p8_caso_5d(datos),
-            "esperado": "Propuesta anteriores:\nListo, lo voy a recordar. Tenés 1 movimiento(s) anterior(es) de \"kiosco\" en otra categoría. ¿Los paso también a Supermercado? Respondé sí o no.\nConfirmación anteriores:\nListo: 1 movimiento(s) actualizado(s).\nCategoría anterior final: Supermercado",
+            "esperado": (
+                "Propuesta anteriores:\n"
+                "Listo, lo voy a recordar.\n"
+                "¿Paso también el gasto anterior de _kiosco_ a Supermercado?\n"
+                "Confirmación anteriores:\n"
+                "Listo, pasé 1 gasto a Supermercado.\n"
+                "Categoría anterior final: Supermercado"
+            ),
         },
         {
             "id": "P8.6", "punto": "Punto 8", "match": "exacto",
             "nombre": "Registrar un gasto y decir 'fue con Santander', verificar billetera y los dos saldos",
             "ejecutar": lambda: p8_caso_6(datos),
-            "esperado": "Propuesta:\nVoy a corregir el último movimiento:\nAntes: $5.000 en Kiosco desde Galicia\nAhora: $5.000 en Kiosco desde Santander\n¿Confirmás?\nConfirmación:\nListo, movimiento corregido.\nBilletera Santander: True | Saldo Galicia revertido: True | Saldo Santander descontado: True",
+            "esperado": (
+                "Propuesta:\n"
+                "¿Lo cambio de Galicia a Santander?\n"
+                "Confirmación:\n"
+                "Listo, quedó $5.000 en Kiosco desde Santander.\n"
+                "Billetera Santander: True | Saldo Galicia revertido: True | "
+                "Saldo Santander descontado: True"
+            ),
         },
         {
             "id": "P8.7", "punto": "Punto 8", "match": "exacto",
             "nombre": "Registrar un gasto y decir 'fue ayer', verificar la fecha",
             "ejecutar": lambda: p8_caso_7(datos),
-            "esperado": "Propuesta:\nVoy a corregir el último movimiento:\nAntes: $5.000 en Kiosco desde Galicia\nAhora: $5.000 en Kiosco desde Galicia (ayer)\n¿Confirmás?\nConfirmación:\nListo, movimiento corregido.\nFecha ayer: True",
+            "esperado": (
+                "Propuesta:\n"
+                "¿Lo cambio de hoy a ayer?\n"
+                "Confirmación:\n"
+                "Listo, quedó $5.000 en Kiosco desde Galicia (ayer).\n"
+                "Fecha ayer: True"
+            ),
         },
         {
             "id": "P8.8", "punto": "Punto 8", "match": "exacto",
             "nombre": "Corregir dos campos en un mismo mensaje (monto y billetera)",
             "ejecutar": lambda: p8_caso_8(datos),
-            "esperado": "Propuesta:\nVoy a corregir el último movimiento:\nAntes: $10.000 en Kiosco desde Galicia\nAhora: $3.000 en Kiosco desde Santander\n¿Confirmás?\nConfirmación:\nListo, movimiento corregido.\nMonto 3000: True | Santander: True",
+            "esperado": (
+                "Propuesta:\n"
+                "¿Lo dejo en $3.000 en Kiosco desde Santander?\n"
+                "Confirmación:\n"
+                "Listo, quedó $3.000 en Kiosco desde Santander.\n"
+                "Monto 3000: True | Santander: True"
+            ),
         },
         {
             "id": "P8.9", "punto": "Punto 8", "match": "exacto",
             "nombre": "Intentar deshacer una cuota de tarjeta y verificar que se rechaza",
             "ejecutar": lambda: p8_caso_9(datos),
-            "esperado": "Ese movimiento corresponde a una cuota de tarjeta y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum.",
+            "esperado": "Las cuotas de tarjeta no se borran por acá. Borrala en miargentum.com",
         },
         {
             "id": "P8.10", "punto": "Punto 8", "match": "exacto",
             "nombre": "Intentar corregir pasado el plazo (>30 min)",
             "ejecutar": lambda: p8_caso_10(datos),
-            "esperado": "El último movimiento fue hace más de 30 minutos. Para modificarlo, ingresá a la web de Argentum.",
+            "esperado": "Pasaron más de 30 minutos. Cambialo en miargentum.com",
         },
         {
             "id": "P8.11", "punto": "Punto 8", "match": "exacto",
             "nombre": "Con propuesta pendiente, 'no, fue en Santander' corrige propuesta y no movimiento anterior",
             "ejecutar": lambda: p8_caso_11(datos),
-            "esperado": "Respuesta:\nVoy a corregir el último movimiento:\nAntes: $5.000 en Kiosco desde Galicia\nAhora: $5.000 en Kiosco desde Santander\n¿Confirmás?\nMovimiento anterior intacto en Efectivo Pesos: True",
+            "esperado": (
+                "Respuesta:\n"
+                "¿Lo cambio de Galicia a Santander?\n"
+                "Movimiento anterior intacto en Efectivo Pesos: True"
+            ),
         },
         {
             "id": "P9.1", "punto": "Punto 9A", "match": "contiene",
@@ -474,25 +640,35 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P9.2", "punto": "Punto 9A", "match": "exacto",
             "nombre": "gasté 30000 con la Visa: pregunta cuál de las dos",
             "ejecutar": lambda: p9_caso_2(datos),
-            "esperado": "¿Con qué tarjeta de crédito fue?\n1. •••• 1506 (Visa - Galicia)\n2. •••• 5077 (Visa - Santander)",
+            "esperado": (
+                "¿Con qué tarjeta fue?\n"
+                "1. Visa Galicia •••• 1506\n"
+                "2. Visa Santander •••• 5077"
+            ),
         },
         {
             "id": "P9.3", "punto": "Punto 9A", "match": "contiene",
             "nombre": "gasté 30000 con la del Santander: resuelve la 5077",
             "ejecutar": lambda: p9_caso_3(datos),
-            "esperado": "con tarjeta •••• 5077",
+            "esperado": "con la Visa Santander •••• 5077",
         },
         {
             "id": "P9.4", "punto": "Punto 9A", "match": "contiene",
             "nombre": "compré una tele en 12 cuotas de 80000: propone 12 cuotas de 80.000, total 960.000",
             "ejecutar": lambda: p9_caso_4(datos),
-            "esperado": "12 cuotas de $80.000 (total $960.000)",
+            "esperado": (
+                "12 cuotas de $80.000 en Equipos con la Visa Galicia •••• 1506 "
+                "($960.000)."
+            ),
         },
         {
             "id": "P9.5", "punto": "Punto 9A", "match": "contiene",
             "nombre": "gasté 80000 en 12 cuotas: propone 12 cuotas de 6.666,67, total 80.000",
             "ejecutar": lambda: p9_caso_5(datos),
-            "esperado": "12 cuotas de $6.666,67 (total $80.000)",
+            "esperado": (
+                "12 cuotas de $6.666,67 en Otros con la Visa Galicia •••• 1506 "
+                "($80.000)."
+            ),
         },
         {
             "id": "P9.6", "punto": "Punto 9A", "match": "contiene",
@@ -504,13 +680,16 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P9.7", "punto": "Punto 9A", "match": "contiene",
             "nombre": "gasté 5000 con la Visa del Galicia: resuelve la tarjeta 1506",
             "ejecutar": lambda: p9_caso_7(datos),
-            "esperado": "con tarjeta •••• 1506",
+            "esperado": "con la Visa Galicia •••• 1506",
         },
         {
             "id": "P9.8", "punto": "Punto 9A", "match": "exacto",
             "nombre": "pagué el resumen de la tarjeta: explica que se hace desde la web, no registra nada",
             "ejecutar": lambda: p9_caso_8(datos),
-            "esperado": "El pago del resumen de la tarjeta se gestiona desde la web de Argentum. No se puede realizar por WhatsApp. | Txs creadas: 0",
+            "esperado": (
+                "El pago del resumen se carga en miargentum.com, no por acá. "
+                "| Txs creadas: 0"
+            ),
         },
         {
             "id": "P9.9", "punto": "Punto 9A", "match": "contiene",
@@ -522,13 +701,16 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P9.10", "punto": "Punto 9A", "match": "contiene",
             "nombre": "Registrar un consumo con tarjeta y deshacerlo: verifica que se borren padre, grupo y cuotas",
             "ejecutar": lambda: p9_caso_10(datos),
-            "esperado": "Listo, movimiento eliminado.\nPadres restantes: 0",
+            "esperado": "Listo, lo borré.\nPadres restantes: 0",
         },
         {
             "id": "P9.11", "punto": "Punto 9A", "match": "exacto",
             "nombre": "Un usuario sin tarjetas dice 'gasté 5000 con la tarjeta': mensaje claro",
             "ejecutar": lambda: p9_caso_11(datos),
-            "esperado": "No tenés ninguna tarjeta de crédito cargada en Argentum. Podés agregarla desde la web, o registrar este movimiento como un gasto común con alguna de tus billeteras.",
+            "esperado": (
+                "No tenés tarjetas de crédito cargadas.\n"
+                "Agregala en miargentum.com o decime de qué cuenta salió y lo anoto como gasto."
+            ),
         },
         {
             "id": "P9.12", "punto": "Punto 9A", "match": "contiene",
@@ -547,7 +729,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "nombre": "me transferí 20000 a Santander: pregunta el origen o usa la principal, según corresponda",
             "ejecutar": lambda: p9b_caso_2(datos),
             "esperado": (
-                "¿Desde qué cuenta pasaste los $20.000 a Santander?\n\n"
+                "¿Desde qué cuenta pasaste los $20.000 a Santander?\n"
                 "1. Galicia\n2. Efectivo Pesos"
             ),
         },
@@ -564,7 +746,10 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P9B.4", "punto": "Punto 9B", "match": "contiene",
             "nombre": "saqué 50000 del cajero con un usuario sin billetera de efectivo: mensaje claro, no registra",
             "ejecutar": lambda: p9b_caso_4(datos),
-            "esperado": "No tenés ninguna billetera de efectivo en pesos. Podés crearla desde la web de Argentum. | No registra: True",
+            "esperado": (
+                "No tenés una cuenta de efectivo en pesos. "
+                "Creala en miargentum.com | No registra: True"
+            ),
         },
         {
             "id": "P9B.5", "punto": "Punto 9B", "match": "contiene",
@@ -576,7 +761,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P9B.6", "punto": "Punto 9B", "match": "exacto",
             "nombre": "compré 100 dólares: pregunta la cotización o los pesos",
             "ejecutar": lambda: p9b_caso_6(datos),
-            "esperado": "¿A qué cotización compraste o cuántos pesos pagaste?",
+            "esperado": "¿A cuánto compraste o cuántos pesos pagaste?",
         },
         {
             "id": "P9B.7", "punto": "Punto 9B", "match": "contiene",
@@ -588,7 +773,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P9B.8", "punto": "Punto 9B", "match": "contiene",
             "nombre": "compré 100 dólares a 5: advierte que la cotización es absurda",
             "ejecutar": lambda: p9b_caso_8(datos),
-            "esperado": "La cotización de $5 por dólar no parece razonable",
+            "esperado": "¿$5 por dólar? Hoy el dólar está a",
         },
         {
             "id": "P9B.9", "punto": "Punto 9B", "match": "contiene",
@@ -600,7 +785,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P9B.10", "punto": "Punto 9B", "match": "contiene",
             "nombre": "gasté 5000 en el kiosco: sigue siendo un gasto",
             "ejecutar": lambda: p9b_caso_10(datos),
-            "esperado": "Listo. $5.000 en Kiosco desde Galicia — registrado.\nSi fue con otra, decime cuál.",
+            "esperado": "Listo, anoté $5.000 en Kiosco desde Galicia.",
         },
         {
             "id": "P9B.11", "punto": "Punto 9B", "match": "contiene",
@@ -612,7 +797,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P9B.12", "punto": "Punto 9B", "match": "exacto",
             "nombre": "Transferencia con origen y destino iguales: se rechaza",
             "ejecutar": lambda: p9b_caso_12(datos),
-            "esperado": "La billetera de origen y destino no pueden ser la misma.",
+            "esperado": "Pusiste la misma cuenta de los dos lados. ¿A qué otra cuenta lo pasaste?",
         },
         {
             "id": "P9B.13", "punto": "Punto 9B", "match": "contiene",
@@ -624,37 +809,43 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P9B.14", "punto": "Punto 9B", "match": "contiene",
             "nombre": "compré 100 dólares y responder 1500: cotización unitaria",
             "ejecutar": lambda: p9b_caso_14(datos),
-            "esperado": "compra de US$100 a $1.500: salen $150.000",
+            "esperado": "Salen $150.000 de Galicia y entran US$100 a Efectivo Dólares (a $1.500).",
         },
         {
             "id": "P9B.15", "punto": "Punto 9B", "match": "contiene",
             "nombre": "compré 100 dólares y responder 150000: monto total",
             "ejecutar": lambda: p9b_caso_15(datos),
-            "esperado": "compra de US$100 a $1.500: salen $150.000",
+            "esperado": "Salen $150.000 de Galicia y entran US$100 a Efectivo Dólares (a $1.500).",
         },
         {
             "id": "P9B.16", "punto": "Punto 9B", "match": "contiene",
             "nombre": "compré 100 dólares a 15: debe advertir, con la cotización de referencia en el mensaje",
             "ejecutar": lambda: p9b_caso_16(datos),
-            "esperado": "la cotización de referencia es de",
+            "esperado": "¿$15 por dólar? Hoy el dólar está a",
         },
         {
             "id": "P9B.17", "punto": "Punto 9B", "match": "contiene",
             "nombre": "compré 100 dólares a 1500 con la tabla de cotizaciones vacía: no rechaza, pide confirmación",
             "ejecutar": lambda: p9b_caso_17(datos),
-            "esperado": "Voy a registrar una compra de US$100 a $1.500: salen $150.000",
+            "esperado": "Salen $150.000 de Galicia y entran US$100 a Efectivo Dólares (a $1.500).",
         },
         {
             "id": "P9B.18", "punto": "Punto 9B", "match": "contiene",
             "nombre": "pasé 50000 de Galicia a Efectivo USD: no transfiere 1:1, pregunta cotización o dólares",
             "ejecutar": lambda: p9b_caso_18(datos),
-            "esperado": "¿A qué cotización compraste o cuántos dólares recibís en Efectivo Dólares? | Sin acreditar 1a1: True",
+            "esperado": (
+                "¿A cuánto compraste o cuántos dólares entraron en Efectivo Dólares? | "
+                "Sin acreditar 1a1: True"
+            ),
         },
         {
             "id": "P9B.19", "punto": "Punto 9B", "match": "contiene",
             "nombre": "pasé 50 de Efectivo USD a Galicia: no transfiere 1:1, pregunta cotización o pesos",
             "ejecutar": lambda: p9b_caso_19(datos),
-            "esperado": "¿A qué cotización vendiste o cuántos pesos recibís en Galicia? | Sin acreditar 1a1: True",
+            "esperado": (
+                "¿A cuánto vendiste o cuántos pesos entraron en Galicia? | "
+                "Sin acreditar 1a1: True"
+            ),
         },
         {
             "id": "P9B.20", "punto": "Punto 9B", "match": "contiene",
@@ -672,7 +863,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P10.2", "punto": "Punto 10", "match": "contiene",
             "nombre": "gasté 5000 en Disney+: sigue siendo un gasto suelto",
             "ejecutar": lambda: p10_caso_2(datos),
-            "esperado": "Listo. $5.000 en Streaming desde Galicia — registrado.\nSi fue con otra, decime cuál.",
+            "esperado": "Listo, anoté $5.000 en Streaming desde Galicia.",
         },
         {
             "id": "P10.3", "punto": "Punto 10", "match": "exacto",
@@ -684,7 +875,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P10.4", "punto": "Punto 10", "match": "exacto",
             "nombre": "pagué el Spotify: pregunta si es gasto único o suscripción",
             "ejecutar": lambda: p10_caso_4(datos),
-            "esperado": "¿Es un gasto único o una suscripción a Spotify?",
+            "esperado": "¿Spotify lo pagás todos los meses?",
         },
         {
             "id": "P10.5", "punto": "Punto 10", "match": "exacto",
@@ -696,7 +887,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P10.6", "punto": "Punto 10", "match": "exacto",
             "nombre": "di de baja Netflix sin tenerla: mensaje claro",
             "ejecutar": lambda: p10_caso_6(datos),
-            "esperado": "No tenés ninguna suscripción activa a Netflix.",
+            "esperado": "No tenés ninguna suscripción a Netflix.",
         },
         {
             "id": "P10.7", "punto": "Punto 10", "match": "exacto",
@@ -921,240 +1112,6 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "esperado": "Intent: consultar_gastos | Falla manejada: True",
         },
         {
-            "id": "P14.1", "punto": "Punto 14", "match": "exacto",
-            "nombre": "gasté 5000 en el kiosco: registro directo en el acto",
-            "ejecutar": lambda: p14_caso_1(datos),
-            "esperado": "Resp ok: True | Txs: 1 | Saldo: -5000.00 | Accion ejecutada: True | Propuesta pendiente: True",
-        },
-        {
-            "id": "P14.2", "punto": "Punto 14", "match": "exacto",
-            "nombre": "lote de 2: registra directo 2 movimientos con accion_ejecutada lote:id1,id2",
-            "ejecutar": lambda: p14_caso_2(datos),
-            "esperado": "Resp ok: True | Txs: 2 | Accion lote: True",
-        },
-        {
-            "id": "P14.3", "punto": "Punto 14", "match": "exacto",
-            "nombre": "ingreso simple: registra en el acto",
-            "ejecutar": lambda: p14_caso_3(datos),
-            "esperado": "Resp ok: True | Txs: 1 | Saldo: +800000.00",
-        },
-        {
-            "id": "P14.4", "punto": "Punto 14", "match": "exacto",
-            "nombre": "compra con tarjeta de crédito en cuotas: NO registra directo, pide confirmación",
-            "ejecutar": lambda: p14_caso_4(datos),
-            "esperado": "Pide conf: True | Txs antes de si: 0 | Txs despues de si: True | Confirma ok: True",
-        },
-        {
-            "id": "P14.5", "punto": "Punto 14", "match": "exacto",
-            "nombre": "el mismo gasto dos veces seguidas: el segundo pregunta por duplicado y no registra",
-            "ejecutar": lambda: p14_caso_5(datos),
-            "esperado": "Pregunta duplicado: True | Txs totales: 1",
-        },
-        {
-            "id": "P14.6", "punto": "Punto 14", "match": "exacto",
-            "nombre": "confianza 0.70: resultado idéntico a HEAD y 0 transacciones",
-            "ejecutar": lambda: p14_caso_6(datos),
-            "esperado": "Coincide con HEAD: True | Txs creadas: 0",
-        },
-        {
-            "id": "P14.7", "punto": "Punto 14", "match": "exacto",
-            "nombre": "sí justo después de un registro directo: mensaje claro y 0 transacciones nuevas",
-            "ejecutar": lambda: p14_caso_7(datos),
-            "esperado": "Resp ok: True | Txs nuevas: 0",
-        },
-        {
-            "id": "P14.8", "punto": "Punto 14", "match": "exacto",
-            "nombre": "registro directo, deshacer y sí: borra transacción y restaura saldo",
-            "ejecutar": lambda: p14_caso_8(datos),
-            "esperado": "Deshacer ok: True | Txs restantes: 0 | Saldo restaurado: True",
-        },
-        {
-            "id": "P14.9", "punto": "Punto 14", "match": "exacto",
-            "nombre": "registro directo y eran 3000 no 5000: corrige monto y saldo",
-            "ejecutar": lambda: p14_caso_9(datos),
-            "esperado": "Monto corregido: True | Saldo ok: True | Confirmacion: True",
-        },
-        {
-            "id": "P14.10", "punto": "Punto 14", "match": "exacto",
-            "nombre": "falla forzada: rollback limpio, 0 transacciones, saldo intacto, ninguna propuesta y sí posterior inocuo",
-            "ejecutar": lambda: p14_caso_10(datos),
-            "esperado": "Sin listo: True | Txs creadas: 0 | Saldo intacto: True | Propuesta pendiente: True | Txs despues si: 0",
-        },
-        {
-            "id": "P14.11", "punto": "Punto 14", "match": "exacto",
-            "nombre": "idempotencia: el mismo wamid dos veces resulta en 1 sola transacción",
-            "ejecutar": lambda: p14_caso_11(datos),
-            "esperado": "Txs creadas: 1",
-        },
-        {
-            "id": "P14.12", "punto": "Punto 14", "match": "exacto",
-            "nombre": "billetera ambigua: pregunta cuál; al responder registra en el acto",
-            "ejecutar": lambda: p14_caso_12(datos),
-            "esperado": "Pregunta ok: True | Txs antes eleccion: 0 | Registro ok: True | Txs creadas: 1",
-        },
-        {
-            "id": "P14.13", "punto": "Punto 14", "match": "exacto",
-            "nombre": "origen imagen sin simular imágenes: tras elegir billetera pide confirmación y recién con sí registra",
-            "ejecutar": lambda: p14_caso_13(datos),
-            "esperado": "Pide conf: True | Txs antes si: 0 | Txs despues si: 1 | Confirma ok: True",
-        },
-        {
-            "id": "P14.14", "punto": "Punto 14", "match": "exacto",
-            "nombre": "lote con todos los ítems inválidos: mensaje claro, 0 transacciones y sin propuesta",
-            "ejecutar": lambda: p14_caso_14(datos),
-            "esperado": "Msg ok: True | Txs creadas: 0 | Propuesta pendiente: True",
-        },
-        {
-            "id": "P14.15", "punto": "Punto 14", "match": "exacto",
-            "nombre": "lote con un ítem inválido y uno válido: registra el válido con aviso previo al Listo",
-            "ejecutar": lambda: p14_caso_15(datos),
-            "esperado": "Aviso descarte: True | Listo ok: True | Orden ok: True | Txs: 1",
-        },
-        {
-            "id": "P14.16", "punto": "Punto 14", "match": "exacto",
-            "nombre": "confianza baja con billetera pendiente: tras elegir billetera pide confirmación y recién con sí registra",
-            "ejecutar": lambda: p14_caso_16(datos),
-            "esperado": "Pide conf: True | Txs antes si: 0 | Txs despues si: 1 | Confirma ok: True",
-        },
-        {
-            "id": "P14.17", "punto": "Punto 14", "match": "exacto",
-            "nombre": "control sin marcas con billetera pendiente: tras elegir billetera registra directo",
-            "ejecutar": lambda: p14_caso_17(datos),
-            "esperado": "Registra directo: True | Txs: 1",
-        },
-        {
-            "id": "P16.1", "punto": "Punto 16", "match": "exacto",
-            "nombre": "Aporte simple con meta y monto claros: propone, confirma, aumenta monto_actual y crea tx",
-            "ejecutar": lambda: p16_caso_1(datos),
-            "esperado": "Propuesta ok: True | Confirmado ok: True | Monto sumado: 15000 | Tx desc ok: True | Saldo Galicia ok: True",
-        },
-        {
-            "id": "P16.2", "punto": "Punto 16", "match": "exacto",
-            "nombre": "Meta ambigua: pregunta cuál antes de proponer",
-            "ejecutar": lambda: p16_caso_2(datos),
-            "esperado": "Pregunta ambigua: True | Txs creadas: 0 | Sin propuesta pendiente: True",
-        },
-        {
-            "id": "P16.3", "punto": "Punto 16", "match": "exacto",
-            "nombre": "Meta inexistente: mensaje claro, no propone nada",
-            "ejecutar": lambda: p16_caso_3(datos),
-            "esperado": "Mensaje claro: True | Txs creadas: 0 | Sin propuesta pendiente: True",
-        },
-        {
-            "id": "P16.4", "punto": "Punto 16", "match": "exacto",
-            "nombre": "Monto que completa o supera el objetivo: confirma y felicita",
-            "ejecutar": lambda: p16_caso_4(datos),
-            "esperado": "Propuesta ok: True | Felicita: True | Monto actual: 13000 | Estado completada: True",
-        },
-        {
-            "id": "P16.5", "punto": "Punto 16", "match": "exacto",
-            "nombre": "'No' cancela la propuesta sin tocar la meta",
-            "ejecutar": lambda: p16_caso_5(datos),
-            "esperado": "Cancelado: True | Meta intacta: True | Txs creadas: 0 | Saldo intacto: True",
-        },
-        {
-            "id": "P16.6", "punto": "Punto 16", "match": "exacto",
-            "nombre": "Deshacer un aporte recién confirmado: revierte monto_actual y borra la transacción",
-            "ejecutar": lambda: p16_caso_6(datos),
-            "esperado": "Propuesta deshacer ok: True | Confirmacion deshacer ok: True | Meta revertida: True | Tx borrada: True | Saldo restaurado: True",
-        },
-        {
-            "id": "P10.13", "punto": "Punto 10", "match": "exacto",
-            "nombre": "alta de gimnasio por WhatsApp con categoría sugerida",
-            "ejecutar": lambda: p10_caso_13(datos),
-            "esperado": "Cat: Ocio / Deportes y gimnasio | Conf: True",
-        },
-        {
-            "id": "P17.1", "punto": "Punto 17", "match": "exacto",
-            "nombre": "mensaje con fecha y Uber es nuevo movimiento, no corrección",
-            "ejecutar": lambda: p17_caso_1(datos),
-            "esperado": "No correccion: True | Nuevo monto 5456: True | Subcat Taxi/Apps: True | Fecha 23/09: True | Anterior intacto: True",
-        },
-        {
-            "id": "P17.2", "punto": "Punto 17", "match": "exacto",
-            "nombre": "lote de 3 movimientos con fecha previa y transferencia recibida",
-            "ejecutar": lambda: p17_caso_2(datos),
-            "esperado": "Lote 3 txs: True | 2 egresos 1 ingreso: True | Todas 27/09: True",
-        },
-        {
-            "id": "P17.3", "punto": "Punto 17", "match": "exacto",
-            "nombre": "lote con frase introductoria y fecha previa",
-            "ejecutar": lambda: p17_caso_3(datos),
-            "esperado": "Lote 2 txs: True | 2 egresos: True | Ambas 27/09: True",
-        },
-        {
-            "id": "P17.4", "punto": "Punto 17", "match": "exacto",
-            "nombre": "corrección explícita de fecha con formato numérico y visualización en Ahora",
-            "ejecutar": lambda: p17_caso_4(datos),
-            "esperado": "Propuesta visible fecha: True | Confirmado ok: True | Fecha actualizada: True",
-        },
-        {
-            "id": "P17.5", "punto": "Punto 17", "match": "exacto",
-            "nombre": "lote mixto con Uber y transferencia a persona no se bloquea",
-            "ejecutar": lambda: p17_caso_5(datos),
-            "esperado": "Sin bloqueo: True | 2 egresos creados: True",
-        },
-        {
-            "id": "P17.6", "punto": "Punto 17", "match": "exacto",
-            "nombre": "lote con transferencia entre cuentas propias se bloquea",
-            "ejecutar": lambda: p17_caso_6(datos),
-            "esperado": "Bloqueo transferencias propias: True | Creadas: 0",
-        },
-        {
-            "id": "P17.7", "punto": "Punto 17", "match": "exacto",
-            "nombre": "Didi clasificado en Transporte / Taxi / Apps",
-            "ejecutar": lambda: p17_caso_7(datos),
-            "esperado": "Subcategoria Taxi/Apps: True | Categoria Transporte: True",
-        },
-        {
-            "id": "P17.8", "punto": "Punto 17", "match": "exacto",
-            "nombre": "Didi Taxi vs Rappi vs Didi Food",
-            "ejecutar": lambda: p17_caso_8(datos),
-            "esperado": "Categorias ajustadas ok: True",
-        },
-        {
-            "id": "P17.9", "punto": "Punto 17", "match": "exacto",
-            "nombre": "ingreso con fecha distinta no dispara pregunta de duplicado",
-            "ejecutar": lambda: p17_caso_9(datos),
-            "esperado": "Sin pregunta duplicado: True | Segundo ingreso: True | Fecha distinta 22/09: True | Fecha igual IA: True",
-        },
-        {
-            "id": "P17.10", "punto": "Punto 17", "match": "exacto",
-            "nombre": "confirmación de lote tras duplicado usa signos y categorías",
-            "ejecutar": lambda: p17_caso_10(datos),
-            "esperado": "Pregunta duplicado ok: True | Confirmacion con signos: True",
-        },
-        {
-            "id": "P17.11", "punto": "Punto 17", "match": "exacto",
-            "nombre": "corrección real de monto sigue funcionando",
-            "ejecutar": lambda: p17_caso_11(datos),
-            "esperado": "Propuesta correccion monto: True | Monto corregido: True",
-        },
-        {
-            "id": "P17.12", "punto": "Punto 17", "match": "exacto",
-            "nombre": "le transferí a persona es egreso",
-            "ejecutar": lambda: p17_caso_12(datos),
-            "esperado": "Tipo egreso: True",
-        },
-        {
-            "id": "P17.13", "punto": "Punto 17", "match": "exacto",
-            "nombre": "persona me transfirió es ingreso",
-            "ejecutar": lambda: p17_caso_13(datos),
-            "esperado": "Tipo ingreso: True",
-        },
-        {
-            "id": "P17.14", "punto": "Punto 17", "match": "exacto",
-            "nombre": "pago a tercero y transferencia entre cuentas propias se bloquea",
-            "ejecutar": lambda: p17_caso_14(datos),
-            "esperado": "Bloqueo transferencias propias: True | Creadas: 0",
-        },
-        {
-            "id": "P17.15", "punto": "Punto 17", "match": "exacto",
-            "nombre": "lote con fechas intermedias propaga fecha previa a movimientos sin fecha",
-            "ejecutar": lambda: p17_caso_15(datos),
-            "esperado": "Lote 3 txs: True | Fechas 25/09 25/09 27/09: True",
-        },
-        {
             "id": "P18.1", "punto": "Punto 18", "match": "exacto",
             "nombre": "Consulta permitirse contado: tele de 300.000",
             "ejecutar": lambda: p18_caso_1(datos),
@@ -1234,6 +1191,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
         },
     ]
     catalogo.extend(entradas_p09c(datos))
+    catalogo.extend(entradas_p16_p17(datos))
     catalogo.extend(entradas_p18b(datos))
     catalogo.extend(entradas_p19b(datos))
     catalogo.extend(entradas_p20(datos))

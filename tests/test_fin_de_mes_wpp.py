@@ -121,5 +121,8 @@ def test_enriquecer_respuesta_consultar_proyeccion_error(usuario_mock, monkeypat
     )
 
     assert res_intent == "consultar_proyeccion"
-    assert resultado_ia["respuesta_usuario"] == "No pude calcular tu proyección en este momento. Probá de nuevo en unos minutos."
+    assert resultado_ia["respuesta_usuario"] == (
+        "No pude ver cómo llegás a fin de mes ahora. "
+        "Probá de nuevo en unos minutos."
+    )
 

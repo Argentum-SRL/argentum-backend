@@ -269,7 +269,10 @@ def test_tf5_directo(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
     ok = manejar_reintegro_wpp("me devolvieron 25000 del súper", usuario, db, "5491112345678")
     assert ok is True
     assert len(mensajes_wpp) == 1
-    assert mensajes_wpp[0] == "Listo, anoté la devolución de $25.000 de «Súper». Si no era esa, decime «borrá eso»."
+    assert mensajes_wpp[0] == (
+        "Listo, anoté el reintegro de $25.000 de Súper.\n"
+        "Si no era esa compra, decime _borrá eso_."
+    )
 
     # Espejo -25000.00, fecha hoy, Galicia, tipo_espejo "reintegro"
     espejos = db.execute(
@@ -382,7 +385,10 @@ def test_credito(db: Session, usuario: Usuario, datos_base, client: TestClient, 
     mensajes_wpp.clear()
     ok = manejar_reintegro_wpp("me devolvieron 10000 de la tele", usuario, db, "5491112345678")
     assert ok is True
-    assert mensajes_wpp[0] == "Listo, anoté la devolución de $10.000 de «Tele» (ayer). Si no era esa, decime «borrá eso»."
+    assert mensajes_wpp[0] == (
+        "Listo, anoté el reintegro de $10.000 de Tele (ayer).\n"
+        "Si no era esa compra, decime _borrá eso_."
+    )
 
     esp_padre = db.execute(
         select(Transaccion).where(
@@ -448,7 +454,10 @@ def test_subcategoria(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
     mensajes_wpp.clear()
     ok = manejar_reintegro_wpp("me devolvieron 5000 del super", usuario, db, "5491112345678")
     assert ok is True
-    assert mensajes_wpp[0] == "Listo, anoté la devolución de $5.000 de «Coto». Si no era esa, decime «borrá eso»."
+    assert mensajes_wpp[0] == (
+        "Listo, anoté el reintegro de $5.000 de Coto.\n"
+        "Si no era esa compra, decime _borrá eso_."
+    )
 
 
 def test_deshacer_sin_previo(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
@@ -474,12 +483,12 @@ def test_deshacer_sin_previo(db: Session, usuario: Usuario, datos_base, mensajes
     mensajes_wpp.clear()
     ok_deshacer = manejar_deshacer("borrá eso", usuario, db, "5491112345678")
     assert ok_deshacer is True
-    assert mensajes_wpp[-1] == "¿Querés eliminar la devolución de $25.000 de «Súper» en Galicia? ¿Confirmás?"
+    assert mensajes_wpp[-1] == "¿Borro el reintegro de $25.000 de Súper?"
 
     mensajes_wpp.clear()
     ok_conf = manejar_confirmacion("sí", usuario, db, "5491112345678")
     assert ok_conf is True
-    assert mensajes_wpp[-1] == "Listo, devolución eliminada."
+    assert mensajes_wpp[-1] == "Listo, borré el reintegro."
 
     espejos = db.execute(
         select(Transaccion).where(Transaccion.reintegro_de_id == tx_super.id)
@@ -521,7 +530,10 @@ def test_pendiente(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
     mensajes_wpp.clear()
     ok = manejar_reintegro_wpp("me llegó el reintegro del súper", usuario, db, "5491112345678")
     assert ok is True
-    assert mensajes_wpp[0] == "Listo, anoté la devolución de $25.000 de «Súper». Si no era esa, decime «borrá eso»."
+    assert mensajes_wpp[0] == (
+        "Listo, anoté el reintegro de $25.000 de Súper.\n"
+        "Si no era esa compra, decime _borrá eso_."
+    )
     db.refresh(b_galicia)
     assert b_galicia.saldo_actual == Decimal("925000.00")
 
@@ -529,7 +541,7 @@ def test_pendiente(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
     mensajes_wpp.clear()
     manejar_deshacer("borrá eso", usuario, db, "5491112345678")
     manejar_confirmacion("sí", usuario, db, "5491112345678")
-    assert mensajes_wpp[-1] == "Listo, devolución eliminada."
+    assert mensajes_wpp[-1] == "Listo, borré el reintegro."
 
     espejos = db.execute(
         select(Transaccion).where(Transaccion.reintegro_de_id == tx_super.id)
@@ -562,7 +574,10 @@ def test_sin_monto_y_sin_esperado(db: Session, usuario: Usuario, datos_base, men
     mensajes_wpp.clear()
     ok = manejar_reintegro_wpp("me llegó el reintegro del súper", usuario, db, "5491112345678")
     assert ok is True
-    assert mensajes_wpp[0] == "¿Cuánto te devolvieron? Decímelo con el monto, por ejemplo «me devolvieron 25000 del súper»."
+    assert mensajes_wpp[0] == (
+        "¿Cuánto te devolvieron? "
+        "Por ejemplo: _me devolvieron 25000 del súper_."
+    )
     espejos = db.execute(
         select(Transaccion).where(Transaccion.reintegro_de_id == tx_super.id)
     ).scalars().all()
@@ -592,7 +607,10 @@ def test_ya_recibido(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
     mensajes_wpp.clear()
     ok = manejar_reintegro_wpp("me devolvieron 5000 del súper", usuario, db, "5491112345678")
     assert ok is True
-    assert mensajes_wpp[0] == "Esa compra ya tiene su reintegro cargado. Para cambiarlo, entrá a la web de Argentum."
+    assert mensajes_wpp[0] == (
+        "Esa compra ya tiene su reintegro. "
+        "Para cambiarlo, entrá a miargentum.com"
+    )
     esp = db.execute(
         select(Transaccion).where(Transaccion.reintegro_de_id == tx_super.id)
     ).scalars().first()
@@ -619,7 +637,7 @@ def test_mayor(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
     mensajes_wpp.clear()
     ok = manejar_reintegro_wpp("me devolvieron 150000 del súper", usuario, db, "5491112345678")
     assert ok is True
-    assert mensajes_wpp[0] == "El reintegro no puede ser mayor que la compra."
+    assert mensajes_wpp[0] == "El reintegro no puede ser más que la compra."
     espejos = db.execute(
         select(Transaccion).where(Transaccion.reintegro_de_id == tx_super.id)
     ).scalars().all()
@@ -664,7 +682,7 @@ def test_varias(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
     mensajes_wpp.clear()
     ok = manejar_reintegro_wpp("me devolvieron 25000 del súper", usuario, db, "5491112345678")
     assert ok is True
-    assert mensajes_wpp[0] == "¿De cuál compra?\n1) Súper $100.000\n2) Súper $80.000 (ayer)\nRespondé con el número."
+    assert mensajes_wpp[0] == "¿De qué compra?\n1. Súper $100.000\n2. Súper $80.000 · ayer"
 
     # "3" en vez de "2" -> False
     assert manejar_respuesta_numerada("3", usuario, db, "5491112345678") is False
@@ -673,7 +691,10 @@ def test_varias(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
     mensajes_wpp.clear()
     ok_resp = manejar_respuesta_numerada("2", usuario, db, "5491112345678")
     assert ok_resp is True
-    assert mensajes_wpp[0] == "Listo, anoté la devolución de $25.000 de «Súper» (ayer). Si no era esa, decime «borrá eso»."
+    assert mensajes_wpp[0] == (
+        "Listo, anoté el reintegro de $25.000 de Súper (ayer).\n"
+        "Si no era esa compra, decime _borrá eso_."
+    )
 
     esp_ayer = db.execute(
         select(Transaccion).where(Transaccion.reintegro_de_id == tx_ayer.id)
@@ -711,4 +732,7 @@ def test_corregir(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
     mensajes_wpp.clear()
     ok_corr = manejar_corregir("no, eran 20000", usuario, db, "5491112345678")
     assert ok_corr is True
-    assert mensajes_wpp[-1] == "Ese movimiento es una devolución de un gasto. Para cambiarlo, entrá a la web de Argentum."
+    assert mensajes_wpp[-1] == (
+        "Ese movimiento es un reintegro. "
+        "Para cambiarlo, entrá a miargentum.com"
+    )

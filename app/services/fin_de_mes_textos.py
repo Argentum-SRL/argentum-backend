@@ -27,7 +27,10 @@ def signo(y: Decimal) -> str:
 def linea_cobertura(factor: Decimal) -> Optional[str]:
     """Genera la advertencia cuando la cobertura histórica es imperfecta."""
     if factor > Decimal("1"):
-        return "Puede que no hayas cargado todo: el rango ya lo tiene en cuenta."
+        return (
+            "Como puede faltar algo por cargar, "
+            "te doy un número más bajo y uno más alto."
+        )
     return None
 
 
@@ -111,12 +114,15 @@ def mensaje_wpp(r: Any) -> str:
         else:
             lineas.append(f"Hoy te faltan {_m(abs(r.libre_ars))} para cubrir lo que vence.")
 
-        if r.estado == "datos_viejos":
-            frescura_txt = linea_frescura_wpp(r.frescura)
-            if frescura_txt is not None:
-                lineas.append(frescura_txt)
+    frescura_txt: Optional[str] = None
+    if r.estado != "completo" and r.estado == "datos_viejos":
+        frescura_txt = linea_frescura_wpp(r.frescura)
 
     if r.libre_usd != Decimal("0"):
-        lineas.append(f"En dólares: {formatear_monto(r.libre_usd, 'USD', con_decimales=False)} libres.")
+        usd_fmt = formatear_monto(r.libre_usd, "USD", con_decimales=False)
+        lineas.append(f"En dólares: {usd_fmt} libres.")
+
+    if frescura_txt is not None:
+        lineas.append(frescura_txt)
 
     return "\n".join(lineas)

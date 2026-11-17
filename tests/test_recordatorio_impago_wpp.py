@@ -160,7 +160,10 @@ def test_caso_a_un_resumen_visa(db_session, monkeypatch):
 
     assert mock_enviar.call_count == 1
     texto_saliente = mock_enviar.call_args[1].get("texto")
-    aviso_esperado = "Ojo: el resumen de Visa de $50.000 (venció 04/11) figura sin pagar."
+    aviso_esperado = (
+        "Ojo: el resumen de Visa Cuenta de $50.000 "
+        "venció el 04/11 y sigue sin pagar."
+    )
     assert texto_saliente == f"Listo.\n{aviso_esperado}"
 
     db_session.refresh(notif)
@@ -288,7 +291,7 @@ def test_caso_f_dos_resumenes_distintos(db_session, monkeypatch):
         assert res is True
 
     texto_saliente = mock_enviar.call_args[1].get("texto")
-    aviso_esperado = "Ojo: tenés 2 resúmenes de tarjeta sin pagar; el más viejo venció el 20/10."
+    aviso_esperado = "Ojo: tenés 2 resúmenes sin pagar; el más viejo venció el 20/10."
     assert texto_saliente == f"Listo.\n{aviso_esperado}"
 
     db_session.refresh(n1)
@@ -317,7 +320,10 @@ def test_caso_g_mismo_resumen_notificaciones_multiples(db_session, monkeypatch):
         assert res is True
 
     texto_saliente = mock_enviar.call_args[1].get("texto")
-    aviso_esperado = "Ojo: el resumen de Visa de $50.000 (venció 04/11) figura sin pagar."
+    aviso_esperado = (
+        "Ojo: el resumen de Visa Cuenta de $50.000 "
+        "venció el 04/11 y sigue sin pagar."
+    )
     assert texto_saliente == f"Listo.\n{aviso_esperado}"
 
     db_session.refresh(n1)
@@ -353,7 +359,7 @@ def test_caso_h_cuatro_resumenes(db_session, monkeypatch):
         assert res is True
 
     texto_saliente = mock_enviar.call_args[1].get("texto")
-    aviso_esperado = "Ojo: tenés 4 resúmenes de tarjeta sin pagar; el más viejo venció el 01/10."
+    aviso_esperado = "Ojo: tenés 4 resúmenes sin pagar; el más viejo venció el 01/10."
     assert texto_saliente == f"Listo.\n{aviso_esperado}"
 
     for n in [n1, n2, n3, n4]:
@@ -441,8 +447,11 @@ def test_caso_k_recorte_nombre_largo(db_session, monkeypatch):
         assert res is True
 
     texto_saliente = mock_enviar.call_args[1].get("texto")
-    aviso_esperado = "Ojo: el resumen de Mastercard Black… de $1.234.567,89 (venció 04/11) figura sin pagar."
-    assert len(aviso_esperado) == 86
+    aviso_esperado = (
+        "Ojo: el resumen de Mastercard Cuenta Bla… de $1.234.568 "
+        "venció el 04/11 y sigue sin pagar."
+    )
+    assert len(aviso_esperado) == 90
     assert texto_saliente == f"Listo.\n{aviso_esperado}"
 
 

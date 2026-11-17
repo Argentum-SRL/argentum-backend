@@ -111,7 +111,7 @@ def procesar_estados_y_handlers_deterministicos(ctx: ContextoMensaje) -> None:
                     "datos_faltantes": [clave_bill],
                 }
                 db.commit()
-                whatsapp_service.enviar_whatsapp(from_number, f"¿A cuál te referís?\n{menu}")
+                whatsapp_service.enviar_whatsapp(from_number, menu)
                 ctx.terminado = True
                 return
             if b_nueva:
@@ -129,7 +129,12 @@ def procesar_estados_y_handlers_deterministicos(ctx: ContextoMensaje) -> None:
                     nuevo_msg = texto_propuesta_usd_pesos(entidades_nuevas, b_nueva.nombre)
                 else:
                     nuevo_msg = _construir_propuesta_transaccion(
-                        entidades_nuevas, b_nueva.nombre, se_asumio_principal=False, billetera_moneda=b_nueva.moneda
+                        entidades_nuevas,
+                        b_nueva.nombre,
+                        se_asumio_principal=False,
+                        billetera_moneda=b_nueva.moneda,
+                        db=db,
+                        usuario_id=usuario.id,
                     )
 
                 propuesta_pendiente.entidades = entidades_nuevas
@@ -179,15 +184,15 @@ def procesar_estados_y_handlers_deterministicos(ctx: ContextoMensaje) -> None:
         ctx.terminado = True
         return
 
-    # 3. Chequeo determinístico de cancelación (Tarea 5)
-    if manejar_cancelacion(mensaje_texto, usuario, db, from_number, wamid=wamid):
-        ctx.terminado = True
-        return
-
-    # 3. Chequeo de respuesta a verificación de duplicado o lote pendiente
+    # 3. Respuesta a verificación de duplicado, lote o suscripción pendiente
     if manejar_verificaciones_slot_filling(
         mensaje_texto, usuario, db, from_number, wamid=wamid
     ):
+        ctx.terminado = True
+        return
+
+    # 3.1 Chequeo determinístico de cancelación (Tarea 5)
+    if manejar_cancelacion(mensaje_texto, usuario, db, from_number, wamid=wamid):
         ctx.terminado = True
         return
 
@@ -212,7 +217,7 @@ def procesar_estados_y_handlers_deterministicos(ctx: ContextoMensaje) -> None:
         db.flush()
         # Si el usuario mandó una respuesta numérica o intenta responder al menú vencido
         if mensaje_texto.strip().isdigit() or _es_pregunta_billetera(conv_vencida):
-            msg_vencida = "Esa operación ya venció. Podés volver a mandarla."
+            msg_vencida = "Pasó mucho tiempo y lo descarté. Mandámelo de nuevo."
             nueva_conv = ConversacionWpp(
                 usuario_id=usuario.id,
                 wamid=wamid,

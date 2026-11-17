@@ -366,12 +366,12 @@ def test_caso_d_whatsapp_textos_aviso_saldo(db_session: Session):
 
     # 1. Comparación exacta de textos generados
     texto_ind_esperado = (
-        "Ojo: es anterior a tu saldo de «Banco Nación» (17/10) y no lo modifica."
+        "Ojo: es de antes del 17/10: cuenta en el mes, pero no cambia tu saldo."
     )
     assert texto_aviso_saldo_individual(b) == texto_ind_esperado
 
     texto_lote_3_esperado = (
-        "Ojo: 3 son anteriores a tu saldo de «Banco Nación» (17/10) y no lo modifican."
+        "Ojo: son de antes del 17/10: cuentan en el mes, pero no cambian tu saldo."
     )
     assert texto_aviso_saldo_lote(b, 3) == texto_lote_3_esperado
 
@@ -457,4 +457,6 @@ def test_caso_d_whatsapp_textos_aviso_saldo(db_session: Session):
         tx_igual,    # Se ignora
     ]
     aviso_lote_res = obtener_aviso_saldo_lote(txs_lote, billeteras_map={b.id: b})
-    assert aviso_lote_res == texto_lote_3_esperado
+    assert aviso_lote_res == (
+        "Ojo: 3 son de antes del 17/10: cuentan en el mes, pero no cambian tu saldo."
+    )

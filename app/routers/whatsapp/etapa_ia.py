@@ -15,6 +15,7 @@ import structlog
 
 from app.core.vocabulario_categorias import aplicar_rescate_si_corresponde
 from app.models.usuario import Moneda
+from app.routers.whatsapp.constantes import texto_cupo_wpp
 from app.routers.whatsapp.contexto import ContextoMensaje
 from app.routers.whatsapp.db_lookups import _obtener_historial_reciente
 from app.routers.whatsapp.detectors import _es_pedido_deshacer
@@ -32,13 +33,9 @@ from app.utils.formato import formatear_monto
 
 logger = structlog.get_logger(__name__)
 
-MSG_TOPE_MOVIMIENTOS_SUPERADO = (
-    "El límite es de 10 movimientos por mensaje. "
-    "Por favor mandalos en tandas más chicas o usá la importación desde la web de Argentum."
-)
+MSG_TOPE_MOVIMIENTOS_SUPERADO = "Mandame hasta 10 movimientos por mensaje."
 MSG_NO_MEZCLAR_TRANSFERENCIAS = (
-    "Las transferencias, extracciones de cajero y compra de dólares deben registrarse "
-    "en mensajes separados de los gastos o ingresos. Por favor mandalas por separado."
+    "Mandame aparte las transferencias, retiros de cajero y compras de dólares."
 )
 
 
@@ -74,6 +71,7 @@ def procesar_llamada_ia_y_normalizacion(ctx: ContextoMensaje) -> None:
     from app.services.uso_ia_service import verificar_cupo_ia
     permitido, texto_cupo = verificar_cupo_ia(db, usuario, "mensaje")
     if not permitido:
+        texto_cupo = texto_cupo_wpp(texto_cupo, "mensaje")
         from datetime import datetime, timedelta
         from app.services import whatsapp_service
         from app.services.rate_limit_service import avisar_una_vez
@@ -172,9 +170,14 @@ def procesar_llamada_ia_y_normalizacion(ctx: ContextoMensaje) -> None:
                 if not faltantes:
                     faltantes = montos_detectados[cant_items:]
                 aviso_montos_faltantes = (
-                    f"Ojo: en tu mensaje también vi {', '.join(faltantes)} y no lo registré. "
-                    "Mandámelo en un mensaje aparte así lo cargo bien."
+                    f"Ojo: también vi {', '.join(faltantes)} y no lo anoté. "
+                    "Mandámelo aparte."
                 )
+                if len(aviso_montos_faltantes) > 90:
+                    aviso_montos_faltantes = (
+                        f"Ojo: también vi {len(faltantes)} montos que no anoté. "
+                        "Mandámelos aparte."
+                    )
 
     # Ajuste determinístico de categorías según marcas comerciales y propagación de fechas
     if isinstance(resultado_ia.get("entidades"), dict):
@@ -202,8 +205,8 @@ def procesar_llamada_ia_y_normalizacion(ctx: ContextoMensaje) -> None:
             resultado_ia["slot_filling"] = False
         else:
             msg_desc = (
-                "No entendí ese mensaje. Por ahora puedo registrar gastos e ingresos, "
-                "o consultar tus saldos y proyecciones. Por ejemplo: 'gasté 5000 en el kiosco' o 'cuánta plata tengo'."
+                "No te entendí. Probá así: _gasté 5000 en el kiosco_ o "
+                "_cuánta plata tengo_."
             )
             resultado_ia["respuesta_usuario"] = msg_desc
             resultado_ia["intent"] = "desconocido"
@@ -227,19 +230,31 @@ def procesar_llamada_ia_y_normalizacion(ctx: ContextoMensaje) -> None:
                 mon_prev = conv_activa.slot_filling_estado.get("moneda", "ARS")
                 mon_prev_enum = Moneda.USD if mon_prev == "USD" else Moneda.ARS
                 cat_prev_disp = _nombre_corto_categoria(cat_prev) if cat_prev else ""
-                monto_prev_fmt = formatear_monto(float(monto_prev), mon_prev_enum) if monto_prev is not None else ""
-
+                monto_prev_fmt = (
+                    formatear_monto(float(monto_prev), mon_prev_enum, con_decimales=False)
+                    if monto_prev is not None
+                    else ""
+                )
                 mon_nuevo = entidades_ia.get("moneda", "ARS")
                 mon_nuevo_enum = Moneda.USD if mon_nuevo == "USD" else Moneda.ARS
                 cat_nuevo_disp = _nombre_corto_categoria(cat_ia) if cat_ia else ""
-                monto_nuevo_fmt = formatear_monto(float(monto_ia), mon_nuevo_enum) if monto_ia is not None else ""
-
+                monto_nuevo_fmt = (
+                    formatear_monto(float(monto_ia), mon_nuevo_enum, con_decimales=False)
+                    if monto_ia is not None
+                    else ""
+                )
                 if cat_prev_disp and cat_nuevo_disp:
-                    aviso_cambio_tema = f"Descarté la de {monto_prev_fmt} en {cat_prev_disp}. Para los {monto_nuevo_fmt} en {cat_nuevo_disp}:"
+                    aviso_cambio_tema = (
+                        f"Dejé sin anotar los {monto_prev_fmt} de {cat_prev_disp}.\n"
+                        f"Vamos con los {monto_nuevo_fmt} de {cat_nuevo_disp}:"
+                    )
                 elif cat_prev_disp:
-                    aviso_cambio_tema = f"Descarté la de {monto_prev_fmt} en {cat_prev_disp}. Para los {monto_nuevo_fmt}:"
+                    aviso_cambio_tema = (
+                        f"Dejé sin anotar los {monto_prev_fmt} de {cat_prev_disp}.\n"
+                        f"Vamos con los {monto_nuevo_fmt}:"
+                    )
                 else:
-                    aviso_cambio_tema = f"Descarté la operación anterior de {monto_prev_fmt}."
+                    aviso_cambio_tema = f"Dejé sin anotar los {monto_prev_fmt} anteriores."
 
     # Fusión determinística de entidades para turnos previos
     if estado_previo:

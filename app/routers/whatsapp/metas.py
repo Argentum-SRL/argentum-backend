@@ -33,6 +33,7 @@ from app.routers.whatsapp.resolvers_cascada import (
 from app.schemas.movimiento_meta import MovimientoMetaCreate
 from app.services import meta_service, whatsapp_service
 from app.services.evento_service import emitir_evento_actualizacion
+from app.core.reglas_texto_wpp import ejemplo_wpp
 from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 from app.utils.texto import normalizar_texto
@@ -78,8 +79,8 @@ def _confirmar_propuesta_aporte_meta(
 
         for c in candidatas:
             if c.accion_ejecutada and str(c.accion_ejecutada).startswith("aporte_meta:"):
-                return None, "Esa operación ya fue confirmada.", True
-        return None, "No tenés ningún aporte a meta pendiente para confirmar.", False
+                return None, "Ya estaba anotado.", True
+        return None, "No tengo nada pendiente para confirmar.", False
 
     entidades = conv_previa.entidades or {}
     meta_id_str = entidades.get("meta_id")
@@ -88,7 +89,7 @@ def _confirmar_propuesta_aporte_meta(
     moneda_str = entidades.get("moneda", "ARS")
 
     if not meta_id_str or not billetera_id_str or not monto_val:
-        return None, "No pude procesar el aporte a la meta.", False
+        return None, "No pude anotar el aporte a la meta.", False
 
     meta_id = UUID(str(meta_id_str))
     billetera_id = UUID(str(billetera_id_str))
@@ -101,7 +102,7 @@ def _confirmar_propuesta_aporte_meta(
 
     billetera = db.get(Billetera, billetera_id)
     if not billetera or billetera.usuario_id != usuario.id:
-        return None, "No encontré la billetera seleccionada.", False
+        return None, "No encontré esa cuenta.", False
 
     data_mov = MovimientoMetaCreate(
         tipo=TipoMovimientoMeta.APORTE,
@@ -124,13 +125,13 @@ def _confirmar_propuesta_aporte_meta(
     except Exception as exc:
         db.rollback()
         logger.error(f"Error al confirmar aporte a meta: {exc}")
-        return None, "Hubo un problema al procesar el aporte a la meta.", False
+        return None, "Hubo un problema y no anoté nada. Probá de nuevo en un rato.", False
 
-    monto_fmt = formatear_monto(float(monto), moneda_mov)
+    monto_fmt = formatear_monto(float(monto), moneda_mov, con_decimales=False)
     if meta.monto_actual >= meta.monto_objetivo:
-        msg_resp = f"Listo. Aporté {monto_fmt} a tu meta '{meta.nombre}'. ¡Felicitaciones! Completaste tu meta."
+        msg_resp = f"Listo, aporté {monto_fmt} a {meta.nombre}. ¡Completaste tu meta!"
     else:
-        msg_resp = f"Listo. Aporté {monto_fmt} a tu meta '{meta.nombre}' desde {billetera.nombre}."
+        msg_resp = f"Listo, aporté {monto_fmt} a tu meta {meta.nombre}."
 
     return nuevo_mov, msg_resp, False
 
@@ -266,7 +267,7 @@ def manejar_aporte_meta(
 
                 if not billetera:
                     bills_mon = [b for b in billeteras_usuario if b.moneda == meta_elegida.moneda]
-                    enc = f"¿Desde qué billetera querés aportar a '{meta_elegida.nombre}'?"
+                    enc = f"¿De qué cuenta sale el aporte a {meta_elegida.nombre}?"
                     pregunta = _generar_menu_billeteras(bills_mon, tipo="egreso", encabezado=enc)
                     entidades_sf = {
                         "intent_origen": "aportar_meta",
@@ -294,8 +295,11 @@ def manejar_aporte_meta(
                     whatsapp_service.enviar_whatsapp(from_number, pregunta)
                     return True
 
-                monto_fmt = formatear_monto(float(monto), meta_elegida.moneda)
-                prop = f"Voy a aportar {monto_fmt} a tu meta '{meta_elegida.nombre}' desde {billetera.nombre}. ¿Confirmás?"
+                monto_fmt = formatear_monto(float(monto), meta_elegida.moneda, con_decimales=False)
+                prop = (
+                    f"¿Aporto {monto_fmt} a tu meta {meta_elegida.nombre} "
+                    f"desde {billetera.nombre}?"
+                )
                 entidades_prop = {
                     "meta_id": str(meta_elegida.id),
                     "meta_nombre": meta_elegida.nombre,
@@ -397,7 +401,8 @@ def manejar_aporte_meta(
 
     if estado_meta == "no_encontrada":
         nombre_disp = meta_name or "esa"
-        msg_resp = f"No encontré ninguna meta con el nombre '{nombre_disp}'. Podés consultar tus metas con 'mis metas'."
+        ex_m = ejemplo_wpp("mis metas")
+        msg_resp = f"No encontré la meta {nombre_disp}. Preguntame {ex_m} para verlas."
         nueva_conv = ConversacionWpp(
             usuario_id=usuario.id,
             wamid=wamid,
@@ -418,8 +423,8 @@ def manejar_aporte_meta(
         return True
 
     if estado_meta == "ambigua":
-        nombres = ", ".join(f"'{m.nombre}'" for m in cands)
-        msg_resp = f"Encontré más de una meta parecida: {nombres}. ¿A cuál querés aportar?"
+        lineas_amb = ["¿A cuál meta?"] + [f"{i}. {m.nombre}" for i, m in enumerate(cands, 1)]
+        msg_resp = "\n".join(lineas_amb)
         entidades_sf = {
             "intent_origen": "aportar_meta",
             "meta_ambigua_cands": [str(m.id) for m in cands],
@@ -455,7 +460,7 @@ def manejar_aporte_meta(
         billetera = next((b for b in bills_mon if b.es_principal), None) or (bills_mon[0] if len(bills_mon) == 1 else None)
 
     if not billetera:
-        enc = f"¿Desde qué billetera querés aportar a '{meta.nombre}'?"
+        enc = f"¿De qué cuenta sale el aporte a {meta.nombre}?"
         pregunta = _generar_menu_billeteras(bills_mon, tipo="egreso", encabezado=enc)
         entidades_sf = {
             "intent_origen": "aportar_meta",
@@ -488,8 +493,12 @@ def manejar_aporte_meta(
 
     # Validar saldo suficiente
     if billetera.saldo_actual < monto_val:
-        monto_disp = formatear_monto(float(billetera.saldo_actual), billetera.moneda)
-        msg_resp = f"Saldo insuficiente en la billetera '{billetera.nombre}'. Tenés {monto_disp}."
+        saldo_val = float(billetera.saldo_actual)
+        monto_disp = formatear_monto(saldo_val, billetera.moneda, con_decimales=False)
+        msg_resp = (
+            f"No te alcanza: {billetera.nombre} tiene {monto_disp}. "
+            "Elegí otra cuenta o un monto menor."
+        )
         nueva_conv = ConversacionWpp(
             usuario_id=usuario.id,
             wamid=wamid,
@@ -510,8 +519,8 @@ def manejar_aporte_meta(
         return True
 
     # Armar propuesta de confirmación
-    monto_fmt = formatear_monto(float(monto_val), meta.moneda)
-    prop = f"Voy a aportar {monto_fmt} a tu meta '{meta.nombre}' desde {billetera.nombre}. ¿Confirmás?"
+    monto_fmt = formatear_monto(float(monto_val), meta.moneda, con_decimales=False)
+    prop = f"¿Aporto {monto_fmt} a tu meta {meta.nombre} desde {billetera.nombre}?"
     entidades_prop = {
         "meta_id": str(meta.id),
         "meta_nombre": meta.nombre,

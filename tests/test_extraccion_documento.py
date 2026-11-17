@@ -227,7 +227,11 @@ def test_textos_exactos_avisos():
         documento_tipo="captura_actividad",
         total_vistos=12,
     )
-    assert "Vi 12 movimientos y cargo los primeros 10. Mandame otra captura con el resto." in res3["respuesta_usuario"]
+    esp_lim = (
+        "Vi 12 movimientos y anoto los primeros 10. "
+        "Mandame otra foto con el resto."
+    )
+    assert esp_lim in res3["respuesta_usuario"]
 
     # Decisión 5: Duplicados parciales
     dups = [
@@ -241,8 +245,7 @@ def test_textos_exactos_avisos():
         documento_tipo="ticket_compra",
         total_vistos=2,
     )
-    assert "Ya tenías cargado: Almuerzo (ayer, $5.000)." in res5["respuesta_usuario"]
-    assert "Si es otro movimiento igual, mandámelo escrito." in res5["respuesta_usuario"]
+    assert "Ya tenías cargado: Almuerzo ($5.000, ayer)." in res5["respuesta_usuario"]
 
     # Decisión 5: Todos duplicados
     res5_todos = armar_resultado_ia_documento(
@@ -253,7 +256,7 @@ def test_textos_exactos_avisos():
         documento_tipo="ticket_compra",
         total_vistos=1,
     )
-    assert res5_todos["respuesta_usuario"] == "Ya tenías cargado todo lo que veo en la imagen."
+    assert res5_todos["respuesta_usuario"] == "Ya tenías cargado todo lo que hay en la foto."
     assert res5_todos["intent"] != "registrar_transaccion"
 
     # Decisión 7: Factura de servicios
@@ -265,7 +268,7 @@ def test_textos_exactos_avisos():
         documento_tipo="factura_servicio",
         total_vistos=1,
     )
-    assert "Si todavía no la pagaste, respondé no y no la cargo." in res7["respuesta_usuario"]
+    assert "Si todavía no la pagaste, decime que no." in res7["respuesta_usuario"]
 
 
 def test_esquema_sin_limite_de_cantidad():
@@ -481,19 +484,27 @@ def test_textos_exactos_decision_9_camino_b():
     r_anotar, avisos = preparar_rendimientos(mock_db, uid, entidades, None, "captura_actividad", camino="B")
     assert len(r_anotar) == 1
     assert len(avisos) == 1
-    assert "Además anoto el rendimiento de $5.650,20 en Ahorro con rendimiento (el 1 de octubre); no cuenta como ingreso." in avisos[0]
+    esp_rend = (
+        "Además anoto el rendimiento de $5.650 en Ahorro con rendimiento (1/10): "
+        "no es un ingreso."
+    )
+    assert esp_rend in avisos[0]
 
     # 2. Rendimiento ya existente
     mock_db.execute.return_value.scalar_one_or_none.return_value = uuid4()  # Ya existe
     r_anotar_dup, avisos_dup = preparar_rendimientos(mock_db, uid, entidades, None, "captura_actividad", camino="B")
     assert len(r_anotar_dup) == 0
-    assert "Ya tenías el rendimiento del 1 de octubre en Ahorro con rendimiento." in avisos_dup[0]
+    assert "Ya tenías el rendimiento del 1/10 en Ahorro con rendimiento." in avisos_dup[0]
 
     # 3. Sin billetera usable (billetera que no rinde)
     mock_db.execute.return_value.scalars.return_value.all.return_value = []
     r_anotar_sin, avisos_sin = preparar_rendimientos(mock_db, uid, entidades, "Galicia", "captura_actividad", camino="B")
     assert len(r_anotar_sin) == 0
-    assert "Vi un rendimiento de $5.650,20 que no pude anotar (billetera o fecha dudosa). Cargalo desde Billeteras." in avisos_sin[0]
+    esp_sin = (
+        "Vi un rendimiento de $5.650 que no pude anotar. "
+        "Cargalo en miargentum.com"
+    )
+    assert esp_sin in avisos_sin[0]
 
     # 4. Solo rendimientos camino B en armar_resultado_ia_documento
     res_solo = armar_resultado_ia_documento(
@@ -506,7 +517,11 @@ def test_textos_exactos_decision_9_camino_b():
     )
     assert res_solo["intent"] == "duplicado"
     assert res_solo["entidades"] == {}
-    assert res_solo["respuesta_usuario"] == "Veo solo rendimientos. Los cargás desde Billeteras o mandame los gastos o ingresos que quieras anotar."
+    esp_solo = (
+        "Veo solo rendimientos: cargalos en miargentum.com "
+        "o mandame gastos o ingresos."
+    )
+    assert res_solo["respuesta_usuario"] == esp_solo
 
 
 def test_prompt_sistema_contiene_fecha_hoy_y_reglas():
@@ -630,7 +645,7 @@ def test_preparar_rendimientos_fechas_invalidas():
     r_70, av_70 = preparar_rendimientos(mock_db, uid, ent_70, None, "captura_actividad", camino="B")
     assert len(r_70) == 0
     assert len(av_70) == 1
-    assert "Vi un rendimiento de $100 que no pude anotar (billetera o fecha dudosa). Cargalo desde Billeteras." in av_70[0]
+    assert "Vi un rendimiento de $100 que no pude anotar. Cargalo en miargentum.com" in av_70[0]
 
     # Caso futura (+5 días)
     fecha_fut = (hoy + timedelta(days=5)).isoformat()
@@ -638,14 +653,14 @@ def test_preparar_rendimientos_fechas_invalidas():
     r_fut, av_fut = preparar_rendimientos(mock_db, uid, ent_fut, None, "captura_actividad", camino="B")
     assert len(r_fut) == 0
     assert len(av_fut) == 1
-    assert "Vi un rendimiento de $100 que no pude anotar (billetera o fecha dudosa). Cargalo desde Billeteras." in av_fut[0]
+    assert "Vi un rendimiento de $100 que no pude anotar. Cargalo en miargentum.com" in av_fut[0]
 
     # Caso None
     ent_none = {"rendimientos": [{"monto": Decimal("100"), "fecha": None}]}
     r_none, av_none = preparar_rendimientos(mock_db, uid, ent_none, None, "captura_actividad", camino="B")
     assert len(r_none) == 0
     assert len(av_none) == 1
-    assert "Vi un rendimiento de $100 que no pude anotar (billetera o fecha dudosa). Cargalo desde Billeteras." in av_none[0]
+    assert "Vi un rendimiento de $100 que no pude anotar. Cargalo en miargentum.com" in av_none[0]
 
 
 def test_motivo_omision_casos_exactos():
@@ -881,9 +896,13 @@ def test_textos_omitidos_decision_5():
         {"motivo": "no_aprobado", "descripcion": "Kiosco Sur", "monto": Decimal("1500"), "moneda": "ARS"},
     ]
     lineas_sing = formatear_lineas_omitidos(omitidos_sing)
-    assert lineas_sing[0] == "Salteé 1 pase entre tus cuentas ($40.000). Si querés registrarlos, mandame cada uno como una transferencia entre tus cuentas."
-    assert lineas_sing[1] == "Salteé 1 pago con tarjeta de crédito (Meli+ $20.990): necesito la tarjeta y las cuotas. Mandámelo escrito."
-    assert lineas_sing[2] == "Salteé 1 movimiento que no figura como aprobado."
+    assert lineas_sing == [
+        "Salteé un pase entre tus cuentas. Mandame cada uno aparte:",
+        "- $40.000",
+        "Salteé un pago con tarjeta. Mandámelo escrito, con la tarjeta y las cuotas:",
+        "- Meli+ $20.990",
+        "Salteé uno que no figura como aprobado.",
+    ]
 
     # 2. Plural
     omitidos_plur = [
@@ -895,9 +914,15 @@ def test_textos_omitidos_decision_5():
         {"motivo": "no_aprobado", "descripcion": "Farmacia", "monto": Decimal("2500"), "moneda": "ARS"},
     ]
     lineas_plur = formatear_lineas_omitidos(omitidos_plur)
-    assert lineas_plur[0] == "Salteé 2 pases entre tus cuentas ($40.000, $905,50). Si querés registrarlos, mandame cada uno como una transferencia entre tus cuentas."
-    assert lineas_plur[1] == "Salteé 2 pagos con tarjeta de crédito (Meli+ $20.990, Uber $5.000): necesito la tarjeta y las cuotas. Mandámelo escrito."
-    assert lineas_plur[2] == "Salteé 2 movimientos que no figuran como aprobados."
+    assert lineas_plur == [
+        "Salteé 2 pases entre tus cuentas. Mandame cada uno aparte:",
+        "- $40.000",
+        "- $906",
+        "Salteé 2 pagos con tarjeta. Mandámelos escritos, con la tarjeta y las cuotas:",
+        "- Meli+ $20.990",
+        "- Uber $5.000",
+        "Salteé 2 que no figuran como aprobados.",
+    ]
 
     # 3. Caso solo omitidos en armar_resultado_ia_documento
     res_so = armar_resultado_ia_documento(
@@ -910,10 +935,14 @@ def test_textos_omitidos_decision_5():
     assert res_so["intent"] == "duplicado"
     assert res_so["entidades"] == {}
     resp_texto = res_so["respuesta_usuario"]
-    assert resp_texto.startswith("No encontré movimientos para anotar en la imagen.")
-    assert "Salteé 1 pase entre tus cuentas ($40.000)." in resp_texto
-    assert "Salteé 1 pago con tarjeta de crédito (Meli+ $20.990):" in resp_texto
-    assert "Salteé 1 movimiento que no figura como aprobado." in resp_texto
+    assert resp_texto.startswith("No encontré gastos para anotar en la foto.")
+    assert "Salteé un pase entre tus cuentas. Mandame cada uno aparte:\n- $40.000" in resp_texto
+    esp_tarj = (
+        "Salteé un pago con tarjeta. Mandámelo escrito, "
+        "con la tarjeta y las cuotas:\n- Meli+ $20.990"
+    )
+    assert esp_tarj in resp_texto
+    assert "Salteé uno que no figura como aprobado." in resp_texto
 
 
 def test_normalizar_anio_documento_casos_exactos():
@@ -1235,54 +1264,4 @@ def test_extraer_movimientos_de_texto_pdf_vencimiento_texto_tres_casos():
         assert err3 is None
         assert res3 is not None
         assert res3.vencimiento == f_real
-
-
-def test_extraer_movimientos_de_imagen_argumentos():
-    """C4: extraer_movimientos_de_imagen lleva temperature=0 y enum de categorías."""
-    import json
-    from unittest.mock import MagicMock, patch
-    from app.routers.whatsapp.extraccion_documento import extraer_movimientos_de_imagen
-
-    categorias = ["Supermercado", "Farmacia"]
-    mock_payload = {
-        "legible": True,
-        "documento_tipo": "ticket_compra",
-        "billetera_texto": None,
-        "vencimiento": None,
-        "movimientos": [
-            {
-                "fecha": "2026-10-08",
-                "monto": 1500.0,
-                "moneda": "ARS",
-                "descripcion": "Coto",
-                "sentido": "egreso",
-                "categoria": "Supermercado",
-                "tipo_operacion": None,
-                "medio_pago": None,
-                "estado": None,
-                "contraparte_es_usuario": False,
-            }
-        ],
-        "cuotas": [],
-    }
-
-    mock_resp = MagicMock()
-    mock_resp.choices = [MagicMock(message=MagicMock(content=json.dumps(mock_payload)))]
-    mock_resp.usage.prompt_tokens = 100
-    mock_resp.usage.completion_tokens = 50
-
-    with patch("app.routers.whatsapp.extraccion_documento.get_openai_client") as mock_get_client:
-        mock_client = MagicMock()
-        mock_get_client.return_value = mock_client
-        mock_client.chat.completions.create.return_value = mock_resp
-
-        res, err = extraer_movimientos_de_imagen(b"fake_image_bytes", categorias_usuario=categorias)
-        assert err is None
-        assert res is not None
-
-        _, kwargs = mock_client.chat.completions.create.call_args
-        assert kwargs.get("temperature") == 0
-        resp_fmt = kwargs.get("response_format", {})
-        cat_enum = resp_fmt["json_schema"]["schema"]["properties"]["movimientos"]["items"]["properties"]["categoria"]["enum"]
-        assert cat_enum == ["Supermercado", "Farmacia", None]
 

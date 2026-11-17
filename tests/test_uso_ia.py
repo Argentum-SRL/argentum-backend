@@ -353,7 +353,7 @@ def test_aviso_rafaga_texto_exacto():
         "t_inicio": 0.0,
     }
 
-    motivo_esperado = "Estás enviando muchos mensajes seguidos. Por favor, esperá un momento antes de volver a escribir."
+    motivo_esperado = "Estás mandando muchos mensajes seguidos. Esperá un minuto y seguimos."
 
     with patch.object(whatsapp_ia, "SessionLocal", MagicMock()), \
          patch.object(whatsapp_ia, "marcar_leido_y_escribiendo", MagicMock()), \
@@ -364,7 +364,7 @@ def test_aviso_rafaga_texto_exacto():
         whatsapp_ia._procesar_mensaje_whatsapp_background(datos_mensaje)
 
     assert len(mensajes_enviados) == 1
-    assert mensajes_enviados[0][1] == "Estás enviando muchos mensajes seguidos. Por favor, esperá un momento antes de volver a escribir."
+    assert mensajes_enviados[0][1] == motivo_esperado
 
 
 def test_verificar_cupo_ia_excepcion_rate_limit_retorna_permitido(db_session: Session, monkeypatch):
@@ -422,8 +422,12 @@ def test_tope_texto_etapa_ia(db_session: Session):
 
         procesar_llamada_ia_y_normalizacion(ctx)
 
+    esp_dia = (
+        "Por hoy llegué al máximo de mensajes. "
+        "Mañana seguimos; mientras, cargá en miargentum.com"
+    )
     assert mock_enviar.call_count == 1
-    assert mock_enviar.call_args[0][1] == TEXTO_TOPE_MENSAJES_USUARIO
+    assert mock_enviar.call_args[0][1] == esp_dia
     mock_ai.assert_not_called()
     mock_transcribir.assert_not_called()
     mock_extraer_img.assert_not_called()
@@ -433,7 +437,7 @@ def test_tope_texto_etapa_ia(db_session: Session):
     conv = db_session.scalar(select(ConversacionWpp).where(ConversacionWpp.wamid == wamid))
     assert conv is not None
     assert conv.intent_detectado == "tope_superado"
-    assert conv.mensaje_bot == TEXTO_TOPE_MENSAJES_USUARIO
+    assert conv.mensaje_bot == esp_dia
     assert conv.tipo_mensaje in ("texto", TipoMensajeWpp.TEXTO)
 
 
@@ -461,8 +465,12 @@ def test_tope_audio_etapa_entrada(db_session: Session):
 
         procesar_entrada_medios_y_texto(ctx)
 
+    esp_dia = (
+        "Por hoy llegué al máximo de mensajes. "
+        "Mañana seguimos; mientras, cargá en miargentum.com"
+    )
     assert mock_enviar.call_count == 1
-    assert mock_enviar.call_args[0][1] == TEXTO_GLOBAL_SIN_IA
+    assert mock_enviar.call_args[0][1] == esp_dia
     mock_ai.assert_not_called()
     mock_transcribir.assert_not_called()
     mock_extraer_img.assert_not_called()
@@ -472,7 +480,7 @@ def test_tope_audio_etapa_entrada(db_session: Session):
     conv = db_session.scalar(select(ConversacionWpp).where(ConversacionWpp.wamid == wamid))
     assert conv is not None
     assert conv.intent_detectado == "tope_superado"
-    assert conv.mensaje_bot == TEXTO_GLOBAL_SIN_IA
+    assert conv.mensaje_bot == esp_dia
     assert conv.tipo_mensaje in ("audio", TipoMensajeWpp.AUDIO)
 
 
@@ -501,8 +509,12 @@ def test_tope_foto_etapa_entrada(db_session: Session):
 
         procesar_entrada_medios_y_texto(ctx)
 
+    esp_arch = (
+        "Por hoy no leo más fotos ni archivos. "
+        "Escribime el gasto, por ejemplo: _2500 súper_."
+    )
     assert mock_enviar.call_count == 1
-    assert mock_enviar.call_args[0][1] == TEXTO_GLOBAL_SIN_ARCHIVOS
+    assert mock_enviar.call_args[0][1] == esp_arch
     mock_ai.assert_not_called()
     mock_transcribir.assert_not_called()
     mock_extraer_img.assert_not_called()
@@ -512,7 +524,7 @@ def test_tope_foto_etapa_entrada(db_session: Session):
     conv = db_session.scalar(select(ConversacionWpp).where(ConversacionWpp.wamid == wamid))
     assert conv is not None
     assert conv.intent_detectado == "tope_superado"
-    assert conv.mensaje_bot == TEXTO_GLOBAL_SIN_ARCHIVOS
+    assert conv.mensaje_bot == esp_arch
     assert conv.tipo_mensaje in ("imagen", TipoMensajeWpp.IMAGEN)
 
 
@@ -542,8 +554,12 @@ def test_tope_pdf_etapa_entrada(db_session: Session):
 
         procesar_entrada_medios_y_texto(ctx)
 
+    esp_arch = (
+        "Por hoy no leo más fotos ni archivos. "
+        "Escribime el gasto, por ejemplo: _2500 súper_."
+    )
     assert mock_enviar.call_count == 1
-    assert mock_enviar.call_args[0][1] == TEXTO_TOPE_ARCHIVOS_USUARIO
+    assert mock_enviar.call_args[0][1] == esp_arch
     mock_ai.assert_not_called()
     mock_transcribir.assert_not_called()
     mock_extraer_img.assert_not_called()
@@ -553,7 +569,7 @@ def test_tope_pdf_etapa_entrada(db_session: Session):
     conv = db_session.scalar(select(ConversacionWpp).where(ConversacionWpp.wamid == wamid))
     assert conv is not None
     assert conv.intent_detectado == "tope_superado"
-    assert conv.mensaje_bot == TEXTO_TOPE_ARCHIVOS_USUARIO
+    assert conv.mensaje_bot == esp_arch
     assert conv.tipo_mensaje in ("imagen", TipoMensajeWpp.IMAGEN)
 
 

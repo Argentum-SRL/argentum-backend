@@ -222,8 +222,9 @@ def p22_caso_2(datos):
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 20 dólares en steam con débito de galicia"), time.perf_counter())
         prop_texto = respuestas[-1][1] if respuestas else ""
         prop_esperada = (
-            "Voy a anotar US$20 en Hobbies y juegos desde Galicia: son $26.000 (oficial $1.000 + 30%).\n"
-            "¿Confirmás? Si te cobraron otro monto en pesos, decime cuánto."
+            "US$20 en Hobbies y juegos desde Galicia: "
+            "son $26.000 (oficial $1.000 + 30%).\n"
+            "¿Lo anoto? Si te cobraron otro monto en pesos, decime cuánto."
         )
         prop_ok = (prop_texto.strip() == prop_esperada)
 
@@ -376,10 +377,11 @@ def entradas_p22(datos) -> list[dict]:
             "ejecutar": lambda: p22_caso_1(datos),
             "esperado": (
                 "Propuesta:\n"
-                "Voy a anotar US$20 en Hobbies y juegos desde Galicia: son $26.000 (oficial $1.000 + 30%).\n"
-                "¿Confirmás? Si te cobraron otro monto en pesos, decime cuánto.\n"
+                "US$20 en Hobbies y juegos desde Galicia: son $26.000 "
+                "(oficial $1.000 + 30%).\n"
+                "¿Lo anoto? Si te cobraron otro monto en pesos, decime cuánto.\n"
                 "Registro:\n"
-                "Listo. US$20 ($26.000) en Hobbies y juegos desde Galicia — registrado.\n"
+                "Listo, anoté US$20 ($26.000) en Hobbies y juegos desde Galicia.\n"
                 "Movimiento: True | Saldo: True"
             ),
         },
@@ -391,8 +393,8 @@ def entradas_p22(datos) -> list[dict]:
             "ejecutar": lambda: p22_caso_2(datos),
             "esperado": (
                 "Propuesta: True | Monto:\n"
-                "Voy a anotar US$20 en Hobbies y juegos desde Galicia: son $25.800.\n"
-                "¿Confirmás?\n"
+                "US$20 en Hobbies y juegos desde Galicia: son $25.800.\n"
+                "¿Lo anoto?\n"
                 "Movimiento: True | Saldo: True"
             ),
         },
@@ -404,8 +406,9 @@ def entradas_p22(datos) -> list[dict]:
             "ejecutar": lambda: p22_caso_3(datos),
             "esperado": (
                 "Propuesta:\n"
-                "Voy a anotar US$20 en Hobbies y juegos desde Galicia: son $26.000 (oficial $1.000 + 30%).\n"
-                "¿Confirmás? Si te cobraron otro monto en pesos, decime cuánto.\n"
+                "US$20 en Hobbies y juegos desde Galicia: son $26.000 "
+                "(oficial $1.000 + 30%).\n"
+                "¿Lo anoto? Si te cobraron otro monto en pesos, decime cuánto.\n"
                 "Sin movimientos: True"
             ),
         },
@@ -417,9 +420,10 @@ def entradas_p22(datos) -> list[dict]:
             "ejecutar": lambda: p22_caso_4(datos),
             "esperado": (
                 "Propuesta:\n"
-                "¿Querés eliminar el último movimiento de $100.000 en Supermercado desde Galicia? También se borra su reintegro de $25.000. ¿Confirmás?\n"
+                "Si lo borro, también se borra su reintegro de $25.000.\n"
+                "¿Borro $100.000 en Supermercado desde Galicia?\n"
                 "Confirmación:\n"
-                "Listo, movimiento eliminado.\n"
+                "Listo, lo borré.\n"
                 "Borrado: True | Saldo restaurado: True"
             ),
         },

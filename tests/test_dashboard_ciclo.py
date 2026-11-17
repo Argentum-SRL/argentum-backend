@@ -784,9 +784,8 @@ def test_caso_16_enriquecer_consultar_saldo_texto(db_session: Session, fixtures_
     enriquecer_respuesta_por_intent("consultar_saldo", resultado_ia, "cuánto tengo", usuario, db_session)
 
     esperado = (
-        "Tus saldos en pesos:\n"
-        "- Total en billeteras: $1.778.545,80\n"
-        "- Disponible libre: $1.778.545,80 (ya descontado lo que vence hasta el 27/10)"
+        "Tenés $1.778.546 en tus cuentas.\n"
+        "Libres: $1.778.546, ya descontado lo que vence hasta el 27/10."
     )
     assert resultado_ia["respuesta_usuario"] == esperado
 

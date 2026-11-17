@@ -8,6 +8,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
+from app.core.reglas_texto_wpp import partir_lineas_wpp
 from app.models.usuario import Moneda
 from app.services.fin_de_mes_service import redondear_mil
 from app.services.permitirse_evaluacion import meses_para_juntar
@@ -74,14 +75,8 @@ def linea_reintegro_texto(rubro: str | None, reintegro: Any, fmt: Any = _fmt) ->
 
 
 def partir_linea_wpp(linea: str) -> list[str]:
-    """
-    Decisión de Sebastián del 15/11: en WhatsApp, si una línea pasa de 90 caracteres se corta
-    después de los dos puntos, con las mismas palabras. Si no pasa, queda como está.
-    """
-    if len(linea) <= LARGO_MAXIMO_WPP or ": " not in linea:
-        return [linea]
-    antes, despues = linea.split(": ", 1)
-    return [f"{antes}:", despues]
+    """Parte en una o más líneas de hasta 90 caracteres usando el divisor común de WhatsApp."""
+    return partir_lineas_wpp(linea).split("\n")
 
 
 def textos_permitirse(r: Any) -> dict[str, Any]:
@@ -185,7 +180,7 @@ def textos_permitirse(r: Any) -> dict[str, Any]:
         if libre_dec < Decimal("0") and resultado in ("ahorros", "no_alcanza"):
             con_compra = Decimal(str(precio)) - libre_dec
             linea_principal = (
-                f"Este ciclo ya te faltan {_fmt(-libre_dec)} para tus pagos; "
+                f"Este mes ya te faltan {_fmt(-libre_dec)} para tus pagos; "
                 f"con esta compra, {_fmt(con_compra)}."
             )
 
@@ -208,8 +203,8 @@ def textos_permitirse(r: Any) -> dict[str, Any]:
         elif resultado == "justo" and usa_cuentas:
             if modo == "cuotas":
                 linea_principal = (
-                    f"Cada mes vas a usar unos {_fmt(uso_mensual)} "
-                    "de la plata que ya tenés en tus cuentas."
+                    f"De cada cuota, unos {_fmt(uso_mensual)} "
+                    "salen de la plata que ya tenés en tus cuentas."
                 )
             else:
                 plazo = "más de 2 años" if meses_cuentas >= 24 else _meses_texto(meses_cuentas)
@@ -275,11 +270,22 @@ def textos_permitirse(r: Any) -> dict[str, Any]:
         interes_monto = plan.interes
         vp_monto = plan.valor_presente
 
-        if interes_monto > Decimal("0"):
-            lineas_plan.append(f"Son {cantidad_cuotas} cuotas de {_fmt(cuota_monto)} ({_fmt(total_monto)} en total).")
+        if cantidad_cuotas == 1:
+            if interes_monto > Decimal("0"):
+                lineas_plan.append(f"En un pago son {_fmt(total_monto)}.")
+                lineas_plan.append(f"Pagás {_fmt(interes_monto)} de interés.")
+            else:
+                lineas_plan.append(f"En un pago son {_fmt(cuota_monto)}.")
+        elif interes_monto > Decimal("0"):
+            lineas_plan.append(
+                f"Son {cantidad_cuotas} cuotas de {_fmt(cuota_monto)} "
+                f"({_fmt(total_monto)} en total)."
+            )
             lineas_plan.append(f"Pagás {_fmt(interes_monto)} de interés.")
         else:
-            lineas_plan.append(f"Son {cantidad_cuotas} cuotas de {_fmt(cuota_monto)}.")
+            lineas_plan.append(
+                f"Son {cantidad_cuotas} cuotas de {_fmt(cuota_monto)}."
+            )
 
         if vp_monto is not None:
             fuente_str = fuente_inflacion or FUENTE_INFLACION_POR_DEFECTO
@@ -320,7 +326,10 @@ def textos_permitirse(r: Any) -> dict[str, Any]:
 
     linea_cuentas: str | None = None
     if modo == "cuotas" and resultado == "justo" and usa_cuentas and not d.get("sin_ingreso"):
-        linea_cuentas = f"Te alcanza para las {cantidad_cuotas} cuotas."
+        if cantidad_cuotas == 1:
+            linea_cuentas = "Te alcanza para pagarlo."
+        else:
+            linea_cuentas = f"Te alcanza para las {cantidad_cuotas} cuotas."
 
     linea_reintegro: str | None = None
     if resultado in ("justo", "ahorros") and rubro_compensar:
@@ -354,9 +363,15 @@ def armar_respuesta_permitirse(resultado: dict, consulta: dict) -> str:
     """
     falta = consulta.get("falta")
     if falta == "precio":
-        return 'Decime cuánto sale. Por ejemplo: "¿me puedo permitir algo de 300.000 en 6 cuotas?"'
+        return (
+            "Decime cuánto sale. Por ejemplo: "
+            "_¿me puedo permitir algo de 300.000 en 6 cuotas?_"
+        )
     if falta == "cuotas":
-        return 'Decime en cuántas cuotas. Por ejemplo: "¿me puedo permitir algo de 300.000 en 6 cuotas?"'
+        return (
+            "Decime en cuántas cuotas. Por ejemplo: "
+            "_¿me puedo permitir algo de 300.000 en 6 cuotas?_"
+        )
 
     titulo = resultado.get("titulo", "")
     lineas_plan = resultado.get("lineas_plan") or []
@@ -367,7 +382,27 @@ def armar_respuesta_permitirse(resultado: dict, consulta: dict) -> str:
     linea_frescura = resultado.get("linea_frescura")
     linea_espera = resultado.get("linea_espera")
 
-    partes: list[str] = [f"{titulo}."]
+    partes: list[str] = []
+    if (
+        titulo == "No te alcanza"
+        and linea_principal == "No te alcanza ni para un mes."
+    ):
+        partes.append(linea_principal)
+        linea_principal = None
+    elif (
+        titulo == "No te alcanza"
+        and linea_principal
+        and linea_principal.startswith("Con la plata de tus cuentas lo bancás ")
+    ):
+        resto_no_alcanza = linea_principal.replace(
+            "Con la plata de tus cuentas lo bancás ",
+            "con la plata de tus cuentas lo pagás solo ",
+            1,
+        )
+        partes.extend(partir_linea_wpp(f"No te alcanza: {resto_no_alcanza}"))
+        linea_principal = None
+    else:
+        partes.append(f"{titulo}.")
 
     # En cuotas, la primera línea del plan va después del título
     if lineas_plan:
@@ -403,6 +438,9 @@ def armar_respuesta_permitirse(resultado: dict, consulta: dict) -> str:
         partes.append(linea_espera)
 
     if consulta.get("nota_interes"):
-        partes.append("Lo calculé sin interés. Si tiene interés, decime la tasa anual (TNA).")
+        partes.append(
+            "Lo calculé sin interés. Si tiene, decime cuánto por año "
+            "(por ejemplo, 60%)."
+        )
 
     return "\n".join(partes)

@@ -167,7 +167,9 @@ def p17_caso_4(datos):
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "ese ingreso es del 27/09"), time.perf_counter())
         resp_prop = respuestas[-1][1] if respuestas else ""
 
-        prop_visible_fecha = ("27" in resp_prop and ("septiembre" in resp_prop.lower() or "09" in resp_prop)) and "corregir" in resp_prop.lower()
+        prop_visible_fecha = "27/09" in resp_prop and (
+            "¿Lo cambio" in resp_prop or "¿Lo dejo" in resp_prop
+        )
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
@@ -229,7 +231,7 @@ def p17_caso_6(datos):
         resp = respuestas[-1][1] if respuestas else ""
 
         tx_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
-        bloqueado = "mandalas por separado" in resp.lower() or "no puedo mezclar transferencias" in resp.lower()
+        bloqueado = "mandame aparte las transferencias" in resp.lower()
         creadas = tx_despues - tx_antes
 
         return f"Bloqueo transferencias propias: {bloqueado} | Creadas: {creadas}"
@@ -346,7 +348,7 @@ def p17_caso_10(datos):
             time.perf_counter()
         )
         resp_dup = respuestas[-1][1] if respuestas else ""
-        pregunta_ok = "Mandaste 2 movimientos iguales" in resp_dup or "¿Son dos ingresos distintos" in resp_dup or "se te repitió" in resp_dup
+        pregunta_ok = "Mandaste 2 veces" in resp_dup or "¿Anoto los dos?" in resp_dup
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "son dos ingresos distintos"), time.perf_counter())
@@ -374,7 +376,7 @@ def p17_caso_11(datos):
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "no, eran 3000"), time.perf_counter())
         resp_prop = respuestas[-1][1] if respuestas else ""
 
-        prop_ok = "corregir" in resp_prop.lower() and "3.000" in resp_prop
+        prop_ok = "¿Lo cambio de" in resp_prop and "3.000" in resp_prop
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
@@ -445,7 +447,7 @@ def p17_caso_14(datos):
         resp = respuestas[-1][1] if respuestas else ""
 
         tx_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
-        bloqueado = "mandalas por separado" in resp.lower() or "no puedo mezclar transferencias" in resp.lower()
+        bloqueado = "mandame aparte las transferencias" in resp.lower()
         creadas = tx_despues - tx_antes
 
         return f"Bloqueo transferencias propias: {bloqueado} | Creadas: {creadas}"

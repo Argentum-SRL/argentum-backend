@@ -29,7 +29,7 @@ def test_tx1_cuotas_justo_con_cuentas():
     })
     assert (
         res["linea_principal"]
-        == "Cada mes vas a usar unos $100.000 de la plata que ya tenés en tus cuentas."
+        == "De cada cuota, unos $100.000 salen de la plata que ya tenés en tus cuentas."
     )
     assert res["linea_cuentas"] == "Te alcanza para las 6 cuotas."
 
@@ -162,7 +162,7 @@ def test_tx7_contado_en_rojo():
     })
     assert (
         res["linea_principal"]
-        == "Este ciclo ya te faltan $460.517 para tus pagos; con esta compra, $510.517."
+        == "Este mes ya te faltan $460.517 para tus pagos; con esta compra, $510.517."
     )
 
 
@@ -252,7 +252,7 @@ def test_tx11_precio_en_dolares():
     assert res["linea_cotizacion"] == "Lo calculé con el dólar oficial de hoy ($1.450)."
     assert (
         res["linea_principal"]
-        == "Cada mes vas a usar unos US$100 de la plata que ya tenés en tus cuentas."
+        == "De cada cuota, unos US$100 salen de la plata que ya tenés en tus cuentas."
     )
 
 

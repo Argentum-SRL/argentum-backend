@@ -194,9 +194,9 @@ def p20_caso_1(datos):
         resp1 = respuestas[-1][1] if respuestas else ""
         esperado_resp1 = (
             f"Factura de EPE en 2 cuotas de $77.597,44: vencen el {f1} y el {f2}.\n"
-            "¿Ya pagaste la primera? Si me decís que sí, la anoto como gasto de hoy en Luz desde Galicia y te anoto la segunda en la web.\n"
-            "Si fue con otra, decime cuál.\n"
-            "Si me decís que no, te anoto las dos en la web para que no se te pasen."
+            "¿Ya pagaste la primera?\n"
+            "Sí: la anoto como gasto de hoy desde Galicia y guardo la otra en miargentum.com.\n"
+            "No: guardo las 2 en miargentum.com y ahí te aviso antes de que venzan."
         )
         propuesta_ok = resp1 == esperado_resp1
 
@@ -204,8 +204,8 @@ def p20_caso_1(datos):
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
         esperado_resp2 = (
-            f"Listo. $77.597,44 en Luz desde Galicia — registrado.\n"
-            f"Te anoté la segunda cuota ($77.597,44, vence el {f2}) en la web."
+            "Listo, anoté $77.597 en Luz desde Galicia.\n"
+            f"Guardé la segunda cuota ($77.597,44, vence el {f2}) en miargentum.com."
         )
         registrado_ok = resp2 == esperado_resp2
 
@@ -263,7 +263,10 @@ def p20_caso_2(datos):
             _procesar_webhook_whatsapp_sync(make_payload_document(), time.perf_counter())
 
         resp = respuestas[-1][1] if respuestas else ""
-        esperado = "Ese PDF es una imagen escaneada y no lo puedo leer. Mandame una captura de la factura."
+        esperado = (
+            "Ese PDF es una imagen escaneada y no lo puedo leer. "
+            "Mandame una captura."
+        )
         texto_ok = resp == esperado
 
         txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
@@ -340,7 +343,10 @@ def p20_caso_4(datos):
             _procesar_webhook_whatsapp_sync(make_payload_document(), time.perf_counter())
 
         resp = respuestas[-1][1] if respuestas else ""
-        esperado = "No pude confirmar el importe o el vencimiento en el PDF. Mandame una captura de la factura."
+        esperado = (
+            "No pude confirmar el monto o el vencimiento en el PDF. "
+            "Mandame una captura."
+        )
         texto_ok = resp == esperado
 
         txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()

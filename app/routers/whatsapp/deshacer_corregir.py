@@ -33,10 +33,10 @@ from app.routers.whatsapp.detectors import (
     _es_pedido_deshacer,
     _es_saludo,
 )
+from app.core.reglas_texto_wpp import fecha_corta_wpp, nombre_tarjeta_wpp
 from app.routers.whatsapp.parsers import (
     _extraer_frecuencia_mencionada,
     _extraer_nombre_servicio,
-    _formatear_fecha_natural,
     _nombre_corto_categoria,
     _parsear_fecha_texto,
     _parsear_monto_argentino,
@@ -129,7 +129,11 @@ def _evaluar_correccion_billetera(
         nom_prop = "pesos" if moneda_prop == Moneda.ARS else "dólares"
         billeteras_validas = _obtener_billeteras_activas(usuario_id, db, moneda=moneda_prop)
         menu_validas = _generar_menu_billeteras(billeteras_validas, tipo=tipo)
-        msg_error = f"No podés usar una billetera en {nom_otra} para un movimiento en {nom_prop}.\n{menu_validas}"
+        sust = "el ingreso" if tipo == "ingreso" else "el gasto"
+        msg_error = (
+            f"{b_otra.nombre} es en {nom_otra} y {sust} es en {nom_prop}. "
+            f"Elegí otra:\n{menu_validas}"
+        )
         return True, None, [], msg_error
 
     if len(cands_moneda) == 1:
@@ -170,8 +174,8 @@ def _confirmar_propuesta_deshacer(
             .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
         ).scalars().first()
         if conv_ya and conv_ya.accion_ejecutada and str(conv_ya.accion_ejecutada).startswith("deshecho:"):
-            return None, "Esa operación ya fue deshecha.", True
-        return None, "No tenés ninguna anulación pendiente para confirmar.", False
+            return None, "Ya estaba borrado.", True
+        return None, "No hay nada para borrar.", False
 
     entidades = conv_undo.entidades or {}
     lote_ids_raw = entidades.get("lote_ids")
@@ -186,8 +190,15 @@ def _confirmar_propuesta_deshacer(
         if not txs:
             conv_undo.accion_ejecutada = f"deshecho:lote:{','.join(str(x) for x in lote_uuids)}"
             db.commit()
-            return None, "El movimiento ya fue eliminado.", False
+            return None, "No hay nada para borrar.", False
         cant_eliminados = len(txs)
+        tipos_lote = {t.tipo for t in txs}
+        if tipos_lote == {TipoTransaccion.EGRESO}:
+            sust_l = "gasto" if cant_eliminados == 1 else "gastos"
+        elif tipos_lote == {TipoTransaccion.INGRESO}:
+            sust_l = "ingreso" if cant_eliminados == 1 else "ingresos"
+        else:
+            sust_l = "movimientos"
         try:
             for t in txs:
                 eliminar_transaccion(db, usuario.id, t.id, commit=False)
@@ -197,9 +208,9 @@ def _confirmar_propuesta_deshacer(
             db.commit()
         except Exception as e:
             db.rollback()
-            logger.error(f"Error al eliminar lote de transacciones: {e}")
-            return None, "Hubo un problema al eliminar el lote, no se borró nada, intentá de nuevo.", False
-        return txs[0], f"Listo, {cant_eliminados} movimientos eliminados.", False
+            logger.error(f"Error al borrar lote de transacciones: {e}")
+            return None, "Hubo un problema y no borré nada. Probá de nuevo en un rato.", False
+        return txs[0], f"Listo, borré los {cant_eliminados} {sust_l}.", False
 
     tr_ids = entidades.get("transferencia_ids")
     if tr_ids:
@@ -216,7 +227,7 @@ def _confirmar_propuesta_deshacer(
         if not trs:
             conv_undo.accion_ejecutada = f"deshecho:transferencias:{ids_str}"
             db.commit()
-            return None, "El movimiento ya fue eliminado.", False
+            return None, "No hay nada para borrar.", False
         try:
             for tr in trs:
                 transferencia_service.eliminar_transferencia(
@@ -228,13 +239,13 @@ def _confirmar_propuesta_deshacer(
             db.commit()
         except Exception as e:
             db.rollback()
-            logger.error(f"Error al anular transferencias {uuids}: {e}")
+            logger.error(f"Error al borrar transferencias {uuids}: {e}")
             return (
                 None,
-                "Hubo un problema al anular las transferencias, no se modificó nada.",
+                "Hubo un problema y no borré nada. Probá de nuevo en un rato.",
                 False,
             )
-        return trs[0], f"Listo, {len(trs)} transferencias anuladas.", False
+        return trs[0], f"Listo, borré los {len(trs)} pases.", False
 
     tr_id_str = entidades.get("transferencia_id")
     if tr_id_str:
@@ -248,7 +259,7 @@ def _confirmar_propuesta_deshacer(
         if not tr:
             conv_undo.accion_ejecutada = f"deshecho:{tr_id}"
             db.commit()
-            return None, "El movimiento ya fue eliminado.", False
+            return None, "No hay nada para borrar.", False
 
         try:
             transferencia_service.eliminar_transferencia(db, usuario.id, tr.id, commit=False)
@@ -258,10 +269,10 @@ def _confirmar_propuesta_deshacer(
             db.commit()
         except Exception as e:
             db.rollback()
-            logger.error(f"Error al anular transferencia {tr_id}: {e}")
-            return None, "Hubo un problema al anular la transferencia, no se modificó nada.", False
+            logger.error(f"Error al borrar transferencia {tr_id}: {e}")
+            return None, "Hubo un problema y no borré nada. Probá de nuevo en un rato.", False
 
-        return tr, "Listo, movimiento eliminado.", False
+        return tr, "Listo, lo borré.", False
 
     reintegro_compra_id_str = entidades.get("reintegro_compra_id")
     if reintegro_compra_id_str:
@@ -285,7 +296,7 @@ def _confirmar_propuesta_deshacer(
         if not compra or not espejo:
             conv_undo.accion_ejecutada = f"deshecho:{tx_id_str}"
             db.commit()
-            return None, "El movimiento ya fue eliminado.", False
+            return None, "No hay nada para borrar.", False
 
         previo = entidades.get("reintegro_esperado_previo")
         try:
@@ -300,15 +311,15 @@ def _confirmar_propuesta_deshacer(
             emitir_evento_actualizacion(db, usuario.id, "transacciones")
             emitir_evento_actualizacion(db, usuario.id, "billeteras")
             db.commit()
-            return compra, "Listo, devolución eliminada.", False
+            return compra, "Listo, borré el reintegro.", False
         except Exception as e:
             db.rollback()
-            logger.error(f"Error al anular devolución reintegro {compra_id}: {e}")
-            return None, "Hubo un problema al anular el movimiento, no se modificó nada.", False
+            logger.error(f"Error al borrar reintegro {compra_id}: {e}")
+            return None, "Hubo un problema y no borré nada. Probá de nuevo en un rato.", False
 
     tx_id_str = entidades.get("transaccion_id")
     if not tx_id_str:
-        return None, "No pude procesar la anulación.", False
+        return None, "No hay nada para borrar.", False
 
     tx_id = UUID(str(tx_id_str))
     tx = db.execute(
@@ -320,7 +331,7 @@ def _confirmar_propuesta_deshacer(
     if not tx:
         conv_undo.accion_ejecutada = f"deshecho:{tx_id}"
         db.commit()
-        return None, "El movimiento ya fue eliminado.", False
+        return None, "No hay nada para borrar.", False
 
     if tx.movimiento_meta_id is not None:
         mov = db.get(MovimientoMeta, tx.movimiento_meta_id)
@@ -332,11 +343,11 @@ def _confirmar_propuesta_deshacer(
                 emitir_evento_actualizacion(db, usuario.id, "transacciones")
                 emitir_evento_actualizacion(db, usuario.id, "billeteras")
                 db.commit()
-                return tx, "Listo, movimiento eliminado.", False
+                return tx, "Listo, lo borré.", False
             except Exception as e:
                 db.rollback()
-                logger.error(f"Error al anular aporte a meta {tx_id}: {e}")
-                return None, "Hubo un problema al anular el movimiento, no se modificó nada.", False
+                logger.error(f"Error al borrar aporte a meta {tx_id}: {e}")
+                return None, "Hubo un problema y no borré nada. Probá de nuevo en un rato.", False
 
     try:
         eliminar_transaccion(db, usuario.id, tx.id, commit=False)
@@ -346,10 +357,10 @@ def _confirmar_propuesta_deshacer(
         db.commit()
     except Exception as e:
         db.rollback()
-        logger.error(f"Error al anular transacción {tx_id}: {e}")
-        return None, "Hubo un problema al anular el movimiento, no se modificó nada.", False
+        logger.error(f"Error al borrar transacción {tx_id}: {e}")
+        return None, "Hubo un problema y no borré nada. Probá de nuevo en un rato.", False
 
-    return tx, "Listo, movimiento eliminado.", False
+    return tx, "Listo, lo borré.", False
 
 
 def _confirmar_propuesta_corregir(
@@ -382,14 +393,14 @@ def _confirmar_propuesta_corregir(
             .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
         ).scalars().first()
         if conv_ya and conv_ya.accion_ejecutada and str(conv_ya.accion_ejecutada).startswith("corregido:"):
-            return None, "Esa operación ya fue corregida.", True
-        return None, "No tenés ninguna corrección pendiente para confirmar.", False
+            return None, "Ya estaba cambiado.", True
+        return None, "No tengo nada pendiente para confirmar.", False
 
     entidades = conv_corr.entidades or {}
     tx_id_str = entidades.get("transaccion_id")
     cambios = entidades.get("cambios") or {}
     if not tx_id_str or not cambios:
-        return None, "No pude procesar la corrección.", False
+        return None, "No pude cambiar eso.", False
 
     tx_id = UUID(str(tx_id_str))
     tx = db.execute(
@@ -401,7 +412,7 @@ def _confirmar_propuesta_corregir(
     if not tx:
         conv_corr.accion_ejecutada = f"corregido:{tx_id}"
         db.commit()
-        return None, "El movimiento ya fue eliminado. No hay nada para corregir.", False
+        return None, "No hay nada para cambiar.", False
 
     kwargs_update = {}
     if "monto" in cambios and cambios["monto"] is not None:
@@ -423,14 +434,31 @@ def _confirmar_propuesta_corregir(
         db.rollback()
         conv_corr.accion_ejecutada = "error"
         db.commit()
-        return None, str(e.detail), False
+        det = str(e.detail or "")
+        if "reintegro" in det.lower():
+            return (
+                None,
+                "Primero sacá el reintegro en miargentum.com y después cambiá la cuenta.",
+                False,
+            )
+        return None, det, False
 
     conv_corr.accion_ejecutada = f"corregido:{tx_id}"
     emitir_evento_actualizacion(db, usuario.id, "transacciones")
     emitir_evento_actualizacion(db, usuario.id, "billeteras")
     db.commit()
 
-    return tx, "Listo, movimiento corregido.", False
+    db.refresh(tx)
+    b_res = db.get(Billetera, tx.billetera_id) if tx.billetera_id else None
+    b_nom = b_res.nombre if b_res else "tu cuenta"
+    c_res = db.get(Categoria, tx.categoria_id) if tx.categoria_id else None
+    s_res = db.get(Subcategoria, tx.subcategoria_id) if tx.subcategoria_id else None
+    cat_disp = s_res.nombre if s_res else (c_res.nombre if c_res else "Otros")
+    m_fmt = formatear_monto(float(tx.monto), tx.moneda, con_decimales=False)
+    f_corta = fecha_corta_wpp(tx.fecha, hoy_argentina())
+    f_disp = f" ({f_corta})" if f_corta else ""
+    prep = "en" if tx.tipo == TipoTransaccion.INGRESO else "desde"
+    return tx, f"Listo, quedó {m_fmt} en {cat_disp} {prep} {b_nom}{f_disp}.", False
 
 
 
@@ -556,7 +584,11 @@ def _detectar_correccion_ultimo_movimiento(
         if b_encontrada.moneda != tx_actual.moneda:
             nom_otra = "dólares" if b_encontrada.moneda == Moneda.USD else "pesos"
             nom_act = "pesos" if tx_actual.moneda == Moneda.ARS else "dólares"
-            return True, {}, f"No podés usar una billetera en {nom_otra} para un movimiento en {nom_act}."
+            tipo_lbl = "ingreso" if tx_actual.tipo == TipoTransaccion.INGRESO else "gasto"
+            return True, {}, (
+                f"{b_encontrada.nombre} es en {nom_otra} "
+                f"y el {tipo_lbl} es en {nom_act}."
+            )
         if b_encontrada.id != tx_actual.billetera_id:
             cambios["billetera_id"] = str(b_encontrada.id)
             cambios["billetera_nombre"] = b_encontrada.nombre
@@ -615,60 +647,85 @@ def _detectar_correccion_ultimo_movimiento(
     return False, {}, None
 
 
-def _construir_propuesta_deshacer(tx_actual: Transaccion | TransferenciaInterna | list[Transaccion], db: Session) -> str:
+def _construir_propuesta_deshacer(
+    tx_actual: Transaccion | TransferenciaInterna | list[Transaccion], db: Session
+) -> str:
+    hoy = hoy_argentina()
     if isinstance(tx_actual, list):
         if tx_actual and isinstance(tx_actual[0], TransferenciaInterna):
-            cant = len(tx_actual)
-            return (
-                f"¿Querés anular las {cant} transferencias que "
-                f"registraste recién? ¿Confirmás?"
-            )
+            return f"¿Borro los {len(tx_actual)} pases que anotaste recién?"
         cant = len(tx_actual)
+        tipos_lote = {t.tipo for t in tx_actual}
+        if tipos_lote == {TipoTransaccion.EGRESO}:
+            sust = "gasto" if cant == 1 else "gastos"
+        elif tipos_lote == {TipoTransaccion.INGRESO}:
+            sust = "ingreso" if cant == 1 else "ingresos"
+        else:
+            sust = "movimientos"
         ids = [t.id for t in tx_actual]
         espejos_lote = db.query(Transaccion).filter(
             Transaccion.reintegro_de_id.in_(ids),
             Transaccion.es_cuota_hija == False,
         ).all()
-        reintegros = [e for e in espejos_lote if getattr(e, "tipo_espejo", None) in ("reintegro", None)]
+        reintegros = [
+            e for e in espejos_lote if getattr(e, "tipo_espejo", None) in ("reintegro", None)
+        ]
         partes = [e for e in espejos_lote if getattr(e, "tipo_espejo", None) == "parte"]
-        frase_extra = ""
+        lineas_extra: list[str] = []
         if reintegros:
             suma_r = sum((abs(e.monto) for e in reintegros), Decimal("0"))
-            mon_r = reintegros[0].moneda
-            frase_extra += f" También se borra su reintegro de {formatear_monto(float(suma_r), mon_r)}."
+            m_r = formatear_monto(float(suma_r), reintegros[0].moneda, con_decimales=False)
+            lineas_extra.append(f"Si los borro, también se borra su reintegro de {m_r}.")
         if partes:
             suma_p = sum((abs(e.monto) for e in partes), Decimal("0"))
-            mon_p = partes[0].moneda
-            frase_extra += f" Los {formatear_monto(float(suma_p), mon_p)} que te devolvieron de este gasto vuelven a quedar como cobro."
-        return f"¿Querés eliminar los {cant} movimientos registrados recientemente?{frase_extra} ¿Confirmás?"
+            m_p = formatear_monto(float(suma_p), partes[0].moneda, con_decimales=False)
+            lineas_extra.append(
+                f"Si los borro, los {m_p} que te devolvieron vuelven a ser un cobro."
+            )
+        preg = f"¿Borro los {cant} {sust} que anotaste recién?"
+        return "\n".join(lineas_extra + [preg])
 
     if isinstance(tx_actual, TransferenciaInterna):
-        billetera_orig = db.get(Billetera, tx_actual.billetera_origen_id) if tx_actual.billetera_origen_id else None
-        billetera_dest = db.get(Billetera, tx_actual.billetera_destino_id) if tx_actual.billetera_destino_id else None
+        billetera_orig = (
+            db.get(Billetera, tx_actual.billetera_origen_id)
+            if tx_actual.billetera_origen_id
+            else None
+        )
+        billetera_dest = (
+            db.get(Billetera, tx_actual.billetera_destino_id)
+            if tx_actual.billetera_destino_id
+            else None
+        )
         bill_orig_nom = billetera_orig.nombre if billetera_orig else "origen"
         bill_dest_nom = billetera_dest.nombre if billetera_dest else "destino"
-        monto_fmt = formatear_monto(float(tx_actual.monto_origen), tx_actual.moneda_origen)
-        return f"¿Querés anular la transferencia de {monto_fmt} de {bill_orig_nom} a {bill_dest_nom}? ¿Confirmás?"
+        monto_fmt = formatear_monto(
+            float(tx_actual.monto_origen), tx_actual.moneda_origen, con_decimales=False
+        )
+        return f"¿Borro el pase de {monto_fmt} de {bill_orig_nom} a {bill_dest_nom}?"
 
-    if hasattr(tx_actual, "movimiento_meta_id") and (tx_actual.movimiento_meta_id is not None or (tx_actual.descripcion and tx_actual.descripcion.startswith("Aporte a la meta:"))):
-        meta_nom = tx_actual.descripcion.replace("Aporte a la meta:", "").strip() if tx_actual.descripcion else "tu meta"
-        monto_fmt = formatear_monto(float(tx_actual.monto), tx_actual.moneda)
-        return f"¿Querés eliminar el aporte de {monto_fmt} a tu meta '{meta_nom}'? ¿Confirmás?"
+    if hasattr(tx_actual, "movimiento_meta_id") and (
+        tx_actual.movimiento_meta_id is not None
+        or (tx_actual.descripcion and tx_actual.descripcion.startswith("Aporte a la meta:"))
+    ):
+        meta_nom = (
+            tx_actual.descripcion.replace("Aporte a la meta:", "").strip()
+            if tx_actual.descripcion
+            else "tu meta"
+        )
+        monto_fmt = formatear_monto(float(tx_actual.monto), tx_actual.moneda, con_decimales=False)
+        return f"¿Borro el aporte de {monto_fmt} a tu meta {meta_nom}?"
 
-    # Si es un espejo (reintegro_de_id no nulo):
     if getattr(tx_actual, "reintegro_de_id", None) is not None:
         compra_padre = db.get(Transaccion, tx_actual.reintegro_de_id)
-        desc_padre = compra_padre.descripcion if compra_padre else "gasto"
-        monto_fmt = formatear_monto(abs(float(tx_actual.monto)), tx_actual.moneda)
-        billetera = db.get(Billetera, tx_actual.billetera_id) if tx_actual.billetera_id else None
-        bill_nom = billetera.nombre if billetera else "tu billetera"
-        fecha_nat = _formatear_fecha_natural(tx_actual.fecha)
-        fecha_disp = f" ({fecha_nat})" if fecha_nat else ""
-        return f"¿Querés eliminar la devolución de {monto_fmt} de «{desc_padre}» en {bill_nom}{fecha_disp}? ¿Confirmás?"
+        desc_padre = compra_padre.descripcion if compra_padre else "ese gasto"
+        monto_fmt = formatear_monto(
+            abs(float(tx_actual.monto)), tx_actual.moneda, con_decimales=False
+        )
+        return f"¿Borro el reintegro de {monto_fmt} de {desc_padre}?"
 
-    monto_fmt = formatear_monto(float(tx_actual.monto), tx_actual.moneda)
+    monto_fmt = formatear_monto(float(tx_actual.monto), tx_actual.moneda, con_decimales=False)
     billetera = db.get(Billetera, tx_actual.billetera_id) if tx_actual.billetera_id else None
-    bill_nom = billetera.nombre if billetera else "tu billetera"
+    bill_nom = billetera.nombre if billetera else "tu cuenta"
     cat_nom = None
     if tx_actual.categoria_id:
         c = db.get(Categoria, tx_actual.categoria_id)
@@ -677,40 +734,47 @@ def _construir_propuesta_deshacer(tx_actual: Transaccion | TransferenciaInterna 
         s = db.get(Subcategoria, tx_actual.subcategoria_id)
         cat_nom = s.nombre if s else cat_nom
     cat_disp = cat_nom or "Otros"
-    fecha_nat = _formatear_fecha_natural(tx_actual.fecha)
-    fecha_disp = f" ({fecha_nat})" if fecha_nat else ""
+    f_corta = fecha_corta_wpp(tx_actual.fecha, hoy)
+    fecha_disp = f" ({f_corta})" if f_corta else ""
 
     espejos_compra = db.query(Transaccion).filter(
         Transaccion.reintegro_de_id == tx_actual.id,
         Transaccion.es_cuota_hija == False,
     ).all()
-    reintegros = [e for e in espejos_compra if getattr(e, "tipo_espejo", None) in ("reintegro", None)]
+    reintegros = [
+        e for e in espejos_compra if getattr(e, "tipo_espejo", None) in ("reintegro", None)
+    ]
     partes = [e for e in espejos_compra if getattr(e, "tipo_espejo", None) == "parte"]
-    frase_espejos = ""
+    lineas_espejos: list[str] = []
     if reintegros:
         suma_r = sum((abs(e.monto) for e in reintegros), Decimal("0"))
-        mon_r = reintegros[0].moneda
-        frase_espejos += f" También se borra su reintegro de {formatear_monto(float(suma_r), mon_r)}."
+        m_r = formatear_monto(float(suma_r), reintegros[0].moneda, con_decimales=False)
+        lineas_espejos.append(f"Si lo borro, también se borra su reintegro de {m_r}.")
     if partes:
         suma_p = sum((abs(e.monto) for e in partes), Decimal("0"))
-        mon_p = partes[0].moneda
-        frase_espejos += f" Los {formatear_monto(float(suma_p), mon_p)} que te devolvieron de este gasto vuelven a quedar como cobro."
+        m_p = formatear_monto(float(suma_p), partes[0].moneda, con_decimales=False)
+        lineas_espejos.append(
+            f"Si lo borro, los {m_p} que te devolvieron vuelven a ser un cobro."
+        )
 
     if tx_actual.metodo_pago == MetodoPago.CREDITO or tx_actual.tarjeta_id:
         tarjeta = db.get(TarjetaCredito, tx_actual.tarjeta_id) if tx_actual.tarjeta_id else None
-        tarjeta_nom = f"tarjeta {tarjeta.nombre}" if tarjeta else "tarjeta de crédito"
+        tarjeta_nom = f"la {nombre_tarjeta_wpp(tarjeta)}" if tarjeta else "la tarjeta"
         grupo = db.execute(
             select(GrupoCuotas).where(GrupoCuotas.transaccion_padre_id == tx_actual.id)
         ).scalar_one_or_none()
         if grupo and grupo.cantidad_cuotas > 1:
-            return f"¿Querés eliminar la compra de {monto_fmt} en {grupo.cantidad_cuotas} cuotas con {tarjeta_nom}?{frase_espejos} ¿Confirmás?"
+            preg = (
+                f"¿Borro la compra de {monto_fmt} en {grupo.cantidad_cuotas} cuotas "
+                f"con {tarjeta_nom}?"
+            )
         else:
-            return f"¿Querés eliminar el último consumo de {monto_fmt} en {cat_disp} con {tarjeta_nom}{fecha_disp}?{frase_espejos} ¿Confirmás?"
-
-    if tx_actual.tipo == TipoTransaccion.INGRESO:
-        return f"¿Querés eliminar el último ingreso de {monto_fmt} en {cat_disp} a {bill_nom}{fecha_disp}?{frase_espejos} ¿Confirmás?"
+            preg = f"¿Borro {monto_fmt} en {cat_disp} con {tarjeta_nom}{fecha_disp}?"
+    elif tx_actual.tipo == TipoTransaccion.INGRESO:
+        preg = f"¿Borro el ingreso de {monto_fmt} en {bill_nom}{fecha_disp}?"
     else:
-        return f"¿Querés eliminar el último movimiento de {monto_fmt} en {cat_disp} desde {bill_nom}{fecha_disp}?{frase_espejos} ¿Confirmás?" 
+        preg = f"¿Borro {monto_fmt} en {cat_disp} desde {bill_nom}{fecha_disp}?"
+    return "\n".join(lineas_espejos + [preg])
 
 
 def _construir_propuesta_corregir(
@@ -718,57 +782,54 @@ def _construir_propuesta_corregir(
     cambios: dict,
     db: Session,
 ) -> str:
+    hoy = hoy_argentina()
     b_vieja = db.get(Billetera, tx_actual.billetera_id)
     cat_vieja = db.get(Categoria, tx_actual.categoria_id) if tx_actual.categoria_id else None
     sub_vieja = db.get(Subcategoria, tx_actual.subcategoria_id) if tx_actual.subcategoria_id else None
     cat_vieja_disp = sub_vieja.nombre if sub_vieja else (cat_vieja.nombre if cat_vieja else "Otros")
-    b_vieja_nom = b_vieja.nombre if b_vieja else "tu billetera"
-    f_vieja_nat = _formatear_fecha_natural(tx_actual.fecha)
-    f_vieja_disp = f" ({f_vieja_nat})" if f_vieja_nat else ""
-    m_viejo_fmt = formatear_monto(float(tx_actual.monto), tx_actual.moneda)
+    b_vieja_nom = b_vieja.nombre if b_vieja else "tu cuenta"
+    f_vieja_corta = fecha_corta_wpp(tx_actual.fecha, hoy)
+    m_viejo_fmt = formatear_monto(float(tx_actual.monto), tx_actual.moneda, con_decimales=False)
 
+    m_nuevo_fmt = m_viejo_fmt
     if "monto" in cambios:
-        m_nuevo_fmt = formatear_monto(float(cambios["monto"]), tx_actual.moneda)
-    else:
-        m_nuevo_fmt = m_viejo_fmt
+        m_nuevo_fmt = formatear_monto(
+            float(cambios["monto"]), tx_actual.moneda, con_decimales=False
+        )
 
+    cat_nueva_disp = cat_vieja_disp
     if "categoria_nombre" in cambios:
         cat_nueva_disp = cambios["categoria_nombre"]
     elif "categoria_id" in cambios:
         c_n = db.get(Categoria, UUID(cambios["categoria_id"]))
         s_n = db.get(Subcategoria, UUID(cambios["subcategoria_id"])) if cambios.get("subcategoria_id") else None
         cat_nueva_disp = s_n.nombre if s_n else (c_n.nombre if c_n else cat_vieja_disp)
-    else:
-        cat_nueva_disp = cat_vieja_disp
 
+    b_nueva_nom = b_vieja_nom
     if "billetera_nombre" in cambios:
         b_nueva_nom = cambios["billetera_nombre"]
     elif "billetera_id" in cambios:
         b_n = db.get(Billetera, UUID(cambios["billetera_id"]))
         b_nueva_nom = b_n.nombre if b_n else b_vieja_nom
-    else:
-        b_nueva_nom = b_vieja_nom
 
+    f_nueva_corta = f_vieja_corta
     if "fecha" in cambios and cambios["fecha"]:
-        f_nueva_obj = date.fromisoformat(str(cambios["fecha"]))
-        if f_nueva_obj == hoy_argentina():
-            f_nueva_disp = " (hoy)"
-        else:
-            f_nueva_nat = _formatear_fecha_natural(f_nueva_obj)
-            f_nueva_disp = f" ({f_nueva_nat})" if f_nueva_nat else ""
-    else:
-        f_nueva_disp = f_vieja_disp
+        f_nueva_corta = fecha_corta_wpp(date.fromisoformat(str(cambios["fecha"])), hoy)
+    f_nueva_disp = f" ({f_nueva_corta})" if f_nueva_corta else ""
 
-    if tx_actual.tipo == TipoTransaccion.INGRESO:
-        linea_antes = f"{m_viejo_fmt} en {cat_vieja_disp} a {b_vieja_nom}{f_vieja_disp}"
-        linea_ahora = f"{m_nuevo_fmt} en {cat_nueva_disp} a {b_nueva_nom}{f_nueva_disp}"
-    else:
-        linea_antes = f"{m_viejo_fmt} en {cat_vieja_disp} desde {b_vieja_nom}{f_vieja_disp}"
-        linea_ahora = f"{m_nuevo_fmt} en {cat_nueva_disp} desde {b_nueva_nom}{f_nueva_disp}"
+    pares_cambio: list[tuple[str, str]] = []
+    if "monto" in cambios and Decimal(str(cambios["monto"])) != tx_actual.monto:
+        pares_cambio.append((m_viejo_fmt, m_nuevo_fmt))
+    cat_cambio = "categoria_id" in cambios or "categoria_nombre" in cambios
+    if cat_cambio and cat_nueva_disp != cat_vieja_disp:
+        pares_cambio.append((cat_vieja_disp, cat_nueva_disp))
+    if ("billetera_id" in cambios or "billetera_nombre" in cambios) and b_nueva_nom != b_vieja_nom:
+        pares_cambio.append((b_vieja_nom, b_nueva_nom))
+    if cambios.get("fecha") and f_nueva_corta != f_vieja_corta:
+        pares_cambio.append((f_vieja_corta or "hoy", f_nueva_corta or "hoy"))
 
-    return (
-        f"Voy a corregir el último movimiento:\n"
-        f"Antes: {linea_antes}\n"
-        f"Ahora: {linea_ahora}\n"
-        f"¿Confirmás?"
-    )
+    if len(pares_cambio) == 1:
+        viejo, nuevo = pares_cambio[0]
+        return f"¿Lo cambio de {viejo} a {nuevo}?"
+    prep = "en" if tx_actual.tipo == TipoTransaccion.INGRESO else "desde"
+    return f"¿Lo dejo en {m_nuevo_fmt} en {cat_nueva_disp} {prep} {b_nueva_nom}{f_nueva_disp}?"

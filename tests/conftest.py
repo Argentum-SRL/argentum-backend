@@ -12,8 +12,14 @@ os.environ["INICIALIZAR_BASE_AL_ARRANCAR"] = "false"
 import pytest
 from tests.guarda_base import MENSAJE_BLOQUEO, base_permitida_para_pruebas
 
+pytest_plugins = ["tests.plugin_reglas_texto"]
+
 
 def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "sin_reglas_texto: desactiva el control de textos WPP para este test",
+    )
     url = os.environ.get("DATABASE_URL")
     if not url:
         from app.core.config import settings

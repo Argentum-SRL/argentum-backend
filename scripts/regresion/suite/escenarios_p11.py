@@ -59,8 +59,14 @@ def p11_caso_1(datos):
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp_conf = respuestas[-1][1] if respuestas else ""
-        ok_prop = "Listo," in resp_prop and "5.000 en Kiosco desde Galicia" in resp_prop and "8.000 en Verdulería desde Santander" in resp_prop
-        ok_conf = (resp_conf.strip() == "Ya quedó anotado. Si hay algo mal, decime qué corregir.")
+        ok_prop = (
+            "Listo, anoté" in resp_prop
+            and "$5.000 en Kiosco" in resp_prop
+            and "Galicia" in resp_prop
+            and "$8.000 en Verdulería" in resp_prop
+            and "Santander" in resp_prop
+        )
+        ok_conf = (resp_conf.strip() == "Ya lo había anotado.")
         return (
             f"Propuesta: {ok_prop} | "
             f"Confirmacion: {ok_conf}"
@@ -77,9 +83,12 @@ def p11_caso_2(datos):
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco y 8000 en la verdulería"), time.perf_counter())
         resp_prop = respuestas[-1][1] if respuestas else ""
-        return (
-            f"Propuesta principal: {'2 movimientos desde Galicia:\n\n- $5.000 en Kiosco\n- $8.000 en Verdulería' in resp_prop and 'Si fue con otra, decime cuál.' in resp_prop}"
+        esp_lote = (
+            "Listo, anoté 2 gastos desde Galicia:\n"
+            "- $5.000 en Kiosco\n"
+            "- $8.000 en Verdulería"
         )
+        return f"Propuesta principal: {esp_lote in resp_prop}"
     return run_isolated(test)
 
 
@@ -95,9 +104,14 @@ def p11_caso_3(datos):
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "2"), time.perf_counter())
         resp_prop = respuestas[-1][1] if respuestas else ""
+        esp_lote = (
+            "Listo, anoté 2 gastos desde Galicia:\n"
+            "- $5.000 en Kiosco\n"
+            "- $8.000 en Verdulería"
+        )
         return (
-            f"Pregunta una vez: {'¿Desde qué billetera salieron los gastos?' in resp_preg} | "
-            f"Propuesta resuelta: {'2 movimientos desde Galicia:\n\n- $5.000 en Kiosco\n- $8.000 en Verdulería' in resp_prop}"
+            f"Pregunta una vez: {'¿De qué cuenta salieron los gastos?' in resp_preg} | "
+            f"Propuesta resuelta: {esp_lote in resp_prop}"
         )
     return run_isolated(test)
 
@@ -114,9 +128,10 @@ def p11_caso_4(datos):
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "3"), time.perf_counter())
         resp_prop = respuestas[-1][1] if respuestas else ""
+        ok_mixta = "5.000 en Kiosco · Galicia" in resp_prop and "Santander" in resp_prop
         return (
-            f"Pregunta faltantes: {'¿Desde qué billetera salieron los gastos?' in resp_preg} | "
-            f"Propuesta mixta: {'5.000 en Kiosco desde Galicia' in resp_prop and 'Santander' in resp_prop}"
+            f"Pregunta faltantes: {'¿De qué cuenta salieron los gastos?' in resp_preg} | "
+            f"Propuesta mixta: {ok_mixta}"
         )
     return run_isolated(test)
 
@@ -133,8 +148,13 @@ def p11_caso_5(datos):
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp_conf = respuestas[-1][1] if respuestas else ""
-        ok_prop = "Listo," in resp_prop and "+$100.000" in resp_prop and "-$30.000" in resp_prop
-        ok_conf = (resp_conf.strip() == "Ya quedó anotado. Si hay algo mal, decime qué corregir.")
+        ok_prop = (
+            "Listo, anoté 2 movimientos" in resp_prop
+            and "$100.000" in resp_prop
+            and "(ingreso)" in resp_prop
+            and "$30.000" in resp_prop
+        )
+        ok_conf = (resp_conf.strip() == "Ya lo había anotado.")
         return (
             f"Propuesta signos: {ok_prop} | "
             f"Confirmacion signos: {ok_conf}"
@@ -151,9 +171,11 @@ def p11_caso_6(datos):
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco con Galicia y 30000 en zapatillas con la Amex"), time.perf_counter())
         resp_prop = respuestas[-1][1] if respuestas else ""
-        return (
-            f"Lote tarjeta y gasto: {'$5.000 en Kiosco desde Galicia' in resp_prop and 'con tarjeta •••• 2745' in resp_prop}"
+        ok_tarj = (
+            "$5.000 en Kiosco · Galicia" in resp_prop
+            and "Amex Galicia •••• 2745" in resp_prop
         )
+        return f"Lote tarjeta y gasto: {ok_tarj}"
     return run_isolated(test)
 
 
@@ -168,7 +190,7 @@ def p11_caso_7(datos):
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, msg_12), time.perf_counter())
         resp = respuestas[-1][1] if respuestas else ""
         return (
-            f"Rechazo tope: {'El límite es de 10 movimientos por mensaje' in resp and 'web de Argentum' in resp}"
+            f"Rechazo tope: {'Mandame hasta 10 movimientos por mensaje.' in resp}"
         )
     return run_isolated(test)
 
@@ -183,9 +205,12 @@ def p11_caso_8(datos):
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco y 50 dólares en un libro"), time.perf_counter())
         resp = respuestas[-1][1] if respuestas else ""
-        return (
-            f"Aviso descarte y propuesta: {'No se pudo registrar' in resp and 'dólares' in resp and 'Listo. $5.000 en Kiosco desde Galicia' in resp}"
+        ok_desc = (
+            "No pude anotar" in resp
+            and "dólares" in resp
+            and "Listo, anoté $5.000 en Kiosco desde Galicia." in resp
         )
+        return f"Aviso descarte y propuesta: {ok_desc}"
     return run_isolated(test)
 
 
@@ -198,9 +223,8 @@ def p11_caso_9(datos):
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco y 5000 en el kiosco"), time.perf_counter())
         resp = respuestas[-1][1] if respuestas else ""
-        return (
-            f"Deteccion duplicado interno: {'Mandaste 2 movimientos iguales de $5.000 en Kiosco' in resp and '¿Son dos gastos distintos o se te repitió?' in resp}"
-        )
+        esp_dup = "Mandaste 2 veces $5.000 en Kiosco. ¿Anoto los dos?"
+        return f"Deteccion duplicado interno: {esp_dup in resp}"
     return run_isolated(test)
 
 
@@ -219,9 +243,10 @@ def p11_caso_10(datos):
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp_conf_undo = respuestas[-1][1] if respuestas else ""
+        esp_u = "¿Borro los 2 gastos que anotaste recién?"
         return (
-            f"Propuesta deshacer lote: {'eliminar los 2 movimientos' in resp_prop_undo} | "
-            f"Confirmacion deshacer lote: {'Listo, 2 movimientos eliminados.' in resp_conf_undo}"
+            f"Propuesta deshacer lote: {esp_u in resp_prop_undo} | "
+            f"Confirmacion deshacer lote: {'Listo, borré los 2 gastos.' in resp_conf_undo}"
         )
     return run_isolated(test)
 

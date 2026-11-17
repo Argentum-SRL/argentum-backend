@@ -187,5 +187,5 @@ def test_reintento_falla_y_termina_en_aviso_faltantes(db_session, mock_contexto_
         assert p_mock.call_count == 2
         assert len(mensajes_enviados) == 1
         resp_final = mensajes_enviados[0]
-        aviso_esperado = "Ojo: en tu mensaje también vi 300.000 pesos y no lo registré. Mandámelo en un mensaje aparte así lo cargo bien."
+        aviso_esperado = "Ojo: también vi 300.000 pesos y no lo anoté. Mandámelo aparte."
         assert aviso_esperado in resp_final

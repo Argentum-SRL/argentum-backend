@@ -5,15 +5,22 @@ import re
 from datetime import date
 from decimal import Decimal
 
+from uuid import UUID
+
+from sqlalchemy.orm import Session
+
+from app.core.reglas_texto_wpp import fecha_corta_wpp, nombre_tarjeta_wpp
 from app.models.billetera import Billetera
+from app.models.categoria import Categoria
+from app.models.subcategoria import Subcategoria
 from app.models.tarjeta_credito import TarjetaCredito
 from app.models.usuario import Moneda
-from app.routers.whatsapp.constantes import MESES_ES_GEN
+from app.routers.whatsapp.db_lookups import _resolver_categoria_y_subcategoria
 from app.routers.whatsapp.parsers import (
-    _formatear_fecha_natural,
     _nombre_corto_categoria,
     _resolver_y_validar_fecha,
 )
+from app.utils.fecha import hoy_argentina
 from app.routers.whatsapp.resolvers_cascada import (
     FORMAS_GENERICAS_TARJETA,
     _validar_item_movimiento,
@@ -65,6 +72,28 @@ def _resolver_mencion_tarjeta_en_texto(
     return None, cands
 
 
+def _resolver_cat_display_wpp(
+    cat_raw: str | None,
+    db: Session | None,
+    usuario_id: UUID | None,
+    tipo: str = "egreso",
+) -> str:
+    """Resuelve el nombre visible de subcategoría/categoría igual que el registro."""
+    if db is not None and usuario_id is not None:
+        cat_id, subcat_id = _resolver_categoria_y_subcategoria(
+            cat_raw, usuario_id, db, tipo=tipo
+        )
+        if subcat_id:
+            sub_db = db.get(Subcategoria, subcat_id)
+            if sub_db:
+                return sub_db.nombre
+        if cat_id:
+            cat_db = db.get(Categoria, cat_id)
+            if cat_db:
+                return cat_db.nombre
+    return _nombre_corto_categoria(cat_raw) if cat_raw else "Otros"
+
+
 def _construir_propuesta_credito(
     entidades: dict,
     tarjeta: TarjetaCredito,
@@ -73,50 +102,41 @@ def _construir_propuesta_credito(
     monto_total: Decimal,
     fecha_vencimiento: date,
     se_asumio_tarjeta: bool = False,
+    db: Session | None = None,
+    usuario_id: UUID | None = None,
 ) -> str:
-    """Construye la propuesta obligatoria de consumo con tarjeta de crédito (Tareas 5.4 y 6.5)."""
+    """Construye la propuesta de consumo con tarjeta de crédito (D5)."""
     moneda_enum = tarjeta.moneda
     cuota_fmt = formatear_monto(float(monto_cuota), moneda_enum)
-    total_fmt = formatear_monto(float(monto_total), moneda_enum)
-
-    cat_nom = entidades.get("categoria")
-    cat_disp = _nombre_corto_categoria(cat_nom) if cat_nom else "Otros"
-
-    venc_str = f"{fecha_vencimiento.day} de {MESES_ES_GEN[fecha_vencimiento.month - 1]}"
+    total_fmt = formatear_monto(float(monto_total), moneda_enum, con_decimales=False)
+    cat_disp = _resolver_cat_display_wpp(entidades.get("categoria"), db, usuario_id)
+    venc_str = fecha_vencimiento.strftime("%d/%m")
+    nom_t = nombre_tarjeta_wpp(tarjeta)
 
     if cant_cuotas > 1:
-        msg = f"Voy a anotar {cant_cuotas} cuotas de {cuota_fmt} (total {total_fmt}) en {cat_disp} con tarjeta {tarjeta.nombre} (primer vencimiento: {venc_str}). ¿Va?"
-    else:
-        msg = f"Voy a anotar 1 cuota de {cuota_fmt} (total {total_fmt}) en {cat_disp} con tarjeta {tarjeta.nombre} (primer vencimiento: {venc_str}). ¿Va?"
+        total_cuotas_fmt = formatear_monto(float(monto_total), moneda_enum)
+        return (
+            f"{cant_cuotas} cuotas de {cuota_fmt} en {cat_disp} "
+            f"con la {nom_t} ({total_cuotas_fmt}).\n"
+            f"La primera vence el {venc_str}. ¿Las anoto?"
+        )
+    return (
+        f"{total_fmt} en {cat_disp} con la {nom_t}, en un pago.\n"
+        f"Vence el {venc_str}. ¿Lo anoto?"
+    )
 
-    if se_asumio_tarjeta:
-        msg += "\nSi fue con otra tarjeta, decime cuál."
-    return msg
 
-
-def _unir_items_multilinea(items: list[str], encabezado: str, cierre: str) -> str:
-    """
-    Une los items de un lote en formato de lista con viñetas nativas de WhatsApp:
-    encabezado
-
-    - item 1
-    - item 2
-
-    cierre
-    """
+def _unir_items_multilinea(items: list[str], encabezado: str, cierre: str = "") -> str:
+    """Une los items de un lote con viñetas nativas de WhatsApp sin renglones vacíos."""
     def _limpiar(it: str) -> str:
-        if it.startswith("- "):
-            return it[2:]
-        if it.startswith("• "):
+        if it.startswith("- ") or it.startswith("• "):
             return it[2:]
         return it
 
-    items_formateados = [f"- {_limpiar(it)}" for it in items]
-    bloque_items = "\n".join(items_formateados)
-    partes = [encabezado, bloque_items]
+    lineas = [encabezado] + [f"- {_limpiar(it)}" for it in items]
     if cierre:
-        partes.append(cierre)
-    return "\n\n".join(partes)
+        lineas.append(cierre)
+    return "\n".join(lineas)
 
 
 def _construir_propuesta_transaccion(
@@ -125,6 +145,8 @@ def _construir_propuesta_transaccion(
     se_asumio_principal: bool = False,
     billetera_moneda: Moneda | None = None,
     billeteras_usuario: list[Billetera] | None = None,
+    db: Session | None = None,
+    usuario_id: UUID | None = None,
 ) -> str:
     """
     Construye el texto limpio de propuesta de confirmación siempre nombrando la billetera (8.1).
@@ -209,134 +231,116 @@ def _construir_propuesta_transaccion(
         else:
             entidades["transacciones_adicionales"] = []
             lineas_error = list(avisos_descarte)
-            lineas_error.append("No se puede registrar ningún movimiento.")
+            lineas_error.append("No pude anotar ninguno.")
             return "\n".join(lineas_error)
     else:
         entidades["monto"] = item_ppal_limpio["monto"]
         entidades["transacciones_adicionales"] = adicionales_validos
 
+    hoy = hoy_argentina()
     if adicionales_validos:
         todos_items = [item_ppal_limpio] + adicionales_validos
         total_movs = len(todos_items)
 
-        # Analizar homogeneidad de billeteras y tipos
         billeteras_items = [it.get("billetera") for it in todos_items if it.get("billetera")]
-        misma_billetera = len(set(billeteras_items)) <= 1 and not any(it.get("tarjeta") for it in todos_items)
+        misma_billetera = (
+            len(set(billeteras_items)) <= 1
+            and not any(it.get("tarjeta") for it in todos_items)
+        )
         b_comun = billeteras_items[0] if billeteras_items else billetera_nombre
         mismo_tipo = len(set(it.get("tipo", "egreso") for it in todos_items)) == 1
-        tipos_mezclados = any(it.get("tipo") == "ingreso" for it in todos_items) and any(it.get("tipo", "egreso") == "egreso" for it in todos_items)
+        tipos_mezclados = (
+            any(it.get("tipo") == "ingreso" for it in todos_items)
+            and any(it.get("tipo", "egreso") == "egreso" for it in todos_items)
+        )
+
+        items_desc: list[str] = []
+        for it in todos_items:
+            tipo_it = it.get("tipo", "egreso")
+            mon_it = Moneda.USD if it.get("moneda") == "USD" else Moneda.ARS
+            m_fmt = formatear_monto(
+                float(it["monto"]), mon_it, con_decimales=False
+            )
+            cat_d = _resolver_cat_display_wpp(
+                it.get("categoria"), db, usuario_id, tipo=tipo_it
+            )
+            fecha_obj, av = _resolver_y_validar_fecha(it.get("fecha"))
+            if av and av not in avisos_fechas:
+                avisos_fechas.append(av)
+            f_corta = fecha_corta_wpp(fecha_obj, hoy)
+            f_suf = f" · {f_corta}" if f_corta else ""
+            t_nom = it.get("tarjeta")
+            b_nom = it.get("billetera") or b_comun
+            ing_suf = " (ingreso)" if (tipos_mezclados and tipo_it == "ingreso") else ""
+
+            if misma_billetera and b_comun:
+                items_desc.append(f"{m_fmt} en {cat_d}{ing_suf}{f_suf}")
+            elif t_nom:
+                t_limpio = t_nom[3:] if t_nom.lower().startswith("la ") else t_nom
+                items_desc.append(f"{m_fmt} en {cat_d}, en un pago · {t_limpio}{f_suf}")
+            else:
+                b_suf = f" · {b_nom}" if b_nom else ""
+                items_desc.append(f"{m_fmt} en {cat_d}{ing_suf}{b_suf}{f_suf}")
 
         if misma_billetera and b_comun:
             if mismo_tipo:
-                items_desc = []
-                for it in todos_items:
-                    mon_it = Moneda.USD if it.get("moneda") == "USD" else Moneda.ARS
-                    m_fmt = formatear_monto(float(it["monto"]), mon_it)
-                    cat_d = _nombre_corto_categoria(it.get("categoria"))
-                    fecha_obj, av = _resolver_y_validar_fecha(it.get("fecha"))
-                    if av and av not in avisos_fechas:
-                        avisos_fechas.append(av)
-                    f_nat = _formatear_fecha_natural(fecha_obj)
-                    f_disp = f" ({f_nat})" if f_nat else ""
-                    items_desc.append(f"{m_fmt} en {cat_d}{f_disp}")
-
-                tipo_comun = todos_items[0].get("tipo", "egreso")
-                origen_str = f" a {b_comun}" if tipo_comun == "ingreso" else f" desde {b_comun}"
-                mov_palabra = "movimientos" if total_movs != 1 else "movimiento"
-                encabezado = f"Voy a anotar {total_movs} {mov_palabra}{origen_str}:"
-                texto = _unir_items_multilinea(items_desc, encabezado, "¿Va?")
+                tipo_c = todos_items[0].get("tipo", "egreso")
+                sust = "ingresos" if tipo_c == "ingreso" else "gastos"
+                prep = "en" if tipo_c == "ingreso" else "desde"
+                encabezado = f"¿Anoto estos {total_movs} {sust} {prep} {b_comun}?"
             else:
-                items_desc = []
-                for it in todos_items:
-                    mon_it = Moneda.USD if it.get("moneda") == "USD" else Moneda.ARS
-                    m_fmt = formatear_monto(float(it["monto"]), mon_it)
-                    cat_d = _nombre_corto_categoria(it.get("categoria"))
-                    fecha_obj, av = _resolver_y_validar_fecha(it.get("fecha"))
-                    if av and av not in avisos_fechas:
-                        avisos_fechas.append(av)
-                    f_nat = _formatear_fecha_natural(fecha_obj)
-                    f_disp = f" ({f_nat})" if f_nat else ""
-                    signo = "+" if it.get("tipo") == "ingreso" else "-"
-                    items_desc.append(f"*{signo}{m_fmt}* en {cat_d}{f_disp}")
-
-                mov_palabra = "movimientos" if total_movs != 1 else "movimiento"
-                encabezado = f"Voy a anotar {total_movs} {mov_palabra} en *{b_comun}*:"
-                texto = _unir_items_multilinea(items_desc, encabezado, "¿Va?")
+                encabezado = f"¿Anoto estos {total_movs} movimientos en {b_comun}?"
         else:
-            items_desc = []
-            for it in todos_items:
-                mon_it = Moneda.USD if it.get("moneda") == "USD" else Moneda.ARS
-                m_fmt = formatear_monto(float(it["monto"]), mon_it)
-                cat_d = _nombre_corto_categoria(it.get("categoria"))
-                fecha_obj, av = _resolver_y_validar_fecha(it.get("fecha"))
-                if av and av not in avisos_fechas:
-                    avisos_fechas.append(av)
-                f_nat = _formatear_fecha_natural(fecha_obj)
-                f_disp = f" ({f_nat})" if f_nat else ""
-
-                t_nom = it.get("tarjeta")
-                b_nom = it.get("billetera") or b_comun
-                tipo_it = it.get("tipo", "egreso")
-
-                if t_nom:
-                    items_desc.append(f"1 cuota de {m_fmt} en {cat_d} con tarjeta {t_nom}{f_disp}")
-                elif tipos_mezclados:
-                    if tipo_it == "ingreso":
-                        dest_s = f" a {b_nom}" if b_nom else ""
-                        items_desc.append(f"+{m_fmt} en {cat_d}{dest_s}{f_disp}")
-                    else:
-                        orig_s = f" desde {b_nom}" if b_nom else ""
-                        items_desc.append(f"-{m_fmt} en {cat_d}{orig_s}{f_disp}")
-                else:
-                    if tipo_it == "ingreso":
-                        dest_s = f" a {b_nom}" if b_nom else ""
-                        items_desc.append(f"{m_fmt} en {cat_d}{dest_s}{f_disp}")
-                    else:
-                        orig_s = f" desde {b_nom}" if b_nom else ""
-                        items_desc.append(f"{m_fmt} en {cat_d}{orig_s}{f_disp}")
-            mov_palabra = "movimientos" if total_movs != 1 else "movimiento"
-            encabezado = f"Voy a anotar {total_movs} {mov_palabra}:"
-            texto = _unir_items_multilinea(items_desc, encabezado, "¿Va?")
+            if mismo_tipo:
+                tipo_c = todos_items[0].get("tipo", "egreso")
+                sust = "ingresos" if tipo_c == "ingreso" else "gastos"
+                encabezado = f"¿Anoto estos {total_movs} {sust}?"
+            else:
+                encabezado = f"¿Anoto estos {total_movs} movimientos?"
+        texto = _unir_items_multilinea(items_desc, encabezado)
     else:
         moneda_prop = Moneda.USD if item_ppal_limpio.get("moneda") == "USD" else Moneda.ARS
-        cat_display = _nombre_corto_categoria(item_ppal_limpio.get("categoria"))
         tipo = item_ppal_limpio.get("tipo", "egreso")
-        b_final_nom = item_ppal_limpio.get("billetera") or billetera_nombre or "tu billetera"
+        cat_display = _resolver_cat_display_wpp(
+            item_ppal_limpio.get("categoria"), db, usuario_id, tipo=tipo
+        )
+        b_final_nom = (
+            item_ppal_limpio.get("billetera")
+            or billetera_nombre
+            or "tu cuenta"
+        )
         fecha_p_obj, aviso_p = _resolver_y_validar_fecha(item_ppal_limpio.get("fecha"))
         if aviso_p and aviso_p not in avisos_fechas:
             avisos_fechas.append(aviso_p)
-        fecha_p_nat = _formatear_fecha_natural(fecha_p_obj)
-        fecha_p_disp = f" ({fecha_p_nat})" if fecha_p_nat else ""
-        monto_str = formatear_monto(float(item_ppal_limpio["monto"]), moneda_prop)
+        f_corta = fecha_corta_wpp(fecha_p_obj, hoy)
+        monto_str = formatear_monto(
+            float(item_ppal_limpio["monto"]), moneda_prop, con_decimales=False
+        )
 
         t_nom_ppal = item_ppal_limpio.get("tarjeta")
         if t_nom_ppal:
-            texto = f"Voy a anotar 1 cuota de {monto_str} en {cat_display} con tarjeta {t_nom_ppal}{fecha_p_disp}. ¿Va?"
+            f_disp = f" ({f_corta})" if f_corta else ""
+            texto = (
+                f"{monto_str} en {cat_display} con la {t_nom_ppal}, "
+                f"en un pago{f_disp}. ¿Lo anoto?"
+            )
         elif tipo == "ingreso":
-            partes = [f"Voy a registrar un ingreso de {monto_str}"]
-            if cat_display:
-                partes.append(f"en {cat_display}")
-            partes.append(f"a {b_final_nom}{fecha_p_disp}.")
-            partes.append("¿Va?")
-            texto = " ".join(partes)
+            if cat_display and f_corta:
+                detalle = f"{cat_display}, {f_corta}"
+            else:
+                detalle = cat_display or f_corta
+            par = f" ({detalle})" if detalle else ""
+            texto = f"¿Anoto un ingreso de {monto_str} en {b_final_nom}{par}?"
         else:
-            partes = [f"Voy a anotar {monto_str}"]
-            if cat_display:
-                partes.append(f"en {cat_display}")
-            partes.append(f"desde {b_final_nom}{fecha_p_disp}.")
-            partes.append("¿Va?")
-            texto = " ".join(partes)
+            f_disp = f" ({f_corta})" if f_corta else ""
+            en_cat = f" en {cat_display}" if cat_display else ""
+            texto = f"¿Anoto {monto_str}{en_cat} desde {b_final_nom}{f_disp}?"
 
-    lineas = []
+    lineas: list[str] = []
     if avisos_descarte:
         lineas.extend(avisos_descarte)
     if avisos_fechas:
         lineas.extend(avisos_fechas)
     lineas.append(texto)
 
-    texto_final = "\n".join(lineas)
-
-    if se_asumio_principal:
-        texto_final += "\nSi fue con otra, decime cuál."
-
-    return texto_final
+    return "\n".join(lineas)

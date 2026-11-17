@@ -27,10 +27,10 @@ from app.routers.whatsapp.db_lookups import (
     _obtener_cotizacion_referencia_usuario,
 )
 from app.routers.whatsapp.detectors import _es_senial_suscripcion
+from app.core.reglas_texto_wpp import fecha_corta_wpp
 from app.routers.whatsapp.parsers import (
     _extraer_frecuencia_mencionada,
     _extraer_nombre_servicio,
-    _formatear_fecha_natural,
     _parsear_monto_argentino,
     _resolver_y_validar_fecha,
 )
@@ -82,14 +82,14 @@ def _confirmar_propuesta_transferencia(
 
         for c in candidatas:
             if c.accion_ejecutada and str(c.accion_ejecutada).startswith("transferencia:"):
-                return None, "Esa operación ya fue confirmada.", True
-        return None, "No tenés ninguna transferencia pendiente para confirmar.", False
+                return None, "Ya estaba anotado.", True
+        return None, "No tengo nada pendiente para confirmar.", False
 
     entidades = conv_previa.entidades or {}
     b_origen_id_str = entidades.get("billetera_origen_id")
     b_destino_id_str = entidades.get("billetera_destino_id")
     if not b_origen_id_str or not b_destino_id_str:
-        return None, "No pude procesar la transferencia.", False
+        return None, "Hubo un problema y no anoté nada. Probá de nuevo en un rato.", False
 
     b_orig_id = UUID(str(b_origen_id_str))
     b_dest_id = UUID(str(b_destino_id_str))
@@ -127,7 +127,7 @@ def _confirmar_propuesta_transferencia(
     except Exception as exc:
         db.rollback()
         logger.error(f"Error al confirmar transferencia: {exc}")
-        return None, "Hubo un problema al procesar la transferencia.", False
+        return None, "Hubo un problema y no anoté nada. Probá de nuevo en un rato.", False
 
     b_origen = db.get(Billetera, b_orig_id)
     b_destino = db.get(Billetera, b_dest_id)
@@ -136,21 +136,19 @@ def _confirmar_propuesta_transferencia(
 
     tipo_op = entidades.get("tipo_operacion", "transferencia")
     if tipo_op == "compra_usd":
-        msg_resp = (
-            f"Listo. Compra de {formatear_monto(float(monto_destino), Moneda.USD)} por "
-            f"{formatear_monto(float(monto_origen), Moneda.ARS)} registrada."
-        )
+        m_usd = formatear_monto(float(monto_destino), Moneda.USD, con_decimales=False)
+        m_ars = formatear_monto(float(monto_origen), Moneda.ARS, con_decimales=False)
+        msg_resp = f"Listo. Compraste {m_usd} por {m_ars}."
     elif tipo_op == "venta_usd":
-        msg_resp = (
-            f"Listo. Venta de {formatear_monto(float(monto_origen), Moneda.USD)} por "
-            f"{formatear_monto(float(monto_destino), Moneda.ARS)} registrada."
-        )
+        m_usd = formatear_monto(float(monto_origen), Moneda.USD, con_decimales=False)
+        m_ars = formatear_monto(float(monto_destino), Moneda.ARS, con_decimales=False)
+        msg_resp = f"Listo. Vendiste {m_usd} por {m_ars}."
     else:
-        monto_fmt = formatear_monto(float(monto_origen), moneda_origen)
-        fecha_nat = _formatear_fecha_natural(fecha_obj)
-        fecha_sufijo = f" ({fecha_nat})" if fecha_nat else ""
+        monto_fmt = formatear_monto(float(monto_origen), moneda_origen, con_decimales=False)
+        f_corta = fecha_corta_wpp(fecha_obj, hoy_argentina())
+        fecha_sufijo = f" ({f_corta})" if f_corta else ""
         com_fmt = (
-            formatear_monto(float(monto_comision), moneda_origen)
+            formatear_monto(float(monto_comision), moneda_origen, con_decimales=False)
             if monto_comision
             else ""
         )
@@ -304,13 +302,16 @@ def _interpretar_transferencia(
                 else:
                     # Fuera de rango plausible
                     candidato_elegido = c1_cotiz if d1 <= d2 else c2_cotiz
-                    c_str = formatear_monto(float(candidato_elegido), Moneda.ARS)
-                    ref_str = formatear_monto(float(cot_ref), Moneda.ARS)
+                    c_str = formatear_monto(
+                        float(candidato_elegido), Moneda.ARS, con_decimales=False
+                    )
+                    ref_str = formatear_monto(float(cot_ref), Moneda.ARS, con_decimales=False)
                     return (
                         True,
                         "absurda",
                         {},
-                        f"La cotización de {c_str} por dólar no parece razonable (la cotización de referencia es de {ref_str}). Por favor verificá el valor e intentá de nuevo.",
+                        f"¿{c_str} por dólar? Hoy el dólar está a {ref_str}. "
+                        "Revisá el número y mandámelo de nuevo.",
                     )
 
                 usd_wallets = [w for w in billeteras_usuario if w.moneda == Moneda.USD and w.estado == EstadoBilletera.ACTIVA]
@@ -331,14 +332,18 @@ def _interpretar_transferencia(
                             b_ars = b_dest_prev
 
                 if not b_usd or not b_ars:
-                    return True, "error", {}, "No se encontraron las billeteras necesarias para operar en dólares."
+                    msg_err_usd = "No tenés las cuentas necesarias para operar en dólares."
+                    return True, "error", {}, msg_err_usd
 
-                cotiz_fmt = formatear_monto(float(cotiz), Moneda.ARS)
-                pesos_fmt = formatear_monto(float(pesos), Moneda.ARS)
-                dolares_fmt = formatear_monto(float(dolares), Moneda.USD)
+                cotiz_fmt = formatear_monto(float(cotiz), Moneda.ARS, con_decimales=False)
+                pesos_fmt = formatear_monto(float(pesos), Moneda.ARS, con_decimales=False)
+                dolares_fmt = formatear_monto(float(dolares), Moneda.USD, con_decimales=False)
 
                 if tipo_op == "compra_usd":
-                    prop = f"Voy a registrar una compra de {dolares_fmt} a {cotiz_fmt}: salen {pesos_fmt} de {b_ars.nombre} y entran {dolares_fmt} a {b_usd.nombre}. ¿Confirmás?"
+                    prop = (
+                        f"Salen {pesos_fmt} de {b_ars.nombre} y entran {dolares_fmt} "
+                        f"a {b_usd.nombre} (a {cotiz_fmt}).\n¿Anoto la compra?"
+                    )
                     entidades = {
                         "tipo_operacion": "compra_usd",
                         "billetera_origen_id": str(b_ars.id),
@@ -351,7 +356,10 @@ def _interpretar_transferencia(
                         "cotizacion": float(cotiz),
                     }
                 else:
-                    prop = f"Voy a registrar una venta de {dolares_fmt} a {cotiz_fmt}: salen {dolares_fmt} de {b_usd.nombre} y entran {pesos_fmt} a {b_ars.nombre}. ¿Confirmás?"
+                    prop = (
+                        f"Salen {dolares_fmt} de {b_usd.nombre} y entran {pesos_fmt} "
+                        f"a {b_ars.nombre} (a {cotiz_fmt}).\n¿Anoto la venta?"
+                    )
                     entidades = {
                         "tipo_operacion": "venta_usd",
                         "billetera_origen_id": str(b_usd.id),
@@ -372,12 +380,12 @@ def _interpretar_transferencia(
 
         usd_wallets = [w for w in billeteras_usuario if w.moneda == Moneda.USD and w.estado == EstadoBilletera.ACTIVA]
         if not usd_wallets:
-            return True, "no_usd", {}, "No tenés ninguna billetera en dólares. Podés crearla desde la web de Argentum."
+            return True, "no_usd", {}, "No tenés una cuenta en dólares. Creala en miargentum.com"
         b_usd = usd_wallets[0]
 
         ars_wallets = [w for w in billeteras_usuario if w.moneda == Moneda.ARS and w.estado == EstadoBilletera.ACTIVA]
         if not ars_wallets:
-            return True, "error", {}, "No tenés ninguna billetera en pesos."
+            return True, "error", {}, "No tenés una cuenta en pesos."
         b_ars = None
         for w in ars_wallets:
             if normalizar_texto(w.nombre) in m_norm:
@@ -398,22 +406,26 @@ def _interpretar_transferencia(
                 rango_min = (cot_ref * FACTOR_MIN_COTIZACION_DOLAR).quantize(Decimal("0.01"))
                 rango_max = (cot_ref * FACTOR_MAX_COTIZACION_DOLAR).quantize(Decimal("0.01"))
                 if cotiz < rango_min or cotiz > rango_max:
-                    c_str = formatear_monto(float(cotiz), Moneda.ARS)
-                    ref_str = formatear_monto(float(cot_ref), Moneda.ARS)
+                    c_str = formatear_monto(float(cotiz), Moneda.ARS, con_decimales=False)
+                    ref_str = formatear_monto(float(cot_ref), Moneda.ARS, con_decimales=False)
                     return (
                         True,
                         "absurda",
                         {},
-                        f"La cotización de {c_str} por dólar no parece razonable (la cotización de referencia es de {ref_str}). Por favor verificá el valor e intentá de nuevo.",
+                        f"¿{c_str} por dólar? Hoy el dólar está a {ref_str}. "
+                        "Revisá el número y mandámelo de nuevo.",
                     )
             pesos = (dolares * cotiz).quantize(Decimal("0.01"))
 
-            cotiz_fmt = formatear_monto(float(cotiz), Moneda.ARS)
-            pesos_fmt = formatear_monto(float(pesos), Moneda.ARS)
-            dolares_fmt = formatear_monto(float(dolares), Moneda.USD)
+            cotiz_fmt = formatear_monto(float(cotiz), Moneda.ARS, con_decimales=False)
+            pesos_fmt = formatear_monto(float(pesos), Moneda.ARS, con_decimales=False)
+            dolares_fmt = formatear_monto(float(dolares), Moneda.USD, con_decimales=False)
 
             if es_compra:
-                prop = f"Voy a registrar una compra de {dolares_fmt} a {cotiz_fmt}: salen {pesos_fmt} de {b_ars.nombre} y entran {dolares_fmt} a {b_usd.nombre}. ¿Confirmás?"
+                prop = (
+                    f"Salen {pesos_fmt} de {b_ars.nombre} y entran {dolares_fmt} "
+                    f"a {b_usd.nombre} (a {cotiz_fmt}).\n¿Anoto la compra?"
+                )
                 entidades = {
                     "tipo_operacion": "compra_usd",
                     "billetera_origen_id": str(b_ars.id),
@@ -426,7 +438,10 @@ def _interpretar_transferencia(
                     "cotizacion": float(cotiz),
                 }
             else:
-                prop = f"Voy a registrar una venta de {dolares_fmt} a {cotiz_fmt}: salen {dolares_fmt} de {b_usd.nombre} y entran {pesos_fmt} a {b_ars.nombre}. ¿Confirmás?"
+                prop = (
+                    f"Salen {dolares_fmt} de {b_usd.nombre} y entran {pesos_fmt} "
+                    f"a {b_ars.nombre} (a {cotiz_fmt}).\n¿Anoto la venta?"
+                )
                 entidades = {
                     "tipo_operacion": "venta_usd",
                     "billetera_origen_id": str(b_usd.id),
@@ -443,7 +458,11 @@ def _interpretar_transferencia(
             m_d = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\s*(?:d[oó]lares|verdes|usd)", m_norm)
             if m_d:
                 dolares = _parsear_monto_argentino(m_d.group(1))
-                pregunta = "¿A qué cotización compraste o cuántos pesos pagaste?" if es_compra else "¿A qué cotización vendiste o cuántos pesos recibiste?"
+                pregunta = (
+                    "¿A cuánto compraste o cuántos pesos pagaste?"
+                    if es_compra
+                    else "¿A cuánto vendiste o cuántos pesos recibiste?"
+                )
                 entidades = {
                     "intent_origen": "transferir_fondos",
                     "tipo_operacion": "compra_usd" if es_compra else "venta_usd",

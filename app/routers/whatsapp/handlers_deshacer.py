@@ -64,19 +64,22 @@ def manejar_deshacer(
     tx_last, motivo_err = _buscar_ultimo_movimiento_whatsapp(usuario.id, db)
     if not tx_last:
         if motivo_err in ("YA_DESHECHO", "YA_BORRADO"):
-            msg_undo_resp = "No hay nada para deshacer."
+            msg_undo_resp = "No hay nada para borrar."
         elif motivo_err == "PLAZO_VENCIDO":
-            msg_undo_resp = "El último movimiento fue hace más de 30 minutos. Para eliminarlo, ingresá a la web de Argentum."
+            msg_undo_resp = "Pasaron más de 30 minutos. Borralo en miargentum.com"
         elif motivo_err == "ES_CUOTA":
-            msg_undo_resp = "Ese movimiento corresponde a una cuota de tarjeta y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
+            msg_undo_resp = "Las cuotas de tarjeta no se borran por acá. Borrala en miargentum.com"
         elif motivo_err == "ES_RESUMEN":
-            msg_undo_resp = "Ese movimiento corresponde al pago de un resumen y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
+            msg_undo_resp = "Los pagos de resumen no se borran por acá. Hacelo en miargentum.com"
         elif motivo_err == "ES_META":
-            msg_undo_resp = "Ese movimiento corresponde a una meta de ahorro y no se puede deshacer por WhatsApp. Podés gestionarlo desde la web de Argentum."
+            msg_undo_resp = "Los aportes a metas no se borran por acá. Hacelo en miargentum.com"
         elif motivo_err == "ES_SUSCRIPCION":
-            msg_undo_resp = "Ese movimiento es el cobro automático de una suscripción. Para cambiarlo, entrá a Suscripciones en la web."
+            msg_undo_resp = "Los cobros de suscripciones se cambian en miargentum.com"
         else:
-            msg_undo_resp = "No tenés ningún movimiento reciente registrado por WhatsApp para deshacer. Podés gestionarlo desde la web de Argentum."
+            msg_undo_resp = (
+                "No anotaste nada por acá en los últimos 30 minutos. "
+                "Borralo en miargentum.com"
+            )
 
         nueva_conv = ConversacionWpp(
             usuario_id=usuario.id,
@@ -166,7 +169,7 @@ def manejar_corregir(
         # Guarda espejo (Decisión 4.b, fase_f2a)
         if getattr(tx_last_corr, "reintegro_de_id", None) is not None:
             if _parece_intento_correccion(mensaje_texto):
-                msg_esp = "Ese movimiento es una devolución de un gasto. Para cambiarlo, entrá a la web de Argentum."
+                msg_esp = "Ese movimiento es un reintegro. Para cambiarlo, entrá a miargentum.com"
                 nueva_conv = ConversacionWpp(
                     usuario_id=usuario.id,
                     wamid=wamid,
@@ -218,7 +221,10 @@ def manejar_corregir(
                         Transaccion.es_cuota_hija == False,
                     ).all()
                     if any(getattr(e, "tipo_espejo", None) in ("reintegro", None) for e in espejos):
-                        msg_aviso_reint = "Primero quitá el reintegro para cambiar el medio de pago o la billetera."
+                        msg_aviso_reint = (
+                            "Primero sacá el reintegro en miargentum.com "
+                            "y después cambiá la cuenta."
+                        )
                         nueva_conv = ConversacionWpp(
                             usuario_id=usuario.id,
                             wamid=wamid,
@@ -260,11 +266,14 @@ def manejar_corregir(
     else:
         if _parece_intento_correccion(mensaje_texto):
             if motivo_corr == "PLAZO_VENCIDO":
-                msg_resp = "El último movimiento fue hace más de 30 minutos. Para modificarlo, ingresá a la web de Argentum."
+                msg_resp = "Pasaron más de 30 minutos. Cambialo en miargentum.com"
             elif motivo_corr == "ES_CUOTA":
-                msg_resp = "Ese movimiento corresponde a una cuota de tarjeta y no se puede modificar por WhatsApp. Podés gestionarlo desde la web de Argentum."
+                msg_resp = "Las cuotas de tarjeta no se cambian por acá. Cambiala en miargentum.com"
             else:
-                msg_resp = "No tenés ningún movimiento reciente registrado por WhatsApp para corregir. Podés gestionarlo desde la web de Argentum."
+                msg_resp = (
+                    "No anotaste nada por acá en los últimos 30 minutos. "
+                    "Cambialo en miargentum.com"
+                )
 
             nueva_conv = ConversacionWpp(
                 usuario_id=usuario.id,

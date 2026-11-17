@@ -334,7 +334,7 @@ def p23_caso_4(datos):
             time.perf_counter(),
         )
         lista_texto = respuestas[-1][1] if respuestas else ""
-        lista_ok = lista_texto.startswith("¿De qué gasto?\n1) Asado $80.000")
+        lista_ok = lista_texto.startswith("¿De qué gasto?\n1. Asado $80.000")
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(
@@ -420,7 +420,8 @@ def entradas_p23(datos) -> list[dict]:
             "ejecutar": lambda: p23_caso_1(datos),
             "esperado": (
                 "Respuesta:\n"
-                "Listo, anoté la devolución de $25.000 de «Kuma». Si no era esa, decime «borrá eso».\n"
+                "Listo, anoté el reintegro de $25.000 de Kuma.\n"
+                "Si no era esa compra, decime _borrá eso_.\n"
                 "Espejo: True | Saldo: True"
             ),
         },
@@ -432,9 +433,9 @@ def entradas_p23(datos) -> list[dict]:
             "ejecutar": lambda: p23_caso_2(datos),
             "esperado": (
                 "Propuesta:\n"
-                "¿Querés eliminar la devolución de $25.000 de «Kuma» en Galicia? ¿Confirmás?\n"
+                "¿Borro el reintegro de $25.000 de Kuma?\n"
                 "Confirmación:\n"
-                "Listo, devolución eliminada.\n"
+                "Listo, borré el reintegro.\n"
                 "Sin reintegro: True | Saldo: True"
             ),
         },
@@ -446,9 +447,10 @@ def entradas_p23(datos) -> list[dict]:
             "ejecutar": lambda: p23_caso_3(datos),
             "esperado": (
                 "Registro:\n"
-                "Listo, anoté la devolución de $25.000 de «Kuma». Si no era esa, decime «borrá eso».\n"
+                "Listo, anoté el reintegro de $25.000 de Kuma.\n"
+                "Si no era esa compra, decime _borrá eso_.\n"
                 "Confirmación:\n"
-                "Listo, devolución eliminada.\n"
+                "Listo, borré el reintegro.\n"
                 "Pendiente: True | Saldo: True"
             ),
         },
@@ -460,12 +462,12 @@ def entradas_p23(datos) -> list[dict]:
             "ejecutar": lambda: p23_caso_4(datos),
             "esperado": (
                 "Registro:\n"
-                "Listo. Ingreso de $3.000 en Cobros de personas a Galicia — registrado.\n"
-                "Si fue con otra, decime cuál.\n"
-                "¿Qué era? 1) Me pagaron 2) Me devolvieron parte de un gasto 3) Solo pasó por mi cuenta\n"
+                "Listo, anoté un ingreso de $3.000 en Galicia (Cobros de personas).\n"
+                "¿Qué era? 1) Me pagaron 2) Me devolvieron parte de un gasto "
+                "3) Solo pasó por mi cuenta\n"
                 "Lista: True\n"
                 "Respuesta:\n"
-                "Listo, los $3.000 se restan de «Asado».\n"
+                "Listo, los $3.000 se restan de Asado.\n"
                 "Parte: True | Saldo: True"
             ),
         },
@@ -477,7 +479,7 @@ def entradas_p23(datos) -> list[dict]:
             "ejecutar": lambda: p23_caso_5(datos),
             "esperado": (
                 "Respuesta:\n"
-                "Listo, queda como plata que solo pasó por tu cuenta: no cuenta como ingreso.\n"
+                "Listo: solo pasó por tu cuenta, no es un ingreso.\n"
                 "Pasó por mi cuenta: True"
             ),
         },

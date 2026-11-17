@@ -113,13 +113,16 @@ def p19_caso_10(datos):
         resp1 = respuestas[-1][1] if respuestas else ""
         propuesta_ok = (
             "Además anoto el rendimiento de $500 en Ahorro con rendimiento" in resp1
-            and "no cuenta como ingreso" in resp1
+            and "no es un ingreso" in resp1
         )
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
-        registrado_ok = "Listo" in resp2 and "Rendimiento de $500 anotado en Ahorro con rendimiento" in resp2
+        registrado_ok = (
+            "Listo, anoté" in resp2
+            and "Anoté el rendimiento de $500 en Ahorro con rendimiento." in resp2
+        )
 
         txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         rends_despues = conn.execute(select(func.count(RendimientoBilletera.id)).where(RendimientoBilletera.billetera_id == b_inv_id)).scalar()
@@ -265,12 +268,16 @@ def p19_caso_12(datos):
             _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
 
         resp1 = respuestas[-1][1] if respuestas else ""
-        msg_ok = resp1 == "Veo solo rendimientos. Los cargás desde Billeteras o mandame los gastos o ingresos que quieras anotar."
+        msg_ok = (
+            resp1
+            == "Veo solo rendimientos: cargalos en miargentum.com "
+            "o mandame gastos o ingresos."
+        )
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
-        nada_conf_ok = "No tenés ninguna operación pendiente para confirmar." in resp2
+        nada_conf_ok = "No tengo nada pendiente para confirmar." in resp2
 
         txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         rends_despues = conn.execute(select(func.count(RendimientoBilletera.id))).scalar()
@@ -326,7 +333,10 @@ def p19_caso_13(datos):
             _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
 
         resp1 = respuestas[-1][1] if respuestas else ""
-        linea_no_pude_ok = "Vi un rendimiento de $500 que no pude anotar (billetera o fecha dudosa). Cargalo desde Billeteras." in resp1
+        linea_no_pude_ok = (
+            "Vi un rendimiento de $500 que no pude anotar. "
+            "Cargalo en miargentum.com" in resp1
+        )
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
@@ -560,7 +570,10 @@ def p19_caso_16(datos):
             _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
 
         resp1 = respuestas[-1][1] if respuestas else ""
-        aviso_no_pude_ok = "Vi un rendimiento de $500 que no pude anotar (billetera o fecha dudosa). Cargalo desde Billeteras." in resp1
+        aviso_no_pude_ok = (
+            "Vi un rendimiento de $500 que no pude anotar. "
+            "Cargalo en miargentum.com" in resp1
+        )
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
@@ -637,13 +650,16 @@ def p19_caso_17(datos):
         resp1 = respuestas[-1][1] if respuestas else ""
         propuesta_ok = (
             "Además anoto el rendimiento de $500 en Galicia" in resp1
-            and "no cuenta como ingreso" in resp1
+            and "no es un ingreso" in resp1
         )
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
-        registrado_ok = "Listo" in resp2 and "Rendimiento de $500 anotado en Galicia" in resp2
+        registrado_ok = (
+            "Listo, anoté" in resp2
+            and "Anoté el rendimiento de $500 en Galicia." in resp2
+        )
 
         txs_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         rends_despues = conn.execute(select(func.count(RendimientoBilletera.id)).where(RendimientoBilletera.billetera_id == b_galicia_id)).scalar()
@@ -690,7 +706,12 @@ def p19_caso_18(datos):
             _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
 
         resp1 = respuestas[-1][1] if respuestas else ""
-        propuesta_ok = ("desde Mercado Pago" in resp1 and "desde Galicia" in resp1 and resp1.count("desde Mercado Pago") == 2 and resp1.count("desde Galicia") == 1)
+        propuesta_ok = (
+            "· Mercado Pago" in resp1
+            and "· Galicia" in resp1
+            and resp1.count("· Mercado Pago") == 2
+            and resp1.count("· Galicia") == 1
+        )
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
@@ -747,9 +768,16 @@ def p19_caso_19(datos):
             _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
 
         resp1 = respuestas[-1][1] if respuestas else ""
-        linea_pase_esperada = "Salteé 2 pases entre tus cuentas ($15.000, $25.000). Si querés registrarlos, mandame cada uno como una transferencia entre tus cuentas."
-        linea_cred_esperada = "Salteé 1 pago con tarjeta de crédito (Meli+ $18.500): necesito la tarjeta y las cuotas. Mandámelo escrito."
-        linea_rech_esperada = "Salteé 1 movimiento que no figura como aprobado."
+        linea_pase_esperada = (
+            "Salteé 2 pases entre tus cuentas. Mandame cada uno aparte:\n"
+            "- $15.000\n"
+            "- $25.000"
+        )
+        linea_cred_esperada = (
+            "Salteé un pago con tarjeta. Mandámelo escrito, con la tarjeta y las cuotas:\n"
+            "- Meli+ $18.500"
+        )
+        linea_rech_esperada = "Salteé uno que no figura como aprobado."
 
         lineas_saltee_ok = (linea_pase_esperada in resp1 and linea_cred_esperada in resp1 and linea_rech_esperada in resp1)
         propuesta_mov_ok = "12.000" in resp1
@@ -789,12 +817,18 @@ def p19_caso_20(datos):
             _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
 
         resp1 = respuestas[-1][1] if respuestas else ""
-        linea_pase = "Salteé 1 pase entre tus cuentas ($5.000). Si querés registrarlos, mandame cada uno como una transferencia entre tus cuentas."
-        linea_cred = "Salteé 1 pago con tarjeta de crédito (Zara $8.000): necesito la tarjeta y las cuotas. Mandámelo escrito."
-        linea_rech = "Salteé 1 movimiento que no figura como aprobado."
+        linea_pase = (
+            "Salteé un pase entre tus cuentas. Mandame cada uno aparte:\n"
+            "- $5.000"
+        )
+        linea_cred = (
+            "Salteé un pago con tarjeta. Mandámelo escrito, con la tarjeta y las cuotas:\n"
+            "- Zara $8.000"
+        )
+        linea_rech = "Salteé uno que no figura como aprobado."
 
         mensaje_ok = (
-            resp1.startswith("No encontré movimientos para anotar en la imagen.")
+            resp1.startswith("No encontré gastos para anotar en la foto.")
             and linea_pase in resp1 and linea_cred in resp1 and linea_rech in resp1
         )
 
@@ -803,7 +837,10 @@ def p19_caso_20(datos):
         resp2 = respuestas[-1][1] if respuestas else ""
 
         txs_creadas = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar() - txs_antes
-        sin_propuesta_confirmable = (txs_creadas == 0 and "No tenés ninguna operación pendiente" in resp2)
+        sin_propuesta_confirmable = (
+            txs_creadas == 0
+            and "No tengo nada pendiente" in resp2
+        )
 
         return f"Mensaje omitidos: {mensaje_ok} | Sin propuesta confirmable: {sin_propuesta_confirmable} | Txs creadas: {txs_creadas}"
 

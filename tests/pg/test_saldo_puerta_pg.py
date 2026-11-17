@@ -580,7 +580,7 @@ def test_td14_dh3_control_saldo_y_foto(db: Session, usuario_test: Usuario, categ
     assert saldo_billetera_service.movimiento_anterior_al_saldo(billetera_1, tx_19.fecha, tx_19.metodo_pago) is True
     from app.routers.whatsapp.aviso_saldo_wpp import obtener_aviso_saldo
     aviso = obtener_aviso_saldo([tx_19], db=db)
-    assert aviso == f"Ojo: es anterior a tu saldo de «{billetera_1.nombre}» (20/10) y no lo modifica."
+    assert aviso == "Ojo: es de antes del 20/10: cuenta en el mes, pero no cambia tu saldo."
     assert_saldo_cierra(db, billetera_1, f_22)
 
     # Gasto de $10.000 con fecha 20/10/2026 -> 290.000,00

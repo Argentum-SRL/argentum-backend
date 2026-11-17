@@ -18,10 +18,8 @@ from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 from app.models.usuario import Moneda, Usuario
 from app.routers.whatsapp import aviso_personas_wpp, aviso_saldo_wpp, registro
 from app.routers.whatsapp.montos_palabras import buscar_monto
-from app.routers.whatsapp.parsers import (
-    _formatear_fecha_natural,
-    _resolver_y_validar_fecha,
-)
+from app.core.reglas_texto_wpp import ejemplo_wpp, fecha_corta_wpp
+from app.routers.whatsapp.parsers import _resolver_y_validar_fecha
 from app.routers.whatsapp.resolvers_cascada import _generar_menu_billeteras
 from app.routers.whatsapp.transferencias_cuentas import (
     billeteras_para_transferir,
@@ -100,16 +98,20 @@ def _registrar_transferencia_directa(
             usuario,
             db,
             mensaje_texto,
-            "Hubo un problema al procesar la transferencia.",
+            "Hubo un problema y no anoté nada. Probá de nuevo en un rato.",
             wamid,
             from_number,
         )
         return True
 
-    monto_fmt = formatear_monto(float(monto), b_orig.moneda)
-    fecha_nat = _formatear_fecha_natural(fecha_obj)
-    fecha_sufijo = f" ({fecha_nat})" if fecha_nat else ""
-    com_fmt = formatear_monto(float(comision), b_orig.moneda) if comision else ""
+    monto_fmt = formatear_monto(float(monto), b_orig.moneda, con_decimales=False)
+    f_corta = fecha_corta_wpp(fecha_obj, hoy_argentina())
+    fecha_sufijo = f" ({f_corta})" if f_corta else ""
+    com_fmt = (
+        formatear_monto(float(comision), b_orig.moneda, con_decimales=False)
+        if comision
+        else ""
+    )
     comision_sufijo = f", con {com_fmt} de comisión" if comision else ""
 
     if cuenta_creada_nombre:
@@ -161,22 +163,25 @@ def _proponer_transferencia_ia(
     monto = item["monto"]
     comision = item.get("comision")
 
-    monto_fmt = formatear_monto(float(monto), b_orig.moneda)
-    fecha_nat = _formatear_fecha_natural(fecha_obj)
-    fecha_sufijo = f" ({fecha_nat})" if fecha_nat else ""
-    com_fmt = formatear_monto(float(comision), b_orig.moneda) if comision else ""
+    monto_fmt = formatear_monto(float(monto), b_orig.moneda, con_decimales=False)
+    f_corta = fecha_corta_wpp(fecha_obj, hoy_argentina())
+    fecha_sufijo = f" ({f_corta})" if f_corta else ""
+    com_fmt = (
+        formatear_monto(float(comision), b_orig.moneda, con_decimales=False)
+        if comision
+        else ""
+    )
     comision_sufijo = f", con {com_fmt} de comisión" if comision else ""
 
     if cuenta_creada_nombre:
         msg_prop = (
-            f"Creé {cuenta_creada_nombre}. Voy a transferir "
-            f"{monto_fmt} de {b_orig.nombre} a {b_dest.nombre}"
-            f"{fecha_sufijo}{comision_sufijo}. ¿Confirmás?"
+            f"Creé {cuenta_creada_nombre}. ¿Paso {monto_fmt} de {b_orig.nombre} "
+            f"a {b_dest.nombre}{fecha_sufijo}{comision_sufijo}?"
         )
     else:
         msg_prop = (
-            f"Voy a transferir {monto_fmt} de {b_orig.nombre} a "
-            f"{b_dest.nombre}{fecha_sufijo}{comision_sufijo}. ¿Confirmás?"
+            f"¿Paso {monto_fmt} de {b_orig.nombre} a "
+            f"{b_dest.nombre}{fecha_sufijo}{comision_sufijo}?"
         )
 
     entidades_prop = {
@@ -218,16 +223,8 @@ def _ejecutar_tabla_flujo(
             b for b in billeteras if b.es_efectivo and b.moneda.value == moneda_ext
         ]
         if not cash_wallets:
-            if moneda_ext == "USD":
-                msg = (
-                    "No tenés ninguna billetera de efectivo en dólares. "
-                    "Podés crearla desde la web de Argentum."
-                )
-            else:
-                msg = (
-                    "No tenés ninguna billetera de efectivo en pesos. "
-                    "Podés crearla desde la web de Argentum."
-                )
+            mon_e = "dólares" if moneda_ext == "USD" else "pesos"
+            msg = f"No tenés una cuenta de efectivo en {mon_e}. Creala en miargentum.com"
             _guardar_conversacion_sin_efecto(
                 usuario, db, mensaje_texto, msg, wamid, from_number
             )
@@ -243,16 +240,8 @@ def _ejecutar_tabla_flujo(
             b for b in billeteras if b.es_efectivo and b.moneda.value == moneda_dep
         ]
         if not cash_wallets:
-            if moneda_dep == "USD":
-                msg = (
-                    "No tenés ninguna billetera de efectivo en dólares. "
-                    "Podés crearla desde la web de Argentum."
-                )
-            else:
-                msg = (
-                    "No tenés ninguna billetera de efectivo en pesos. "
-                    "Podés crearla desde la web de Argentum."
-                )
+            mon_d = "dólares" if moneda_dep == "USD" else "pesos"
+            msg = f"No tenés una cuenta de efectivo en {mon_d}. Creala en miargentum.com"
             _guardar_conversacion_sin_efecto(
                 usuario, db, mensaje_texto, msg, wamid, from_number
             )
@@ -293,10 +282,8 @@ def _ejecutar_tabla_flujo(
             if st_orig == "desconocida"
             else item.get("raw_destino") or item.get("destino")
         )
-        msg_ia = (
-            f"No encontré la cuenta «{cuenta_raw}». "
-            f"Mandámelo así: «pasé 20 mil de Galicia a Mercado Pago»."
-        )
+        ex_p = ejemplo_wpp("pasé 20 mil de Galicia a Mercado Pago")
+        msg_ia = f"No encontré la cuenta {cuenta_raw}. Mandámelo así: {ex_p}."
         _guardar_conversacion_sin_efecto(
             usuario, db, mensaje_texto, msg_ia, wamid, from_number
         )
@@ -361,7 +348,7 @@ def _ejecutar_tabla_flujo(
             st_orig = "ok"
         else:
             monto_fmt = (
-                formatear_monto(float(item["monto"]), moneda_cands)
+                formatear_monto(float(item["monto"]), moneda_cands, con_decimales=False)
                 if item.get("monto")
                 else "la plata"
             )
@@ -414,7 +401,7 @@ def _ejecutar_tabla_flujo(
             st_dest = "ok"
         else:
             monto_fmt = (
-                formatear_monto(float(item["monto"]), moneda_cands)
+                formatear_monto(float(item["monto"]), moneda_cands, con_decimales=False)
                 if item.get("monto")
                 else "la plata"
             )
@@ -434,7 +421,7 @@ def _ejecutar_tabla_flujo(
 
     # 7. Mismo origen y destino
     if b_orig and b_dest and b_orig.id == b_dest.id:
-        msg = "La billetera de origen y destino no pueden ser la misma."
+        msg = "Pusiste la misma cuenta de los dos lados. ¿A qué otra cuenta lo pasaste?"
         _guardar_conversacion_sin_efecto(
             usuario, db, mensaje_texto, msg, wamid, from_number
         )
@@ -553,10 +540,8 @@ def manejar_transferencia_ia(
     b_dest_str = entidades.get("billetera_destino")
 
     if not b_orig_str and not b_dest_str:
-        msg = (
-            "Decime de qué cuenta a qué cuenta. Por ejemplo: "
-            "«pasé 20 mil de Galicia a Mercado Pago»."
-        )
+        ex_p = ejemplo_wpp("pasé 20 mil de Galicia a Mercado Pago")
+        msg = f"Decime de qué cuenta a qué cuenta. Por ejemplo: {ex_p}."
         _guardar_conversacion_sin_efecto(
             usuario, db, mensaje_texto, msg, wamid, from_number
         )

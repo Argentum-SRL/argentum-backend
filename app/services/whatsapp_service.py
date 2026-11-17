@@ -15,6 +15,8 @@ from contextvars import ContextVar
 from uuid import UUID
 
 from app.core.config import settings
+from app.core.reglas_texto_wpp import partir_lineas_wpp
+from app.routers.whatsapp.verificacion_texto_ia import TextoIA
 
 logger = logging.getLogger(__name__)
 
@@ -386,6 +388,7 @@ def _enviar_registrado(
     aviso_tipo: str | None = None,
     exento_tope: bool = False,
     max_intentos: int = 3,
+    lleva_texto_ia: bool = False,
 ) -> bool:
     """
     Envía y registra un mensaje saliente. Controla el tope diario de salientes (150).
@@ -423,6 +426,12 @@ def _enviar_registrado(
                 return False
 
         res = _post_meta(payload, max_intentos=max_intentos)
+        logger.info(
+            "whatsapp_envio_registrado tipo=%s enviado=%s lleva_texto_ia=%s",
+            tipo,
+            res.ok,
+            lleva_texto_ia,
+        )
 
         salientes_wpp_service.registrar_saliente(
             usuario_id=usuario_id,
@@ -454,6 +463,7 @@ class BuzonSalida:
         self.partes: list[str] = []
         self.usuario_id: UUID | None = None
         self.tipo: str = "respuesta"
+        self.lleva_texto_ia: bool = False
         self._aviso_texto: str | None = None
         self._aviso_tipo: str | None = None
         self._aviso_al_enviar = None
@@ -509,6 +519,7 @@ def _despachar_partido_4096(buzon: BuzonSalida, texto_completo: str) -> bool:
             wamid_entrante=buzon.wamid_entrante,
             partes=1,
             aviso_tipo="partido_4096",
+            lleva_texto_ia=buzon.lleva_texto_ia,
         )
         if not ok:
             todos_ok = False
@@ -550,6 +561,7 @@ def buzon_de_respuesta(numero: str, wamid_entrante: str | None = None):
                         wamid_entrante=buzon.wamid_entrante,
                         partes=len(buzon.partes),
                         aviso_tipo=buzon._aviso_tipo,
+                        lleva_texto_ia=buzon.lleva_texto_ia,
                     )
                     if enviado and buzon._aviso_al_enviar:
                         try:
@@ -568,47 +580,52 @@ def enviar_whatsapp(numero: str, mensaje: str, tipo: str = "respuesta", exento_t
     Si hay un buzón abierto para ese mismo número, agrega el texto como parte y devuelve True sin mandar.
     Si no, o si el buzón es para otro número, envía en el momento por _enviar_registrado.
     """
+    es_texto_ia = isinstance(mensaje, TextoIA)
+    texto_final = mensaje if es_texto_ia else partir_lineas_wpp(mensaje)
     buzon = buzon_actual()
     num_norm = formatear_numero_whatsapp(numero)
 
     if buzon is not None:
         if buzon.numero_norm == num_norm:
-            buzon.partes.append(mensaje)
+            if es_texto_ia:
+                buzon.lleva_texto_ia = True
+            buzon.partes.append(texto_final)
             return True
-        else:
-            tipo_envio = "otro_numero" if tipo == "respuesta" else tipo
-            payload = {
-                "messaging_product": "whatsapp",
-                "to": num_norm,
-                "type": "text",
-                "text": {"body": mensaje},
-            }
-            return _enviar_registrado(
-                numero,
-                payload,
-                texto=mensaje,
-                tipo=tipo_envio,
-                usuario_id=None,
-                wamid_entrante=None,
-                partes=1,
-                exento_tope=exento_tope,
-            )
+        tipo_envio = "otro_numero" if tipo == "respuesta" else tipo
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": num_norm,
+            "type": "text",
+            "text": {"body": texto_final},
+        }
+        return _enviar_registrado(
+            numero,
+            payload,
+            texto=texto_final,
+            tipo=tipo_envio,
+            usuario_id=None,
+            wamid_entrante=None,
+            partes=1,
+            exento_tope=exento_tope,
+            lleva_texto_ia=es_texto_ia,
+        )
 
     payload = {
         "messaging_product": "whatsapp",
         "to": num_norm,
         "type": "text",
-        "text": {"body": mensaje},
+        "text": {"body": texto_final},
     }
     return _enviar_registrado(
         numero,
         payload,
-        texto=mensaje,
+        texto=texto_final,
         tipo=tipo,
         usuario_id=None,
         wamid_entrante=None,
         partes=1,
         exento_tope=exento_tope,
+        lleva_texto_ia=es_texto_ia,
     )
 
 

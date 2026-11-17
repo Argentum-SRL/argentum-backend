@@ -19,14 +19,15 @@ from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 from app.models.usuario import Moneda, Usuario
 from app.routers.whatsapp.contexto import ContextoMensaje
 from app.routers.whatsapp.db_lookups import _buscar_propuesta_confirmable_mas_reciente
+from app.core.reglas_texto_wpp import fecha_corta_wpp
 from app.routers.whatsapp.parsers import (
-    _formatear_fecha_natural,
     _nombre_corto_categoria,
     _parsear_monto_argentino,
     _resolver_fecha_transaccion,
 )
 from app.routers.whatsapp.resolvers_cascada import resolver_billetera_cascada
 from app.services import dolar_service, whatsapp_service
+from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 from app.utils.texto import normalizar_texto
 
@@ -98,40 +99,37 @@ def texto_propuesta_usd_pesos(entidades: dict, billetera_nombre: str) -> str:
       'Voy a anotar {usd} en {cat} desde {billetera}{fecha}.\\n¿Cuántos pesos te cobraron?'
     """
     monto_orig = entidades.get("monto_original") or entidades.get("monto") or 0
-    usd = formatear_monto(float(monto_orig), Moneda.USD)
-
+    usd = formatear_monto(float(monto_orig), Moneda.USD, con_decimales=False)
     cat = _nombre_corto_categoria(entidades.get("categoria"))
-
     fecha_obj = _resolver_fecha_transaccion(entidades.get("fecha"))
-    fecha_nat = _formatear_fecha_natural(fecha_obj)
-    fecha_str = f" ({fecha_nat})" if fecha_nat else ""
+    f_corta = fecha_corta_wpp(fecha_obj, hoy_argentina())
+    fecha_str = f" ({f_corta})" if f_corta else ""
 
     monto = entidades.get("monto")
     monto_editado = bool(entidades.get("monto_editado"))
 
     if monto is not None and not monto_editado:
-        ars = formatear_monto(float(monto), Moneda.ARS)
+        ars = formatear_monto(float(monto), Moneda.ARS, con_decimales=False)
         cot_val = entidades.get("cotizacion_sugerida") or 0
-        cot = formatear_monto(float(cot_val), Moneda.ARS)
+        cot = formatear_monto(float(cot_val), Moneda.ARS, con_decimales=False)
         percepcion = entidades.get("percepcion", 30)
         return (
-            f"Voy a anotar {usd} en {cat} desde {billetera_nombre}{fecha_str}: "
+            f"{usd} en {cat} desde {billetera_nombre}{fecha_str}: "
             f"son {ars} (oficial {cot} + {percepcion}%).\n"
-            f"¿Confirmás? Si te cobraron otro monto en pesos, decime cuánto."
+            "¿Lo anoto? Si te cobraron otro monto en pesos, decime cuánto."
         )
 
     if monto is not None and monto_editado:
-        ars = formatear_monto(float(monto), Moneda.ARS)
+        ars = formatear_monto(float(monto), Moneda.ARS, con_decimales=False)
         return (
-            f"Voy a anotar {usd} en {cat} desde {billetera_nombre}{fecha_str}: "
+            f"{usd} en {cat} desde {billetera_nombre}{fecha_str}: "
             f"son {ars}.\n"
-            f"¿Confirmás?"
+            "¿Lo anoto?"
         )
 
-    # Sin monto (no hubo cotización disponible)
     return (
-        f"Voy a anotar {usd} en {cat} desde {billetera_nombre}{fecha_str}.\n"
-        f"¿Cuántos pesos te cobraron?"
+        f"{usd} en {cat} desde {billetera_nombre}{fecha_str}. "
+        "¿Cuántos pesos te cobraron?"
     )
 
 
@@ -282,7 +280,11 @@ def manejar_monto_pesos_usd(
     entidades_nuevas["monto"] = float(monto_extraido)
     entidades_nuevas["monto_editado"] = True
 
-    billetera_nom = entidades_nuevas.get("billetera") or entidades_nuevas.get("billetera_origen") or "tu billetera"
+    billetera_nom = (
+        entidades_nuevas.get("billetera")
+        or entidades_nuevas.get("billetera_origen")
+        or "tu cuenta"
+    )
     msg_bot = texto_propuesta_usd_pesos(entidades_nuevas, billetera_nom)
 
     prop.entidades = entidades_nuevas

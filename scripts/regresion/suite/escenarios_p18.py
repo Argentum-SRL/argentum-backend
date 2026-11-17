@@ -197,7 +197,10 @@ def p18_caso_4(datos):
         ).mappings().first()
         intent = row["intent_detectado"] if row else None
 
-        esperado = 'Decime cuánto sale. Por ejemplo: "¿me puedo permitir algo de 300.000 en 6 cuotas?"'
+        esperado = (
+            "Decime cuánto sale. Por ejemplo: "
+            "_¿me puedo permitir algo de 300.000 en 6 cuotas?_"
+        )
         resp_ok = (resp == esperado)
 
         return f"Intent: {intent} | Respuesta ok: {resp_ok}"

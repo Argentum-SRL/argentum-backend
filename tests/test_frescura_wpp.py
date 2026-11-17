@@ -287,7 +287,7 @@ def test_consultar_saldo_wpp_fallos_controlados(db: Session, usuario_test: Usuar
         )
         assert (
             res_fallo_sync.get("respuesta_usuario")
-            == "No pude consultar tu saldo en este momento. Probá de nuevo en unos minutos."
+            == "No pude ver tu saldo ahora. Probá de nuevo en unos minutos."
         )
 
     # 2. Fallo en calcular_frescura
@@ -305,7 +305,7 @@ def test_consultar_saldo_wpp_fallos_controlados(db: Session, usuario_test: Usuar
         )
         texto = res_fallo_frescura.get("respuesta_usuario", "")
         # Debe contener la información estándar de saldo
-        assert "Tus saldos en pesos:" in texto
+        assert "en tus cuentas." in texto
         # No debe contener la línea de aviso de frescura
         assert "Ojo: hace" not in texto
 

@@ -37,3 +37,22 @@ MESES_ES_GEN = [
 
 FACTOR_MIN_COTIZACION_DOLAR = Decimal("0.40")
 FACTOR_MAX_COTIZACION_DOLAR = Decimal("2.50")
+
+
+def texto_cupo_wpp(texto_cupo: str, canal: str = "mensaje") -> str:
+    """Convierte los textos de tope de uso de IA al formato de WhatsApp (D12)."""
+    t = (texto_cupo or "").lower()
+    if "este mes" in t:
+        return (
+            "Este mes ya no puedo responder por acá. "
+            "Cargá tus movimientos en miargentum.com"
+        )
+    if canal == "archivo" or "fotos" in t or "archivos" in t:
+        return (
+            "Por hoy no leo más fotos ni archivos. "
+            "Escribime el gasto, por ejemplo: _2500 súper_."
+        )
+    return (
+        "Por hoy llegué al máximo de mensajes. "
+        "Mañana seguimos; mientras, cargá en miargentum.com"
+    )

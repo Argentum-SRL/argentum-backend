@@ -19,7 +19,7 @@ from app.models.transaccion import (
     Transaccion,
 )
 from app.models.usuario import Moneda, Usuario
-from app.routers.whatsapp.constantes import MESES_ES_GEN, logger
+from app.routers.whatsapp.constantes import logger
 from app.routers.whatsapp.db_lookups import (
     PLAZO_EXPIRACION_ESTADO_MINUTOS,
     _buscar_propuesta_confirmable_mas_reciente,
@@ -70,7 +70,7 @@ def _confirmar_propuesta_suscripcion(
     proximo_cobro_str = entidades.get("proximo_cobro")
 
     if not nombre or monto_val is None or not proximo_cobro_str:
-        return None, "Faltan datos para crear la suscripción.", False
+        return None, "Faltan datos para anotar la suscripción.", False
 
     proximo_cobro = date.fromisoformat(proximo_cobro_str)
     billetera_id = UUID(billetera_id_str) if billetera_id_str else None
@@ -97,25 +97,21 @@ def _confirmar_propuesta_suscripcion(
     db.commit()
 
     mon_enum = Moneda.USD if moneda_val == "USD" else Moneda.ARS
-    monto_fmt = formatear_monto(float(monto_val), mon_enum)
+    monto_fmt = formatear_monto(float(monto_val), mon_enum, con_decimales=False)
     medio_pago_txt = entidades.get("medio_pago_txt", "")
-    fecha_guardada = nueva_sub.proximo_cobro
-    fecha_fmt = f"{fecha_guardada.day} de {MESES_ES_GEN[fecha_guardada.month - 1]}"
-
-    # Armado de la frase de categoría asignada
-    from app.models.categoria import Categoria
-    from app.models.subcategoria import Subcategoria
-    cat_obj = db.get(Categoria, nueva_sub.categoria_id) if nueva_sub.categoria_id else None
-    cat_nom = cat_obj.nombre if cat_obj else "Otros"
-    subcat_obj = db.get(Subcategoria, nueva_sub.subcategoria_id) if nueva_sub.subcategoria_id else None
-    subcat_nom = subcat_obj.nombre if subcat_obj else None
-
-    if subcat_nom:
-        frase_cat = f"La anoté en {cat_nom} / {subcat_nom}. Si va en otra, la cambiás desde Suscripciones en la web."
-    else:
-        frase_cat = f"La anoté en {cat_nom}. Si va en otra, la cambiás desde Suscripciones en la web."
-
-    msg_resp = f"Listo. Suscripción a {nombre} por {monto_fmt} {frecuencia_val} programada {medio_pago_txt} (primer cobro el {fecha_fmt}). {frase_cat}"
+    frec_txt = {
+        "mensual": "por mes",
+        "bimestral": "cada 2 meses",
+        "trimestral": "cada 3 meses",
+        "semestral": "cada 6 meses",
+        "anual": "por año",
+    }.get(frecuencia_val, frecuencia_val)
+    fecha_fmt = nueva_sub.proximo_cobro.strftime("%d/%m")
+    medio_suf = f" {medio_pago_txt}" if medio_pago_txt else ""
+    msg_resp = (
+        f"Listo, anoté {nombre}: {monto_fmt} {frec_txt}{medio_suf}.\n"
+        f"Primer cobro: {fecha_fmt}."
+    )
     return nueva_sub, msg_resp, False
 
 
@@ -145,7 +141,7 @@ def _confirmar_propuesta_baja_suscripcion(
     nombre = entidades.get("nombre", "el servicio")
 
     if not sub_id_str:
-        return None, "No pude procesar la baja.", False
+        return None, "No pude dar de baja la suscripción.", False
 
     sub_id = UUID(sub_id_str)
     sub = suscripcion_service.cambiar_estado(db, usuario.id, sub_id, EstadoSuscripcion.CANCELADA)
@@ -153,7 +149,7 @@ def _confirmar_propuesta_baja_suscripcion(
     conv_baja.accion_ejecutada = f"baja:{sub.id}"
     db.commit()
 
-    return sub, f"Listo, dimos de baja tu suscripción a {nombre}.", False
+    return sub, f"Listo, di de baja {nombre}.", False
 
 
 def _confirmar_propuesta_cambio_precio(
@@ -184,7 +180,7 @@ def _confirmar_propuesta_cambio_precio(
     nombre = entidades.get("nombre", "el servicio")
 
     if not sub_id_str or nuevo_monto is None:
-        return None, "No pude procesar el cambio de precio.", False
+        return None, "No pude cambiar el precio.", False
 
     sub_id = UUID(sub_id_str)
     req = ActualizarPrecioRequest(
@@ -198,8 +194,8 @@ def _confirmar_propuesta_cambio_precio(
     db.commit()
 
     mon_enum = Moneda.USD if moneda == "USD" else Moneda.ARS
-    nuevo_fmt = formatear_monto(float(nuevo_monto), mon_enum)
-    return hist, f"Listo, actualicé el precio de {nombre} a {nuevo_fmt}.", False
+    nuevo_fmt = formatear_monto(float(nuevo_monto), mon_enum, con_decimales=False)
+    return hist, f"Listo, {nombre} ahora es {nuevo_fmt}.", False
 
 
 def _ejecutar_intent(resultado_ia: dict, usuario: Usuario, db: Session) -> str | None:

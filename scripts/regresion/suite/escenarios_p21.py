@@ -94,17 +94,20 @@ def p21_caso_1(datos):
 
         resp1 = respuestas[-1][1] if respuestas else ""
         esperado_resp1 = (
-            f"Factura de Aguas Santafesinas por $12.345,67, vence el {f_str}.\n"
-            f"¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy en Agua desde Galicia.\n"
-            f"Si fue con otra, decime cuál.\n"
-            f"Si me decís que no, te la anoto en la web para que no se te pase."
+            f"Factura de Aguas Santafesinas: $12.345,67, vence el {f_str}. "
+            "¿Ya la pagaste?\n"
+            "Sí: la anoto como gasto de hoy desde Galicia.\n"
+            "No: la guardo en miargentum.com y ahí te aviso antes de que venza."
         )
         prop_ok = resp1 == esperado_resp1
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "no"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
-        esperado_resp2 = "Listo, te la anoto en la web. Te aviso 3 días antes y el día del vencimiento."
+        esperado_resp2 = (
+            "Listo, la guardé en miargentum.com. "
+            "Ahí te aviso 3 días antes y el día que vence."
+        )
         resp_ok = resp2 == esperado_resp2
 
         db = Session()
@@ -170,17 +173,17 @@ def p21_caso_2(datos):
 
         resp1 = respuestas[-1][1] if respuestas else ""
         esperado_resp1 = (
-            f"Factura de Aguas Santafesinas por $12.345,67, vence el {f_str}.\n"
-            f"¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy en Agua desde Galicia.\n"
-            f"Si fue con otra, decime cuál.\n"
-            f"Si me decís que no, te la anoto en la web para que no se te pase."
+            f"Factura de Aguas Santafesinas: $12.345,67, vence el {f_str}. "
+            "¿Ya la pagaste?\n"
+            "Sí: la anoto como gasto de hoy desde Galicia.\n"
+            "No: la guardo en miargentum.com y ahí te aviso antes de que venza."
         )
         prop_ok = resp1 == esperado_resp1
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
-        esperado_resp2 = "Listo. $12.345,67 en Agua desde Galicia — registrado."
+        esperado_resp2 = "Listo, anoté $12.346 en Agua desde Galicia."
         resp_ok = resp2 == esperado_resp2
 
         db = Session()
@@ -260,16 +263,19 @@ def p21_caso_3(datos):
         resp1 = respuestas[-1][1] if respuestas else ""
         esperado_resp1 = (
             f"Factura de EPE en 2 cuotas de $77.597,44: vencen el {f1_str} y el {f2_str}.\n"
-            f"¿Ya pagaste la primera? Si me decís que sí, la anoto como gasto de hoy en Luz desde Galicia y te anoto la segunda en la web.\n"
-            f"Si fue con otra, decime cuál.\n"
-            f"Si me decís que no, te anoto las dos en la web para que no se te pasen."
+            "¿Ya pagaste la primera?\n"
+            "Sí: la anoto como gasto de hoy desde Galicia y guardo la otra en miargentum.com.\n"
+            "No: guardo las 2 en miargentum.com y ahí te aviso antes de que venzan."
         )
         prop_ok = resp1 == esperado_resp1
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "no"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
-        esperado_resp2 = "Listo, te anoto las 2 cuotas en la web. Te aviso 3 días antes y el día de cada vencimiento."
+        esperado_resp2 = (
+            "Listo, guardé las 2 cuotas en miargentum.com. "
+            "Ahí te aviso antes de cada una."
+        )
         resp_ok = resp2 == esperado_resp2
 
         db = Session()
@@ -354,9 +360,9 @@ def p21_caso_4(datos):
         resp1 = respuestas[-1][1] if respuestas else ""
         esperado_resp1 = (
             f"Factura de EPE en 2 cuotas de $77.597,44: vencen el {f1_str} y el {f2_str}.\n"
-            f"¿Ya pagaste la primera? Si me decís que sí, la anoto como gasto de hoy en Luz desde Galicia y te anoto la segunda en la web.\n"
-            f"Si fue con otra, decime cuál.\n"
-            f"Si me decís que no, te anoto las dos en la web para que no se te pasen."
+            "¿Ya pagaste la primera?\n"
+            "Sí: la anoto como gasto de hoy desde Galicia y guardo la otra en miargentum.com.\n"
+            "No: guardo las 2 en miargentum.com y ahí te aviso antes de que venzan."
         )
         prop_ok = resp1 == esperado_resp1
 
@@ -364,8 +370,8 @@ def p21_caso_4(datos):
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
         esperado_resp2 = (
-            f"Listo. $77.597,44 en Luz desde Galicia — registrado.\n"
-            f"Te anoté la segunda cuota ($77.597,44, vence el {f2_str}) en la web."
+            "Listo, anoté $77.597 en Luz desde Galicia.\n"
+            f"Guardé la segunda cuota ($77.597,44, vence el {f2_str}) en miargentum.com."
         )
         resp_ok = resp2 == esperado_resp2
 
@@ -439,17 +445,17 @@ def p21_caso_5(datos):
 
         resp1 = respuestas[-1][1] if respuestas else ""
         esperado_resp1 = (
-            f"Factura de Aguas Santafesinas por $12.345,67, venció el {f_str}.\n"
-            f"¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy en Agua desde Galicia.\n"
-            f"Si fue con otra, decime cuál.\n"
-            f"Si me decís que no, te la anoto en la web para que no se te pase."
+            f"Factura de Aguas Santafesinas: $12.345,67, venció el {f_str}. "
+            "¿Ya la pagaste?\n"
+            "Sí: la anoto como gasto de hoy desde Galicia.\n"
+            "No: la guardo en miargentum.com y ahí te aviso antes de que venza."
         )
         prop_ok = resp1 == esperado_resp1
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "no"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
-        esperado_resp2 = "Listo, te la anoto en la web como vencida."
+        esperado_resp2 = "Listo, la guardé en miargentum.com como vencida."
         resp_ok = resp2 == esperado_resp2
 
         db = Session()
@@ -511,10 +517,10 @@ def p21_caso_6(datos):
 
         resp1 = respuestas[-1][1] if respuestas else ""
         esperado_resp1 = (
-            f"Factura de Aguas Santafesinas por $12.345,67, vence el {f_str}.\n"
-            f"¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy en Agua desde Galicia.\n"
-            f"Si fue con otra, decime cuál.\n"
-            f"Si me decís que no, te la anoto en la web para que no se te pase."
+            f"Factura de Aguas Santafesinas: $12.345,67, vence el {f_str}. "
+            "¿Ya la pagaste?\n"
+            "Sí: la anoto como gasto de hoy desde Galicia.\n"
+            "No: la guardo en miargentum.com y ahí te aviso antes de que venza."
         )
         prop1_ok = resp1 == esperado_resp1
 
@@ -523,16 +529,17 @@ def p21_caso_6(datos):
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "Santander"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
         esperado_resp2 = (
-            f"Factura de Aguas Santafesinas por $12.345,67, vence el {f_str}.\n"
-            f"¿Ya la pagaste? Si me decís que sí, la anoto como gasto de hoy en Agua desde Santander.\n"
-            f"Si me decís que no, te la anoto en la web para que no se te pase."
+            f"Factura de Aguas Santafesinas: $12.345,67, vence el {f_str}. "
+            "¿Ya la pagaste?\n"
+            "Sí: la anoto como gasto de hoy desde Santander.\n"
+            "No: la guardo en miargentum.com y ahí te aviso antes de que venza."
         )
         prop2_ok = resp2 == esperado_resp2
 
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp3 = respuestas[-1][1] if respuestas else ""
-        esperado_resp3 = "Listo. $12.345,67 en Agua desde Santander — registrado."
+        esperado_resp3 = "Listo, anoté $12.346 en Agua desde Santander."
         resp3_ok = resp3 == esperado_resp3
 
         db = Session()
@@ -596,7 +603,11 @@ def p21_caso_7(datos):
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "no"), time.perf_counter())
         resp1 = respuestas[-1][1] if respuestas else ""
-        resp1_ok = resp1 == "Listo, te la anoto en la web. Te aviso 3 días antes y el día del vencimiento."
+        resp1_ok = (
+            resp1
+            == "Listo, la guardé en miargentum.com. "
+            "Ahí te aviso 3 días antes y el día que vence."
+        )
 
         # Segunda vez: misma factura
         respuestas.clear()
@@ -607,7 +618,7 @@ def p21_caso_7(datos):
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "no"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
-        resp2_ok = resp2 == "Esa factura ya la tenía anotada."
+        resp2_ok = resp2 == "Ya tenía guardada esa factura."
 
         db = Session()
         nuevas_txs = db.execute(select(Transaccion).where(Transaccion.usuario_id == u.id, Transaccion.id.not_in(tx_ids_antes))).scalars().all()
@@ -657,9 +668,8 @@ def p21_caso_8(datos):
 
         resp1 = respuestas[-1][1] if respuestas else ""
         esperado_resp1 = (
-            "Voy a anotar $12.345,67 en Agua desde Galicia. ¿Va?\n"
-            "Si fue con otra, decime cuál.\n"
-            "Si todavía no la pagaste, respondé no y no la cargo."
+            "¿Anoto $12.346 en Agua desde Galicia? "
+            "Si todavía no la pagaste, decime que no."
         )
         prop_ok = resp1 == esperado_resp1
 
@@ -750,14 +760,19 @@ def p21_caso_9(datos):
             _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
 
         resp_prop = respuestas[-1][1] if respuestas else ""
-        prop_ok = "12.345,67" in resp_prop and "Agua" in resp_prop and "Galicia" in resp_prop and "¿Va?" in resp_prop
+        prop_ok = (
+            "$12.346" in resp_prop
+            and "Agua" in resp_prop
+            and "Galicia" in resp_prop
+            and "¿Anoto" in resp_prop
+        )
 
         # 3. Respuesta 'sí'
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp_conf = respuestas[-1][1] if respuestas else ""
         esperado_conf = (
-            "Listo. $12.345,67 en Agua desde Galicia — registrado.\n"
+            "Listo, anoté $12.346 en Agua desde Galicia.\n"
             "Marqué pagada la factura de Aguas Santafesinas."
         )
         conf_ok = resp_conf == esperado_conf
@@ -848,13 +863,18 @@ def p21_caso_10(datos):
             _procesar_webhook_whatsapp_sync(make_payload_image(), time.perf_counter())
 
         resp_prop = respuestas[-1][1] if respuestas else ""
-        prop_ok = "$12.345" in resp_prop and "Agua" in resp_prop and "Galicia" in resp_prop and "¿Va?" in resp_prop
+        prop_ok = (
+            "$12.345" in resp_prop
+            and "Agua" in resp_prop
+            and "Galicia" in resp_prop
+            and "¿Anoto" in resp_prop
+        )
 
         # 3. Respuesta 'sí'
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "sí"), time.perf_counter())
         resp_conf = respuestas[-1][1] if respuestas else ""
-        esperado_conf = "Listo. $12.345 en Agua desde Galicia — registrado."
+        esperado_conf = "Listo, anoté $12.345 en Agua desde Galicia."
         conf_ok = resp_conf == esperado_conf and "Marqué pagada" not in resp_conf
 
         # 4. Estado en base de datos: la factura sigue pendiente

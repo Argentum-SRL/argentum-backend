@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from app.core.catalogo_suscripciones import identificar_servicio_en_texto
+from app.core.reglas_texto_wpp import fecha_corta_wpp
 from app.utils.formato import formatear_monto
 from app.utils.fecha import hoy_argentina
 from app.models.transaccion import Moneda
@@ -84,7 +85,7 @@ def _interpretar_cuotas(
     if pat_de:
         cant = int(pat_de.group(1))
         if cant < 1 or cant > 48:
-            return cant, None, None, False, "La cantidad de cuotas debe ser entre 1 y 48."
+            return cant, None, None, False, "Las cuotas tienen que ser entre 1 y 48."
         m_str = pat_de.group(2).strip()
         m_val = _parsear_monto_texto_cuota(m_str)
         if m_val is None and monto_ia is not None:
@@ -102,7 +103,7 @@ def _interpretar_cuotas(
     if pat_en:
         cant = int(pat_en.group(2))
         if cant < 1 or cant > 48:
-            return cant, None, None, False, "La cantidad de cuotas debe ser entre 1 y 48."
+            return cant, None, None, False, "Las cuotas tienen que ser entre 1 y 48."
         m_str = pat_en.group(1).strip()
         m_val = _parsear_monto_texto_cuota(m_str)
         if m_val is None and monto_ia is not None:
@@ -117,7 +118,7 @@ def _interpretar_cuotas(
     if pat_gen:
         cant = int(pat_gen.group(1))
         if cant < 1 or cant > 48:
-            return cant, None, None, False, "La cantidad de cuotas debe ser entre 1 y 48."
+            return cant, None, None, False, "Las cuotas tienen que ser entre 1 y 48."
         if cant > 1 and monto_ia is not None:
             return cant, None, None, True, None
 
@@ -205,34 +206,20 @@ def _resolver_y_validar_fecha(fecha_val: str | date | None) -> tuple[date, str |
 
     limite_antiguedad = hoy - timedelta(days=60)
     if fecha_candidata > hoy:
-        return hoy, "No puedo registrar movimientos con fecha futura porque todavía no ocurrieron. Va a quedar con fecha de hoy."
+        return hoy, "Todavía no pasó esa fecha: va con fecha de hoy."
     elif fecha_candidata < limite_antiguedad:
-        return hoy, "No puedo registrar movimientos de más de 60 días atrás. Va a quedar con fecha de hoy."
+        return (
+            hoy,
+            "Solo anoto hasta 60 días para atrás: va con fecha de hoy.",
+        )
     else:
         return fecha_candidata, None
 
 
 def _formatear_fecha_natural(fecha_obj: date) -> str | None:
-    """
-    Formatea una fecha de forma natural en rioplatense:
-    - Hoy: None (no se menciona)
-    - Ayer: 'ayer'
-    - Anteayer: 'anteayer'
-    - Otra fecha: 'el 31 de agosto' (o 'el 31 de agosto de 2025' si difiere el año)
-    """
-    hoy = hoy_argentina()
-    if fecha_obj == hoy:
-        return None
-    delta = (hoy - fecha_obj).days
-    if delta == 1:
-        return "ayer"
-    elif delta == 2:
-        return "anteayer"
-    else:
-        mes_nombre = _MESES_RIOPLATENSE[fecha_obj.month - 1]
-        if fecha_obj.year != hoy.year:
-            return f"el {fecha_obj.day} de {mes_nombre} de {fecha_obj.year}"
-        return f"el {fecha_obj.day} de {mes_nombre}"
+    """Formatea una fecha con fecha_corta_wpp respecto a hoy."""
+    res = fecha_corta_wpp(fecha_obj, hoy_argentina())
+    return res or None
 
 
 def _parsear_monto_argentino(texto: str) -> Decimal | None:

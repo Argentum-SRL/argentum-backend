@@ -224,7 +224,15 @@ def _es_confirmacion_lote_uno_solo(mensaje: str) -> bool:
     norm = normalizar_texto(mensaje)
     if not norm:
         return False
-    return any(k in norm for k in ("es uno solo", "uno solo", "solo uno", "uno", "es uno", "fue uno solo", "fue uno", "anota uno", "anota solo uno"))
+    if re.fullmatch(r"no+", norm):
+        return True
+    return any(
+        k in norm
+        for k in (
+            "es uno solo", "uno solo", "solo uno", "uno",
+            "es uno", "fue uno solo", "fue uno", "anota uno", "anota solo uno",
+        )
+    )
 
 def _parece_intento_correccion(mensaje: str) -> bool:
     norm = normalizar_texto(mensaje)
@@ -411,10 +419,12 @@ def _es_confirmacion_gasto_aparte(mensaje: str) -> bool:
     norm = normalizar_texto(mensaje)
     if not norm:
         return False
+    if norm in PALABRAS_CONFIRMACION:
+        return True
     frases = [
         "es un gasto aparte", "gasto aparte", "es aparte", "aparte",
         "es otro gasto", "es otro", "otro gasto", "anotalo igual",
-        "anotarlo igual", "es nuevo", "nuevo", "si anotalo", "si, anotalo"
+        "anotarlo igual", "es nuevo", "nuevo", "si anotalo", "si, anotalo",
     ]
     return any(f in norm for f in frases)
 

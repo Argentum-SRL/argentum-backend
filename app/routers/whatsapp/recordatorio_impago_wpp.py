@@ -13,6 +13,10 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.models.notificacion import Notificacion, TipoNotificacion
+from app.core.reglas_texto_wpp import (
+    LARGO_MAXIMO_LINEA_WPP,
+    nombre_tarjeta_wpp,
+)
 from app.models.tarjeta_credito import TarjetaCredito
 from app.models.usuario import Usuario
 from app.routers.whatsapp.db_lookups import (
@@ -153,22 +157,34 @@ def agregar_recordatorio_impago(
 
         if len(resumenes_validos) == 1:
             r = resumenes_validos[0]
-            nom = r["tarjeta"].nombre
-            if len(nom) > 18:
-                nom_recortado = nom[:17].rstrip() + "…"
-            else:
-                nom_recortado = nom
-
-            monto_fmt = formatear_monto(r["deuda"], r["tarjeta"].moneda)
+            monto_fmt = formatear_monto(
+                r["deuda"],
+                r["tarjeta"].moneda,
+                con_decimales=False,
+            )
             venc_fmt = r["vencimiento"].strftime("%d/%m")
-
-            texto = f"Ojo: el resumen de {nom_recortado} de {monto_fmt} (venció {venc_fmt}) figura sin pagar."
-            if len(texto) > 90:
-                texto = f"Ojo: el resumen de {nom_recortado} (venció {venc_fmt}) figura sin pagar."
+            nom = nombre_tarjeta_wpp(r["tarjeta"]) or r["tarjeta"].nombre
+            prefijo = "Ojo: el resumen de "
+            sufijo = f" de {monto_fmt} venció el {venc_fmt} y sigue sin pagar."
+            texto = f"{prefijo}{nom}{sufijo}"
+            if len(texto) > LARGO_MAXIMO_LINEA_WPP:
+                libre = LARGO_MAXIMO_LINEA_WPP - len(prefijo) - len(sufijo)
+                if libre >= 6:
+                    nom_corto = nom[: libre - 1].rstrip() + "…"
+                    texto = f"{prefijo}{nom_corto}{sufijo}"
+                else:
+                    nom_corto = nom[:17].rstrip() + "…" if len(nom) > 18 else nom
+                    texto = (
+                        f"{prefijo}{nom_corto} venció el {venc_fmt} "
+                        "y sigue sin pagar."
+                    )
         else:
             n = len(resumenes_validos)
             venc_mas_viejo = resumenes_validos[0]["vencimiento"].strftime("%d/%m")
-            texto = f"Ojo: tenés {n} resúmenes de tarjeta sin pagar; el más viejo venció el {venc_mas_viejo}."
+            texto = (
+                f"Ojo: tenés {n} resúmenes sin pagar; "
+                f"el más viejo venció el {venc_mas_viejo}."
+            )
 
         ids_notifs = [n.id for r in resumenes_validos for n in r["notificaciones"]]
 

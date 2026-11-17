@@ -234,13 +234,9 @@ from app.utils.texto import normalizar_texto
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp-ia"])
 
 MAX_MOVIMIENTOS_POR_LOTE = 10
-MSG_TOPE_MOVIMIENTOS_SUPERADO = (
-    "El límite es de 10 movimientos por mensaje. "
-    "Por favor mandalos en tandas más chicas o usá la importación desde la web de Argentum."
-)
+MSG_TOPE_MOVIMIENTOS_SUPERADO = "Mandame hasta 10 movimientos por mensaje."
 MSG_NO_MEZCLAR_TRANSFERENCIAS = (
-    "Las transferencias, extracciones de cajero y compra de dólares deben registrarse "
-    "en mensajes separados de los gastos o ingresos. Por favor mandalas por separado."
+    "Mandame aparte las transferencias, retiros de cajero y compras de dólares."
 )
 
 TERMINOS_BLOQUEO_MEZCLA = (
@@ -511,7 +507,7 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                     b_final = b_ppal
                     se_asumio_defecto = True
 
-                billetera_nombre = b_final.nombre if b_final else "tu billetera"
+                billetera_nombre = b_final.nombre if b_final else "tu cuenta"
 
                 se_asumio_principal = asignar_billeteras(
                     resultado=ctx.extraccion,
@@ -550,6 +546,8 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                         omitidos=omitidos,
                         es_pdf=ctx.es_pdf,
                         extraccion=ctx.extraccion,
+                        db=db,
+                        usuario_id=usuario.id,
                     )
                 elif not tiene_movimientos_comunes and not tiene_rendimientos_extraidos:
                     ctx.resultado_ia = armar_resultado_ia_documento(
@@ -567,6 +565,8 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                         omitidos=omitidos,
                         es_pdf=ctx.es_pdf,
                         extraccion=ctx.extraccion,
+                        db=db,
+                        usuario_id=usuario.id,
                     )
                 else:
                     aplicar_marcas_y_memoria(db, usuario.id, entidades_raw)
@@ -589,6 +589,8 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
                         omitidos=omitidos,
                         es_pdf=ctx.es_pdf,
                         extraccion=ctx.extraccion,
+                        db=db,
+                        usuario_id=usuario.id,
                     )
             else:
                 # Etapa 3: Estados pendientes y handlers determinísticos
@@ -633,7 +635,8 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
             try:
                 if from_number:
                     whatsapp_service.enviar_whatsapp(
-                        from_number, "Hubo un problema al procesar tu mensaje. Intentá de nuevo."
+                        from_number,
+                        "Hubo un problema y no anoté nada. Probá de nuevo en un rato.",
                     )
             except Exception:
                 logger.exception("Error al enviar mensaje de fallback")

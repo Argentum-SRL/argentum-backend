@@ -64,34 +64,43 @@ def manejar_consulta_suscripciones(
     if not _es_consulta_suscripciones(mensaje_texto):
         return False
 
+    def _frec_txt(f: str) -> str:
+        return {
+            "mensual": "por mes",
+            "bimestral": "cada 2 meses",
+            "trimestral": "cada 3 meses",
+            "semestral": "cada 6 meses",
+            "anual": "por año",
+        }.get(f, f)
+
     def _procesar_consulta_suscripciones(usuario: Usuario, db: Session) -> str:
         subs = suscripcion_service.obtener_suscripciones(db, usuario.id, estado="activa")
         if not subs:
-            return "No tenés suscripciones activas registradas."
+            return "No tenés suscripciones activas."
 
         totales = suscripcion_service.obtener_total_mensual(db, usuario.id)
         total_ars = totales["total_ars"]
         total_usd = totales["total_usd"]
 
-        lineas = ["Tus suscripciones activas:"]
+        lineas = ["Tus suscripciones:"]
         for s in subs:
             monto_p = s.precio_actual.monto if s.precio_actual else Decimal("0")
             moneda_p = s.precio_actual.moneda if s.precio_actual else "ARS"
             mon_enum = Moneda.USD if moneda_p == "USD" else Moneda.ARS
-            monto_fmt = formatear_monto(float(monto_p), mon_enum)
+            monto_fmt = formatear_monto(float(monto_p), mon_enum, con_decimales=False)
             frec_str = s.frecuencia.value if hasattr(s.frecuencia, "value") else str(s.frecuencia)
-            lineas.append(f"- {s.nombre}: {monto_fmt} {frec_str}")
+            lineas.append(f"- {s.nombre}: {monto_fmt} {_frec_txt(frec_str)}")
 
         totales_str = []
         if total_ars > 0:
-            totales_str.append(formatear_monto(float(total_ars), Moneda.ARS))
+            totales_str.append(formatear_monto(float(total_ars), Moneda.ARS, con_decimales=False))
         if total_usd > 0:
-            totales_str.append(formatear_monto(float(total_usd), Moneda.USD))
+            totales_str.append(formatear_monto(float(total_usd), Moneda.USD, con_decimales=False))
 
         if not totales_str:
             totales_str = ["$0"]
 
-        lineas.append(f"Total mensual estimado: {' y '.join(totales_str)}")
+        lineas.append(f"Total por mes: {' y '.join(totales_str)}")
         return "\n".join(lineas)
 
     msg_resp = _procesar_consulta_suscripciones(usuario, db)
@@ -132,7 +141,7 @@ def manejar_baja_suscripcion(
     sub_candidata = _buscar_suscripcion_activa_por_nombre(usuario.id, srv_baja, db)
     if not sub_candidata:
         srv_display = srv_baja or "ese servicio"
-        msg_resp = f"No tenés ninguna suscripción activa a {srv_display}."
+        msg_resp = f"No tenés ninguna suscripción a {srv_display}."
         nueva_conv = ConversacionWpp(
             usuario_id=usuario.id,
             wamid=wamid,
@@ -156,8 +165,15 @@ def manejar_baja_suscripcion(
     m_val = pv.monto if pv else Decimal("0")
     mon_val = pv.moneda if pv else "ARS"
     frec_str = sub_candidata.frecuencia.value if hasattr(sub_candidata.frecuencia, "value") else str(sub_candidata.frecuencia)
-    m_fmt = formatear_monto(float(m_val), Moneda.USD if mon_val == "USD" else Moneda.ARS)
-    msg_propuesta = f"¿Confirmás dar de baja la suscripción a {sub_candidata.nombre} ({m_fmt} {frec_str})?"
+    m_fmt = formatear_monto(
+        float(m_val), Moneda.USD if mon_val == "USD" else Moneda.ARS, con_decimales=False
+    )
+    frec_txt = {
+        "mensual": "por mes", "bimestral": "cada 2 meses",
+        "trimestral": "cada 3 meses", "semestral": "cada 6 meses",
+        "anual": "por año",
+    }.get(frec_str, frec_str)
+    msg_propuesta = f"¿Doy de baja {sub_candidata.nombre} ({m_fmt} {frec_txt})?"
 
     nueva_conv = ConversacionWpp(
         usuario_id=usuario.id,
@@ -196,7 +212,7 @@ def manejar_cambio_precio_suscripcion(
     sub_candidata = _buscar_suscripcion_activa_por_nombre(usuario.id, srv_cp, db)
     if not sub_candidata:
         srv_display = srv_cp or "ese servicio"
-        msg_resp = f"No tenés ninguna suscripción activa a {srv_display}."
+        msg_resp = f"No tenés ninguna suscripción a {srv_display}."
         nueva_conv = ConversacionWpp(
             usuario_id=usuario.id,
             wamid=wamid,
@@ -220,10 +236,10 @@ def manejar_cambio_precio_suscripcion(
     m_ant = pv.monto if pv else Decimal("0")
     mon_val = pv.moneda if pv else "ARS"
     mon_enum = Moneda.USD if mon_val == "USD" else Moneda.ARS
-    m_ant_fmt = formatear_monto(float(m_ant), mon_enum)
-    m_nuevo_fmt = formatear_monto(float(nuevo_precio), mon_enum)
+    m_ant_fmt = formatear_monto(float(m_ant), mon_enum, con_decimales=False)
+    m_nuevo_fmt = formatear_monto(float(nuevo_precio), mon_enum, con_decimales=False)
 
-    msg_propuesta = f"¿Confirmás actualizar el precio de {sub_candidata.nombre} de {m_ant_fmt} a {m_nuevo_fmt}?"
+    msg_propuesta = f"¿Cambio {sub_candidata.nombre} de {m_ant_fmt} a {m_nuevo_fmt}?"
     nueva_conv = ConversacionWpp(
         usuario_id=usuario.id,
         wamid=wamid,
@@ -263,7 +279,7 @@ def manejar_ambiguedad_suscripcion(
     if not (es_amb and srv_amb):
         return False
 
-    msg_pregunta = f"¿Es un gasto único o una suscripción a {srv_amb}?"
+    msg_pregunta = f"¿{srv_amb} lo pagás todos los meses?"
     nueva_conv = ConversacionWpp(
         usuario_id=usuario.id,
         wamid=wamid,
@@ -294,8 +310,6 @@ def manejar_alta_suscripcion(
     """
     Detección determinística de alta de suscripción.
     """
-    from app.routers.whatsapp.constantes import MESES_ES_GEN
-
     if _es_intento_alta_suscripcion(mensaje_texto):
         srv_nom = _extraer_nombre_servicio(mensaje_texto)
         monto_sub, mon_sub = _extraer_monto_y_moneda_suscripcion(mensaje_texto)
@@ -307,9 +321,14 @@ def manejar_alta_suscripcion(
                 m_val = pv.monto if pv else Decimal("0")
                 mon_val = pv.moneda if pv else "ARS"
                 mon_enum = Moneda.USD if mon_val == "USD" else Moneda.ARS
-                m_fmt = formatear_monto(float(m_val), mon_enum)
+                m_fmt = formatear_monto(float(m_val), mon_enum, con_decimales=False)
                 frec_str = sub_act.frecuencia.value if hasattr(sub_act.frecuencia, "value") else str(sub_act.frecuencia)
-                msg_aviso = f"Ya tenés una suscripción activa a {sub_act.nombre} por {m_fmt} {frec_str}. ¿Querés registrar otra igual o te referías a la existente?"
+                frec_txt = {
+                    "mensual": "por mes", "bimestral": "cada 2 meses",
+                    "trimestral": "cada 3 meses", "semestral": "cada 6 meses",
+                    "anual": "por año",
+                }.get(frec_str, frec_str)
+                msg_aviso = f"Ya tenés {sub_act.nombre} ({m_fmt} {frec_txt}). ¿Querés sumar otra?"
                 nueva_conv = ConversacionWpp(
                     usuario_id=usuario.id,
                     wamid=wamid,
@@ -342,11 +361,13 @@ def manejar_alta_suscripcion(
             frecuencia = _extraer_frecuencia_mencionada(mensaje_texto)
             if not frecuencia:
                 srv_cat = buscar_servicio_por_texto(srv_nom)
+                msg_frec = (
+                    f"¿Cada cuánto se paga {srv_nom}? Mensual, bimestral, "
+                    "trimestral, semestral o anual."
+                )
                 if srv_cat and srv_cat.get("frecuencia_sugerida"):
                     frec_tipica = srv_cat["frecuencia_sugerida"]
-                    msg_frec = f"¿Con qué frecuencia se paga {srv_nom}? (lo habitual es {frec_tipica}: mensual, bimestral, trimestral, semestral o anual)"
-                else:
-                    msg_frec = f"¿Con qué frecuencia se paga {srv_nom}? (mensual, bimestral, trimestral, semestral o anual)"
+                    msg_frec = f"Lo habitual es {frec_tipica}.\n{msg_frec}"
 
                 nueva_conv = ConversacionWpp(
                     usuario_id=usuario.id,
@@ -383,11 +404,20 @@ def manejar_alta_suscripcion(
                     billetera_obj = db.query(Billetera).filter(Billetera.usuario_id == usuario.id).first()
 
                 proximo_cobro = suscripcion_service.calcular_siguiente_cobro(hoy_argentina(), frecuencia)
-                fecha_fmt = f"{proximo_cobro.day} de {MESES_ES_GEN[proximo_cobro.month - 1]}"
+                fecha_fmt = proximo_cobro.strftime("%d/%m")
                 mon_enum = Moneda.USD if mon_sub == "USD" else Moneda.ARS
-                monto_fmt = formatear_monto(float(monto_sub), mon_enum)
+                monto_fmt = formatear_monto(float(monto_sub), mon_enum, con_decimales=False)
+                frec_txt = {
+                    "mensual": "por mes", "bimestral": "cada 2 meses",
+                    "trimestral": "cada 3 meses", "semestral": "cada 6 meses",
+                    "anual": "por año",
+                }.get(frecuencia, frecuencia)
                 medio_pago_txt = f"desde {billetera_obj.nombre}" if billetera_obj else ""
-                propuesta_msg = f"Voy a programar la suscripción a {srv_nom}: {monto_fmt} {frecuencia} {medio_pago_txt}, primer cobro el {fecha_fmt}. ¿Confirmás?"
+                desde_suf = f" {medio_pago_txt}" if medio_pago_txt else ""
+                propuesta_msg = (
+                    f"{srv_nom}: {monto_fmt} {frec_txt}{desde_suf}, primer cobro el {fecha_fmt}.\n"
+                    "¿Anoto la suscripción?"
+                )
 
                 nueva_conv = ConversacionWpp(
                     usuario_id=usuario.id,

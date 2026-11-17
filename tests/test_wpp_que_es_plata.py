@@ -316,7 +316,7 @@ def test_3(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
     mensajes_wpp.clear()
     ok = manejar_respuesta_numerada("3", usuario, db, "5491112345678")
     assert ok is True
-    assert mensajes_wpp[0] == "Listo, queda como plata que solo pasó por tu cuenta: no cuenta como ingreso."
+    assert mensajes_wpp[0] == "Listo: solo pasó por tu cuenta, no es un ingreso."
 
     db.refresh(tx_juan)
     assert tx_juan.subcategoria.nombre == "Pasó por mi cuenta"
@@ -371,12 +371,12 @@ def test_2(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
     mensajes_wpp.clear()
     ok_2 = manejar_respuesta_numerada("2", usuario, db, "5491112345678")
     assert ok_2 is True
-    assert mensajes_wpp[0] == "¿De qué gasto?\n1) Asado $80.000\n2) Súper $100.000 (ayer)\nRespondé con el número."
+    assert mensajes_wpp[0] == "¿De qué gasto?\n1. Asado $80.000\n2. Súper $100.000 · ayer"
 
     mensajes_wpp.clear()
     ok_elegir = manejar_respuesta_numerada("2", usuario, db, "5491112345678")
     assert ok_elegir is True
-    assert mensajes_wpp[0] == "Listo, los $30.000 se restan de «Súper»."
+    assert mensajes_wpp[0] == "Listo, los $30.000 se restan de Súper."
 
     db.refresh(tx_juan)
     assert tx_juan.reintegro_de_id == tx_super.id
@@ -400,7 +400,7 @@ def test_2_sin_gastos(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
     mensajes_wpp.clear()
     ok = manejar_respuesta_numerada("2", usuario, db, "5491112345678")
     assert ok is True
-    assert mensajes_wpp[0] == "No encontré un gasto para vincularla. Podés hacerlo desde la web de Argentum."
+    assert mensajes_wpp[0] == "No encontré un gasto para restarlo. Hacelo en miargentum.com"
 
 
 def test_fuera_de_rango(db: Session, usuario: Usuario, datos_base, mensajes_wpp):

@@ -211,7 +211,7 @@ def test_armar_respuesta_permitirse_espera():
         "Son 6 cuotas de $100.000.\n"
         "Te quedarían solo $15.000 por mes después de tus gastos de siempre.\n"
         "Si no es urgente, esperá 24 horas y volvé a fijarte.\n"
-        "Lo calculé sin interés. Si tiene interés, decime la tasa anual (TNA)."
+        "Lo calculé sin interés. Si tiene, decime cuánto por año (por ejemplo, 60%)."
     )
     obtenido = armar_respuesta_permitirse(resultado, consulta)
     assert obtenido == esperado

@@ -14,6 +14,7 @@ import structlog
 
 from app.core.config import settings
 from app.models.usuario import Usuario
+from app.routers.whatsapp.constantes import texto_cupo_wpp
 from app.routers.whatsapp.contexto import ContextoMensaje
 from app.routers.whatsapp.db_lookups import _verificar_rate_limit_vinculacion
 from app.routers.whatsapp.detectors import _debe_responder_no_registrado
@@ -56,7 +57,7 @@ def procesar_vinculacion_o_desconocido(ctx: ContextoMensaje) -> None:
             if es_vencido or not entrada_vinc:
                 whatsapp_service.enviar_whatsapp(
                     ctx.from_number,
-                    "El código de vinculación expiró. Por favor solicitá un código nuevo desde la app.",
+                    "El código venció. Pedí uno nuevo en miargentum.com",
                 )
                 ctx.terminado = True
                 return
@@ -97,7 +98,7 @@ def procesar_vinculacion_o_desconocido(ctx: ContextoMensaje) -> None:
                 )
                 whatsapp_service.enviar_whatsapp(
                     ctx.from_number,
-                    "Ese número de teléfono ya está asociado a otra cuenta de Argentum.",
+                    "Ese número ya está conectado a otra cuenta de Argentum.",
                 )
                 ctx.terminado = True
                 return
@@ -107,7 +108,9 @@ def procesar_vinculacion_o_desconocido(ctx: ContextoMensaje) -> None:
                 try:
                     whatsapp_service.enviar_whatsapp(
                         tel_viejo,
-                        "Tu cuenta de Argentum fue desvinculada de este número porque se asoció a un nuevo número de WhatsApp. Si no fuiste vos, contactanos inmediatamente.",
+                        "Este número se desconectó de tu cuenta porque conectaste "
+                        "otro WhatsApp.\n"
+                        "Si no fuiste vos, cambiá tu contraseña en miargentum.com",
                     )
                 except Exception as e:
                     logger.warning("No se pudo enviar aviso de desvinculación a número anterior: %s", e)
@@ -121,9 +124,10 @@ def procesar_vinculacion_o_desconocido(ctx: ContextoMensaje) -> None:
 
             whatsapp_service.enviar_whatsapp(
                 ctx.from_number,
-                "¡Tu cuenta de Argentum fue vinculada con éxito!\n"
-                "A partir de ahora podés registrar tus gastos e ingresos directamente desde acá. "
-                "Probá mandarme un mensaje o audio como: *Almuerzo $3500 con Galicia*.",
+                "¡Listo, ya estamos conectados!\n"
+                "Mandame tus gastos como se los contarías a un amigo: _almuerzo 3500_.\n"
+                "También entiendo audios y fotos de tickets.\n"
+                "Si me equivoco, decime _fue con Galicia_ o _borrá eso_.",
             )
 
             try:
@@ -150,7 +154,10 @@ def procesar_vinculacion_o_desconocido(ctx: ContextoMensaje) -> None:
             respondido=debe_responder,
         )
         if debe_responder:
-            whatsapp_service.enviar_whatsapp(ctx.from_number, "No encontramos tu cuenta. Registrate en miargentum.com")
+            whatsapp_service.enviar_whatsapp(
+                ctx.from_number,
+                "No encontré tu cuenta. Creala en miargentum.com",
+            )
         ctx.terminado = True
         return
 
@@ -176,6 +183,7 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
             from app.services.uso_ia_service import verificar_cupo_ia
             permitido, texto_cupo = verificar_cupo_ia(ctx.db, ctx.usuario, "audio")
             if not permitido:
+                texto_cupo = texto_cupo_wpp(texto_cupo, "audio")
                 id_usr = str(ctx.usuario.id) if ctx.usuario else ctx.from_number
                 if avisar_una_vez("aviso_tope_ia", id_usr, segundos_medianoche):
                     whatsapp_service.enviar_whatsapp(ctx.from_number, texto_cupo)
@@ -216,7 +224,7 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
             if error_audio == "DURACION_EXCEDIDA":
                 whatsapp_service.enviar_whatsapp(
                     ctx.from_number,
-                    "El audio es muy largo (máximo 2 minutos). Por favor mandá un audio más corto o escribí el gasto en texto.",
+                    "El audio es muy largo (máximo 2 minutos). Mandá uno más corto o escribime.",
                 )
                 ctx.terminado = True
                 return
@@ -224,7 +232,7 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
             if error_audio == "TAMANO_EXCEDIDO":
                 whatsapp_service.enviar_whatsapp(
                     ctx.from_number,
-                    "El audio es muy pesado (máximo 8 MB). Por favor mandá un audio más corto o escribí el gasto en texto.",
+                    "El audio es muy pesado (máximo 8 MB). Mandá uno más corto o escribime.",
                 )
                 ctx.terminado = True
                 return
@@ -237,13 +245,13 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
                     logger.info("Audio transcripto: '%s'", ctx.transcripcion[:100])
             else:
                 whatsapp_service.enviar_whatsapp(
-                    ctx.from_number, "No pude escuchar el audio. Mandame el mensaje en texto."
+                    ctx.from_number, "No pude escuchar el audio. Escribime el gasto."
                 )
                 ctx.terminado = True
                 return
         else:
             whatsapp_service.enviar_whatsapp(
-                ctx.from_number, "No pude escuchar el audio. Mandame el mensaje en texto."
+                ctx.from_number, "No pude escuchar el audio. Escribime el gasto."
             )
             ctx.terminado = True
             return
@@ -260,7 +268,7 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
             image_bytes, mime = _descargar_medio_meta(media_id)
             if not image_bytes:
                 whatsapp_service.enviar_whatsapp(
-                    ctx.from_number, "No pude leer el comprobante. Mandame los datos en texto."
+                    ctx.from_number, "No pude leer la foto. Escribime los datos."
                 )
                 ctx.terminado = True
                 return
@@ -268,6 +276,7 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
             from app.services.uso_ia_service import verificar_cupo_ia
             permitido, texto_cupo = verificar_cupo_ia(ctx.db, ctx.usuario, "archivo")
             if not permitido:
+                texto_cupo = texto_cupo_wpp(texto_cupo, "archivo")
                 id_usr = str(ctx.usuario.id) if ctx.usuario else ctx.from_number
                 if avisar_una_vez("aviso_tope_ia", id_usr, segundos_medianoche):
                     whatsapp_service.enviar_whatsapp(ctx.from_number, texto_cupo)
@@ -309,7 +318,7 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
             if error_img == "TAMANO_EXCEDIDO":
                 whatsapp_service.enviar_whatsapp(
                     ctx.from_number,
-                    "La imagen es muy pesada (máximo 5 MB). Por favor mandá una foto más liviana.",
+                    "La foto es muy pesada (máximo 5 MB). Mandá una más liviana.",
                 )
                 ctx.terminado = True
                 return
@@ -325,13 +334,13 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
                 )
             else:
                 whatsapp_service.enviar_whatsapp(
-                    ctx.from_number, "No pude leer el comprobante. Mandame los datos en texto."
+                    ctx.from_number, "No pude leer la foto. Escribime los datos."
                 )
                 ctx.terminado = True
                 return
         else:
             whatsapp_service.enviar_whatsapp(
-                ctx.from_number, "No pude leer el comprobante. Mandame los datos en texto."
+                ctx.from_number, "No pude leer la foto. Escribime los datos."
             )
             ctx.terminado = True
             return
@@ -399,7 +408,7 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
         elif error_pdf == "SIN_TEXTO":
             whatsapp_service.enviar_whatsapp(
                 ctx.from_number,
-                "Ese PDF es una imagen escaneada y no lo puedo leer. Mandame una captura de la factura.",
+                "Ese PDF es una imagen escaneada y no lo puedo leer. Mandame una captura.",
             )
             ctx.terminado = True
             return
@@ -421,6 +430,7 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
         from app.services.uso_ia_service import verificar_cupo_ia
         permitido, texto_cupo = verificar_cupo_ia(ctx.db, ctx.usuario, "archivo")
         if not permitido:
+            texto_cupo = texto_cupo_wpp(texto_cupo, "archivo")
             id_usr = str(ctx.usuario.id) if ctx.usuario else ctx.from_number
             if avisar_una_vez("aviso_tope_ia", id_usr, segundos_medianoche):
                 whatsapp_service.enviar_whatsapp(ctx.from_number, texto_cupo)
@@ -465,7 +475,7 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
         if not verificar_extraccion_contra_texto(resultado_extraccion, texto_pdf):
             whatsapp_service.enviar_whatsapp(
                 ctx.from_number,
-                "No pude confirmar el importe o el vencimiento en el PDF. Mandame una captura de la factura.",
+                "No pude confirmar el monto o el vencimiento en el PDF. Mandame una captura.",
             )
             ctx.terminado = True
             return
@@ -484,16 +494,21 @@ def procesar_entrada_medios_y_texto(ctx: ContextoMensaje) -> None:
         if not ctx.mensaje_texto:
             whatsapp_service.enviar_whatsapp(
                 ctx.from_number,
-                "No entendí bien lo que quisiste decir. Podés contarme qué gastaste, por ejemplo: *Almuerzo $1.500*",
+                "No te entendí. Probá así: _gasté 5000 en el kiosco_ o "
+                "_cuánta plata tengo_.",
             )
             ctx.terminado = True
             return
 
         if len(ctx.mensaje_texto) > 1500:
-            logger.warning("whatsapp_texto_limite_caracteres_superado", longitud=len(ctx.mensaje_texto))
+            logger.warning(
+                "whatsapp_texto_limite_caracteres_superado",
+                longitud=len(ctx.mensaje_texto),
+            )
             whatsapp_service.enviar_whatsapp(
                 ctx.from_number,
-                "El mensaje es muy largo (máximo 1500 caracteres). Por favor mandalo más resumido.",
+                "El mensaje es muy largo (máximo 1.500 caracteres). "
+                "Mandámelo más corto.",
             )
             ctx.terminado = True
             return

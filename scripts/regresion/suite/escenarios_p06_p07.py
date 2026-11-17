@@ -66,7 +66,7 @@ def p6_ejecutar_caso(datos, nombre_caso, ent, forzar_cero: bool = False):
 
         propuesta_texto = _construir_propuesta_transaccion(entidades_caso, b_nom, se_asumio_principal=False, billetera_moneda=b_mon)
 
-        if "No se puede registrar ningún movimiento." in propuesta_texto:
+        if "No pude anotar ninguno." in propuesta_texto:
             return f"Propuesta:\n{propuesta_texto}\nConfirmación:\nNO_APLICA"
 
         pid = uuid.uuid4()

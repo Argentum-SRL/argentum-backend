@@ -261,14 +261,14 @@ def test_tf_7a(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
     assert ok_deshacer is True
     assert len(mensajes_wpp) == 1
     assert mensajes_wpp[-1] == (
-        "¿Querés eliminar el último movimiento de $100.000 en Supermercado desde Galicia? "
-        "También se borra su reintegro de $25.000. ¿Confirmás?"
+        "Si lo borro, también se borra su reintegro de $25.000.\n"
+        "¿Borro $100.000 en Supermercado desde Galicia?"
     )
 
     # manejar_confirmacion("sí", ...)
     ok_conf = manejar_confirmacion("sí", usuario, db, "5491112345678")
     assert ok_conf is True
-    assert mensajes_wpp[-1] == "Listo, movimiento eliminado."
+    assert mensajes_wpp[-1] == "Listo, lo borré."
 
     # no queda la compra ni ningún espejo
     txs_restantes = db.execute(select(Transaccion).where(Transaccion.usuario_id == usuario.id)).scalars().all()
@@ -343,9 +343,9 @@ def test_tf_7b(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
     ok_deshacer = manejar_deshacer("borrá eso", usuario, db, "5491112345678")
     assert ok_deshacer is True
     assert mensajes_wpp[-1] == (
-        "¿Querés eliminar el último movimiento de $100.000 en Supermercado desde Galicia? "
-        "También se borra su reintegro de $25.000. "
-        "Los $30.000 que te devolvieron de este gasto vuelven a quedar como cobro. ¿Confirmás?"
+        "Si lo borro, también se borra su reintegro de $25.000.\n"
+        "Si lo borro, los $30.000 que te devolvieron vuelven a ser un cobro.\n"
+        "¿Borro $100.000 en Supermercado desde Galicia?"
     )
 
     ok_conf = manejar_confirmacion("sí", usuario, db, "5491112345678")
@@ -406,8 +406,8 @@ def test_tf_7c(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
     ok_deshacer = manejar_deshacer("borrá eso", usuario, db, "5491112345678")
     assert ok_deshacer is True
     assert mensajes_wpp[-1] == (
-        "¿Querés eliminar el último consumo de $30.000 en Muebles y electro con tarjeta Visa? "
-        "También se borra su reintegro de $10.000. ¿Confirmás?"
+        "Si lo borro, también se borra su reintegro de $10.000.\n"
+        "¿Borro $30.000 en Muebles y electro con la Visa Galicia?"
     )
 
 
@@ -468,11 +468,14 @@ def test_espejo(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
 
     ok_deshacer = manejar_deshacer("borrá eso", usuario, db, "5491112345678")
     assert ok_deshacer is True
-    assert mensajes_wpp[-1] == "¿Querés eliminar la devolución de $50.000 de «Asado» en Galicia? ¿Confirmás?"
+    assert mensajes_wpp[-1] == "¿Borro el reintegro de $50.000 de Asado?"
 
     ok_corr = manejar_corregir("no, eran 40000", usuario, db, "5491112345678")
     assert ok_corr is True
-    assert mensajes_wpp[-1] == "Ese movimiento es una devolución de un gasto. Para cambiarlo, entrá a la web de Argentum."
+    assert mensajes_wpp[-1] == (
+        "Ese movimiento es un reintegro. "
+        "Para cambiarlo, entrá a miargentum.com"
+    )
 
     db.refresh(tx_juan)
     assert tx_juan.monto == Decimal("-50000.00")
@@ -518,7 +521,10 @@ def test_corregir_con_reintegro(db: Session, usuario: Usuario, datos_base, mensa
 
     ok_corr = manejar_corregir("no, fue con mercado pago", usuario, db, "5491112345678")
     assert ok_corr is True
-    assert mensajes_wpp[-1] == "Primero quitá el reintegro para cambiar el medio de pago o la billetera."
+    assert mensajes_wpp[-1] == (
+        "Primero sacá el reintegro en miargentum.com "
+        "y después cambiá la cuenta."
+    )
     db.refresh(tx_super)
     assert tx_super.billetera_id == b_galicia.id
 
@@ -543,7 +549,7 @@ def test_corregir_con_reintegro(db: Session, usuario: Usuario, datos_base, mensa
 
     tx_res, msg_res, ya_c = _confirmar_propuesta_corregir(usuario, db)
     assert tx_res is None
-    assert msg_res == "Primero quitá el reintegro para cambiar el medio de pago o la billetera."
+    assert msg_res == "Primero sacá el reintegro en miargentum.com y después cambiá la cuenta."
     assert ya_c is False
     assert conv_corr_pendiente.accion_ejecutada == "error"
     db.refresh(tx_super)
@@ -584,5 +590,5 @@ def test_sin_espejos(db: Session, usuario: Usuario, datos_base, mensajes_wpp):
 
     ok = manejar_deshacer("borrá eso", usuario, db, "5491112345678")
     assert ok is True
-    assert mensajes_wpp[-1] == "¿Querés eliminar el último movimiento de $5.000 en Kiosco desde Galicia? ¿Confirmás?"
+    assert mensajes_wpp[-1] == "¿Borro $5.000 en Kiosco desde Galicia?"
 

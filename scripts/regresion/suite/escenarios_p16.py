@@ -215,8 +215,8 @@ def p16_caso_1(datos):
             select(Transaccion).where(Transaccion.usuario_id == u.id, Transaccion.movimiento_meta_id.is_not(None)).order_by(Transaccion.fecha_creacion.desc())
         ).scalars().first()
 
-        prop_ok = "¿Confirmás?" in prop and "15.000" in prop and "Fondo de Emergencia" in prop
-        conf_ok = "Listo." in conf and "Aporté $15.000" in conf and "Fondo de Emergencia" in conf
+        prop_ok = "¿Aporto $15.000 a tu meta Fondo de Emergencia desde Galicia?" in prop
+        conf_ok = "Listo, aporté $15.000 a tu meta Fondo de Emergencia." in conf
         monto_sumado = int(meta.monto_actual - m_ini)
         tx_ok = (tx_despues == tx_antes + 1) and (tx_nueva.descripcion == "Aporte a la meta: Fondo de Emergencia") and (tx_nueva.movimiento_meta_id is not None)
         saldo_ok = (b_db.saldo_actual == s_ini - Decimal("15000"))
@@ -247,7 +247,11 @@ def p16_caso_2(datos):
 
         tx_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         prop_pendiente = _buscar_propuesta_confirmable_mas_reciente(u.id, db)
-        es_ambigua = "Encontré más de una meta parecida:" in resp and "Vacaciones Bariloche" in resp and "Vacaciones Brasil" in resp
+        es_ambigua = (
+            "¿A cuál meta?" in resp
+            and "Vacaciones Bariloche" in resp
+            and "Vacaciones Brasil" in resp
+        )
 
         return f"Pregunta ambigua: {es_ambigua} | Txs creadas: {tx_despues - tx_antes} | Sin propuesta pendiente: {prop_pendiente is None}"
     return run_isolated(test)
@@ -269,7 +273,10 @@ def p16_caso_3(datos):
 
         tx_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
         prop_pendiente = _buscar_propuesta_confirmable_mas_reciente(u.id, db)
-        msg_claro = "No encontré ninguna meta con el nombre 'Casa en la playa'" in resp
+        msg_claro = (
+            "No encontré la meta Casa en la playa. Preguntame _mis metas_ para verlas."
+            in resp
+        )
 
         return f"Mensaje claro: {msg_claro} | Txs creadas: {tx_despues - tx_antes} | Sin propuesta pendiente: {prop_pendiente is None}"
     return run_isolated(test)
@@ -308,8 +315,8 @@ def p16_caso_4(datos):
         conf = respuestas[-1][1] if respuestas else ""
 
         db.refresh(m_curso)
-        prop_ok = "¿Confirmás?" in prop and "Curso de Inglés" in prop
-        felicita = "¡Felicitaciones! Completaste tu meta." in conf
+        prop_ok = "¿Aporto" in prop and "Curso de Inglés" in prop
+        felicita = "¡Completaste tu meta!" in conf
         monto_actual_ok = (m_curso.monto_actual == Decimal("13000"))
         completada_ok = (m_curso.estado == "completada")
 
@@ -386,8 +393,11 @@ def p16_caso_6(datos):
         db.refresh(b_db)
         tx_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
 
-        prop_desh_ok = "¿Querés eliminar el aporte" in resp_prop_deshacer and "Fondo de Emergencia" in resp_prop_deshacer
-        conf_desh_ok = "Listo, movimiento eliminado." in resp_conf_deshacer
+        prop_desh_ok = (
+            "¿Borro el aporte" in resp_prop_deshacer
+            and "Fondo de Emergencia" in resp_prop_deshacer
+        )
+        conf_desh_ok = "Listo, lo borré." in resp_conf_deshacer
         meta_revertida = (meta.monto_actual == m_ini)
         tx_borrada = (tx_despues == tx_antes)
         saldo_restaurado = (b_db.saldo_actual == s_ini)

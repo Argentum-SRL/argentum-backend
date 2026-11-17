@@ -681,7 +681,7 @@ def test_textos_whatsapp_decision_8(db_session: Session):
     # 1 movimiento
     m1 = {"billetera": b1, "fecha": fecha_ant, "metodo_pago": MetodoPago.DEBITO}
     txt1 = obtener_aviso_saldo([m1])
-    esperado1 = "Ojo: es anterior a tu saldo de «Banco Nación» (18/10) y no lo modifica."
+    esperado1 = "Ojo: es de antes del 18/10: cuenta en el mes, pero no cambia tu saldo."
     assert txt1 == esperado1
     assert len(txt1) <= 90
 
@@ -692,7 +692,9 @@ def test_textos_whatsapp_decision_8(db_session: Session):
         {"billetera": b1, "fecha": fecha_ant, "metodo_pago": MetodoPago.DEBITO},
     ]
     txt_misma = obtener_aviso_saldo(m_misma)
-    esperado_misma = "Ojo: 3 son anteriores a tu saldo de «Banco Nación» (18/10) y no lo modifican."
+    esperado_misma = (
+        "Ojo: son de antes del 18/10: cuentan en el mes, pero no cambian tu saldo."
+    )
     assert txt_misma == esperado_misma
     assert len(txt_misma) <= 90
 
@@ -703,7 +705,9 @@ def test_textos_whatsapp_decision_8(db_session: Session):
         {"billetera": b2, "fecha": fecha_ant, "metodo_pago": MetodoPago.DEBITO},
     ]
     txt_distintas = obtener_aviso_saldo(m_distintas)
-    esperado_distintas = "Ojo: 3 son anteriores a tu saldo y no lo modifican."
+    esperado_distintas = (
+        "Ojo: son de antes del 18/10: cuentan en el mes, pero no cambian tus saldos."
+    )
     assert txt_distintas == esperado_distintas
     assert len(txt_distintas) <= 90
 
@@ -711,7 +715,7 @@ def test_textos_whatsapp_decision_8(db_session: Session):
     assert len(recortar_nombre_billetera(b_larga.nombre)) == 25
     txt_larga = obtener_aviso_saldo([{"billetera": b_larga, "fecha": fecha_ant, "metodo_pago": MetodoPago.DEBITO}])
     assert len(txt_larga) <= 90
-    assert "…" in txt_larga
+    assert "de antes del 18/10" in txt_larga
 
     # Sin aviso con crédito
     assert obtener_aviso_saldo([{"billetera": b1, "fecha": fecha_ant, "metodo_pago": MetodoPago.CREDITO}]) is None

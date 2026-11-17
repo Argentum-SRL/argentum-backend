@@ -21,9 +21,10 @@ from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 from app.models.transaccion import Transaccion
 from app.models.usuario import Usuario
 from app.routers.whatsapp.db_lookups import PLAZO_EXPIRACION_ESTADO_MINUTOS
-from app.routers.whatsapp.parsers import _formatear_fecha_natural
+from app.core.reglas_texto_wpp import fecha_corta_wpp
 from app.routers.whatsapp.reintegro_wpp import nombre_compra, registrar_reintegro_wpp
 from app.services import que_es_plata_service, whatsapp_service
+from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
 
 
@@ -125,7 +126,7 @@ def manejar_respuesta_numerada(
         elif n == 3:
             try:
                 que_es_plata_service.responder(db, usuario.id, tx.id, "paso_por_mi_cuenta", commit=False)
-                msg = "Listo, queda como plata que solo pasó por tu cuenta: no cuenta como ingreso."
+                msg = "Listo: solo pasó por tu cuenta, no es un ingreso."
                 estado.accion_ejecutada = "respondida"
                 nueva_conv = ConversacionWpp(
                     usuario_id=usuario.id,
@@ -171,7 +172,7 @@ def manejar_respuesta_numerada(
         elif n == 2:
             gastos = que_es_plata_service.gastos_para_vincular(db, usuario.id, tx.moneda, tx.fecha, tx.monto, limite=5)
             if not gastos:
-                msg = "No encontré un gasto para vincularla. Podés hacerlo desde la web de Argentum."
+                msg = "No encontré un gasto para restarlo. Hacelo en miargentum.com"
                 estado.accion_ejecutada = "respondida"
                 nueva_conv = ConversacionWpp(
                     usuario_id=usuario.id,
@@ -194,15 +195,15 @@ def manejar_respuesta_numerada(
             else:
                 lineas = ["¿De qué gasto?"]
                 gasto_ids = []
+                hoy = hoy_argentina()
                 for idx, g in enumerate(gastos, start=1):
                     g_obj = db.get(Transaccion, g["id"])
                     nom = nombre_compra(g_obj) if g_obj else (g.get("descripcion") or "tu gasto")
-                    f_nat = _formatear_fecha_natural(g["fecha"])
-                    f_str = f" ({f_nat})" if f_nat else ""
-                    m_str = formatear_monto(g["monto"], tx.moneda)
-                    lineas.append(f"{idx}) {nom} {m_str}{f_str}")
+                    f_corta = fecha_corta_wpp(g["fecha"], hoy)
+                    f_str = f" · {f_corta}" if f_corta else ""
+                    m_str = formatear_monto(g["monto"], tx.moneda, con_decimales=False)
+                    lineas.append(f"{idx}. {nom} {m_str}{f_str}")
                     gasto_ids.append(str(g["id"]))
-                lineas.append("Respondé con el número.")
                 msg = "\n".join(lineas)
 
                 estado.accion_ejecutada = "respondida"
@@ -243,8 +244,8 @@ def manejar_respuesta_numerada(
             gasto_obj = db.get(Transaccion, gasto_id)
             nom_gasto = nombre_compra(gasto_obj) if gasto_obj else "tu gasto"
             monto_cobro = abs(Decimal(str(tx.monto)))
-            monto_fmt = formatear_monto(monto_cobro, tx.moneda)
-            msg = f"Listo, los {monto_fmt} se restan de «{nom_gasto}»."
+            monto_fmt = formatear_monto(monto_cobro, tx.moneda, con_decimales=False)
+            msg = f"Listo, los {monto_fmt} se restan de {nom_gasto}."
 
             try:
                 que_es_plata_service.responder(db, usuario.id, tx.id, "parte_de_gasto", gasto_id=gasto_id, commit=False)

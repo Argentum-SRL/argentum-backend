@@ -41,7 +41,7 @@ def manejar_pago_resumen(
     if not _es_pedido_pago_resumen(mensaje_texto):
         return False
 
-    msg_pago_resumen = "El pago del resumen de la tarjeta se gestiona desde la web de Argentum. No se puede realizar por WhatsApp."
+    msg_pago_resumen = "El pago del resumen se carga en miargentum.com, no por acá."
     nueva_conv = ConversacionWpp(
         usuario_id=usuario.id,
         wamid=wamid,

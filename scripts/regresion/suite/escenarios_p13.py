@@ -96,21 +96,25 @@ def p13_caso_2(datos):
         db = Session()
         try:
             from app.services.dashboard_service import calcular_balance_ciclo
-            from app.routers.whatsapp.parsers import _fmt
+            from app.utils.formato import formatear_monto
             from app.models.usuario import Moneda
             bal = calcular_balance_ciclo(db, u)
             egr_ars = bal["ars"]["egresos"]
             egr_usd = bal["usd"]["egresos"]
             sin_marcador = "LLM_INVENTADO_999" not in resp
-            patron_inicio = r"^En este ciclo(?:\s*\(\d\d/\d\d\s+al\s+\d\d/\d\d\))?\s+"
+            patron_inicio = r"^Este mes(?:\s*\(desde el \d\d/\d\d\))?\s+"
             if egr_ars == 0 and egr_usd == 0:
-                coincide = bool(re.match(patron_inicio + r"no registraste gastos\.", resp)) and sin_marcador
+                coincide = bool(
+                    re.match(patron_inicio + r"no anotaste gastos\.", resp)
+                ) and sin_marcador
             else:
                 coincide = bool(re.match(patron_inicio + r"gastaste\s+", resp)) and sin_marcador
                 if egr_ars > 0:
-                    coincide = coincide and (_fmt(egr_ars) in resp)
+                    m_ars = formatear_monto(egr_ars, Moneda.ARS, con_decimales=False)
+                    coincide = coincide and (m_ars in resp)
                 if egr_usd > 0:
-                    coincide = coincide and (_fmt(egr_usd, Moneda.USD) in resp)
+                    m_usd = formatear_monto(egr_usd, Moneda.USD, con_decimales=False)
+                    coincide = coincide and (m_usd in resp)
         finally:
             db.close()
         return f"Intent: {intent} | Coincide con balance: {coincide}"
@@ -132,8 +136,8 @@ def p13_caso_3(datos):
         intent = row["intent_detectado"] if row else None
         sin_marcador = "LLM_INVENTADO_999" not in resp
         ok = (
-            (resp.startswith("Esta semana gastaste ") and resp.endswith(" en «pizza»."))
-            or (resp == "Esta semana no encontré gastos que mencionen «pizza».")
+            (resp.startswith("Esta semana gastaste ") and resp.endswith(" en _pizza_."))
+            or (resp == "Esta semana no encontré gastos de _pizza_.")
         ) and sin_marcador
         return f"Intent: {intent} | Filtro por descripcion: {ok}"
     return run_isolated(test)
@@ -153,10 +157,10 @@ def p13_caso_4(datos):
         ).mappings().first()
         intent = row["intent_detectado"] if row else None
         sin_marcador = "LLM_INVENTADO_999" not in resp
-        patron_inicio = r"^El mes pasado(?:\s*\(\d\d/\d\d\s+al\s+\d\d/\d\d\))?\s+"
+        patron_inicio = r"^El mes pasado(?:\s*\(del \d\d/\d\d\s+al\s+\d\d/\d\d\))?\s+"
         ok = (
             (bool(re.match(patron_inicio + r"gastaste\s+", resp)) and resp.endswith(" en Supermercado."))
-            or bool(re.match(patron_inicio + r"no registraste gastos en Supermercado\.", resp))
+            or bool(re.match(patron_inicio + r"no anotaste gastos en Supermercado\.", resp))
         ) and sin_marcador
         return f"Intent: {intent} | Filtro por catalogo: {ok}"
     return run_isolated(test)
@@ -176,7 +180,7 @@ def p13_caso_5(datos):
             {"uid": u.id}
         ).mappings().first()
         intent = row["intent_detectado"] if row else None
-        falla_esperada = "No pude consultar tus gastos en este momento. Probá de nuevo en unos minutos."
+        falla_esperada = "No pude ver tus gastos ahora. Probá de nuevo en unos minutos."
         falla_ok = (resp == falla_esperada) and ("LLM_INVENTADO_999" not in resp)
         return f"Intent: {intent} | Falla manejada: {falla_ok}"
     return run_isolated(test)

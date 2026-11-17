@@ -319,8 +319,8 @@ def test_textos_propuesta_usd_pesos():
         "monto_editado": False,
     }
     assert texto_propuesta_usd_pesos(e1, "Galicia") == (
-        "Voy a anotar US$20 en Hobbies y juegos desde Galicia: son $26.000 (oficial $1.000 + 30%).\n"
-        "¿Confirmás? Si te cobraron otro monto en pesos, decime cuánto."
+        "US$20 en Hobbies y juegos desde Galicia: son $26.000 (oficial $1.000 + 30%).\n"
+        "¿Lo anoto? Si te cobraron otro monto en pesos, decime cuánto."
     )
 
     # con monto 25800.0 y monto_editado True
@@ -334,7 +334,7 @@ def test_textos_propuesta_usd_pesos():
         "monto_editado": True,
     }
     assert texto_propuesta_usd_pesos(e2, "Galicia") == (
-        "Voy a anotar US$20 en Hobbies y juegos desde Galicia: son $25.800.\n¿Confirmás?"
+        "US$20 en Hobbies y juegos desde Galicia: son $25.800.\n¿Lo anoto?"
     )
 
     # con monto None
@@ -348,7 +348,7 @@ def test_textos_propuesta_usd_pesos():
         "monto_editado": False,
     }
     assert texto_propuesta_usd_pesos(e3, "Galicia") == (
-        "Voy a anotar US$20 en Hobbies y juegos desde Galicia.\n¿Cuántos pesos te cobraron?"
+        "US$20 en Hobbies y juegos desde Galicia. ¿Cuántos pesos te cobraron?"
     )
 
     # con fecha = ayer en ISO
@@ -362,8 +362,8 @@ def test_textos_propuesta_usd_pesos():
         "monto_editado": False,
     }
     assert texto_propuesta_usd_pesos(e4, "Galicia") == (
-        "Voy a anotar US$20 en Hobbies y juegos desde Galicia (ayer): son $26.000 (oficial $1.000 + 30%).\n"
-        "¿Confirmás? Si te cobraron otro monto en pesos, decime cuánto."
+        "US$20 en Hobbies y juegos desde Galicia (ayer): son $26.000 (oficial $1.000 + 30%).\n"
+        "¿Lo anoto? Si te cobraron otro monto en pesos, decime cuánto."
     )
 
 
@@ -458,7 +458,7 @@ def test_confirmacion_usd_pesos(db: Session, usuario: Usuario, datos_base):
     assert calcular_saldo_teorico(db, b_galicia.id) == b_galicia.saldo_actual
 
     primera_linea = msg.splitlines()[0]
-    assert primera_linea == "Listo. US$20 ($26.000) en Hobbies y juegos desde Galicia — registrado."
+    assert primera_linea == "Listo, anoté US$20 ($26.000) en Hobbies y juegos desde Galicia."
     assert conv.accion_ejecutada == str(tx.id)
 
     # Con "monto": None → (None, "Decime cuántos pesos te cobraron.", False)
@@ -545,7 +545,7 @@ def test_monto_nuevo_y_edicion(db: Session, usuario: Usuario, datos_base, monkey
     assert ok is True
     assert len(mensajes_enviados) == 1
     assert mensajes_enviados[-1] == (
-        "Voy a anotar US$20 en Hobbies y juegos desde Galicia: son $25.800.\n¿Confirmás?"
+        "US$20 en Hobbies y juegos desde Galicia: son $25.800.\n¿Lo anoto?"
     )
     db.refresh(prop)
     assert prop.entidades["monto"] == 25800.0

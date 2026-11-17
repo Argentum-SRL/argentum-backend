@@ -46,8 +46,8 @@ MENSAJE_CAMBIO_CONTRASENA = (
     "cambiala de inmediato."
 )
 MENSAJE_CAMBIO_CONTRASENA_WPP = (
-    "Tu contraseña de Argentum fue actualizada. Si no fuiste vos, "
-    "cambiala de inmediato desde https://miargentum.com/auth/recuperar-password"
+    "Se cambió la contraseña de tu cuenta de Argentum.\n"
+    "Si no fuiste vos, cambiala ya: https://miargentum.com/auth/recuperar-password"
 )
 TEMPLATE_CAMBIO_CONTRASENA = "alerta_cambio_contrasena"
 TEMPLATE_CAMBIO_CONTRASENA_LANG = "es"

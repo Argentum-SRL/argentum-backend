@@ -36,6 +36,7 @@ from scripts.regresion.suite.comun import (
     ColectorSalidas,
     verificar_antiguedad_grabaciones,
     resolver_datos_base,
+    revisar_reglas_textos_suite,
 )
 from scripts.regresion.suite.controles import (
     obtener_conteos_base,
@@ -51,10 +52,7 @@ from scripts.regresion.suite.catalogo import obtener_catalogo
 
 def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool = False, forzar_grabadas: bool = False, solo_escenario: str | None = None, volcar_salidas: str | None = None):
     comun.reiniciar_metricas_envio()
-    if volcar_salidas:
-        colector = ColectorSalidas(volcar_salidas)
-    else:
-        colector = None
+    colector = ColectorSalidas(volcar_salidas or "")
     comun._colector_salidas = colector
     escenarios_p05._colector_salidas = colector
     _colector_salidas = colector
@@ -230,6 +228,11 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
     if m > 1:
         fallidos += 1
 
+    hallazgos_texto = revisar_reglas_textos_suite(colector.salidas_detalle)
+    n_prob_texto = len(hallazgos_texto)
+    if n_prob_texto > 0:
+        fallidos += n_prob_texto
+
     if verbose:
         print("\n=== RESUMEN DE EJECUCION ===")
         print(f"Total: {total} | Aprobados: {aprobados} | Omitidos: {omitidos} | Fallidos: {fallidos} | Tiempo: {dur_total:.2f}s")
@@ -290,6 +293,9 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             for disc in discrepancias:
                 u_label = _fmt_email(disc["email"])
                 print(f"  - {u_label} ({disc['billetera']}): guardado={disc['guardado']}, calculado={disc['calculado']}, diff={disc['diferencia']}, esperado={disc['esperado_diff']}")
+        print(f"REGLAS DE TEXTO: {n_prob_texto} problemas")
+        for eid_p, txt_p, cods_p in hallazgos_texto:
+            print(f"  - [{eid_p}] {cods_p}: {txt_p!r}")
     else:
         # Modo compacto (menos de 30 líneas en verde)
         print("\n=== RESUMEN DE EJECUCION ===")
@@ -317,6 +323,9 @@ def _ejecutar_suite(verbose: bool = False, ia_real: bool = False, regrabar: bool
             for disc in discrepancias:
                 u_label = _fmt_email(disc["email"])
                 print(f"  - {u_label} ({disc['billetera']}): guardado={disc['guardado']}, calc={disc['calculado']}, diff={disc['diferencia']}")
+        print(f"REGLAS DE TEXTO: {n_prob_texto} problemas")
+        for eid_p, txt_p, cods_p in hallazgos_texto:
+            print(f"  - [{eid_p}] {cods_p}: {txt_p!r}")
 
     return total, aprobados, omitidos, fallidos, detalles_fallidos
 

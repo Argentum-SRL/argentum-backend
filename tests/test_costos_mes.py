@@ -475,8 +475,11 @@ def test_bot_texto_tope_mes_etapa_ia(db_session: Session, mock_mails, monkeypatc
 
         procesar_llamada_ia_y_normalizacion(ctx)
 
+    esp_mes = (
+        "Este mes ya no puedo responder por acá. Cargá tus movimientos en miargentum.com"
+    )
     assert mock_enviar.call_count == 1
-    assert mock_enviar.call_args[0][1] == TEXTO_MES_SIN_IA
+    assert mock_enviar.call_args[0][1] == esp_mes
     mock_ai.assert_not_called()
     mock_transcribir.assert_not_called()
     assert ctx.terminado is True
@@ -484,7 +487,7 @@ def test_bot_texto_tope_mes_etapa_ia(db_session: Session, mock_mails, monkeypatc
     conv = db_session.scalar(select(ConversacionWpp).where(ConversacionWpp.wamid == wamid))
     assert conv is not None
     assert conv.intent_detectado == "tope_superado"
-    assert conv.mensaje_bot == TEXTO_MES_SIN_IA
+    assert conv.mensaje_bot == esp_mes
 
 
 def test_bot_audio_tope_mes_etapa_entrada(db_session: Session, mock_mails, monkeypatch):
@@ -521,8 +524,11 @@ def test_bot_audio_tope_mes_etapa_entrada(db_session: Session, mock_mails, monke
 
         procesar_entrada_medios_y_texto(ctx)
 
+    esp_mes = (
+        "Este mes ya no puedo responder por acá. Cargá tus movimientos en miargentum.com"
+    )
     assert mock_enviar.call_count == 1
-    assert mock_enviar.call_args[0][1] == TEXTO_MES_SIN_IA
+    assert mock_enviar.call_args[0][1] == esp_mes
     mock_ai.assert_not_called()
     mock_transcribir.assert_not_called()
     assert ctx.terminado is True
