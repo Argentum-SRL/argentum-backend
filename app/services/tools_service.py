@@ -402,74 +402,99 @@ def calcular_plan_cuotas(
     )
 
 
-def calcular_conveniencia_cuotas(req: InstallmentConvenienceRequest) -> dict:
+def calcular_conveniencia_cuotas(
+    req: InstallmentConvenienceRequest,
+    db: Session | None = None,
+) -> dict:
     """
-    Calcula si conviene pagar en cuotas o de contado bajo la inflación provista.
+    Calcula si conviene pagar en cuotas o de contado bajo la inflación esperada o provista.
     """
-    tasa = req.inflacion_mensual / 100  # Convertir a decimal
-    
-    if req.tiene_interes and req.tna is not None:
-        precio_base = Decimal(str(req.precio_contado))
-        tna_param = Decimal(str(req.tna))
-        i = float(tna_a_mensual(tna_param))
-        if i == 0:
-            monto_cuota = float(precio_base) / req.cantidad_cuotas
-        else:
-            monto_cuota = float(precio_base) * (i * (1 + i) ** req.cantidad_cuotas) / ((1 + i) ** req.cantidad_cuotas - 1)
-    else:
-        precio_base = Decimal(str(req.precio_total_cuotas))
-        tna_param = None
-        monto_cuota = float(precio_base) / req.cantidad_cuotas
-
-    plan = calcular_plan_cuotas(
-        precio=precio_base,
-        cantidad=req.cantidad_cuotas,
-        tna=tna_param,
-        inflacion_mensual=[Decimal(str(req.inflacion_mensual))] * req.cantidad_cuotas if req.inflacion_mensual is not None else None,
+    from app.services.conveniencia_service import (
+        comparar_cuotas_contado,
+        textos_conveniencia,
     )
-    precio_total_cuotas = float(plan.total)
-    interes_total = float(plan.interes)
+    from app.services.inflacion_esperada_service import inflacion_esperada
 
-    detalle_cuotas = []
-    costo_real_total = 0.0
-    
-    for n in range(1, req.cantidad_cuotas + 1):
-        valor_presente = monto_cuota / ((1 + tasa) ** n)
-        costo_real_total += valor_presente
-        detalle_cuotas.append({
-            "mes": n,
-            "cuota_nominal": round(monto_cuota, 2),
-            "cuota_valor_presente": round(valor_presente, 2)
-        })
-    
-    diferencia = req.precio_contado - costo_real_total
-    porcentaje_diferencia = (abs(diferencia) / req.precio_contado) * 100
-    
-    UMBRAL_INDIFERENCIA = 1.0  # Si la diferencia es menor al 1%, es indiferente
-    
-    if porcentaje_diferencia < UMBRAL_INDIFERENCIA:
-        resultado = "indiferente"
-    elif diferencia > 0:
-        resultado = "conviene_cuotas"  # El costo real en cuotas es menor al contado
+    cant = req.cantidad_cuotas
+    contado_dec = Decimal(str(req.precio_contado))
+    interes_total: float | None = None
+
+    if req.valor_cuota is not None:
+        valor_cuota_dec = Decimal(str(req.valor_cuota))
+        if req.tiene_interes and req.tna is not None:
+            plan_tna = calcular_plan_cuotas(
+                precio=contado_dec,
+                cantidad=cant,
+                tna=Decimal(str(req.tna)),
+            )
+            interes_total = float(plan_tna.interes)
+    elif req.sin_interes:
+        base_sin_int = (
+            Decimal(str(req.precio_total_cuotas))
+            if req.precio_total_cuotas is not None
+            else contado_dec
+        )
+        valor_cuota_dec = (base_sin_int / Decimal(cant)).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+    elif req.tiene_interes and req.tna is not None:
+        plan = calcular_plan_cuotas(
+            precio=contado_dec,
+            cantidad=cant,
+            tna=Decimal(str(req.tna)),
+        )
+        valor_cuota_dec = plan.monto_cuota
+        interes_total = float(plan.interes)
     else:
-        resultado = "conviene_contado"  # El costo real en cuotas es mayor al contado
+        valor_cuota_dec = Decimal(str(req.precio_total_cuotas)) / Decimal(cant)
 
-    ahorro_real_final = round(abs(diferencia), 2)
-    porcentaje_ahorro_final = round(porcentaje_diferencia, 2)
+    if req.inflacion_mensual is not None:
+        inflacion_lista = [Decimal(str(req.inflacion_mensual))]
+        fuente_inflacion = "la inflación que pusiste"
+    else:
+        inf_esp = inflacion_esperada(db, hoy_argentina(), cant) if db else None
+        if inf_esp is None or not inf_esp.tasas:
+            raise ValueError("No hay datos de inflación disponibles.")
+        inflacion_lista = list(inf_esp.tasas)
+        fuente_inflacion = inf_esp.fuente_texto
+
+    comp = comparar_cuotas_contado(
+        precio_contado=contado_dec,
+        cantidad=cant,
+        valor_cuota=valor_cuota_dec,
+        inflacion_mensual=inflacion_lista,
+    )
+
+    resultado = comp["resultado"]
+    precio_total_cuotas = float(comp["total"])
+    costo_real_total = float(comp["vp"])
+    monto_cuota = float(valor_cuota_dec.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    ahorro_real_final = round(abs(float(comp["diferencia_real"])), 2)
+    porcentaje_ahorro_final = round(
+        (abs(float(comp["diferencia_real"])) / req.precio_contado) * 100, 2
+    )
 
     # Costo de oportunidad / Flujo de caja invertido en billetera remunerada
     remanente_vpn = None
     saldo_final_inversion = None
     if req.tna_billetera_inversion is not None and req.tna_billetera_inversion > 0:
-        r_b = float(tna_a_mensual(req.tna_billetera_inversion))  # tasa mensual de rendimiento
-        s_k = float(req.precio_contado)  # Saldo inicial S_0
-        for _ in range(req.cantidad_cuotas):
-            s_k = s_k * (1 + r_b) - monto_cuota
+        r_b = float(tna_a_mensual(req.tna_billetera_inversion))
+        s_k = float(req.precio_contado)
+        cuota_inv = float(valor_cuota_dec)
+        for _ in range(cant):
+            s_k = s_k * (1 + r_b) - cuota_inv
         saldo_final_inversion = round(s_k, 2)
-        # Remanente descontado a valor presente por la inflación mensual estimada
-        remanente_vpn = round(s_k / ((1 + tasa) ** req.cantidad_cuotas), 2)
+        factor_inv = 1.0
+        for k in range(1, cant + 1):
+            inf_k = (
+                inflacion_lista[k - 1]
+                if k - 1 < len(inflacion_lista)
+                else inflacion_lista[-1]
+            )
+            factor_inv *= 1.0 + float(inf_k) / 100.0
+        remanente_vpn = round(s_k / factor_inv, 2)
         diferencia_pct = round((abs(remanente_vpn) / req.precio_contado) * 100, 2)
-        if diferencia_pct < UMBRAL_INDIFERENCIA:
+        if diferencia_pct < 1.0:
             resultado = "indiferente"
         elif saldo_final_inversion > 0:
             resultado = "conviene_cuotas"
@@ -478,6 +503,17 @@ def calcular_conveniencia_cuotas(req: InstallmentConvenienceRequest) -> dict:
         ahorro_real_final = round(abs(remanente_vpn), 2)
         porcentaje_ahorro_final = diferencia_pct
 
+    txts = textos_conveniencia(
+        resultado=resultado,
+        cantidad=cant,
+        valor_cuota=valor_cuota_dec.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        total=comp["total"],
+        extra=comp["extra"],
+        extra_pct=comp["extra_pct"],
+        vp=comp["vp"],
+        fuente_texto=fuente_inflacion,
+    )
+
     return {
         "resultado": resultado,
         "precio_contado": round(req.precio_contado, 2),
@@ -485,17 +521,27 @@ def calcular_conveniencia_cuotas(req: InstallmentConvenienceRequest) -> dict:
         "costo_real_cuotas": round(costo_real_total, 2),
         "ahorro_real": ahorro_real_final,
         "porcentaje_ahorro": porcentaje_ahorro_final,
-        "monto_cuota": round(monto_cuota, 2),
-        "cantidad_cuotas": req.cantidad_cuotas,
-        "inflacion_mensual_usada": req.inflacion_mensual,
-        "detalle_por_mes": detalle_cuotas,
+        "monto_cuota": monto_cuota,
+        "valor_cuota": monto_cuota,
+        "cantidad_cuotas": cant,
+        "inflacion_mensual_usada": round(float(inflacion_lista[0]), 4),
+        "inflaciones_usadas": [round(float(x), 4) for x in inflacion_lista],
+        "fuente_inflacion": fuente_inflacion,
+        "extra": float(comp["extra"]),
+        "extra_pct": comp["extra_pct"],
+        "titulo": txts["titulo"],
+        "linea_2": txts["linea_2"],
+        "linea_3": txts["linea_3"],
+        "detalle_por_mes": comp["detalle_por_mes"],
         "tiene_interes": req.tiene_interes,
         "tna_usada": req.tna if req.tiene_interes else None,
-        "interes_total": round(interes_total, 2) if req.tiene_interes else None,
-        "precio_total_cuotas_con_interes": round(precio_total_cuotas, 2) if req.tiene_interes else None,
+        "interes_total": round(interes_total, 2) if interes_total is not None else None,
+        "precio_total_cuotas_con_interes": (
+            round(precio_total_cuotas, 2) if req.tiene_interes else None
+        ),
         "tna_billetera_inversion_usada": req.tna_billetera_inversion,
         "saldo_final_inversion": saldo_final_inversion,
-        "remanente_vpn": remanente_vpn
+        "remanente_vpn": remanente_vpn,
     }
 
 

@@ -32,11 +32,14 @@ class GrupoCuotasResumen(BaseModel):
     subcategoria_id: UUID | None = None
     suscripcion_id: UUID | None = None
     reintegro: ReintegroRead | None = None
+    precio_contado: DecimalJSON | None = None
+    detalle_precio_contado: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 class GrupoCuotasUpdate(BaseModel):
     monto_total_nuevo: DecimalJSON | None = Field(default=None, gt=0, max_digits=15, decimal_places=2)
+    precio_contado: DecimalJSON | None = Field(default=None, gt=0, max_digits=14, decimal_places=2)
     descripcion: str | None = Field(default=None, max_length=300)
     categoria_id: UUID | None = None
     subcategoria_id: UUID | None = None

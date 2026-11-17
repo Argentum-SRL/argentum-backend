@@ -27,6 +27,10 @@ from app.routers.whatsapp.handlers_deshacer import (
     manejar_corregir,
     manejar_deshacer,
 )
+from app.routers.whatsapp.handlers_conveniencia import (
+    manejar_consulta_conveniencia,
+    manejar_respuesta_pendiente_conveniencia,
+)
 from app.routers.whatsapp.handlers_permitirse import (
     manejar_consulta_permitirse,
     manejar_respuesta_pendiente_permitirse,
@@ -80,6 +84,11 @@ def procesar_estados_y_handlers_deterministicos(ctx: ContextoMensaje) -> None:
 
     # 0.5 Respuesta a pregunta pendiente de '¿Me lo puedo permitir?' (bloque T1)
     if manejar_respuesta_pendiente_permitirse(ctx):
+        ctx.terminado = True
+        return
+
+    # 0.55 Respuesta a pregunta pendiente de 'Cuotas vs contado' (bloque T2)
+    if manejar_respuesta_pendiente_conveniencia(ctx):
         ctx.terminado = True
         return
 
@@ -269,6 +278,11 @@ def procesar_estados_y_handlers_deterministicos(ctx: ContextoMensaje) -> None:
     if manejar_numero_aislado(
         mensaje_texto, usuario, db, from_number, wamid=wamid, conv_activa=conv_activa, estado_previo=estado_previo
     ):
+        ctx.terminado = True
+        return
+
+    # 7.35 Detección determinística de 'Cuotas vs contado' (bloque T2, antes de permitirse)
+    if manejar_consulta_conveniencia(ctx):
         ctx.terminado = True
         return
 

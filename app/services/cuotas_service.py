@@ -12,12 +12,43 @@ from app.services.saldo_billetera_service import aplicar_impacto_saldo
 from app.services.textos_avisos_web import texto_billetera_sin_saldo
 from app.utils.cuotas import monto_efectivo_cuota
 from app.utils.fecha import hoy_argentina
+from app.utils.formato import formatear_monto
 from app.core.constants import IVA_INTERESES
 
 logger = logging.getLogger(__name__)
 
 
 from app.utils.tasas import tna_a_mensual
+
+
+def texto_detalle_precio_contado(
+    total_financiado: Decimal | float | int,
+    precio_contado: Decimal | float | int | None,
+    moneda: object = "ARS",
+) -> str | None:
+    """
+    Arma la línea de comparación contra el precio de contado en el detalle de cuotas (D-T2.5).
+    """
+    if precio_contado is None:
+        return None
+    contado_d = Decimal(str(precio_contado))
+    if contado_d <= Decimal("0"):
+        return None
+    total_d = Decimal(str(total_financiado))
+    extra = (total_d - contado_d).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    if extra > Decimal("0"):
+        pct = int(
+            ((extra / contado_d) * Decimal("100")).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        )
+        extra_fmt = formatear_monto(extra, moneda)
+        return f"Pagás {extra_fmt} más que de contado ({pct}%)."
+    if extra == Decimal("0"):
+        return "Pagás lo mismo que de contado."
+    menos_fmt = formatear_monto(-extra, moneda)
+    return f"Pagás {menos_fmt} menos que de contado."
 
 
 def calcular_tasas_cuotas(tasa_tna: Decimal | float | None) -> dict[str, Decimal] | None:
@@ -661,6 +692,9 @@ def actualizar_grupo(
             if not c.pagada and c.transaccion:
                 c.transaccion.categoria_id = data.categoria_id
                 c.transaccion.subcategoria_id = data.subcategoria_id
+
+    if "precio_contado" in data.model_fields_set:
+        grupo.precio_contado = data.precio_contado
 
     if data.monto_total_nuevo is not None:
         pagadas = [c for c in grupo.cuotas if c.pagada]

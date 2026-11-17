@@ -48,6 +48,7 @@ class GrupoCuotas(Base):
     tiene_interes: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     tasa_interes: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
     total_financiado: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    precio_contado: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     moneda: Mapped[Moneda] = mapped_column(SAEnum(Moneda, values_callable=lambda obj: [e.value for e in obj], name="moneda_enum"), nullable=False)
     estado: Mapped[EstadoGrupoCuotas] = mapped_column(
         SAEnum(EstadoGrupoCuotas, values_callable=lambda obj: [e.value for e in obj], name="estado_grupo_cuotas_enum"),

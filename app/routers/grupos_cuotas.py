@@ -16,7 +16,10 @@ from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificac
 from app.models.billetera import Billetera
 from app.schemas.grupos_cuotas import GrupoCuotasResumen, GrupoCuotasUpdate, PlanCuotas, SimularCuotasResponse
 from app.services.transaccion_service import _hoy_argentina
-from app.services.cuotas_service import calcular_tasas_cuotas
+from app.services.cuotas_service import (
+    calcular_tasas_cuotas,
+    texto_detalle_precio_contado,
+)
 from app.services import idempotencia_service
 from app.utils.cuotas import monto_efectivo_cuota, calcular_plan_cuotas
 from app.utils.tasas import tna_a_mensual
@@ -128,6 +131,12 @@ def mapear_grupo_resumen(db: Session, grupo: GrupoCuotas) -> dict:
         "subcategoria_id": subcategoria_id,
         "suscripcion_id": suscripcion_id,
         "reintegro": grupo.transaccion_padre.reintegro if grupo.transaccion_padre else None,
+        "precio_contado": grupo.precio_contado,
+        "detalle_precio_contado": texto_detalle_precio_contado(
+            grupo.total_financiado,
+            grupo.precio_contado,
+            grupo.moneda,
+        ),
     }
 
 @router.get("", response_model=list[GrupoCuotasResumen])

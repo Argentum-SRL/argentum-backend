@@ -24,6 +24,13 @@ class InfoCuotas(BaseModel):
     tiene_interes: bool = False
     tasa_interes: DecimalJSON | None = Field(default=None, ge=0, le=3000, description="Tasa nominal anual (TNA) %")
     monto_total: DecimalJSON = Field(gt=0, max_digits=15, decimal_places=2, description="Monto base total")
+    precio_contado: DecimalJSON | None = Field(
+        default=None,
+        gt=0,
+        max_digits=14,
+        decimal_places=2,
+        description="Precio de contado opcional",
+    )
     proximo_resumen: bool = False
 
     @model_validator(mode="after")

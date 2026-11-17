@@ -12,8 +12,10 @@ MAX_MONTO = MAX_MONTO_FLOAT
 class InstallmentConvenienceRequest(BaseModel):
     precio_contado: float
     precio_total_cuotas: float | None = None
+    valor_cuota: float | None = None
+    sin_interes: bool = False
     cantidad_cuotas: int
-    inflacion_mensual: float
+    inflacion_mensual: float | None = None
     tiene_interes: bool = False
     tna: float | None = None
     tna_billetera_inversion: float | None = None
@@ -37,6 +39,16 @@ class InstallmentConvenienceRequest(BaseModel):
                 raise ValueError('El precio en cuotas excede el límite permitido')
         return v
 
+    @field_validator('valor_cuota')
+    @classmethod
+    def valor_cuota_positivo(cls, v):
+        if v is not None:
+            if v <= 0:
+                raise ValueError('Ingresá un valor de cuota mayor a 0.')
+            if v > MAX_MONTO:
+                raise ValueError('El valor de cada cuota es muy alto.')
+        return v
+
     @field_validator('cantidad_cuotas')
     @classmethod
     def cuotas_validas(cls, v):
@@ -47,7 +59,7 @@ class InstallmentConvenienceRequest(BaseModel):
     @field_validator('inflacion_mensual')
     @classmethod
     def inflacion_valida(cls, v):
-        if v < 0 or v > 100:
+        if v is not None and (v < 0 or v > 100):
             raise ValueError('La inflación mensual estimada debe estar entre 0% y 100%')
         return v
 
@@ -67,12 +79,18 @@ class InstallmentConvenienceRequest(BaseModel):
 
     @model_validator(mode='after')
     def validar_interes_y_total(self) -> InstallmentConvenienceRequest:
+        if self.valor_cuota is not None or self.sin_interes:
+            return self
         if not self.tiene_interes:
             if self.precio_total_cuotas is None:
-                raise ValueError('Debe ingresar el precio total en cuotas si no tiene interés')
+                raise ValueError(
+                    'Debe ingresar el precio total en cuotas si no tiene interés'
+                )
         else:
             if self.tna is None:
-                raise ValueError('Debe ingresar la TNA si las cuotas tienen interés')
+                raise ValueError(
+                    'Debe ingresar la TNA si las cuotas tienen interés'
+                )
         return self
 
 
@@ -100,6 +118,14 @@ class InstallmentConvenienceResponseData(BaseModel):
     tna_billetera_inversion_usada: float | None = None
     saldo_final_inversion: float | None = None
     remanente_vpn: float | None = None
+    valor_cuota: float | None = None
+    extra: float | None = None
+    extra_pct: int | None = None
+    fuente_inflacion: str | None = None
+    inflaciones_usadas: list[float] | None = None
+    titulo: str | None = None
+    linea_2: str | None = None
+    linea_3: str | None = None
 
 
 class IPCData(BaseModel):

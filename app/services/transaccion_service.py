@@ -373,6 +373,7 @@ def crear_transaccion(
             tiene_interes=data.info_cuotas.tiene_interes,
             tasa_interes=data.info_cuotas.tasa_interes,
             total_financiado=total_financiado,
+            precio_contado=data.info_cuotas.precio_contado,
             moneda=data.moneda,
             primer_vencimiento=primer_vencimiento
         )

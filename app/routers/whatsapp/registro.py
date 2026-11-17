@@ -51,6 +51,7 @@ from app.routers.whatsapp.detectors import (
     _es_senial_gasto_suelto,
 )
 from app.core.reglas_texto_wpp import fecha_corta_wpp, nombre_tarjeta_wpp
+from app.routers.whatsapp.montos_palabras import buscar_monto
 from app.routers.whatsapp.parsers import (
     _nombre_corto_categoria,
     _parsear_monto_argentino,
@@ -82,6 +83,37 @@ from app.services.transaccion_service import (
 from app.utils.formato import formatear_monto
 from app.utils.texto import normalizar_texto
 
+
+
+def _extraer_precio_contado(texto: str | None) -> Decimal | None:
+    """
+    Lee el precio de contado opcional desde el mensaje ('de contado N',
+    'contado N' o 'N de contado') usando montos_palabras.buscar_monto.
+    """
+    if not texto:
+        return None
+    norm = normalizar_texto(texto)
+    m_desp = re.search(r"\b(?:de\s+)?contado\s+(.+)$", norm)
+    if m_desp:
+        cola = re.sub(r"^(?:es|sale|salia|era|a)\s+", "", m_desp.group(1).strip())
+        if cola and not re.match(r"^(?:en|o|y|con)\b", cola):
+            monto, sobrante = buscar_monto(cola)
+            if monto is not None and monto > 0:
+                if not sobrante or cola.find(sobrante) > 0:
+                    return Decimal(str(monto))
+    m_antes = re.search(r"(.+?)\s+de\s+contado\b", norm)
+    if m_antes:
+        pre = re.split(r"[,;.]", m_antes.group(1))[-1].strip()
+        pre = re.sub(
+            r"^.*?\bcuotas?\b(?:\s+de\s+\S+(?:\s+mil|\s+lucas?|\s+k)?)?",
+            "",
+            pre,
+        ).strip()
+        if pre:
+            monto, _ = buscar_monto(pre)
+            if monto is not None and monto > 0:
+                return Decimal(str(monto))
+    return None
 
 
 def _registrar_item_batch(
@@ -153,6 +185,7 @@ def _registrar_item_batch(
                 tiene_interes=False,
                 tasa_interes=None,
                 monto_total=monto_total,
+                precio_contado=_extraer_precio_contado(mensaje_original),
                 proximo_resumen=False,
             ),
         )
@@ -573,6 +606,10 @@ def _confirmar_propuesta_transaccion(
             tipo="egreso",
         )
 
+        msg_contado = conv_previa.mensaje_usuario if conv_previa else None
+        precio_contado_prop = (
+            entidades.get("precio_contado") or _extraer_precio_contado(msg_contado)
+        )
         data_tx = TransaccionCreate(
             tipo=TipoTransaccion.EGRESO,
             monto=monto_total,
@@ -592,6 +629,7 @@ def _confirmar_propuesta_transaccion(
                 tiene_interes=False,
                 tasa_interes=None,
                 monto_total=monto_total,
+                precio_contado=precio_contado_prop,
                 proximo_resumen=False,
             ),
         )
@@ -1003,6 +1041,7 @@ def _registrar_movimiento_directo(
     entidades: dict,
     db: Session,
     registrar_adicionales: bool = True,
+    mensaje_original: str | None = None,
 ) -> tuple[Transaccion | None, str]:
     """Registra directamente un movimiento confirmado como nuevo o lote (Tareas 3.3 y 4.1)."""
     monto = entidades.get("monto")
@@ -1034,6 +1073,10 @@ def _registrar_movimiento_directo(
             tipo="egreso",
         )
 
+        msg_contado = mensaje_original
+        precio_contado_dir = (
+            entidades.get("precio_contado") or _extraer_precio_contado(msg_contado)
+        )
         data_tx = TransaccionCreate(
             tipo=TipoTransaccion.EGRESO,
             monto=monto_total,
@@ -1053,6 +1096,7 @@ def _registrar_movimiento_directo(
                 tiene_interes=False,
                 tasa_interes=None,
                 monto_total=monto_total,
+                precio_contado=precio_contado_dir,
                 proximo_resumen=False,
             ),
         )

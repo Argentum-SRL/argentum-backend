@@ -52,7 +52,7 @@ def calculate_convenience_endpoint(
     """
     Calcula si conviene pagar en cuotas o de contado bajo la inflación provista.
     """
-    result = tools_service.calcular_conveniencia_cuotas(body)
+    result = tools_service.calcular_conveniencia_cuotas(body, db=db)
     registrar_evento(db, current_user.id, "calculadora_cuotas")
     return {
         "success": True,
