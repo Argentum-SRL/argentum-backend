@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import calendar
 from typing import Optional, List
-from sqlalchemy import select, func, or_, desc, and_
+from sqlalchemy import select, func, or_, desc, and_, delete as sa_delete
 from sqlalchemy.orm import Session, joinedload, selectinload
 from fastapi import HTTPException
 
@@ -15,11 +15,19 @@ from app.models.periodo_presupuesto import PeriodoPresupuesto
 from app.models.transaccion import Transaccion, TipoTransaccion, EstadoVerificacionTransaccion
 from app.models.categoria import Categoria, TipoCategoria
 from app.models.subcategoria import Subcategoria
-from app.models.notificacion import TipoNotificacion, NivelNotificacion
+from app.models.notificacion import Notificacion, TipoNotificacion, NivelNotificacion
 from app.models.usuario import Usuario, Moneda
 from app.schemas.presupuesto import PresupuestoCreate, PresupuestoUpdate
 from app.core.politica_notificaciones import puede_salir_por_whatsapp
 from app.services.definiciones_service import condicion_gasto
+from app.services.notificacion_service import crear_notificacion, obtener_configuracion
+from app.services.presupuesto_alertas import (
+    alertas_por_defecto,
+    extraer_umbrales_avisados,
+    grupo_alerta,
+    umbral_a_avisar,
+    validar_alertas,
+)
 from app.services.textos_avisos_web import (
     texto_presupuesto_limite,
     texto_presupuesto_superado,
@@ -496,6 +504,15 @@ def obtener_presupuestos(db: Session, usuario_id: UUID, estado: Optional[str] = 
 
     return presupuestos
 
+def alertas_por_defecto_usuario(db: Session, usuario_id: UUID) -> list[int]:
+    """Devuelve los porcentajes iniciales de aviso según el perfil del usuario."""
+    config = obtener_configuracion(db, usuario_id)
+    return alertas_por_defecto(
+        config.presupuesto_umbral_1,
+        config.presupuesto_umbral_1_activo,
+    )
+
+
 def crear_presupuesto(db: Session, usuario_id: UUID, data: PresupuestoCreate) -> Presupuesto:
     if data.monto <= 0:
         raise HTTPException(
@@ -504,6 +521,15 @@ def crear_presupuesto(db: Session, usuario_id: UUID, data: PresupuestoCreate) ->
         )
 
     _validar_categorias_presupuesto(db, data.categorias, usuario_id)
+
+    if data.alertas_porcentajes is not None:
+        alertas = validar_alertas(data.alertas_porcentajes)
+    else:
+        config = obtener_configuracion(db, usuario_id, commit=False)
+        alertas = alertas_por_defecto(
+            config.presupuesto_umbral_1,
+            config.presupuesto_umbral_1_activo,
+        )
 
     nombre_limpio = data.nombre.strip()
     nombre_existente = db.execute(
@@ -540,7 +566,8 @@ def crear_presupuesto(db: Session, usuario_id: UUID, data: PresupuestoCreate) ->
         moneda=moneda_enum,
         periodo=periodo_enum,
         renovacion=renovacion_enum,
-        estado=EstadoPresupuesto.ACTIVO
+        estado=EstadoPresupuesto.ACTIVO,
+        alertas_porcentajes=alertas,
     )
     db.add(nuevo_presupuesto)
     db.flush()
@@ -602,6 +629,10 @@ def obtener_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto:
     return presupuesto
 
 def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: PresupuestoUpdate) -> Presupuesto:
+    alertas_nuevas = None
+    if data.alertas_porcentajes is not None:
+        alertas_nuevas = validar_alertas(data.alertas_porcentajes)
+
     presupuesto = obtener_presupuesto(db, usuario_id, id)
     
     if data.nombre is not None:
@@ -630,6 +661,8 @@ def actualizar_presupuesto(db: Session, usuario_id: UUID, id: UUID, data: Presup
             presupuesto.renovacion = RenovacionPresupuesto(data.renovacion)
         except ValueError:
             raise HTTPException(status_code=400, detail="Elegí cómo se renueva.")
+    if alertas_nuevas is not None:
+        presupuesto.alertas_porcentajes = alertas_nuevas
         
     periodo_cambio = False
     if data.periodo is not None and data.periodo != (presupuesto.periodo.value if hasattr(presupuesto.periodo, "value") else str(presupuesto.periodo)):
@@ -713,47 +746,43 @@ def reanudar_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> Presupuesto
     db.commit()
     return obtener_presupuesto(db, usuario_id, id)
 
-def eliminar_presupuesto(db: Session, usuario_id: UUID, id: UUID) -> None:
-    presupuesto = obtener_presupuesto(db, usuario_id, id)
-    presupuesto.estado = EstadoPresupuesto.FINALIZADO
-    presupuesto.eliminado_en = datetime.now(timezone.utc)
-    db.commit()
-
-
-def restaurar_presupuesto(db: Session, usuario_id: UUID, id: UUID, estado: str) -> Presupuesto:
-    """
-    Restaura un presupuesto eliminado hace menos de 90 días devolviéndolo al estado pedido.
-    """
-    query = (
-        select(Presupuesto)
-        .options(
-            joinedload(Presupuesto.usuario),
-            selectinload(Presupuesto.categorias).joinedload(PresupuestoCategoria.categoria),
-            selectinload(Presupuesto.categorias).joinedload(PresupuestoCategoria.subcategoria),
-            selectinload(Presupuesto.periodos)
+def eliminar_presupuesto(
+    db: Session,
+    usuario_id: UUID,
+    id: UUID,
+    commit: bool = True,
+) -> None:
+    """Elimina definitivamente un presupuesto con sus períodos y categorías."""
+    existe = db.execute(
+        select(Presupuesto.id).where(
+            Presupuesto.id == id,
+            Presupuesto.usuario_id == usuario_id,
+            Presupuesto.eliminado_en.is_(None),
         )
-        .where(Presupuesto.id == id, Presupuesto.usuario_id == usuario_id)
+    ).scalar_one_or_none()
+    if not existe:
+        raise HTTPException(
+            status_code=404,
+            detail="No se encontró ese presupuesto.",
+        )
+
+    db.execute(
+        sa_delete(PeriodoPresupuesto).where(
+            PeriodoPresupuesto.presupuesto_id == id
+        )
     )
-    presupuesto = db.execute(query).scalar_one_or_none()
-    if not presupuesto:
-        raise HTTPException(status_code=404, detail="No se encontró ese presupuesto.")
-
-    if presupuesto.eliminado_en is None:
-        raise HTTPException(status_code=400, detail="Este presupuesto no está eliminado.")
-
-    ahora = datetime.now(timezone.utc)
-    limite = ahora - timedelta(days=90)
-    eliminado_en = presupuesto.eliminado_en
-    if eliminado_en.tzinfo is None:
-        eliminado_en = eliminado_en.replace(tzinfo=timezone.utc)
-
-    if eliminado_en < limite:
-        raise HTTPException(status_code=404, detail="No se encontró ese presupuesto.")
-
-    presupuesto.estado = EstadoPresupuesto(estado)
-    presupuesto.eliminado_en = None
-    db.commit()
-    return obtener_presupuesto(db, usuario_id, id)
+    db.execute(
+        sa_delete(PresupuestoCategoria).where(
+            PresupuestoCategoria.presupuesto_id == id
+        )
+    )
+    db.execute(
+        sa_delete(Presupuesto).where(Presupuesto.id == id)
+    )
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
 
 def purgar_presupuestos_eliminados(db: Session) -> int:
@@ -897,18 +926,25 @@ def verificar_alertas_presupuesto(
     usado_dec = Decimal(str(usado))
     porcentaje = (usado_dec / limite) * Decimal("100")
 
-    from app.services.notificacion_service import obtener_configuracion, crear_notificacion
-    config = obtener_configuracion(db, presupuesto.usuario_id, commit=commit)
+    umbrales = sorted(presupuesto.alertas_porcentajes or [80, 100])
+    prefijo = f"presupuestos/{presupuesto.id}/{periodo.id}/"
+    grupos_existentes = db.execute(
+        select(Notificacion.grupo_agrupacion).where(
+            Notificacion.usuario_id == presupuesto.usuario_id,
+            Notificacion.grupo_agrupacion.startswith(prefijo),
+        )
+    ).scalars().all()
+    ya_avisados = extraer_umbrales_avisados(grupos_existentes, prefijo, umbrales)
+    umbral = umbral_a_avisar(porcentaje, umbrales, ya_avisados)
+    if umbral is None:
+        return
 
-    tipo = None
-    nivel = None
-    canal_web = True
-    canal_whatsapp = False
+    config = obtener_configuracion(db, presupuesto.usuario_id, commit=commit)
     nombre = presupuesto.nombre
     gastado_fmt = formatear_monto(usado_dec, presupuesto.moneda)
     limite_fmt = formatear_monto(limite, presupuesto.moneda)
 
-    if porcentaje >= Decimal("100"):
+    if umbral == 100:
         tipo = TipoNotificacion.PRESUPUESTO_AGOTADO
         nivel = NivelNotificacion.FINANCIERA_IMPORTANTE
         canal_web = config.presupuesto_umbral_2_web
@@ -921,7 +957,7 @@ def verificar_alertas_presupuesto(
             "gastado_fmt": gastado_fmt,
             "limite_fmt": limite_fmt,
         }
-    elif config.presupuesto_umbral_1_activo and porcentaje >= Decimal(str(config.presupuesto_umbral_1)):
+    else:
         tipo = TipoNotificacion.PRESUPUESTO_LIMITE
         nivel = NivelNotificacion.FINANCIERA_INFORMATIVA
         canal_web = config.presupuesto_umbral_1_web
@@ -934,8 +970,6 @@ def verificar_alertas_presupuesto(
             "limite_fmt": limite_fmt,
             "nombre_pres": nombre,
         }
-    else:
-        return
 
     if not canal_web and not canal_whatsapp:
         return
@@ -952,7 +986,9 @@ def verificar_alertas_presupuesto(
         canal_web=canal_web,
         canal_whatsapp=canal_whatsapp,
         canal_email=False,
-        grupo_agrupacion_override=f"presupuestos/{presupuesto.id}/{periodo.id}/{tipo.value}",
+        grupo_agrupacion_override=grupo_alerta(
+            presupuesto.id, periodo.id, umbral
+        ),
         commit=commit,
         datos_template=datos_template,
     )

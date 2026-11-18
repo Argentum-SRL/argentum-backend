@@ -208,7 +208,7 @@ def actualizar_configuracion(
 
     # Validaciones de rango para evitar valores fuera de límites
     config.cuota_vence_anticipacion_dias = max(1, min(30, config.cuota_vence_anticipacion_dias))
-    config.presupuesto_umbral_1 = max(50, min(95, config.presupuesto_umbral_1))
+    config.presupuesto_umbral_1 = max(50, min(95, int(config.presupuesto_umbral_1)))
     config.suscripcion_recordatorio_dias = max(1, min(14, config.suscripcion_recordatorio_dias))
     config.inactividad_dias = max(3, min(30, config.inactividad_dias))
     config.whatsapp_hora_envio = max(0, min(23, config.whatsapp_hora_envio))

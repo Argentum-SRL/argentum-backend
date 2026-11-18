@@ -5,7 +5,16 @@ from decimal import Decimal
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Numeric, String, Index
+from sqlalchemy import (
+    DateTime,
+    Enum as SAEnum,
+    ForeignKey,
+    Index,
+    JSON as sa_JSON,
+    Numeric,
+    String,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -67,6 +76,13 @@ class Presupuesto(Base):
     # Fecha y hora en que se marcó como eliminado el presupuesto (soft delete)
     eliminado_en: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    # Porcentajes elegidos para recibir avisos en cada período (1 a 3 valores ordenados)
+    alertas_porcentajes: Mapped[list[int]] = mapped_column(
+        sa_JSON,
+        nullable=False,
+        default=lambda: [80, 100],
+        server_default=text("'[80, 100]'"),
     )
 
     categorias: Mapped[list[PresupuestoCategoria]] = relationship(

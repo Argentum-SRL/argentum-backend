@@ -1,17 +1,4 @@
-"""Pruebas para eliminación, restauración y purga de presupuestos.
-
-Verifica:
-1. DELETE de presupuesto activo -> 200 {"detail": "Presupuesto eliminado."}, estado finalizado y eliminado_en con fecha.
-   GET /presupuestos (sin filtro y con estado=activo) no lo trae. GET /presupuestos/{id} -> 404.
-2. POST /restaurar con {"estado": "pausado"} -> 200, estado pausado, eliminado_en null, aparece en GET /presupuestos?estado=pausado.
-3. POST /restaurar de uno no eliminado -> 400 "Este presupuesto no está eliminado.".
-4. POST /restaurar de uno eliminado hace 91 días -> 404.
-5. DELETE dos veces -> la segunda 404.
-6. purgar_presupuestos_eliminados: eliminado hace 91 días desaparece con hijos; hace 89 días queda.
-7. GET /presupuestos?estado=finalizado -> [].
-8. registrar_impacto_presupuesto con gasto en categoría de presupuesto eliminado -> período no cambia.
-9. Presupuesto de otro usuario: DELETE y restaurar -> 404.
-"""
+"""Pruebas para eliminación definitiva y purga de presupuestos (E1 a E6)."""
 
 from __future__ import annotations
 
@@ -59,10 +46,7 @@ from app.models.transaccion import (
     OrigenTransaccion,
     EstadoVerificacionTransaccion,
 )
-from app.services.presupuesto_service import (
-    purgar_presupuestos_eliminados,
-    registrar_impacto_presupuesto,
-)
+from app.services.presupuesto_service import purgar_presupuestos_eliminados
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -183,8 +167,18 @@ def categoria_prueba_fixture(db_session):
     return cat
 
 
-def test_1_delete_presupuesto_activo(client, db_session, usuario_principal, categoria_prueba):
-    """1. DELETE activo -> 200, finalizado y eliminado_en, GET no lo trae, GET {id} 404."""
+def test_e1_delete_borra_definitivo_con_periodos_y_categorias(
+    client, db_session, usuario_principal, categoria_prueba
+):
+    """E1: DELETE borra el presupuesto, sus 2 períodos y 2 categorías; GET -> 404."""
+    cat_extra = Categoria(
+        id=uuid.uuid4(),
+        nombre=f"Transporte {uuid.uuid4().hex[:6]}",
+        tipo=TipoCategoria.EGRESO,
+    )
+    db_session.add(cat_extra)
+    db_session.flush()
+
     presu = Presupuesto(
         id=uuid.uuid4(),
         usuario_id=usuario_principal.id,
@@ -197,119 +191,58 @@ def test_1_delete_presupuesto_activo(client, db_session, usuario_principal, cate
         fecha_creacion=datetime.now(timezone.utc),
     )
     db_session.add(presu)
-    db_session.commit()
+    db_session.flush()
 
-    resp = client.delete(f"/presupuestos/{presu.id}")
+    per1 = PeriodoPresupuesto(
+        id=uuid.uuid4(),
+        presupuesto_id=presu.id,
+        fecha_inicio=date(2026, 10, 1),
+        fecha_fin=date(2026, 10, 31),
+        monto_limite=Decimal("100000.00"),
+        monto_usado=Decimal("0.00"),
+    )
+    per2 = PeriodoPresupuesto(
+        id=uuid.uuid4(),
+        presupuesto_id=presu.id,
+        fecha_inicio=date(2026, 11, 1),
+        fecha_fin=date(2026, 11, 30),
+        monto_limite=Decimal("100000.00"),
+        monto_usado=Decimal("0.00"),
+    )
+    pc1 = PresupuestoCategoria(
+        id=uuid.uuid4(),
+        presupuesto_id=presu.id,
+        categoria_id=categoria_prueba.id,
+    )
+    pc2 = PresupuestoCategoria(
+        id=uuid.uuid4(),
+        presupuesto_id=presu.id,
+        categoria_id=cat_extra.id,
+    )
+    db_session.add_all([per1, per2, pc1, pc2])
+    db_session.commit()
+    presu_id = presu.id
+    per1_id, per2_id = per1.id, per2.id
+    pc1_id, pc2_id = pc1.id, pc2.id
+
+    resp = client.delete(f"/presupuestos/{presu_id}")
     assert resp.status_code == 200
     assert resp.json() == {"detail": "Presupuesto eliminado."}
 
-    # Verificar directamente en la base
-    db_session.expire_all()
-    presu_db = db_session.get(Presupuesto, presu.id)
-    assert presu_db is not None
-    assert presu_db.estado == EstadoPresupuesto.FINALIZADO
-    assert presu_db.eliminado_en is not None
+    db_session.expunge_all()
+    assert db_session.get(Presupuesto, presu_id) is None
+    assert db_session.get(PeriodoPresupuesto, per1_id) is None
+    assert db_session.get(PeriodoPresupuesto, per2_id) is None
+    assert db_session.get(PresupuestoCategoria, pc1_id) is None
+    assert db_session.get(PresupuestoCategoria, pc2_id) is None
 
-    # Listado general no lo incluye
-    resp_list = client.get("/presupuestos")
-    assert resp_list.status_code == 200
-    ids_list = [p["id"] for p in resp_list.json()]
-    assert str(presu.id) not in ids_list
-
-    # Listado con estado=activo no lo incluye
-    resp_activos = client.get("/presupuestos?estado=activo")
-    assert resp_activos.status_code == 200
-    ids_activos = [p["id"] for p in resp_activos.json()]
-    assert str(presu.id) not in ids_activos
-
-    # GET por ID devuelve 404
-    resp_get = client.get(f"/presupuestos/{presu.id}")
+    resp_get = client.get(f"/presupuestos/{presu_id}")
     assert resp_get.status_code == 404
     assert get_error_message(resp_get) == "No se encontró ese presupuesto."
 
 
-def test_2_post_restaurar_pausado(client, db_session, usuario_principal):
-    """2. POST /restaurar con {'estado': 'pausado'} -> 200, pausado, eliminado_en null."""
-    presu = Presupuesto(
-        id=uuid.uuid4(),
-        usuario_id=usuario_principal.id,
-        nombre="Presupuesto Servicios",
-        monto=Decimal("50000.00"),
-        moneda=Moneda.ARS,
-        periodo=PeriodoPresupuestoTipo.MENSUAL,
-        renovacion=RenovacionPresupuesto.AUTOMATICA,
-        estado=EstadoPresupuesto.FINALIZADO,
-        eliminado_en=datetime.now(timezone.utc) - timedelta(days=2),
-        fecha_creacion=datetime.now(timezone.utc) - timedelta(days=10),
-    )
-    db_session.add(presu)
-    db_session.commit()
-
-    resp = client.post(f"/presupuestos/{presu.id}/restaurar", json={"estado": "pausado"})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["id"] == str(presu.id)
-    assert data["estado"] == "pausado"
-
-    db_session.expire_all()
-    presu_db = db_session.get(Presupuesto, presu.id)
-    assert presu_db.estado == EstadoPresupuesto.PAUSADO
-    assert presu_db.eliminado_en is None
-
-    # Aparece en GET /presupuestos?estado=pausado
-    resp_pausados = client.get("/presupuestos?estado=pausado")
-    assert resp_pausados.status_code == 200
-    ids = [p["id"] for p in resp_pausados.json()]
-    assert str(presu.id) in ids
-
-
-def test_3_post_restaurar_no_eliminado(client, db_session, usuario_principal):
-    """3. POST /restaurar de uno no eliminado -> 400 'Este presupuesto no está eliminado.'."""
-    presu = Presupuesto(
-        id=uuid.uuid4(),
-        usuario_id=usuario_principal.id,
-        nombre="Presupuesto Activo",
-        monto=Decimal("30000.00"),
-        moneda=Moneda.ARS,
-        periodo=PeriodoPresupuestoTipo.MENSUAL,
-        renovacion=RenovacionPresupuesto.AUTOMATICA,
-        estado=EstadoPresupuesto.ACTIVO,
-        eliminado_en=None,
-        fecha_creacion=datetime.now(timezone.utc),
-    )
-    db_session.add(presu)
-    db_session.commit()
-
-    resp = client.post(f"/presupuestos/{presu.id}/restaurar", json={"estado": "activo"})
-    assert resp.status_code == 400
-    assert get_error_message(resp) == "Este presupuesto no está eliminado."
-
-
-def test_4_post_restaurar_eliminado_hace_91_dias(client, db_session, usuario_principal):
-    """4. POST /restaurar de uno eliminado hace 91 días -> 404."""
-    hace_91_dias = datetime.now(timezone.utc) - timedelta(days=91)
-    presu = Presupuesto(
-        id=uuid.uuid4(),
-        usuario_id=usuario_principal.id,
-        nombre="Presupuesto Viejo",
-        monto=Decimal("20000.00"),
-        moneda=Moneda.ARS,
-        periodo=PeriodoPresupuestoTipo.MENSUAL,
-        renovacion=RenovacionPresupuesto.AUTOMATICA,
-        estado=EstadoPresupuesto.FINALIZADO,
-        eliminado_en=hace_91_dias,
-        fecha_creacion=hace_91_dias - timedelta(days=30),
-    )
-    db_session.add(presu)
-    db_session.commit()
-
-    resp = client.post(f"/presupuestos/{presu.id}/restaurar", json={"estado": "activo"})
-    assert resp.status_code == 404
-    assert get_error_message(resp) == "No se encontró ese presupuesto."
-
-
-def test_5_delete_dos_veces(client, db_session, usuario_principal):
-    """5. DELETE dos veces -> la segunda 404."""
+def test_e2_delete_dos_veces(client, db_session, usuario_principal):
+    """E2: DELETE dos veces -> la segunda 404."""
     presu = Presupuesto(
         id=uuid.uuid4(),
         usuario_id=usuario_principal.id,
@@ -332,12 +265,63 @@ def test_5_delete_dos_veces(client, db_session, usuario_principal):
     assert get_error_message(resp2) == "No se encontró ese presupuesto."
 
 
-def test_6_purgar_presupuestos_eliminados(db_session, usuario_principal, categoria_prueba):
-    """6. purgar_presupuestos_eliminados: 91 días desaparece con hijos; 89 días queda."""
+def test_e3_delete_presupuesto_otro_usuario(
+    client, db_session, usuario_principal, usuario_otro
+):
+    """E3: DELETE de un presupuesto de otro usuario -> 404 y sigue en la base."""
+    _ = usuario_principal
+    presu_otro = Presupuesto(
+        id=uuid.uuid4(),
+        usuario_id=usuario_otro.id,
+        nombre="Presupuesto Ajeno",
+        monto=Decimal("80000.00"),
+        moneda=Moneda.ARS,
+        periodo=PeriodoPresupuestoTipo.MENSUAL,
+        renovacion=RenovacionPresupuesto.AUTOMATICA,
+        estado=EstadoPresupuesto.ACTIVO,
+        fecha_creacion=datetime.now(timezone.utc),
+    )
+    db_session.add(presu_otro)
+    db_session.commit()
+
+    resp_del = client.delete(f"/presupuestos/{presu_otro.id}")
+    assert resp_del.status_code == 404
+    assert get_error_message(resp_del) == "No se encontró ese presupuesto."
+
+    db_session.expire_all()
+    assert db_session.get(Presupuesto, presu_otro.id) is not None
+
+
+def test_e4_restaurar_no_existe(client, db_session, usuario_principal):
+    """E4: POST /presupuestos/{id}/restaurar -> 404 o 405 (la ruta no existe)."""
+    presu = Presupuesto(
+        id=uuid.uuid4(),
+        usuario_id=usuario_principal.id,
+        nombre="Presupuesto Sin Restaurar",
+        monto=Decimal("25000.00"),
+        moneda=Moneda.ARS,
+        periodo=PeriodoPresupuestoTipo.MENSUAL,
+        renovacion=RenovacionPresupuesto.AUTOMATICA,
+        estado=EstadoPresupuesto.ACTIVO,
+        fecha_creacion=datetime.now(timezone.utc),
+    )
+    db_session.add(presu)
+    db_session.commit()
+
+    resp = client.post(
+        f"/presupuestos/{presu.id}/restaurar",
+        json={"estado": "activo"},
+    )
+    assert resp.status_code in (404, 405)
+
+
+def test_e5_purgar_presupuestos_eliminados(
+    client, db_session, usuario_principal, categoria_prueba
+):
+    """E5: 91 días desaparece con hijos; 89 días queda y no sale en GET."""
     hace_91 = datetime.now(timezone.utc) - timedelta(days=91)
     hace_89 = datetime.now(timezone.utc) - timedelta(days=89)
 
-    # Presupuesto A: 91 días
     p_viejo = Presupuesto(
         id=uuid.uuid4(),
         usuario_id=usuario_principal.id,
@@ -364,7 +348,6 @@ def test_6_purgar_presupuestos_eliminados(db_session, usuario_principal, categor
         categoria_id=categoria_prueba.id,
     )
 
-    # Presupuesto B: 89 días
     p_reciente = Presupuesto(
         id=uuid.uuid4(),
         usuario_id=usuario_principal.id,
@@ -391,49 +374,34 @@ def test_6_purgar_presupuestos_eliminados(db_session, usuario_principal, categor
         categoria_id=categoria_prueba.id,
     )
 
-    db_session.add_all([p_viejo, per_viejo, cat_viejo, p_reciente, per_reciente, cat_reciente])
+    db_session.add_all(
+        [p_viejo, per_viejo, cat_viejo, p_reciente, per_reciente, cat_reciente]
+    )
     db_session.commit()
 
     total_purgados = purgar_presupuestos_eliminados(db_session)
     assert total_purgados >= 1
 
     db_session.expire_all()
-    # Presupuesto A e hijos desaparecieron
     assert db_session.get(Presupuesto, p_viejo.id) is None
     assert db_session.get(PeriodoPresupuesto, per_viejo.id) is None
     assert db_session.get(PresupuestoCategoria, cat_viejo.id) is None
 
-    # Presupuesto B e hijos permanecen
     assert db_session.get(Presupuesto, p_reciente.id) is not None
     assert db_session.get(PeriodoPresupuesto, per_reciente.id) is not None
     assert db_session.get(PresupuestoCategoria, cat_reciente.id) is not None
 
-
-def test_7_get_presupuestos_finalizados_vacio(client, db_session, usuario_principal):
-    """7. GET /presupuestos?estado=finalizado -> []."""
-    presu = Presupuesto(
-        id=uuid.uuid4(),
-        usuario_id=usuario_principal.id,
-        nombre="Presupuesto Finalizado",
-        monto=Decimal("60000.00"),
-        moneda=Moneda.ARS,
-        periodo=PeriodoPresupuestoTipo.MENSUAL,
-        renovacion=RenovacionPresupuesto.AUTOMATICA,
-        estado=EstadoPresupuesto.FINALIZADO,
-        eliminado_en=datetime.now(timezone.utc),
-        fecha_creacion=datetime.now(timezone.utc) - timedelta(days=10),
-    )
-    db_session.add(presu)
-    db_session.commit()
-
-    resp = client.get("/presupuestos?estado=finalizado")
-    assert resp.status_code == 200
-    assert resp.json() == []
+    resp_list = client.get("/presupuestos")
+    assert resp_list.status_code == 200
+    ids = [p["id"] for p in resp_list.json()]
+    assert str(p_reciente.id) not in ids
 
 
-def test_8_impacto_presupuesto_eliminado(db_session, usuario_principal, categoria_prueba):
-    """8. registrar_impacto_presupuesto con gasto en presupuesto eliminado -> período no cambia."""
-    hoy = date.today()
+def test_e6_transacciones_quedan_intactas_al_eliminar(
+    client, db_session, usuario_principal, categoria_prueba
+):
+    """E6: las transacciones de la categoría del presupuesto borrado siguen todas."""
+    hoy = date(2026, 11, 18)
     presu = Presupuesto(
         id=uuid.uuid4(),
         usuario_id=usuario_principal.id,
@@ -442,45 +410,40 @@ def test_8_impacto_presupuesto_eliminado(db_session, usuario_principal, categori
         moneda=Moneda.ARS,
         periodo=PeriodoPresupuestoTipo.MENSUAL,
         renovacion=RenovacionPresupuesto.AUTOMATICA,
-        estado=EstadoPresupuesto.FINALIZADO,
-        eliminado_en=datetime.now(timezone.utc),
-        fecha_creacion=datetime.now(timezone.utc) - timedelta(days=5),
+        estado=EstadoPresupuesto.ACTIVO,
+        fecha_creacion=datetime.now(timezone.utc),
     )
     periodo = PeriodoPresupuesto(
         id=uuid.uuid4(),
         presupuesto_id=presu.id,
-        fecha_inicio=hoy - timedelta(days=5),
-        fecha_fin=hoy + timedelta(days=25),
+        fecha_inicio=date(2026, 11, 1),
+        fecha_fin=date(2026, 11, 30),
         monto_limite=Decimal("100000.00"),
         monto_usado=Decimal("0.00"),
-        superado=False,
     )
-    cat = PresupuestoCategoria(
+    pc = PresupuestoCategoria(
         id=uuid.uuid4(),
         presupuesto_id=presu.id,
         categoria_id=categoria_prueba.id,
     )
-    db_session.add_all([presu, periodo, cat])
-    db_session.commit()
-
     billetera = Billetera(
         id=uuid.uuid4(),
         usuario_id=usuario_principal.id,
         nombre="Efectivo Test",
         moneda=Moneda.ARS,
-        saldo_actual=Decimal("100000.00"),
         saldo_inicial=Decimal("100000.00"),
+        saldo_actual=Decimal("100000.00"),
         es_principal=True,
     )
-    db_session.add(billetera)
-    db_session.commit()
+    db_session.add_all([presu, periodo, pc, billetera])
+    db_session.flush()
 
-    tx = Transaccion(
+    tx1 = Transaccion(
         id=uuid.uuid4(),
         usuario_id=usuario_principal.id,
         billetera_id=billetera.id,
         categoria_id=categoria_prueba.id,
-        monto=Decimal("15000.00"),
+        monto=Decimal("12500.00"),
         moneda=Moneda.ARS,
         tipo=TipoTransaccion.EGRESO,
         fecha=hoy,
@@ -488,50 +451,34 @@ def test_8_impacto_presupuesto_eliminado(db_session, usuario_principal, categori
         origen=OrigenTransaccion.MANUAL,
         estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
     )
-    db_session.add(tx)
+    tx2 = Transaccion(
+        id=uuid.uuid4(),
+        usuario_id=usuario_principal.id,
+        billetera_id=billetera.id,
+        categoria_id=categoria_prueba.id,
+        monto=Decimal("8750.50"),
+        moneda=Moneda.ARS,
+        tipo=TipoTransaccion.EGRESO,
+        fecha=hoy,
+        metodo_pago=MetodoPago.EFECTIVO,
+        origen=OrigenTransaccion.MANUAL,
+        estado_verificacion=EstadoVerificacionTransaccion.CONFIRMADA,
+    )
+    db_session.add_all([tx1, tx2])
     db_session.commit()
 
-    registrar_impacto_presupuesto(db_session, tx)
+    resp = client.delete(f"/presupuestos/{presu.id}")
+    assert resp.status_code == 200
 
-    from app.models.notificacion import Notificacion, TipoNotificacion
-    notifs = (
-        db_session.query(Notificacion)
+    db_session.expire_all()
+    txs = (
+        db_session.query(Transaccion)
         .filter(
-            Notificacion.usuario_id == usuario_principal.id,
-            Notificacion.tipo.in_([TipoNotificacion.PRESUPUESTO_LIMITE, TipoNotificacion.PRESUPUESTO_AGOTADO]),
+            Transaccion.usuario_id == usuario_principal.id,
+            Transaccion.categoria_id == categoria_prueba.id,
         )
+        .order_by(Transaccion.monto.asc())
         .all()
     )
-    assert len(notifs) == 0
-
-
-def test_9_presupuesto_otro_usuario(client, db_session, usuario_principal, usuario_otro):
-    """9. Presupuesto de otro usuario: DELETE y restaurar -> 404."""
-    presu_otro = Presupuesto(
-        id=uuid.uuid4(),
-        usuario_id=usuario_otro.id,
-        nombre="Presupuesto Ajeno",
-        monto=Decimal("80000.00"),
-        moneda=Moneda.ARS,
-        periodo=PeriodoPresupuestoTipo.MENSUAL,
-        renovacion=RenovacionPresupuesto.AUTOMATICA,
-        estado=EstadoPresupuesto.ACTIVO,
-        fecha_creacion=datetime.now(timezone.utc),
-    )
-    db_session.add(presu_otro)
-    db_session.commit()
-
-    # Usuario principal intenta borrar presupuesto de usuario_otro -> 404
-    resp_del = client.delete(f"/presupuestos/{presu_otro.id}")
-    assert resp_del.status_code == 404
-    assert get_error_message(resp_del) == "No se encontró ese presupuesto."
-
-    # Se marca eliminado para usuario_otro
-    presu_otro.estado = EstadoPresupuesto.FINALIZADO
-    presu_otro.eliminado_en = datetime.now(timezone.utc)
-    db_session.commit()
-
-    # Usuario principal intenta restaurar presupuesto de usuario_otro -> 404
-    resp_rest = client.post(f"/presupuestos/{presu_otro.id}/restaurar", json={"estado": "activo"})
-    assert resp_rest.status_code == 404
-    assert get_error_message(resp_rest) == "No se encontró ese presupuesto."
+    assert len(txs) == 2
+    assert [t.monto for t in txs] == [Decimal("8750.50"), Decimal("12500.00")]

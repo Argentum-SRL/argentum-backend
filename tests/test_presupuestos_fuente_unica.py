@@ -329,7 +329,9 @@ def test_te1_compra_credito_1_pago_fuente_unica_y_alertas(
         .all()
     )
     assert len(notifs_lim) == 1
-    assert notifs_lim[0].grupo_agrupacion == f"presupuestos/{presu.id}/{periodo.id}/{TipoNotificacion.PRESUPUESTO_LIMITE.value}"
+    assert notifs_lim[0].grupo_agrupacion == (
+        f"presupuestos/{presu.id}/{periodo.id}/umbral_80"
+    )
     assert (
         notifs_lim[0].mensaje
         == "Ya usaste el 83% del presupuesto Súper: $100.000 de $120.000."

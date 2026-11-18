@@ -1,7 +1,7 @@
 from uuid import UUID
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional, List, Literal
+from typing import Optional, List
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
@@ -36,6 +36,7 @@ class PresupuestoCreate(BaseModel):
     periodo: PeriodoPresupuestoTipo
     renovacion: RenovacionPresupuesto
     categorias: List[PresupuestoCategoriaInput] = Field(..., min_length=1)
+    alertas_porcentajes: Optional[List[int]] = None
 
     @field_validator("nombre")
     @classmethod
@@ -79,6 +80,7 @@ class PresupuestoUpdate(BaseModel):
     periodo: Optional[PeriodoPresupuestoTipo] = None
     renovacion: Optional[RenovacionPresupuesto] = None
     categorias: Optional[List[PresupuestoCategoriaInput]] = None
+    alertas_porcentajes: Optional[List[int]] = None
 
     @field_validator("nombre")
     @classmethod
@@ -186,12 +188,13 @@ class PresupuestoResponse(BaseModel):
     estado: str
     fecha_creacion: datetime
     categorias: List[PresupuestoCategoriaResponse]
+    alertas_porcentajes: List[int]
     periodo_actual: Optional[PeriodoPresupuestoResponse] = None
     proxima_renovacion: Optional[date] = None
     ritmo_texto: Optional[str] = None
     sugerencia_limite: Optional[SugerenciaLimiteResponse] = None
 
 
-class RestaurarPresupuestoRequest(BaseModel):
-    """Esquema para la petición de restauración de un presupuesto eliminado."""
-    estado: Literal["activo", "pausado"]
+class AlertasPorDefectoResponse(BaseModel):
+    """Porcentajes iniciales según la configuración del usuario."""
+    alertas_porcentajes: List[int]

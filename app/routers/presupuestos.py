@@ -10,12 +10,12 @@ from app.core.auth import get_current_user
 from app.core.limiter import limiter
 from app.models.usuario import Usuario
 from app.schemas.presupuesto import (
-    PresupuestoCreate, 
+    AlertasPorDefectoResponse,
+    PresupuestoCreate,
     PresupuestoUpdate, 
     PresupuestoResponse, 
     PeriodoPresupuestoResponse,
     PresupuestoCategoriaResponse,
-    RestaurarPresupuestoRequest,
     SugerenciaLimiteResponse,
     SugerenciaRubro,
     SugerenciaRubroResponse
@@ -96,6 +96,7 @@ def _map_presupuesto_response(db: Session, p) -> PresupuestoResponse:
         estado=estado_val,
         fecha_creacion=p.fecha_creacion,
         categorias=categorias_resp,
+        alertas_porcentajes=list(p.alertas_porcentajes),
         periodo_actual=periodo_actual_resp,
         proxima_renovacion=proxima,
         ritmo_texto=ritmo_texto,
@@ -171,6 +172,15 @@ def obtener_sugerencia_rubro(
     )
 
 
+@router.get("/alertas-por-defecto", response_model=AlertasPorDefectoResponse)
+def obtener_alertas_por_defecto(
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(get_current_user),
+):
+    alertas = presupuesto_service.alertas_por_defecto_usuario(db, usuario.id)
+    return AlertasPorDefectoResponse(alertas_porcentajes=alertas)
+
+
 @router.get("/{id}", response_model=PresupuestoResponse)
 def obtener_presupuesto(
     id: UUID,
@@ -225,16 +235,6 @@ def eliminar_presupuesto(
 ):
     presupuesto_service.eliminar_presupuesto(db, usuario.id, id)
     return {"detail": "Presupuesto eliminado."}
-
-@router.post("/{id}/restaurar", response_model=PresupuestoResponse)
-def restaurar_presupuesto(
-    id: UUID,
-    data: RestaurarPresupuestoRequest,
-    db: Session = Depends(get_db),
-    usuario: Usuario = Depends(get_current_user)
-):
-    p = presupuesto_service.restaurar_presupuesto(db, usuario.id, id, data.estado)
-    return _map_presupuesto_response(db, p)
 
 @router.get("/{id}/historial", response_model=List[PeriodoPresupuestoResponse])
 def obtener_historial(

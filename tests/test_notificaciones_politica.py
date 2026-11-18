@@ -648,6 +648,7 @@ def test_14_presupuesto_plantilla_por_defecto_no_despacha(db_session, monkeypatc
         nombre="Comida",
         moneda=Moneda.ARS,
         categorias=[],
+        alertas_porcentajes=[80, 100],
     )
     periodo = SimpleNamespace(
         id=uuid.uuid4(),
@@ -695,6 +696,7 @@ def test_15_presupuesto_plantilla_activa_despacha(db_session, monkeypatch):
         nombre="Comida",
         moneda=Moneda.ARS,
         categorias=[],
+        alertas_porcentajes=[80, 100],
     )
     periodo = SimpleNamespace(
         id=uuid.uuid4(),
