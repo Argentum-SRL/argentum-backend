@@ -1,0 +1,347 @@
+[
+  {
+    "frase": "fotocopias del TP",
+    "tipo": "egreso",
+    "esperado": "Educación › Libros y útiles"
+  },
+  {
+    "frase": "imprimí apuntes en la librería",
+    "tipo": "egreso",
+    "esperado": "Educación › Libros y útiles"
+  },
+  {
+    "frase": "carga de la sube",
+    "tipo": "egreso",
+    "esperado": "Transporte › Transporte público"
+  },
+  {
+    "frase": "uber al laburo",
+    "tipo": "egreso",
+    "esperado": "Transporte › Taxi y apps"
+  },
+  {
+    "frase": "le cambié las cubiertas al auto",
+    "tipo": "egreso",
+    "esperado": "Transporte › Auto"
+  },
+  {
+    "frase": "vtv",
+    "tipo": "egreso",
+    "esperado": "Transporte › Auto"
+  },
+  {
+    "frase": "pagué la cochera",
+    "tipo": "egreso",
+    "esperado": "Transporte › Estacionamiento"
+  },
+  {
+    "frase": "peaje de la autopista",
+    "tipo": "egreso",
+    "esperado": "Transporte › Peajes"
+  },
+  {
+    "frase": "nafta",
+    "tipo": "egreso",
+    "esperado": "Transporte › Combustible"
+  },
+  {
+    "frase": "birra con los pibes",
+    "tipo": "egreso",
+    "esperado": "Ocio › Salidas"
+  },
+  {
+    "frase": "entradas para el recital",
+    "tipo": "egreso",
+    "esperado": "Ocio › Salidas"
+  },
+  {
+    "frase": "cuota del gimnasio",
+    "tipo": "egreso",
+    "esperado": "Ocio › Deportes y gimnasio"
+  },
+  {
+    "frase": "pasajes a Bariloche",
+    "tipo": "egreso",
+    "esperado": "Ocio › Viajes"
+  },
+  {
+    "frase": "juego de la play",
+    "tipo": "egreso",
+    "esperado": "Ocio › Hobbies y juegos"
+  },
+  {
+    "frase": "netflix",
+    "tipo": "egreso",
+    "esperado": "Ocio › Streaming"
+  },
+  {
+    "frase": "suscripción de chatgpt",
+    "tipo": "egreso",
+    "esperado": "Tecnología › Apps y programas"
+  },
+  {
+    "frase": "auriculares bluetooth",
+    "tipo": "egreso",
+    "esperado": "Tecnología › Equipos"
+  },
+  {
+    "frase": "recarga de Personal",
+    "tipo": "egreso",
+    "esperado": "Tecnología › Celular"
+  },
+  {
+    "frase": "factura de Fibertel",
+    "tipo": "egreso",
+    "esperado": "Tecnología › Internet"
+  },
+  {
+    "frase": "regalo de cumple para Juli",
+    "tipo": "egreso",
+    "esperado": "Otros › Regalos"
+  },
+  {
+    "frase": "le pasé plata a mi vieja",
+    "tipo": "egreso",
+    "esperado": "Otros › Ayuda familiar"
+  },
+  {
+    "frase": "comida del perro",
+    "tipo": "egreso",
+    "esperado": "Otros › Mascotas"
+  },
+  {
+    "frase": "vacuna del gato en la veterinaria",
+    "tipo": "egreso",
+    "esperado": "Otros › Mascotas"
+  },
+  {
+    "frase": "turno con el dermatólogo",
+    "tipo": "egreso",
+    "esperado": "Salud › Médico"
+  },
+  {
+    "frase": "ibuprofeno",
+    "tipo": "egreso",
+    "esperado": "Salud › Farmacia"
+  },
+  {
+    "frase": "sesión con la psicóloga",
+    "tipo": "egreso",
+    "esperado": "Salud › Terapias"
+  },
+  {
+    "frase": "limpieza de dientes",
+    "tipo": "egreso",
+    "esperado": "Salud › Dentista"
+  },
+  {
+    "frase": "cuota de OSDE",
+    "tipo": "egreso",
+    "esperado": "Salud › Prepaga y obra social"
+  },
+  {
+    "frase": "corte de pelo",
+    "tipo": "egreso",
+    "esperado": "Cuidado personal › Peluquería y belleza"
+  },
+  {
+    "frase": "shampoo y crema",
+    "tipo": "egreso",
+    "esperado": "Cuidado personal › Perfumería"
+  },
+  {
+    "frase": "zapatillas nike",
+    "tipo": "egreso",
+    "esperado": "Indumentaria › Calzado"
+  },
+  {
+    "frase": "campera de invierno",
+    "tipo": "egreso",
+    "esperado": "Indumentaria › Ropa"
+  },
+  {
+    "frase": "anteojos de sol",
+    "tipo": "egreso",
+    "esperado": "Indumentaria › Accesorios"
+  },
+  {
+    "frase": "plomero por la pérdida del baño",
+    "tipo": "egreso",
+    "esperado": "Hogar › Reparaciones"
+  },
+  {
+    "frase": "lavandina y detergente",
+    "tipo": "egreso",
+    "esperado": "Hogar › Limpieza"
+  },
+  {
+    "frase": "silla para el escritorio",
+    "tipo": "egreso",
+    "esperado": "Hogar › Muebles y electro"
+  },
+  {
+    "frase": "la señora que limpia",
+    "tipo": "egreso",
+    "esperado": "Hogar › Servicio doméstico"
+  },
+  {
+    "frase": "expensas de noviembre",
+    "tipo": "egreso",
+    "esperado": "Vivienda › Expensas"
+  },
+  {
+    "frase": "garrafa",
+    "tipo": "egreso",
+    "esperado": "Vivienda › Gas"
+  },
+  {
+    "frase": "boleta de Edesur",
+    "tipo": "egreso",
+    "esperado": "Vivienda › Luz"
+  },
+  {
+    "frase": "alquiler del depto",
+    "tipo": "egreso",
+    "esperado": "Vivienda › Alquiler"
+  },
+  {
+    "frase": "chino de la esquina",
+    "tipo": "egreso",
+    "esperado": "Alimentación › Supermercado"
+  },
+  {
+    "frase": "milanesas",
+    "tipo": "egreso",
+    "esperado": "Alimentación › Carnicería"
+  },
+  {
+    "frase": "medialunas",
+    "tipo": "egreso",
+    "esperado": "Alimentación › Panadería"
+  },
+  {
+    "frase": "puchos",
+    "tipo": "egreso",
+    "esperado": "Alimentación › Kiosco"
+  },
+  {
+    "frase": "frutas y verduras",
+    "tipo": "egreso",
+    "esperado": "Alimentación › Verdulería"
+  },
+  {
+    "frase": "pedí sushi por rappi",
+    "tipo": "egreso",
+    "esperado": "Gastronomía › Delivery"
+  },
+  {
+    "frase": "cena en una parrilla",
+    "tipo": "egreso",
+    "esperado": "Gastronomía › Restaurantes"
+  },
+  {
+    "frase": "helado",
+    "tipo": "egreso",
+    "esperado": "Gastronomía › Cafetería"
+  },
+  {
+    "frase": "cafecito en starbucks",
+    "tipo": "egreso",
+    "esperado": "Gastronomía › Cafetería"
+  },
+  {
+    "frase": "curso de inglés",
+    "tipo": "egreso",
+    "esperado": "Educación › Cursos"
+  },
+  {
+    "frase": "cuota de la facu",
+    "tipo": "egreso",
+    "esperado": "Educación › Colegio y facultad"
+  },
+  {
+    "frase": "monotributo",
+    "tipo": "egreso",
+    "esperado": "Impuestos › Monotributo"
+  },
+  {
+    "frase": "patente de la moto",
+    "tipo": "egreso",
+    "esperado": "Impuestos › Patente"
+  },
+  {
+    "frase": "ABL",
+    "tipo": "egreso",
+    "esperado": "Impuestos › ABL e inmobiliario"
+  },
+  {
+    "frase": "mantenimiento de la cuenta del banco",
+    "tipo": "egreso",
+    "esperado": "Banco › Comisiones"
+  },
+  {
+    "frase": "cuota del préstamo personal",
+    "tipo": "egreso",
+    "esperado": "Banco › Préstamos"
+  },
+  {
+    "frase": "seguro del celular",
+    "tipo": "egreso",
+    "esperado": "Banco › Seguros"
+  },
+  {
+    "frase": "sueldo de noviembre",
+    "tipo": "ingreso",
+    "esperado": "Trabajo › Sueldo"
+  },
+  {
+    "frase": "aguinaldo",
+    "tipo": "ingreso",
+    "esperado": "Trabajo › Aguinaldo"
+  },
+  {
+    "frase": "propina",
+    "tipo": "ingreso",
+    "esperado": "Trabajo › Bonos y extras"
+  },
+  {
+    "frase": "vendí la bici por Mercado Libre",
+    "tipo": "ingreso",
+    "esperado": "Trabajo › Ventas"
+  },
+  {
+    "frase": "arreglé una compu de un cliente",
+    "tipo": "ingreso",
+    "esperado": "Trabajo › Freelance y changas"
+  },
+  {
+    "frase": "plazo fijo",
+    "tipo": "ingreso",
+    "esperado": "Inversiones › Intereses"
+  },
+  {
+    "frase": "me pagaron el alquiler del local",
+    "tipo": "ingreso",
+    "esperado": "Inversiones › Alquileres"
+  },
+  {
+    "frase": "jubilación",
+    "tipo": "ingreso",
+    "esperado": "Jubilación y AUH › Jubilación o pensión"
+  },
+  {
+    "frase": "AUH",
+    "tipo": "ingreso",
+    "esperado": "Jubilación y AUH › AUH y asignaciones"
+  },
+  {
+    "frase": "mi abuela me mandó plata",
+    "tipo": "ingreso",
+    "esperado": "Otros › Ayuda familiar"
+  },
+  {
+    "frase": "regalo de cumple",
+    "tipo": "ingreso",
+    "esperado": "Otros › Regalos"
+  }
+]

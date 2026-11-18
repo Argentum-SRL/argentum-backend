@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,3 +21,15 @@ class CategoriaRead(CategoriaBase):
     id: UUID
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CategoriaBusquedaItem(BaseModel):
+    categoria_id: UUID
+    subcategoria_id: UUID | None = None
+    categoria: str
+    subcategoria: str | None = None
+    origen: Literal["memoria", "catalogo", "ia"]
+
+
+class CategoriaBusquedaResponse(BaseModel):
+    resultados: list[CategoriaBusquedaItem]
