@@ -282,6 +282,8 @@ def calcular_reporte(db: Session, hoy: date) -> dict[str, Any]:
     calculadora_cuotas_count = len(func_usuarios.get("calculadora_cuotas", set()))
     descargar_datos_count = len(func_usuarios.get("descargar_datos", set()))
     descargar_presupuestos_count = len(func_usuarios.get("descargar_presupuestos", set()))
+    permitirse_wpp_count = len(func_usuarios.get("permitirse_wpp", set()))
+    cuotas_contado_wpp_count = len(func_usuarios.get("cuotas_contado_wpp", set()))
 
     # 9. WhatsApp en Otros
     # transacciones de la semana (dia_ar(fecha_creacion)) con origen IA_WPP o IA_PDF,
@@ -404,6 +406,8 @@ def calcular_reporte(db: Session, hoy: date) -> dict[str, Any]:
             "calculadora_cuotas": calculadora_cuotas_count,
             "descargar_datos": descargar_datos_count,
             "descargar_presupuestos": descargar_presupuestos_count,
+            "permitirse_wpp": permitirse_wpp_count,
+            "cuotas_contado_wpp": cuotas_contado_wpp_count,
         },
         "consejos": consejos_metricas,
         "otros": {
@@ -475,6 +479,12 @@ def armar_texto(rep: dict[str, Any], hoy: date) -> str:
         f"Funciones de la web (personas en la semana): ¿Me lo puedo permitir? {fn['permitirse']}; "
         f"calculadora de cuotas {fn['calculadora_cuotas']}; descargar mis datos {fn['descargar_datos']}; "
         f"Excel de presupuestos {fn['descargar_presupuestos']}."
+    )
+    a_wpp = fn.get("permitirse_wpp", 0)
+    b_wpp = fn.get("cuotas_contado_wpp", 0)
+    lineas.append(
+        f"Por WhatsApp (personas en la semana): ¿Me lo puedo permitir? {a_wpp}; "
+        f"cuotas vs contado {b_wpp}."
     )
 
     lineas.append("")

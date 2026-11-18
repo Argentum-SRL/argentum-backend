@@ -19,6 +19,7 @@ from app.routers.whatsapp.permitirse_flujo import (
     leer_respuesta_pendiente,
 )
 from app.services import tools_service, whatsapp_service
+from app.services.uso_service import registrar_evento
 from app.utils.texto import normalizar_texto
 
 logger = structlog.get_logger(__name__)
@@ -340,6 +341,7 @@ def _responder_consulta(ctx: ContextoMensaje, consulta: dict) -> bool:
     wamid = ctx.wamid
 
     estado_pregunta: dict | None = None
+    calculado = False
     if consulta.get("falta") is not None:
         msg_resp = armar_respuesta_permitirse({}, consulta)
         estado_pregunta = armar_estado_pregunta(consulta)
@@ -359,6 +361,7 @@ def _responder_consulta(ctx: ContextoMensaje, consulta: dict) -> bool:
                 moneda=consulta.get("moneda") or "ARS",
             )
             msg_resp = armar_respuesta_permitirse(resultado, consulta)
+            calculado = True
         except Exception as e:
             logger.warning("Error calculando si puede permitirse", error=str(e), exc_info=True)
             msg_resp = "No pude calcularlo en este momento. Probá de nuevo en unos minutos."
@@ -378,6 +381,8 @@ def _responder_consulta(ctx: ContextoMensaje, consulta: dict) -> bool:
         slot_filling_estado=estado_pregunta,
     )
     db.add(nueva_conv)
+    if calculado:
+        registrar_evento(db, usuario.id, "permitirse_wpp", commit=False)
     db.commit()
     whatsapp_service.enviar_whatsapp(from_number, msg_resp)
     return True

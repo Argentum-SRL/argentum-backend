@@ -21,6 +21,7 @@ from app.routers.whatsapp.conveniencia_flujo import (
 )
 from app.routers.whatsapp.parsers import _parsear_monto_argentino
 from app.services import whatsapp_service
+from app.services.uso_service import registrar_evento
 from app.services.conveniencia_service import (
     comparar_cuotas_contado,
     textos_conveniencia,
@@ -134,6 +135,7 @@ def _responder_conveniencia(ctx: ContextoMensaje, consulta: dict) -> bool:
     db = ctx.db
     usuario = ctx.usuario
     estado_pregunta: dict | None = None
+    calculado = False
 
     if consulta.get("falta") == "cuota":
         msg_resp = _armar_mensaje_pregunta_cuota()
@@ -168,6 +170,7 @@ def _responder_conveniencia(ctx: ContextoMensaje, consulta: dict) -> bool:
                 )
                 crudo = f"{txts['titulo']}\n{txts['linea_2']}\n{txts['linea_3']}"
                 msg_resp = partir_lineas_wpp(crudo)
+                calculado = True
         except Exception as exc:
             logger.warning(
                 "Error calculando cuotas vs contado",
@@ -193,6 +196,8 @@ def _responder_conveniencia(ctx: ContextoMensaje, consulta: dict) -> bool:
         slot_filling_estado=estado_pregunta,
     )
     db.add(nueva_conv)
+    if calculado:
+        registrar_evento(db, usuario.id, "cuotas_contado_wpp", commit=False)
     db.commit()
     whatsapp_service.enviar_whatsapp(ctx.from_number, msg_resp)
     return True

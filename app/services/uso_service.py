@@ -18,7 +18,15 @@ from app.utils.fecha import hoy_argentina
 
 logger = logging.getLogger(__name__)
 
-EVENTOS = ("visita", "permitirse", "calculadora_cuotas", "descargar_datos", "descargar_presupuestos")
+EVENTOS = (
+    "visita",
+    "permitirse",
+    "calculadora_cuotas",
+    "descargar_datos",
+    "descargar_presupuestos",
+    "permitirse_wpp",
+    "cuotas_contado_wpp",
+)
 
 
 def registrar_evento(
