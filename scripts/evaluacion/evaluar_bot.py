@@ -186,7 +186,7 @@ def _ejecutar_frase(frase_cfg: dict[str, Any]) -> dict[str, Any]:
         try:
             for msg in mensajes_entrada:
                 payload = comun.make_payload(comun.TELEFONO_TEST, msg)
-                comun._procesar_webhook_whatsapp_sync(payload)
+                comun._procesar_webhook_whatsapp_sync(payload, time.perf_counter())
         finally:
             comun._colector_salidas = None
 
