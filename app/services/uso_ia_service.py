@@ -19,12 +19,14 @@ from app.services.costos_service import (
     exento_tope_mensual,
     gasto_ia_mes_usd,
 )
+from app.services.modelos_ia import modelos_por_minuto
 from app.services.rate_limit_service import verificar_rate_limit
 from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
 
 logger = logging.getLogger(__name__)
 
-# Precios estimados: revisar en la página de precios de OpenAI
+# Fuente: página de precios de OpenAI, verificada el 18/11/2026
+# (gpt-6-luna USD 0,10 / 0,01 / 0,50 por millón; gpt-transcribe USD 0,0045 por minuto).
 PRECIOS_IA: dict[str, dict[str, Decimal]] = {
     "gpt-4o-mini": {
         "entrada": Decimal("0.15"),
@@ -36,8 +38,16 @@ PRECIOS_IA: dict[str, dict[str, Decimal]] = {
         "entrada_cache": Decimal("1.25"),
         "salida": Decimal("10.00"),
     },
+    "gpt-6-luna": {
+        "entrada": Decimal("0.10"),
+        "entrada_cache": Decimal("0.01"),
+        "salida": Decimal("0.50"),
+    },
     "whisper-1": {
         "precio_por_minuto": Decimal("0.006"),
+    },
+    "gpt-transcribe": {
+        "precio_por_minuto": Decimal("0.0045"),
     },
 }
 
@@ -67,12 +77,21 @@ def calcular_costo_ia(
     Calcula el costo estimado en USD de una llamada a OpenAI.
     Aplica redondeo a 6 decimales.
     """
-    if modelo == "whisper-1":
-        precio_minuto = PRECIOS_IA["whisper-1"]["precio_por_minuto"]
+    if modelo in modelos_por_minuto:
+        if modelo in PRECIOS_IA and "precio_por_minuto" in PRECIOS_IA[modelo]:
+            precio_minuto = PRECIOS_IA[modelo]["precio_por_minuto"]
+        else:
+            logger.warning(
+                "Modelo de audio sin precio propio '%s', usando whisper-1",
+                modelo,
+            )
+            precio_minuto = PRECIOS_IA["whisper-1"]["precio_por_minuto"]
         costo = Decimal(segundos_audio) * (precio_minuto / Decimal("60"))
         return round(costo, 6)
 
-    if modelo.startswith("gpt-4o-mini"):
+    if modelo.startswith("gpt-6-luna"):
+        precios = PRECIOS_IA["gpt-6-luna"]
+    elif modelo.startswith("gpt-4o-mini"):
         precios = PRECIOS_IA["gpt-4o-mini"]
     elif modelo.startswith("gpt-4o"):
         precios = PRECIOS_IA["gpt-4o"]

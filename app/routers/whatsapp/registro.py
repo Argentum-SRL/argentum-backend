@@ -17,6 +17,7 @@ from app.core.catalogo_suscripciones import (
     resolver_categoria_sugerida,
 )
 from app.core.constants import MAX_MONTO_INTEGRIDAD
+from app.core.jerga import sufijo_multiplicador_rx
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
@@ -105,7 +106,7 @@ def _extraer_precio_contado(texto: str | None) -> Decimal | None:
     if m_antes:
         pre = re.split(r"[,;.]", m_antes.group(1))[-1].strip()
         pre = re.sub(
-            r"^.*?\bcuotas?\b(?:\s+de\s+\S+(?:\s+mil|\s+lucas?|\s+k)?)?",
+            rf"^.*?\bcuotas?\b(?:\s+de\s+\S+(?:\s+{sufijo_multiplicador_rx()})?)?",
             "",
             pre,
         ).strip()

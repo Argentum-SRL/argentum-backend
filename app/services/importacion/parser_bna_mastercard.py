@@ -9,8 +9,10 @@ import logging
 import re
 import pdfplumber
 
+from app.core.config import settings
 from app.services.importacion.schemas import ResultadoParseo, TransaccionCruda
 from app.services.importacion.utils import sanitizar_texto_pdf
+from app.services.modelos_ia import parametros_chat
 from app.services.openai_client import get_openai_client
 
 logger = logging.getLogger(__name__)
@@ -157,22 +159,22 @@ def parsear_bna_mastercard(pdf_bytes: bytes) -> ResultadoParseo:
 
         user_content = f"Texto del resumen a procesar:\n\n{texto_sanitizado}"
         
+        modelo_chat = settings.OPENAI_MODEL
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=modelo_chat,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_content}
+                {"role": "user", "content": user_content},
             ],
-            temperature=0.1,
-            max_tokens=6000,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            **parametros_chat(modelo_chat, 0.1, 6000),
         )
 
         from app.services.uso_ia_service import registrar_uso_ia
         registrar_uso_ia(
             usuario_id=None,
             funcion="importacion_pdf",
-            modelo="gpt-4o-mini",
+            modelo=modelo_chat,
             respuesta=response,
         )
 

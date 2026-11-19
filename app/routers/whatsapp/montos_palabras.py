@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from decimal import Decimal
 
+from app.core.jerga import MULTIPLICADORES, NO_ES_MONTO, sufijo_multiplicador_rx
 from app.routers.whatsapp.parsers import _parsear_monto_argentino
 
 UNIDADES = {
@@ -43,10 +44,8 @@ TODAS_PALABRAS = (
     | set(VEINTI)
     | set(DECENAS)
     | set(CENTENAS)
-    | {
-        "mil", "luca", "lucas", "millon", "millones",
-        "palo", "palos", "medio", "media", "y",
-    }
+    | set(MULTIPLICADORES)
+    | {"millon", "millones", "medio", "media", "y"}
 )
 
 
@@ -92,7 +91,7 @@ def monto_en_palabras(texto: str) -> Decimal | None:
     if not texto:
         return None
     t = texto.strip().lower()
-    if "gamba" in t:
+    if any(p in t for p in NO_ES_MONTO):
         return None
     if t in ("medio palo",):
         return Decimal("500000")
@@ -110,10 +109,13 @@ def monto_en_palabras(texto: str) -> Decimal | None:
         if p not in TODAS_PALABRAS:
             return None
 
-    # Millones o palos
+    # Millones, palos o melones
+    millones_palabras = {
+        p for p, v in MULTIPLICADORES.items() if v == 1000000
+    } | {"millon", "millones"}
     palo_idx = -1
     for idx, p in enumerate(palabras):
-        if p in ("millon", "millones", "palo", "palos"):
+        if p in millones_palabras:
             palo_idx = idx
             break
 
@@ -135,9 +137,12 @@ def monto_en_palabras(texto: str) -> Decimal | None:
         return Decimal(str(res))
 
     # Miles o lucas
+    miles_palabras = {
+        p for p, v in MULTIPLICADORES.items() if v == 1000 and p != "k"
+    }
     mil_idx = -1
     for idx, p in enumerate(palabras):
-        if p in ("mil", "luca", "lucas"):
+        if p in miles_palabras:
             mil_idx = idx
             break
 
@@ -173,7 +178,7 @@ def buscar_monto(texto: str) -> tuple[Decimal | None, str]:
 
     # 1. Buscar monto numérico
     pat_num = re.search(
-        r"(?:\$|\b)\d+(?:[.,]\d+)*(?:\s*(?:mil|k|lucas?|palos?))?\b",
+        rf"(?:\$|\b)\d+(?:[.,]\d+)*(?:\s*{sufijo_multiplicador_rx()})?\b",
         texto,
         re.IGNORECASE,
     )

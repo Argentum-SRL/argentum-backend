@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.jerga import sufijo_multiplicador_rx
 from app.models.billetera import Billetera
 from app.models.categoria import Categoria
 from app.models.conversacion_wpp import ConversacionWpp
@@ -521,9 +522,15 @@ def _detectar_correccion_ultimo_movimiento(
         return False, {}, None
 
     # Descartar si tiene dos o más montos salvo que sea la estructura "X no Y"
-    es_correccion_dos_montos = bool(re.search(r"(?:eran?|fue)?\s*\$?[\d\.,]+k?\s+no\s+\$?[\d\.,]+k?", norm))
+    suf_rx = rf"(?:\s*{sufijo_multiplicador_rx()}\b)?"
+    es_correccion_dos_montos = bool(
+        re.search(rf"(?:eran?|fue)?\s*\$?[\d\.,]+{suf_rx}\s+no\s+\$?[\d\.,]+{suf_rx}", norm)
+    )
     norm_sin_fechas = re.sub(r"\b\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?\b", "", norm)
-    montos_detectados = re.findall(r"\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?\b", norm_sin_fechas)
+    montos_detectados = re.findall(
+        rf"\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*{sufijo_multiplicador_rx()})?\b",
+        norm_sin_fechas,
+    )
     # Filtrar solo montos numéricos significativos
     montos_reales = [m for m in montos_detectados if _parsear_monto_argentino(m) is not None]
     if len(montos_reales) >= 2 and not es_correccion_dos_montos:
@@ -533,15 +540,16 @@ def _detectar_correccion_ultimo_movimiento(
     texto_restante = mensaje.strip()
 
     # 1. Detectar monto: "eran 3.000 no 30.000", "no, 5000", "eran 3000", etc.
-    m_no = re.search(r"(?:eran?|fue)?\s*\$?([\d\.,]+k?)\s+no\s+\$?([\d\.,]+k?)", norm)
+    pat_dos = rf"(?:eran?|fue)?\s*\$?([\d\.,]+{suf_rx})\s+no\s+\$?([\d\.,]+{suf_rx})"
+    m_no = re.search(pat_dos, norm)
     if m_no:
         m_val = _parsear_monto_argentino(m_no.group(1))
         if m_val:
             cambios["monto"] = float(m_val)
-            texto_restante = re.sub(r"(?:eran?|fue)?\s*\$?[\d\.,]+k?\s+no\s+\$?[\d\.,]+k?", "", texto_restante, flags=re.IGNORECASE).strip()
+            texto_restante = re.sub(pat_dos, "", texto_restante, flags=re.IGNORECASE).strip()
 
     if "monto" not in cambios:
-        m_num = re.search(r"^no,?\s+(?:eran?\s+)?\$?([\d\.,]+k?)$", norm)
+        m_num = re.search(rf"^no,?\s+(?:eran?\s+)?\$?([\d\.,]+{suf_rx})$", norm)
         if m_num:
             m_val = _parsear_monto_argentino(m_num.group(1))
             if m_val:
@@ -549,12 +557,15 @@ def _detectar_correccion_ultimo_movimiento(
                 texto_restante = ""
 
     if "monto" not in cambios:
-        m_era = re.search(r"(?:eran?|era)\s+\$?([\d\.,]+k?)", norm)
+        pat_era = rf"(?:eran?|era)\s+\$?([\d\.,]+{suf_rx})"
+        m_era = re.search(pat_era, norm)
         if m_era:
             m_val = _parsear_monto_argentino(m_era.group(1))
             if m_val:
                 cambios["monto"] = float(m_val)
-                texto_restante = re.sub(r"(?:eran?|era)\s+\$?[\d\.,]+k?", "", texto_restante, flags=re.IGNORECASE).strip()
+                texto_restante = re.sub(
+                    pat_era, "", texto_restante, flags=re.IGNORECASE
+                ).strip()
 
     # 2. Detectar billetera: "fue con Santander", "con Santander", "era Santander", etc.
     billeteras_activas = _obtener_billeteras_activas(usuario_id, db)

@@ -20,6 +20,7 @@ from app.models.uso_ia import UsoIA
 from app.models.usuario import Usuario
 from app.services import categoria_service
 from app.services.categoria_busqueda_service import normalizar_busqueda
+from app.services.modelos_ia import parametros_chat
 from app.services.openai_client import get_openai_client
 from app.services.uso_ia_service import registrar_uso_ia, verificar_cupo_ia
 from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
@@ -58,8 +59,9 @@ SYSTEM_PROMPT_CLASIFICADOR = (
     "- Si es de la familia (mam\u00e1, pap\u00e1, mi vieja, mi viejo, mis viejos, abuela, "
     "abuelo, hijo, hija), la categor\u00eda es \"Ayuda familiar\", en egreso o en "
     "ingreso.\n"
-    "- Si sab\u00e9s el rubro pero no la subcategor\u00eda, devolv\u00e9 el nombre de la "
-    "categor\u00eda (ej: \"Alimentaci\u00f3n\"), nunca \"Otros\".\n"
+    "- Si sab\u00e9s el rubro pero no la subcategor\u00eda, "
+    "eleg\u00ed \"<Categor\u00eda> \u203a Otros\" "
+    "(ej: \"Alimentaci\u00f3n \u203a Otros\").\n"
     "\n"
     "CONCEPTOS RAROS O DESCONOCIDOS:\n"
     "Si el usuario menciona un gasto o ingreso con un concepto que no conoc\u00e9s, "
@@ -236,12 +238,13 @@ def llamar_clasificador(
 ) -> Any:
     """Llama a OpenAI chat.completions con Structured Outputs y timeout de 5s."""
     cliente = get_openai_client().with_options(timeout=TIMEOUT_CLASIFICADOR)
+    modelo_real = model or settings.OPENAI_MODEL
+    params = parametros_chat(modelo_real, temperature, max_tokens)
     return cliente.chat.completions.create(
-        model=model or settings.OPENAI_MODEL,
-        temperature=temperature,
-        max_tokens=max_tokens,
+        model=modelo_real,
         messages=mensajes,
         response_format=schema,
+        **params,
     )
 
 
@@ -262,6 +265,7 @@ def _extraer_contenido_respuesta(respuesta: Any) -> str:
 def _parsear_opciones(
     contenido: str,
     opciones_enum: list[str],
+    descartar_otros_secundarios: bool = False,
 ) -> list[tuple[str, str | None]]:
     """Valida contra el enum, deduplica y toma hasta 3 pares (cat, sub | None)."""
     permitidas = set(opciones_enum)
@@ -286,6 +290,13 @@ def _parsear_opciones(
         par: tuple[str, str | None] = (
             (cat_nombre, None) if sub_nombre == "Otros" else (cat_nombre, sub_nombre)
         )
+        if (
+            descartar_otros_secundarios
+            and pares
+            and pares[0][1] is not None
+            and par[1] is None
+        ):
+            continue
         if par in vistos:
             continue
         vistos.add(par)
@@ -299,6 +310,7 @@ def _clasificar_con_respuesta(
     db: Session,
     texto: str,
     tipo: str,
+    descartar_otros_secundarios: bool = False,
 ) -> tuple[list[tuple[str, str | None]], Any]:
     """Ejecuta la clasificaci\u00f3n contra OpenAI y devuelve (pares, respuesta)."""
     if tipo not in ("egreso", "ingreso"):
@@ -324,7 +336,11 @@ def _clasificar_con_respuesta(
         max_tokens=MAX_TOKENS_CLASIFICADOR,
     )
     contenido = _extraer_contenido_respuesta(respuesta)
-    pares = _parsear_opciones(contenido, opciones)
+    pares = _parsear_opciones(
+        contenido,
+        opciones,
+        descartar_otros_secundarios=descartar_otros_secundarios,
+    )
     return pares, respuesta
 
 
@@ -334,7 +350,12 @@ def clasificar_sin_limites(
     tipo: str,
 ) -> list[tuple[str, str | None]]:
     """Clasifica un concepto sin cach\u00e9 ni cupos (uso en evaluaci\u00f3n y pruebas)."""
-    pares, _ = _clasificar_con_respuesta(db, texto, tipo)
+    pares, _ = _clasificar_con_respuesta(
+        db,
+        texto,
+        tipo,
+        descartar_otros_secundarios=True,
+    )
     return pares
 
 

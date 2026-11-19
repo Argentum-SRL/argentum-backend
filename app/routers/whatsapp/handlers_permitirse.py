@@ -10,6 +10,11 @@ from decimal import Decimal
 import re
 import structlog
 
+from app.core.jerga import (
+    monedas_dolares_rx,
+    monedas_pesos_rx,
+    sufijo_multiplicador_rx,
+)
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 from app.routers.whatsapp.contexto import ContextoMensaje
 from app.routers.whatsapp.parsers import _parsear_monto_argentino, montos_de_dinero_en_texto
@@ -65,8 +70,8 @@ FRASES_DEBILES = [
 
 FRASES_MENSUAL = ["por mes", "al mes", "mensual", "todos los meses", "cada mes"]
 
-_NUMERO = r"\d+(?:[\.,]\d+)*(?:\s*(?:mil|k|lucas?|palos?))?"
-_DOLAR = r"(?:dolares|dolar|usd|u\$s|us\$)"
+_NUMERO = rf"\d+(?:[\.,]\d+)*(?:\s*{sufijo_multiplicador_rx()})?"
+_DOLAR = rf"(?:{monedas_dolares_rx()}|us\$)"
 
 # Los dólares son lo que se compra ("comprar 100 dólares"): no es una consulta de permitirse
 PATRON_COMPRA_DE_DOLARES = re.compile(
@@ -132,8 +137,10 @@ def analizar_consulta_permitirse(texto: str) -> dict | None:
 
     # d) y e) Cuotas y Precio
     # Caso especial: "N cuotas de X" (ej: "12 cuotas de 50 lucas", "12 cuotas de $50.000")
+    suf_cuotas = rf"(?:{monedas_pesos_rx()}|{sufijo_multiplicador_rx()})"
     m_cuotas_de = re.search(
-        r"\b(\d+)\s+cuotas?\s+de\s+(?:cada\s+una\s+de\s+)?([\$€£]|us\$|usd)?\s*([\d\.,]+(?:\s*(?:pesos|mil|lucas?|k|palos?))?)",
+        rf"\b(\d+)\s+cuotas?\s+de\s+(?:cada\s+una\s+de\s+)?"
+        rf"([\$€£]|us\$|usd)?\s*([\d\.,]+(?:\s*{suf_cuotas})?)",
         norm,
         flags=re.IGNORECASE,
     )
@@ -191,7 +198,8 @@ def analizar_consulta_permitirse(texto: str) -> dict | None:
 
         # Si no hay ninguno: buscar números sueltos (con o sin sufijo) que no sean cuotas ni %
         if precio is None:
-            pat_num = r"\b\d+(?:[\.,]\d+)*(?:\s*(?:pesos|mil|lucas?|k|palos?))?\b"
+            suf_num = rf"(?:{monedas_pesos_rx()}|{sufijo_multiplicador_rx()})"
+            pat_num = rf"\b\d+(?:[\.,]\d+)*(?:\s*{suf_num})?\b"
             candidatos_num = []
             for m in re.finditer(pat_num, norm):
                 num_token = m.group(0)

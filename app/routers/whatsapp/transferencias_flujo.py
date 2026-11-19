@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.entidades import ENTIDADES
+from app.core.jerga import monedas_dolares_rx, monedas_pesos_rx
 from app.models.billetera import Billetera
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 from app.models.usuario import Moneda, Usuario
@@ -860,12 +861,11 @@ def continuar_transferencia(
             db.flush()
 
         item["monto"] = monto
-        m_curr = re.search(
-            r"\b(?:d[oó]lares|verdes|usd)\b", normalizar_texto(mensaje_texto)
-        )
+        norm_msg = normalizar_texto(mensaje_texto)
+        m_curr = re.search(rf"\b{monedas_dolares_rx()}\b", norm_msg)
         if m_curr:
             item["moneda"] = "USD"
-        elif re.search(r"\b(?:pesos|mangos|ars)\b", normalizar_texto(mensaje_texto)):
+        elif re.search(rf"\b{monedas_pesos_rx()}\b", norm_msg):
             item["moneda"] = "ARS"
 
         return _ejecutar_tabla_flujo(

@@ -4,6 +4,7 @@ from decimal import Decimal
 from unittest.mock import MagicMock, patch
 import pytest
 
+from app.core.config import settings
 from app.services.importacion.parser_generico import parsear_generico
 from app.services.importacion.schemas import ResultadoParseo
 
@@ -137,7 +138,7 @@ def test_parsear_generico_with_mock():
         assert mock_client.chat.completions.create.called
         call_args = mock_client.chat.completions.create.call_args[1]
         
-        assert call_args["model"] == "gpt-4o-mini"
+        assert call_args["model"] == settings.OPENAI_MODEL
         assert call_args["max_tokens"] == 6000
         assert call_args["temperature"] == 0.1
         

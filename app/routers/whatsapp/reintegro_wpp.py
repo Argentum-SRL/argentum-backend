@@ -15,6 +15,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.constants import MAX_MONTO_INTEGRIDAD
+from app.core.jerga import sufijo_multiplicador_rx
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 from app.models.transaccion import Transaccion
 from app.models.usuario import Moneda, Usuario
@@ -74,7 +75,10 @@ def detectar_pedido_reintegro(texto: str) -> tuple[Decimal | None, str] | None:
 
     # Extracción opcional del monto
     monto = None
-    m = re.match(r"^(?:de )?(\$?\s?\d[\d.,]*\s?(?:k|mil|lucas?)?)\s+(.*)$", resto)
+    m = re.match(
+        rf"^(?:de )?(\$?\s?\d[\d.,]*\s?{sufijo_multiplicador_rx()}?)\s+(.*)$",
+        resto,
+    )
     if m:
         monto_parsed = _parsear_monto_argentino(m.group(1))
         if monto_parsed is None or monto_parsed <= 0 or monto_parsed > MAX_MONTO_INTEGRIDAD:

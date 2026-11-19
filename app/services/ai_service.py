@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
+from app.core.jerga import sufijo_multiplicador_rx
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.meta import Meta, EstadoMeta
 from app.models.presupuesto import Presupuesto, EstadoPresupuesto
@@ -27,6 +28,7 @@ from app.services.evento_service import _cache_contexto_financiero
 from app.services.openai_client import get_openai_client
 from app.services import categoria_service
 from app.services import presupuesto_service
+from app.services.modelos_ia import parametros_chat
 from app.utils.fecha import hoy_argentina
 
 
@@ -48,7 +50,7 @@ def extraer_concepto_mensaje(mensaje: str | None, tipo: str = "egreso") -> str:
     # Quitar signos monetarios y números
     texto = re.sub(r"[\$€£]\s*[\d\.,]+", "", texto)
     texto = re.sub(r"\b\d+(?:[\.,]\d+)?\b", "", texto)
-    texto = re.sub(r"\b(k|lucas?|palos?)\b", "", texto, flags=re.IGNORECASE)
+    texto = re.sub(rf"\b{sufijo_multiplicador_rx()}\b", "", texto, flags=re.IGNORECASE)
 
     # Quitar menciones de billeteras y métodos de pago
     billeteras_regex = (
@@ -811,8 +813,9 @@ def procesar_mensaje(
             logger.info(f"Enviando {len(messages_openai)} mensajes a OpenAI. Último mensaje: {messages_openai[-1]['content'][:100]}")
 
         client = _get_client()
-        model_name = getattr(settings, "OPENAI_MODEL", "gpt-4o-mini-2024-07-18")
+        model_name = settings.OPENAI_MODEL
         schema_format = _construir_schema_estricto(db)
+        params_chat = parametros_chat(model_name, 0.1, 2000)
 
         # Intento con Structured Outputs (strict: true), con fallback a json_object si falla por error no-conexión,
         # y reintento (máximo 2 intentos totales) ÚNICAMENTE ante fallos de conexión de red o timeout.
@@ -823,9 +826,8 @@ def procesar_mensaje(
                     response = client.chat.completions.create(
                         model=model_name,
                         messages=messages_openai,
-                        temperature=0.1,
-                        max_tokens=2000,
                         response_format=schema_format,
+                        **params_chat,
                     )
                 except Exception as e_strict:
                     err_strict_str = str(e_strict).lower()
@@ -838,9 +840,8 @@ def procesar_mensaje(
                     response = client.chat.completions.create(
                         model=model_name,
                         messages=messages_openai,
-                        temperature=0.1,
-                        max_tokens=2000,
                         response_format={"type": "json_object"},
+                        **params_chat,
                     )
                 break
             except Exception as e_call:

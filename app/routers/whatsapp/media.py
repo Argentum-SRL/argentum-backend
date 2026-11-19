@@ -128,8 +128,9 @@ def _transcribir_audio(
         # Transcribir pasando tupla (filename, bytes, content_type) directamente en memoria
         try:
             client_oai = get_openai_client()
+            modelo_audio = settings.OPENAI_MODEL_AUDIO
             transcripcion = client_oai.audio.transcriptions.create(
-                model="whisper-1",
+                model=modelo_audio,
                 file=(f"audio{ext}", audio_bytes, content_type),
                 language="es",
             )
@@ -137,7 +138,7 @@ def _transcribir_audio(
             registrar_uso_ia(
                 usuario_id=usuario_id,
                 funcion="audio_whatsapp",
-                modelo="whisper-1",
+                modelo=modelo_audio,
                 respuesta=transcripcion,
                 segundos_audio=segundos_audio,
             )

@@ -12,6 +12,11 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
+from app.core.jerga import (
+    monedas_dolares_rx,
+    monedas_pesos_rx,
+    sufijo_multiplicador_rx,
+)
 from app.models.billetera import Billetera
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 from app.models.usuario import Moneda, Usuario
@@ -196,21 +201,22 @@ def resolver_transferencia_distinta_moneda(
     m_norm = normalizar_texto(mensaje_texto)
     monto = item.get("monto")
 
+    suf_rx = sufijo_multiplicador_rx()
     m_usd = re.search(
-        r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\s*(?:d[oó]lares|verdes|usd)\b",
+        rf"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*{suf_rx})?)\s*{monedas_dolares_rx()}\b",
         m_norm,
     )
     dolares_explicit = _parsear_monto_argentino(m_usd.group(1)) if m_usd else None
 
     m_ars = re.search(
-        r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?)\s*(?:pesos|ars)\b",
+        rf"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*{suf_rx})?)\s*{monedas_pesos_rx()}\b",
         m_norm,
     )
     pesos_explicit = _parsear_monto_argentino(m_ars.group(1)) if m_ars else None
 
     m_cotiz = None
     for m_c in re.finditer(
-        r"\ba\s+(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\b", m_norm
+        rf"\ba\s+(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*{suf_rx})?)\b", m_norm
     ):
         val_c = _parsear_monto_argentino(m_c.group(1))
         if val_c and val_c > Decimal("100"):
@@ -219,7 +225,7 @@ def resolver_transferencia_distinta_moneda(
 
     m_son = re.search(
         r"(?:son|que\s+son|equivalen\s+a|por|recib[ií])\s+"
-        r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?)\b",
+        rf"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*{suf_rx})?)\b",
         m_norm,
     )
     segundo_monto = _parsear_monto_argentino(m_son.group(1)) if m_son else None

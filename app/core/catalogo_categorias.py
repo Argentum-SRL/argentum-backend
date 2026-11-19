@@ -45,7 +45,15 @@ ARBOL_CATEGORIAS: tuple[CategoriaCatalogo, ...] = (
         color="#F97316",
         descripcion_otros="fiambrería, dietética, vinoteca",
         subcategorias=(
-            SubcategoriaCatalogo("Supermercado", 0, False, "01", "súper, Coto, Carrefour, Día, Jumbo, Changomás, almacén, chino, mayorista, despensa, compras del mes"),
+            SubcategoriaCatalogo(
+                "Supermercado",
+                0,
+                False,
+                "01",
+                "súper, Coto, Carrefour, Día, Jumbo, Changomás, almacén, "
+                "chino, el chino de la esquina, súper chino, mayorista, "
+                "despensa, compras del mes",
+            ),
             SubcategoriaCatalogo("Verdulería", 1, False, "01", "verdulería, frutería, frutas, verduras, papas, tomate, lechuga, bananas"),
             SubcategoriaCatalogo("Carnicería", 2, False, "01", "carnicería, carne, asado, milanesas, pollo, pollería, granja, pescadería, pescado, achuras, chorizo"),
             SubcategoriaCatalogo("Panadería", 3, False, "01", "panadería, pan, facturas, medialunas, bizcochos, budín, tortas, chipá"),
@@ -61,7 +69,14 @@ ARBOL_CATEGORIAS: tuple[CategoriaCatalogo, ...] = (
         subcategorias=(
             SubcategoriaCatalogo("Restaurantes", 0, False, "11", "restaurante, resto, parrilla, pizzería, bodegón, almuerzo o cena afuera, tenedor libre"),
             SubcategoriaCatalogo("Delivery", 1, False, "11", "delivery, PedidosYa, Rappi, pedir comida, pizza o empanadas a domicilio"),
-            SubcategoriaCatalogo("Cafetería", 2, False, "11", "café, cafetería, Starbucks, merienda o desayuno afuera, heladería"),
+            SubcategoriaCatalogo(
+                "Cafetería",
+                2,
+                False,
+                "11",
+                "café, cafetería, Starbucks, merienda o desayuno afuera, "
+                "helado, heladería",
+            ),
         ),
     ),
     CategoriaCatalogo(

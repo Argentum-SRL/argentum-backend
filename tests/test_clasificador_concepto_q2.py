@@ -235,7 +235,7 @@ def test_tc1_opciones_validas_excluye_sistema_ahorro_y_otro_tipo(ctx_clf):
 
 
 def test_tc2_system_prompt_reglas_bot_y_catalogo_por_tipo(ctx_clf):
-    """TC2: prompt contiene las 5 reglas de ai_service y filtra categorías por tipo."""
+    """TC2: prompt conserva 4 reglas del bot, adapta la 5ta y filtra por tipo."""
     texto_bot = ai_service.SYSTEM_PROMPT
     inicio = texto_bot.index("REGLAS DE CATEGORÍA (OBLIGATORIAS):")
     fin = texto_bot.index("CONCEPTOS RAROS O DESCONOCIDOS:")
@@ -243,13 +243,19 @@ def test_tc2_system_prompt_reglas_bot_y_catalogo_por_tipo(ctx_clf):
     reglas_bot = [ln for ln in bloque.splitlines() if ln.startswith("- ")]
     assert len(reglas_bot) == 5
 
-    for regla in reglas_bot:
+    regla_5_clf = (
+        '- Si sabés el rubro pero no la subcategoría, elegí '
+        '"<Categoría> › Otros" (ej: "Alimentación › Otros").'
+    )
+    reglas_esperadas = reglas_bot[:4] + [regla_5_clf]
+
+    for regla in reglas_esperadas:
         assert regla in clasificador_concepto_service.SYSTEM_PROMPT_CLASIFICADOR
 
     prompt_eg = clasificador_concepto_service.construir_system_prompt(
         ctx_clf.db, "egreso"
     )
-    for regla in reglas_bot:
+    for regla in reglas_esperadas:
         assert regla in prompt_eg
     linea_libros = (
         "  - Libros y útiles: útiles escolares, libros de estudio, "
@@ -470,3 +476,49 @@ def test_frases_evaluacion_clasificador_validas(ctx_clf):
         assert tipo in opciones_por_tipo
         assert item["esperado"] in opciones_por_tipo[tipo]
     assert len(ctx_clf.llamadas) == 0
+
+
+def test_tc16_clasificar_sin_limites_descarta_otros_secundarios(ctx_clf):
+    """TC16: descarta '› Otros' secundarios solo si la primera es específica."""
+    ctx_clf.respuesta_cfg["opciones"] = [
+        "Alimentación › Supermercado",
+        "Alimentación › Otros",
+        "Alimentación › Kiosco",
+    ]
+    pares_esp = clasificador_concepto_service.clasificar_sin_limites(
+        ctx_clf.db, "compras", "egreso"
+    )
+    assert pares_esp == [
+        ("Alimentación", "Supermercado"),
+        ("Alimentación", "Kiosco"),
+    ]
+
+    ctx_clf.respuesta_cfg["opciones"] = [
+        "Ocio › Otros",
+        "Ocio › Salidas",
+    ]
+    pares_otros = clasificador_concepto_service.clasificar_sin_limites(
+        ctx_clf.db, "algo de ocio", "egreso"
+    )
+    assert pares_otros == [
+        ("Ocio", None),
+        ("Ocio", "Salidas"),
+    ]
+
+
+def test_tc17_descripciones_nuevas_en_prompt_clasificador(ctx_clf):
+    """TC17: descripciones actualizadas de Supermercado y Cafetería en egreso."""
+    prompt_eg = clasificador_concepto_service.construir_system_prompt(
+        ctx_clf.db, "egreso"
+    )
+    desc_super = (
+        "súper, Coto, Carrefour, Día, Jumbo, Changomás, almacén, "
+        "chino, el chino de la esquina, súper chino, mayorista, "
+        "despensa, compras del mes"
+    )
+    desc_cafe = (
+        "café, cafetería, Starbucks, merienda o desayuno afuera, "
+        "helado, heladería"
+    )
+    assert f"  - Supermercado: {desc_super}" in prompt_eg
+    assert f"  - Cafetería: {desc_cafe}" in prompt_eg

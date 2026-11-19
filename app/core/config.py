@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     # OpenAI
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini-2024-07-18"
+    # Modelo para leer fotos y PDF; se cambia tras medir con scripts\evaluacion.
+    OPENAI_MODEL_DOCUMENTOS: str = "gpt-4o"
+    # Modelo para transcribir audios; se cambia tras medir con scripts\evaluacion.
+    OPENAI_MODEL_AUDIO: str = "whisper-1"
+    # Esfuerzo de razonamiento (none|low|medium); se decide con scripts\evaluacion.
+    OPENAI_RAZONAMIENTO: str = "none"
     IA_PRESUPUESTO_DIARIO_USD: float = 1.0
     IA_PRESUPUESTO_MENSUAL_USD: float = 10.0  # Tope mensual de OpenAI (V6, Sebastián 06/11/2026): mail al 50%, 80% y 100%; al 100% el bot deja de usar la IA hasta el 1° del mes siguiente.
     IA_MAX_MENSAJES_DIA_USUARIO: int = 150

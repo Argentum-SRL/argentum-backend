@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "frases": [
+    {
+      "id": "B001",
+      "funcion": "gasto",
+      "mensajes": ["gasté 2 lucas en el chino"],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 2000,
+            "moneda": "ARS",
+            "categoria": "Alimentación",
+            "subcategoria": "Supermercado",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B002",
+      "funcion": "ingreso",
+      "mensajes": ["cobré el sueldo, 850 mil"],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 850000,
+            "moneda": "ARS",
+            "categoria": "Trabajo",
+            "subcategoria": "Sueldo"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B003",
+      "funcion": "transferencia",
+      "mensajes": ["pasé 20 lucas de galicia a santander"],
+      "confirmar": true,
+      "esperado": {
+        "transferencias": [
+          {
+            "origen": "Galicia",
+            "destino": "Santander",
+            "monto": 20000,
+            "moneda": "ARS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B004",
+      "funcion": "gasto",
+      "mensajes": ["ayer nafta 35 mil"],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 35000,
+            "categoria": "Transporte",
+            "subcategoria": "Combustible",
+            "dias": -1
+          }
+        ]
+      }
+    },
+    {
+      "id": "B005",
+      "funcion": "gasto",
+      "mensajes": ["birra con los pibes 8500 en efectivo"],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 8500,
+            "cuenta": "Efectivo Pesos",
+            "categoria": "Ocio",
+            "subcategoria": "Salidas"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B006",
+      "funcion": "gasto",
+      "mensajes": ["3 gambas en el kiosco"],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": []
+      }
+    }
+  ]
+}

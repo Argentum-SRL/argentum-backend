@@ -9,6 +9,13 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from app.core.catalogo_suscripciones import identificar_servicio_en_texto
+from app.core.jerga import (
+    PALABRAS_DOLARES,
+    monedas_dolares_rx,
+    monedas_pesos_rx,
+    multiplicador_de,
+    sufijo_multiplicador_rx,
+)
 from app.core.reglas_texto_wpp import fecha_corta_wpp
 from app.utils.formato import formatear_monto
 from app.utils.fecha import hoy_argentina
@@ -41,15 +48,15 @@ def _nombre_corto_categoria(nombre: str | None) -> str:
 def _parsear_monto_texto_cuota(t: str) -> Decimal | None:
     """Parsea montos en texto soportando modismos argentinos como '80 mil', '80k', '1 palo'."""
     t = t.lower().strip()
-    m_mil = re.match(r"^([0-9]+(?:[.,][0-9]+)?)\s*(?:mil|k)$", t)
-    if m_mil:
-        val = float(m_mil.group(1).replace(",", ".")) * 1000
-        return Decimal(str(int(val)))
-    m_palo = re.match(r"^([0-9]+(?:[.,][0-9]+)?)\s*(?:palos?|lucas?)$", t)
-    if m_palo:
-        mult = 1000000 if "palo" in t else 1000
-        val = float(m_palo.group(1).replace(",", ".")) * mult
-        return Decimal(str(int(val)))
+    m_mult = re.match(
+        rf"^([0-9]+(?:[.,][0-9]+)?)\s*({sufijo_multiplicador_rx()})$",
+        t,
+    )
+    if m_mult:
+        mult = multiplicador_de(m_mult.group(2))
+        if mult is not None:
+            val = float(m_mult.group(1).replace(",", ".")) * mult
+            return Decimal(str(int(val)))
     t_clean = re.sub(r"[^\d.,]", "", t)
     if not t_clean:
         return None
@@ -78,8 +85,11 @@ def _interpretar_cuotas(
     m_norm = normalizar_texto(mensaje)
 
     # Caso 1: "en X cuotas de M" o "X cuotas de M" -> M es por cuota
+    suf_rx = sufijo_multiplicador_rx()
     pat_de = re.search(
-        r"(?:en\s+)?(\d+)\s*(?:cuotas?|pagos?)\s+de\s+(?:cada\s+una\s+de\s+)?(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?)(?:\b|$)",
+        rf"(?:en\s+)?(\d+)\s*(?:cuotas?|pagos?)\s+de\s+"
+        rf"(?:cada\s+una\s+de\s+)?"
+        rf"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*{suf_rx})?)(?:\b|$)",
         m_norm,
     )
     if pat_de:
@@ -97,7 +107,8 @@ def _interpretar_cuotas(
 
     # Caso 2: "M en X cuotas" o "M a pagar en X cuotas" -> M es el total
     pat_en = re.search(
-        r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k|\s*lucas?|\s*palos?)?)\s+(?:a\s+pagar\s+)?en\s+(\d+)\s*(?:cuotas?|pagos?)(?:\b|$)",
+        rf"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*{suf_rx})?)\s+"
+        rf"(?:a\s+pagar\s+)?en\s+(\d+)\s*(?:cuotas?|pagos?)(?:\b|$)",
         m_norm,
     )
     if pat_en:
@@ -228,18 +239,15 @@ def _parsear_monto_argentino(texto: str) -> Decimal | None:
     limpio = texto.strip().lower()
     limpio = limpio.replace("$", "").replace("ars", "").replace("usd", "").strip()
     multiplicador = Decimal("1")
-    if limpio.endswith("k"):
-        multiplicador = Decimal("1000")
-        limpio = limpio[:-1].strip()
-    elif "mil" in limpio.split() or limpio.endswith("mil") or re.search(r"\bmil\b", limpio):
-        multiplicador = Decimal("1000")
-        limpio = re.sub(r"\bmil\b", "", limpio).strip()
-    elif "luca" in limpio:
-        multiplicador = Decimal("1000")
-        limpio = re.sub(r"lucas?", "", limpio).strip()
-    elif "palo" in limpio:
-        multiplicador = Decimal("1000000")
-        limpio = re.sub(r"palos?", "", limpio).strip()
+    m_mult = re.search(
+        rf"(?:(?<=\d)|(?<=\s)|^)\s*({sufijo_multiplicador_rx()})$",
+        limpio,
+    )
+    if m_mult:
+        mult = multiplicador_de(m_mult.group(1))
+        if mult is not None:
+            multiplicador = Decimal(str(mult))
+            limpio = limpio[: m_mult.start()].strip()
 
     if "." in limpio and "," in limpio:
         limpio = limpio.replace(".", "").replace(",", ".")
@@ -288,8 +296,13 @@ def _extraer_nombre_servicio(mensaje: str) -> str | None:
     if serv_cat:
         return serv_cat["nombre"]
 
+    mon_rx = rf"(?:{monedas_dolares_rx()}|{monedas_pesos_rx()}|us\$)"
+    suf_rx = sufijo_multiplicador_rx()
     m1 = re.search(
-        r"(?:empec[eé]|empece)\s+a\s+pagar\s+(?:\$?\s*[\d\.,]+(?:k|\s*mil)?\s*(?:d[oó]lares|usd|pesos)?\s+)?(?:de\s+la|de\s+el|del|de|a|en)\s+(.+?)(?:\s+(?:por\s+mes|al\s+mes|mensual|anual|cada\s+mes|con|desde)\b|$)",
+        rf"(?:empec[eé]|empece)\s+a\s+pagar\s+"
+        rf"(?:\$?\s*[\d\.,]+(?:\s*{suf_rx})?\s*{mon_rx}?\s+)?"
+        r"(?:de\s+la|de\s+el|del|de|a|en)\s+(.+?)"
+        r"(?:\s+(?:por\s+mes|al\s+mes|mensual|anual|cada\s+mes|con|desde)\b|$)",
         mensaje,
         flags=re.IGNORECASE,
     )
@@ -333,8 +346,15 @@ def _extraer_nombre_servicio(mensaje: str) -> str | None:
 
 def _extraer_monto_y_moneda_suscripcion(mensaje: str) -> tuple[Decimal | None, str]:
     norm = normalizar_texto(mensaje)
-    moneda = "USD" if any(w in norm for w in ["dolar", "dolares", "dólares", "usd", "us$"]) else "ARS"
-    m = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\s*(?:d[oó]lares|usd|pesos)?\b", mensaje, flags=re.IGNORECASE)
+    es_usd = any(w in norm for w in (*PALABRAS_DOLARES, "us$"))
+    moneda = "USD" if es_usd else "ARS"
+    suf_rx = sufijo_multiplicador_rx()
+    mon_rx = rf"(?:{monedas_dolares_rx()}|{monedas_pesos_rx()}|us\$)"
+    m = re.search(
+        rf"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*{suf_rx})?)\s*{mon_rx}?\b",
+        mensaje,
+        flags=re.IGNORECASE,
+    )
     if m:
         monto = _parsear_monto_argentino(m.group(1))
         return monto, moneda
@@ -365,11 +385,22 @@ def montos_de_dinero_en_texto(texto: str) -> list[str]:
         t_enmascarado = re.sub(pf, lambda m: " " * len(m.group(0)), t_enmascarado, flags=re.IGNORECASE)
 
     # 2. Enmascarar lo que sigue a 'cuotas de' o 'cuota de'
-    patron_cuotas_de = r"\bcuotas?\s+de\s+(?:cada\s+una\s+de\s+)?(?:[\$€£]|us\$|usd)?\s*[\d\.,]+(?:\s*(?:pesos|mil|lucas?|k|palos?|d[oó]lares|dolares|usd|us\$))?"
-    t_enmascarado = re.sub(patron_cuotas_de, lambda m: " " * len(m.group(0)), t_enmascarado, flags=re.IGNORECASE)
+    sufijos = (
+        rf"(?:{sufijo_multiplicador_rx()}|{monedas_pesos_rx()}|"
+        rf"{monedas_dolares_rx()}|us\$)"
+    )
+    patron_cuotas_de = (
+        r"\bcuotas?\s+de\s+(?:cada\s+una\s+de\s+)?"
+        rf"(?:[\$€£]|us\$|usd)?\s*[\d\.,]+(?:\s*{sufijos})?"
+    )
+    t_enmascarado = re.sub(
+        patron_cuotas_de,
+        lambda m: " " * len(m.group(0)),
+        t_enmascarado,
+        flags=re.IGNORECASE,
+    )
 
     # 3. Buscar montos con marca de dinero
-    sufijos = r"(?:pesos|mil|lucas?|k|palos?|d[oó]lares|dolares|usd|us\$)"
     patron_monto = re.compile(
         rf"""
         (?:
@@ -393,7 +424,8 @@ def montos_de_dinero_en_texto(texto: str) -> list[str]:
 
 def parsear_monto_marca(m_txt: str) -> Decimal | None:
     """Extrae el valor numérico Decimal de una expresión de monto con marca."""
-    t = re.sub(r"(?:[\$€£]|us\$|usd|u\$s|pesos|d[oó]lares|dolares)", "", m_txt, flags=re.IGNORECASE).strip()
+    rx_mon = rf"(?:[\$€£]|us\$|{monedas_dolares_rx()}|{monedas_pesos_rx()})"
+    t = re.sub(rx_mon, "", m_txt, flags=re.IGNORECASE).strip()
     return _parsear_monto_texto_cuota(t) or _parsear_monto_argentino(t)
 
 

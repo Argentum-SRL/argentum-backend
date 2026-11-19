@@ -10,6 +10,7 @@ from decimal import Decimal, ROUND_HALF_UP
 import re
 import structlog
 
+from app.core.jerga import sufijo_multiplicador_rx
 from app.core.reglas_texto_wpp import ejemplo_wpp, partir_lineas_wpp
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 from app.routers.whatsapp.contexto import ContextoMensaje
@@ -39,7 +40,7 @@ TRIGGERS_CONVENIENCIA = (
     "cuotas o",
 )
 
-_MONTO_RX = r"(?:\$\s*)?\d+(?:[\.,]\d+)*(?:\s*(?:mil|k|lucas?|palos?))?"
+_MONTO_RX = rf"(?:\$\s*)?\d+(?:[\.,]\d+)*(?:\s*{sufijo_multiplicador_rx()})?"
 _PATRON_CONTADO_DESPUES = re.compile(
     rf"({_MONTO_RX})\s+(?:de\s+contado|contado|en\s+efectivo)\b"
 )

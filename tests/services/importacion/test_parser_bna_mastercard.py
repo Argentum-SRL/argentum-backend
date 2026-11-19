@@ -5,6 +5,7 @@ from decimal import Decimal
 from unittest.mock import MagicMock, patch
 import pytest
 
+from app.core.config import settings
 from app.services.importacion.utils import sanitizar_texto_pdf
 from app.services.importacion.parser_bna_mastercard import parsear_bna_mastercard, parse_bna_mastercard_date
 from app.services.importacion.schemas import ResultadoParseo
@@ -144,7 +145,7 @@ N° de Socio 099-0123456-0-1
         assert mock_client.chat.completions.create.called
         call_args = mock_client.chat.completions.create.call_args[1]
         
-        assert call_args["model"] == "gpt-4o-mini"
+        assert call_args["model"] == settings.OPENAI_MODEL
         assert call_args["max_tokens"] == 6000
         assert call_args["temperature"] == 0.1
         

@@ -14,6 +14,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from app.core.constants import MAX_MONTO_INTEGRIDAD
+from app.core.jerga import sufijo_multiplicador_rx
 from app.models.billetera import Billetera
 from app.models.conversacion_wpp import ConversacionWpp, TipoMensajeWpp
 from app.models.usuario import Moneda, Usuario
@@ -243,7 +244,7 @@ def extraer_monto_pesos(texto: str | None) -> Decimal | None:
     elif t.endswith(" pesos"):
         t = t[:-6].strip()
 
-    patron = r"\$?\s?\d[\d.,]*\s?(?:k|mil|lucas?)?"
+    patron = rf"\$?\s?\d[\d.,]*\s?{sufijo_multiplicador_rx()}?"
     if not re.fullmatch(patron, t, flags=re.IGNORECASE):
         return None
 

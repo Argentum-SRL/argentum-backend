@@ -10,6 +10,13 @@ import unicodedata
 from datetime import date, timedelta
 from decimal import Decimal
 
+from app.core.jerga import (
+    PALABRAS_DOLARES,
+    PALABRAS_PESOS,
+    monedas_dolares_rx,
+    monedas_pesos_rx,
+    sufijo_multiplicador_rx,
+)
 from app.routers.whatsapp.montos_palabras import buscar_monto, monto_en_palabras
 
 _DIAS_SEMANA = {
@@ -146,7 +153,7 @@ def _extraer_monto_y_moneda(t: str) -> tuple[Decimal | None, str | None, str]:
     """Extrae el monto y la moneda escrita justo después del monto."""
     # 1. Numérico
     pat_num = re.search(
-        r"(?:\$|\b)\d+(?:[.,]\d+)*(?:\s*(?:mil|k|lucas?|palos?))?\b",
+        rf"(?:\$|\b)\d+(?:[.,]\d+)*(?:\s*{sufijo_multiplicador_rx()})?\b",
         t,
         re.IGNORECASE,
     )
@@ -157,14 +164,14 @@ def _extraer_monto_y_moneda(t: str) -> tuple[Decimal | None, str | None, str]:
             moneda = None
             resto = t[pat_num.end():]
             m_mon = re.match(
-                r"^\s+(dolares|dolar|usd|u\$s|verdes|pesos|mangos)\b",
+                rf"^\s+({monedas_dolares_rx()}|{monedas_pesos_rx()})\b",
                 resto,
                 re.IGNORECASE,
             )
             end_pos = pat_num.end()
             if m_mon:
                 w = m_mon.group(1).lower()
-                if w in ("dolares", "dolar", "usd", "u$s", "verdes"):
+                if w in PALABRAS_DOLARES:
                     moneda = "USD"
                 else:
                     moneda = "ARS"
@@ -182,11 +189,9 @@ def _extraer_monto_y_moneda(t: str) -> tuple[Decimal | None, str | None, str]:
             if val is not None and val > 0:
                 moneda = None
                 end_idx = j
-                if j < n and palabras[j] in (
-                    "dolares", "dolar", "usd", "u$s", "verdes", "pesos", "mangos"
-                ):
+                if j < n and palabras[j] in (*PALABRAS_DOLARES, *PALABRAS_PESOS):
                     w = palabras[j]
-                    if w in ("dolares", "dolar", "usd", "u$s", "verdes"):
+                    if w in PALABRAS_DOLARES:
                         moneda = "USD"
                     else:
                         moneda = "ARS"

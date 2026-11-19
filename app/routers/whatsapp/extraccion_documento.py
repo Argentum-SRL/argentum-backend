@@ -13,6 +13,8 @@ import json
 from typing import Any
 import structlog
 
+from app.core.config import settings
+from app.services.modelos_ia import parametros_chat
 from app.services.openai_client import get_openai_client
 from app.utils.fecha import hoy_argentina
 from app.utils.texto import normalizar_texto
@@ -599,8 +601,9 @@ def extraer_movimientos_de_imagen(
         client_oai = get_openai_client()
         esquema = esquema_con_categorias(categorias_usuario)
 
+        modelo_doc = settings.OPENAI_MODEL_DOCUMENTOS
         vision_response = client_oai.chat.completions.create(
-            model="gpt-4o",
+            model=modelo_doc,
             messages=[
                 {
                     "role": "system",
@@ -624,14 +627,14 @@ def extraer_movimientos_de_imagen(
                 },
             ],
             response_format=esquema,
-            temperature=0,
+            **parametros_chat(modelo_doc, 0, None),
         )
 
         from app.services.uso_ia_service import registrar_uso_ia
         registrar_uso_ia(
             usuario_id=usuario_id,
             funcion="imagen_whatsapp",
-            modelo="gpt-4o",
+            modelo=modelo_doc,
             respuesta=vision_response,
         )
 
@@ -669,8 +672,9 @@ def extraer_movimientos_de_texto_pdf(
 
         client_oai = get_openai_client()
         esquema = esquema_con_categorias(categorias_usuario)
+        modelo_doc = settings.OPENAI_MODEL_DOCUMENTOS
         response = client_oai.chat.completions.create(
-            model="gpt-4o",
+            model=modelo_doc,
             messages=[
                 {
                     "role": "system",
@@ -682,14 +686,14 @@ def extraer_movimientos_de_texto_pdf(
                 },
             ],
             response_format=esquema,
-            temperature=0,
+            **parametros_chat(modelo_doc, 0, None),
         )
 
         from app.services.uso_ia_service import registrar_uso_ia
         registrar_uso_ia(
             usuario_id=usuario_id,
             funcion="pdf_whatsapp",
-            modelo="gpt-4o",
+            modelo=modelo_doc,
             respuesta=response,
         )
 
