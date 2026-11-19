@@ -142,6 +142,7 @@ def _resolver_categoria_y_subcategoria(
     usuario_id: UUID,
     db: Session,
     tipo: str = "egreso",
+    detalle: dict | None = None,
 ) -> tuple[UUID | None, UUID | None]:
     """
     Parsea y valida el campo categoría/subcategoría contra las tablas reales de la base de datos
@@ -231,7 +232,24 @@ def _resolver_categoria_y_subcategoria(
                 confianza_cat = "exacta"
                 break
 
-        # b) Coincidencia por contención SOLO SI produce exactamente 1 candidata (min 4 chars)
+        # b) Búsqueda por subcategoría exacta y única en todo el árbol (antes que contención de cat)
+        if not categoria_match:
+            candidatas_sub = []
+            for s in subcategorias_candidatas:
+                s_norm = normalizar_texto(s.nombre)
+                if s_norm == norm_cat:
+                    candidatas_sub.append(s)
+            if len(candidatas_sub) == 1:
+                sub_unica_detectada = candidatas_sub[0]
+                cat_padre = next(
+                    (c for c in categorias_candidatas if c.id == sub_unica_detectada.categoria_id),
+                    None,
+                )
+                if cat_padre:
+                    categoria_match = cat_padre
+                    confianza_cat = "aproximada"
+
+        # c) Coincidencia por contención SOLO SI produce exactamente 1 candidata (min 4 chars)
         if not categoria_match:
             candidatas_b = []
             for c in categorias_candidatas:
@@ -243,23 +261,11 @@ def _resolver_categoria_y_subcategoria(
                 categoria_match = candidatas_b[0]
                 confianza_cat = "aproximada"
 
-        # c) Búsqueda por subcategoría exacta y única en todo el árbol (solo si a y b fallaron)
-        if not categoria_match:
-            candidatas_sub = []
-            for s in subcategorias_candidatas:
-                s_norm = normalizar_texto(s.nombre)
-                if s_norm == norm_cat:
-                    candidatas_sub.append(s)
-            if len(candidatas_sub) == 1:
-                sub_unica_detectada = candidatas_sub[0]
-                cat_padre = next((c for c in categorias_candidatas if c.id == sub_unica_detectada.categoria_id), None)
-                if cat_padre:
-                    categoria_match = cat_padre
-                    confianza_cat = "aproximada"
-
     # d) Fallback si nada resolvió
     if not categoria_match:
         cat_id, _ = _obtener_fallback_otros(tipo, categorias_candidatas, db)
+        if detalle is not None:
+            detalle["categoria_por_descarte"] = True
         logger.debug(
             "[CATEGORIZACION] Fallback categoría 'Otros' para input='%s' -> (%s, None), confianza=fallback",
             nombre,
@@ -403,8 +409,12 @@ def _buscar_slot_filling_vencido(usuario_id: UUID, db: Session) -> ConversacionW
     ).scalars().first()
     return conv
 
-def _buscar_propuesta_pendiente(usuario_id: UUID, db: Session) -> ConversacionWpp | None:
-    limite = datetime.now(timezone.utc) - timedelta(minutes=PLAZO_EXPIRACION_ESTADO_MINUTOS)
+def _buscar_propuesta_pendiente(
+    usuario_id: UUID,
+    db: Session,
+    minutos: int = PLAZO_EXPIRACION_ESTADO_MINUTOS,
+) -> ConversacionWpp | None:
+    limite = datetime.now(timezone.utc) - timedelta(minutes=minutos)
     return db.execute(
         select(ConversacionWpp)
         .where(

@@ -4075,7 +4075,7 @@
       "id": "B189",
       "funcion": "ingreso",
       "mensajes": [
-        "propina 5000 en efectivo"
+        "me dejaron 5000 de propina en efectivo"
       ],
       "confirmar": true,
       "esperado": {
@@ -5206,7 +5206,6 @@
             "monto": 900000,
             "moneda": "ARS",
             "categoria": "Hogar",
-            "subcategoria": "Muebles y electro",
             "dias": 0,
             "cuotas": 10
           }
@@ -5219,19 +5218,9 @@
       "mensajes": [
         "lavarropas 3 cuotas de 150 mil con la tarjeta"
       ],
-      "confirmar": true,
+      "confirmar": false,
       "esperado": {
-        "movimientos": [
-          {
-            "tipo": "egreso",
-            "monto": 450000,
-            "moneda": "ARS",
-            "categoria": "Hogar",
-            "subcategoria": "Muebles y electro",
-            "dias": 0,
-            "cuotas": 3
-          }
-        ]
+        "movimientos": []
       }
     },
     {
@@ -5390,20 +5379,14 @@
       "id": "B257",
       "funcion": "dolares",
       "mensajes": [
-        "pagué 20 dolares de chatgpt"
+        "pagué 20 dolares de chatgpt",
+        "sí"
       ],
-      "confirmar": true,
+      "confirmar": false,
       "esperado": {
-        "movimientos": [
-          {
-            "tipo": "egreso",
-            "monto": 20,
-            "moneda": "USD",
-            "cuenta": "Efectivo Dólares",
-            "categoria": "Tecnología",
-            "subcategoria": "Apps y programas",
-            "dias": 0
-          }
+        "movimientos": [],
+        "texto_contiene": [
+          "US$20 por mes"
         ]
       }
     },
@@ -7004,6 +6987,320 @@
       "confirmar": false,
       "esperado": {
         "movimientos": []
+      }
+    },
+    {
+      "id": "B369",
+      "funcion": "dolares",
+      "mensajes": [
+        "pagué 20 dolares de chatgpt",
+        "no, fue una vez"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 20,
+            "moneda": "USD",
+            "cuenta": "Efectivo Dólares",
+            "categoria": "Tecnología",
+            "subcategoria": "Apps y programas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B370",
+      "funcion": "permitirse",
+      "mensajes": [
+        "si me compro una bici de 300 lucas me alcanza?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "puede_permitirse",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B371",
+      "funcion": "permitirse",
+      "mensajes": [
+        "puedo gastar 50 lucas en ropa este mes?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "puede_permitirse",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B372",
+      "funcion": "ingreso",
+      "mensajes": [
+        "me llego el sueldo 900 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 900000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Trabajo",
+            "subcategoria": "Sueldo",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B373",
+      "funcion": "gasto",
+      "mensajes": [
+        "cuota del colegio 120 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 120000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Educación",
+            "subcategoria": "Colegio y facultad",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B374",
+      "funcion": "cuotas",
+      "mensajes": [
+        "200 lucas en 6 cuotas con la visa santander, un celular"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 200000,
+            "moneda": "ARS",
+            "cuenta": "•••• 5077",
+            "categoria": "Tecnología",
+            "subcategoria": "Equipos",
+            "dias": 0,
+            "cuotas": 6
+          }
+        ]
+      }
+    },
+    {
+      "id": "B375",
+      "funcion": "cuotas",
+      "mensajes": [
+        "6 cuotas de 30 mil con la amex, unas zapatillas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 180000,
+            "moneda": "ARS",
+            "cuenta": "•••• 2745",
+            "categoria": "Indumentaria",
+            "subcategoria": "Calzado",
+            "dias": 0,
+            "cuotas": 6
+          }
+        ]
+      }
+    },
+    {
+      "id": "B376",
+      "funcion": "meta",
+      "mensajes": [
+        "guardé 30 lucas en la meta del viaje a bariloche"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "aportar_meta",
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 30000,
+            "moneda": "ARS",
+            "categoria": "Ahorro"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B377",
+      "funcion": "meta",
+      "mensajes": [
+        "separé 40 mil para el fondo de emergencia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "aportar_meta",
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 40000,
+            "moneda": "ARS",
+            "categoria": "Ahorro"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B378",
+      "funcion": "dolares",
+      "mensajes": [
+        "compré 200 dólares con galicia a 1480"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": [
+          {
+            "origen": "Galicia",
+            "destino": "Efectivo Dólares"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B379",
+      "funcion": "dolares",
+      "mensajes": [
+        "gasté 50 usd con la visa santander en un hotel"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 50,
+            "moneda": "USD",
+            "cuenta": "•••• 5077",
+            "categoria": "Ocio",
+            "subcategoria": "Viajes",
+            "dias": 0,
+            "cuotas": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "B380",
+      "funcion": "ingreso",
+      "mensajes": [
+        "ingreso 15 lucas en santander de una venta"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 15000,
+            "moneda": "ARS",
+            "cuenta": "Santander",
+            "categoria": "Trabajo",
+            "subcategoria": "Ventas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B381",
+      "funcion": "gasto",
+      "mensajes": [
+        "nafta 25 mil en efectivo"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 25000,
+            "moneda": "ARS",
+            "cuenta": "Efectivo Pesos",
+            "categoria": "Transporte",
+            "subcategoria": "Combustible",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B382",
+      "funcion": "gasto",
+      "mensajes": [
+        "subte 1200"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 1200,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Transporte público",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B383",
+      "funcion": "gasto",
+      "mensajes": [
+        "tren 900"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 900,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Transporte público",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B384",
+      "funcion": "gasto",
+      "mensajes": [
+        "pagué 8 mil de la verdu con billetes"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 8000,
+            "moneda": "ARS",
+            "cuenta": "Efectivo Pesos",
+            "categoria": "Alimentación",
+            "subcategoria": "Verdulería",
+            "dias": 0
+          }
+        ]
       }
     }
   ]

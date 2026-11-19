@@ -183,6 +183,8 @@ def manejar_cancelacion(
         msg_cancel = "Listo, solo esta vez."
     elif intent_ganador == "memoria_anteriores":
         msg_cancel = "Listo, quedan como estaban."
+    elif intent_ganador == "registrar_transaccion":
+        msg_cancel = "Listo, no lo anoto."
     else:
         msg_cancel = "Listo, cancelado."
 

@@ -405,7 +405,8 @@ def test_es_registro_directo():
             "billetera_origen": "Galicia",
         },
     )
-    assert _es_registro_directo(c_wpp_sin_flujo) is True
+    # D-D2: 26000 no aparece en "gaste 20 dolares" -> exige confirmacion
+    assert _es_registro_directo(c_wpp_sin_flujo) is False
 
 
 def test_confirmacion_usd_pesos(db: Session, usuario: Usuario, datos_base):

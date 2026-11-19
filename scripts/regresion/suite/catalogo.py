@@ -154,10 +154,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P3.10", "punto": "Punto 3", "match": "exacto",
             "nombre": "Usuario con una sola billetera en pesos dice 'gasté 5000'",
             "ejecutar": lambda: p3_caso_10(datos),
-            "esperado": (
-                "Listo, anoté $5.000 en Otros desde Efectivo Pesos.\n"
-                "Efectivo Pesos quedó en negativo."
-            ),
+            "esperado": "¿Anoto $5.000 en Otros desde Efectivo Pesos?",
         },
         {
             "id": "P4.1", "punto": "Punto 4", "match": "exacto",
@@ -182,7 +179,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P4.3", "punto": "Punto 4", "match": "exacto",
             "nombre": "Recibe una propuesta y responde 'no'",
             "ejecutar": lambda: p4_caso_3(datos),
-            "esperado": "Listo, cancelado.",
+            "esperado": "Listo, no lo anoto.",
         },
         {
             "id": "P4.4", "punto": "Punto 4", "match": "exacto",
@@ -221,7 +218,7 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P4.VAR1", "punto": "Punto 4", "match": "exacto",
             "nombre": "Variante de no: 'no'",
             "ejecutar": lambda: p4_variante_no(datos, "no"),
-            "esperado": "Listo, cancelado.",
+            "esperado": "Listo, no lo anoto.",
         },
         {
             "id": "P4.VAR2", "punto": "Punto 4", "match": "exacto",
@@ -239,19 +236,19 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
             "id": "P4.VAR4", "punto": "Punto 4", "match": "exacto",
             "nombre": "Variante de no: 'no, cancelá'",
             "ejecutar": lambda: p4_variante_no(datos, "no, cancelá"),
-            "esperado": "Listo, cancelado.",
+            "esperado": "Listo, no lo anoto.",
         },
         {
             "id": "P4.VAR5", "punto": "Punto 4", "match": "exacto",
             "nombre": "Variante de no: 'nooo'",
             "ejecutar": lambda: p4_variante_no(datos, "nooo"),
-            "esperado": "Listo, cancelado.",
+            "esperado": "Listo, no lo anoto.",
         },
         {
             "id": "P4.VAR6", "punto": "Punto 4", "match": "exacto",
             "nombre": "Variante de no: 'no gracias'",
             "ejecutar": lambda: p4_variante_no(datos, "no gracias"),
-            "esperado": "Listo, cancelado.",
+            "esperado": "Listo, no lo anoto.",
         },
         {
             "id": "P5.1", "punto": "Punto 5", "match": "contiene",

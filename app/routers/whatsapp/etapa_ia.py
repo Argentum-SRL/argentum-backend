@@ -26,6 +26,7 @@ from app.routers.whatsapp.parsers import (
     parsear_monto_marca,
     propagar_fechas_lote,
 )
+from app.routers.whatsapp.regla_registro import confianza_ia_baja
 from app.routers.whatsapp.resolvers_cascada import _merge_entidades
 from app.routers.whatsapp.verificacion_texto_ia import TextoIA
 from app.services import ai_service
@@ -269,7 +270,7 @@ def procesar_llamada_ia_y_normalizacion(ctx: ContextoMensaje) -> None:
             if conv_activa.slot_filling_estado.get(marca):
                 resultado_ia["entidades"][marca] = True
 
-    if confianza_ia_raw < 0.85 and isinstance(resultado_ia.get("entidades"), dict):
+    if confianza_ia_baja(confianza_ia_raw) and isinstance(resultado_ia.get("entidades"), dict):
         resultado_ia["entidades"]["confianza_baja"] = True
 
     # Actualizar estado en el contexto

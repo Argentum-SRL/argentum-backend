@@ -159,9 +159,16 @@ class GestorGrabacionesIA:
         # Modo replay
         rec = self._cargar_grabacion(esc_id)
         if rec and "llamadas" in rec and idx < len(rec["llamadas"]):
+            llamada_rec = rec["llamadas"][idx]
+            msg_rec = llamada_rec.get("mensaje")
+            if (
+                msg_rec is not None
+                and str(msg_rec).strip() != str(mensaje or "").strip()
+            ):
+                print(f"  [DESALINEADO] Escenario {esc_id} llamada #{idx}")
             with self._lock:
                 self.llamadas_grabadas += 1
-            return copy.deepcopy(rec["llamadas"][idx]["respuesta"])
+            return copy.deepcopy(llamada_rec["respuesta"])
 
         # No existe grabación previa para esta llamada: llamar a IA real y guardarla
         print(f"  [GRABANDO IA] Escenario {esc_id} llamada #{idx} ('{mensaje[:40]}') no tiene grabación. Llamando a IA real y guardando...")

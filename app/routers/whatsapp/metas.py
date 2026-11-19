@@ -33,6 +33,7 @@ from app.routers.whatsapp.resolvers_cascada import (
 from app.schemas.movimiento_meta import MovimientoMetaCreate
 from app.services import meta_service, whatsapp_service
 from app.services.evento_service import emitir_evento_actualizacion
+from app.core.jerga import sufijo_multiplicador_rx
 from app.core.reglas_texto_wpp import ejemplo_wpp
 from app.utils.fecha import hoy_argentina
 from app.utils.formato import formatear_monto
@@ -329,13 +330,23 @@ def manejar_aporte_meta(
 
     # Parsear mensaje para aporte a meta
     m_norm = normalizar_texto(mensaje_texto)
-    signals = ["meta", "metas", "aporte", "aportar", "aporta"]
-    tiene_senal = any(s in m_norm for s in signals) or bool(re.search(r"\b(?:puse|guarde|separe|mande|meter)\b.*\b(?:meta|para la|a la)\b", m_norm))
-    if not tiene_senal:
+    signals_meta = ("meta", "metas", "aporte", "aportar", "aporta")
+    tiene_senal_meta = any(s in m_norm for s in signals_meta)
+    verbo_ahorro_rx = (
+        r"\b(?:aporte|aportar|aporta|puse|poner|guarde|guardar|"
+        r"separe|separar|mande|mandar|meti|meter|deposite|depositar|"
+        r"transferi|transferir)\b"
+    )
+    tiene_verbo_ahorro = bool(re.search(verbo_ahorro_rx, m_norm))
+    if not (tiene_senal_meta or tiene_verbo_ahorro):
         return False
 
-    # Extraer monto
-    m_monto = re.search(r"(\$?\s*\d+(?:[.,]\d+)?(?:\s*(?:mil|k))?)\b", m_norm)
+    # Extraer monto usando sufijo_multiplicador_rx() de jerga.py
+    suf_rx = sufijo_multiplicador_rx()
+    m_monto = re.search(
+        rf"(\$?\s*\d+(?:[.,]\d+)?(?:\s*{suf_rx})?)\b",
+        m_norm,
+    )
     if not m_monto:
         return False
     monto_val = _parsear_monto_argentino(m_monto.group(1))
@@ -349,7 +360,10 @@ def manejar_aporte_meta(
         if re.search(rf"\b(?:desde|con|en|de)\s+{re.escape(b_low)}\b", m_norm):
             billetera_encontrada = b
             break
-        elif re.search(rf"\b{re.escape(b_low)}\b", m_norm) and b_low not in ("pesos", "dolares", "dólares", "efectivo"):
+        elif (
+            re.search(rf"\b{re.escape(b_low)}\b", m_norm)
+            and b_low not in ("pesos", "dolares", "dólares", "efectivo")
+        ):
             if any(p in m_norm for p in [f"con {b_low}", f"desde {b_low}", f"por {b_low}"]):
                 billetera_encontrada = b
                 break
@@ -357,26 +371,62 @@ def manejar_aporte_meta(
     # Extraer nombre de meta
     clean_text = mensaje_texto
     if billetera_encontrada:
-        clean_text = re.sub(rf"\b(?:desde|con|en|de)\s+{re.escape(billetera_encontrada.nombre)}\b", "", clean_text, flags=re.IGNORECASE)
-        clean_text = re.sub(rf"\b{re.escape(billetera_encontrada.nombre)}\b", "", clean_text, flags=re.IGNORECASE)
+        clean_text = re.sub(
+            rf"\b(?:desde|con|en|de)\s+{re.escape(billetera_encontrada.nombre)}\b",
+            "",
+            clean_text,
+            flags=re.IGNORECASE,
+        )
+        clean_text = re.sub(
+            rf"\b{re.escape(billetera_encontrada.nombre)}\b",
+            "",
+            clean_text,
+            flags=re.IGNORECASE,
+        )
 
-    m_meta = re.search(r"\b(?:a|para)\s+(?:la\s+|mi\s+)?meta\s+([a-zA-Z0-9_áéíóúÁÉÍÓÚñÑ\s]+)", clean_text, re.IGNORECASE)
+    m_meta = re.search(
+        r"\b(?:a|para|en)\s+(?:la\s+|mi\s+)?meta\s+"
+        r"(?:de\s+|del\s+|para\s+)?([a-zA-Z0-9_áéíóúÁÉÍÓÚñÑ\s]+)",
+        clean_text,
+        re.IGNORECASE,
+    )
     meta_name = None
     if m_meta:
         meta_name = m_meta.group(1).strip()
     else:
-        m_meta2 = re.search(r"\b(?:aportar|aporte|aporta|aporté)\s+.*?\s+(?:a|para)\s+([a-zA-Z0-9_áéíóúÁÉÍÓÚñÑ\s]+)", clean_text, re.IGNORECASE)
+        clean_norm = normalizar_texto(clean_text)
+        m_meta2 = re.search(
+            rf"{verbo_ahorro_rx}\s+.*?\b(?:en|a|para|al)\s+"
+            r"([a-z0-9_\s]+)",
+            clean_norm,
+            re.IGNORECASE,
+        )
         if m_meta2:
             cand = m_meta2.group(1).strip()
-            cand = re.sub(r"^(?:mi|la|el)\s+", "", cand, flags=re.IGNORECASE).strip()
+            cand = re.sub(
+                r"^(?:el|la|los|las|mi|tu|un|una)\s+",
+                "",
+                cand,
+                flags=re.IGNORECASE,
+            ).strip()
             meta_name = cand
 
     if meta_name:
         meta_name = re.sub(r"[.,;:!?]+$", "", meta_name).strip()
-        meta_name = re.sub(r"\$?\s*\d+(?:[.,]\d+)?(?:\s*(?:mil|k))?", "", meta_name).strip()
+        meta_name = re.sub(
+            rf"\$?\s*\d+(?:[.,]\d+)?(?:\s*{suf_rx})?",
+            "",
+            meta_name,
+            flags=re.IGNORECASE,
+        ).strip()
+
+    if not tiene_senal_meta and not meta_name:
+        return False
 
     # Resolver meta
     meta, estado_meta, cands = _buscar_meta_activa_por_nombre(usuario.id, meta_name, db)
+    if not tiene_senal_meta and estado_meta not in ("ok", "ambigua"):
+        return False
 
     if estado_meta == "no_metas":
         msg_resp = "No tenés metas activas."

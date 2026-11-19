@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.jerga import sufijo_multiplicador_rx
+from app.core.jerga import multiplicador_de, sufijo_multiplicador_rx
 from app.models.billetera import Billetera
 from app.models.categoria import Categoria
 from app.models.conversacion_wpp import ConversacionWpp
@@ -110,7 +110,10 @@ def _evaluar_correccion_billetera(
                 cands.append(b)
             else:
                 for alias_k, alias_v in ALIAS_BILLETERAS.items():
-                    if alias_k in norm_msg.split() and (alias_v in b_norm or b_norm in alias_v):
+                    es_ef_alias = alias_v == "efectivo" and getattr(b, "es_efectivo", False)
+                    if re.search(rf"(?<!\w){re.escape(alias_k)}(?!\w)", norm_msg) and (
+                        es_ef_alias or alias_v in b_norm or b_norm in alias_v
+                    ):
                         if b not in cands:
                             cands.append(b)
 
@@ -521,14 +524,20 @@ def _detectar_correccion_ultimo_movimiento(
         # Una fecha sola o mensaje sin señal explícita nunca es corrección
         return False, {}, None
 
-    # Descartar si tiene dos o más montos salvo que sea la estructura "X no Y"
-    suf_rx = rf"(?:\s*{sufijo_multiplicador_rx()}\b)?"
+    # Descartar si tiene dos o más montos salvo estructuras "X no Y" o "no era X, eran Y"
+    suf_base_rx = sufijo_multiplicador_rx()
+    suf_rx = rf"(?:\s*{suf_base_rx}\b)?"
+    pat_dos = rf"(?:eran?|fue)?\s*\$?([\d\.,]+{suf_rx})\s+no\s+\$?([\d\.,]+{suf_rx})"
+    pat_no_era = (
+        rf"(?:no\s+)?(?:eran?|era|fue)\s+\$?([\d\.,]+{suf_rx})"
+        rf"[\s,;]+(?:sino|eran?|era|son|es)\s+\$?([\d\.,]+{suf_rx})"
+    )
     es_correccion_dos_montos = bool(
-        re.search(rf"(?:eran?|fue)?\s*\$?[\d\.,]+{suf_rx}\s+no\s+\$?[\d\.,]+{suf_rx}", norm)
+        re.search(pat_dos, norm) or re.search(pat_no_era, norm)
     )
     norm_sin_fechas = re.sub(r"\b\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?\b", "", norm)
     montos_detectados = re.findall(
-        rf"\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*{sufijo_multiplicador_rx()})?\b",
+        rf"\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*{suf_base_rx})?\b",
         norm_sin_fechas,
     )
     # Filtrar solo montos numéricos significativos
@@ -538,20 +547,31 @@ def _detectar_correccion_ultimo_movimiento(
 
     cambios: dict = {}
     texto_restante = mensaje.strip()
+    monto_nuevo_raw = None
 
-    # 1. Detectar monto: "eran 3.000 no 30.000", "no, 5000", "eran 3000", etc.
-    pat_dos = rf"(?:eran?|fue)?\s*\$?([\d\.,]+{suf_rx})\s+no\s+\$?([\d\.,]+{suf_rx})"
-    m_no = re.search(pat_dos, norm)
-    if m_no:
-        m_val = _parsear_monto_argentino(m_no.group(1))
+    # 1. Detectar monto: "no era 10, eran 15", "eran 3.000 no 30.000", "no, 5000", "eran 3000"
+    m_ne = re.search(pat_no_era, norm)
+    if m_ne:
+        monto_nuevo_raw = m_ne.group(2).strip()
+        m_val = _parsear_monto_argentino(monto_nuevo_raw)
         if m_val:
             cambios["monto"] = float(m_val)
-            texto_restante = re.sub(pat_dos, "", texto_restante, flags=re.IGNORECASE).strip()
+            texto_restante = re.sub(pat_no_era, "", texto_restante, flags=re.IGNORECASE).strip()
+
+    if "monto" not in cambios:
+        m_no = re.search(pat_dos, norm)
+        if m_no:
+            monto_nuevo_raw = m_no.group(1).strip()
+            m_val = _parsear_monto_argentino(monto_nuevo_raw)
+            if m_val:
+                cambios["monto"] = float(m_val)
+                texto_restante = re.sub(pat_dos, "", texto_restante, flags=re.IGNORECASE).strip()
 
     if "monto" not in cambios:
         m_num = re.search(rf"^no,?\s+(?:eran?\s+)?\$?([\d\.,]+{suf_rx})$", norm)
         if m_num:
-            m_val = _parsear_monto_argentino(m_num.group(1))
+            monto_nuevo_raw = m_num.group(1).strip()
+            m_val = _parsear_monto_argentino(monto_nuevo_raw)
             if m_val:
                 cambios["monto"] = float(m_val)
                 texto_restante = ""
@@ -560,32 +580,80 @@ def _detectar_correccion_ultimo_movimiento(
         pat_era = rf"(?:eran?|era)\s+\$?([\d\.,]+{suf_rx})"
         m_era = re.search(pat_era, norm)
         if m_era:
-            m_val = _parsear_monto_argentino(m_era.group(1))
+            monto_nuevo_raw = m_era.group(1).strip()
+            m_val = _parsear_monto_argentino(monto_nuevo_raw)
             if m_val:
                 cambios["monto"] = float(m_val)
                 texto_restante = re.sub(
                     pat_era, "", texto_restante, flags=re.IGNORECASE
                 ).strip()
 
+    # Heredar unidad de jerga del mensaje original si el nuevo número vino sin unidad
+    if "monto" in cambios and monto_nuevo_raw:
+        sin_unidad = (
+            "." not in monto_nuevo_raw
+            and "," not in monto_nuevo_raw
+            and not re.search(suf_base_rx, monto_nuevo_raw, re.IGNORECASE)
+        )
+        if sin_unidad:
+            limite_jerga = datetime.now(timezone.utc) - timedelta(
+                minutes=PLAZO_DESHACER_CORREGIR_MINUTOS
+            )
+            conv_orig = db.execute(
+                select(ConversacionWpp)
+                .where(
+                    ConversacionWpp.usuario_id == usuario_id,
+                    ConversacionWpp.intent_detectado == "registrar_transaccion",
+                    ConversacionWpp.fecha >= limite_jerga,
+                )
+                .order_by(ConversacionWpp.fecha.desc(), ConversacionWpp.id.desc())
+            ).scalars().first()
+            if conv_orig and conv_orig.mensaje_usuario:
+                orig_norm = normalizar_texto(conv_orig.mensaje_usuario)
+                m_jerga = re.search(
+                    rf"\d+(?:[.,]\d+)?\s*({suf_base_rx})\b",
+                    orig_norm,
+                )
+                if m_jerga:
+                    mult = multiplicador_de(m_jerga.group(1))
+                    if mult and mult > 1 and cambios["monto"] < mult:
+                        cambios["monto"] = float(cambios["monto"] * mult)
+
     # 2. Detectar billetera: "fue con Santander", "con Santander", "era Santander", etc.
     billeteras_activas = _obtener_billeteras_activas(usuario_id, db)
+    billeteras_misma_moneda = [
+        b for b in billeteras_activas if b.moneda == tx_actual.moneda
+    ]
     b_encontrada = None
-    m_bill = re.search(r"(?:fue\s+con|era\s+con|fue\s+en|era\s+en|con|en)\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)", texto_restante, flags=re.IGNORECASE)
+    m_bill = re.search(
+        r"(?:fue\s+con|era\s+con|fue\s+en|era\s+en|con|en)\s+"
+        r"([a-zA-ZáéíóúÁÉÍÓÚñÑ\s]+)",
+        texto_restante,
+        flags=re.IGNORECASE,
+    )
     if m_bill:
         candidato_bill = m_bill.group(1).strip()
-        b_match, _ = resolver_billetera_cascada(candidato_bill, billeteras_activas)
+        b_match, _ = resolver_billetera_cascada(candidato_bill, billeteras_misma_moneda)
+        if not b_match:
+            b_match, _ = resolver_billetera_cascada(candidato_bill, billeteras_activas)
         if b_match:
             b_encontrada = b_match
             texto_restante = texto_restante.replace(m_bill.group(0), "").strip()
 
     if not b_encontrada:
-        for b in billeteras_activas:
+        orden_billeteras = billeteras_misma_moneda + [
+            b for b in billeteras_activas if b not in billeteras_misma_moneda
+        ]
+        for b in orden_billeteras:
             b_n = normalizar_texto(b.nombre)
             if b_n in norm.split() or b_n in norm:
                 b_encontrada = b
                 break
             for ak, av in ALIAS_BILLETERAS.items():
-                if ak in norm.split() and (av in b_n or b_n in av):
+                es_ef_alias = av == "efectivo" and getattr(b, "es_efectivo", False)
+                if re.search(rf"(?<!\w){re.escape(ak)}(?!\w)", norm) and (
+                    es_ef_alias or av in b_n or b_n in av
+                ):
                     b_encontrada = b
                     break
             if b_encontrada:

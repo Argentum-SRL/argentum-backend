@@ -315,7 +315,11 @@ def p11_caso_12(datos):
         resp_inicial = respuestas[-1][1] if respuestas else ""
 
         tx_despues_1 = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
-        if tx_despues_1 == tx_antes and ("¿Confirmás" in resp_inicial or "confirmar" in resp_inicial.lower()):
+        if tx_despues_1 == tx_antes and (
+            "¿Confirmás" in resp_inicial
+            or "confirmar" in resp_inicial.lower()
+            or "¿Anoto" in resp_inicial
+        ):
             _procesar_webhook_whatsapp_sync(
                 make_payload(TELEFONO_TEST, "sí"),
                 time.perf_counter()

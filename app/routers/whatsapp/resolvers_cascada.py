@@ -30,7 +30,11 @@ ALIAS_BILLETERAS = {
     "lemon": "lemon",
     "uala": "ualá",
     "efectivo": "efectivo",
+    "en efectivo": "efectivo",
     "cash": "efectivo",
+    "plata fisica": "efectivo",
+    "billetes": "efectivo",
+    "con billetes": "efectivo",
     "arq": "arq",
     "dolarapp": "arq",
 }
@@ -64,12 +68,64 @@ FORMAS_GENERICAS_TARJETA = [
 def _moneda_de_efectivo(nombre_norm: str) -> Moneda | None:
     """Identifica si el texto normalizado refiere a efectivo en una moneda determinada."""
     palabras = set(nombre_norm.split())
-    if not palabras & {"efectivo", "cash"}:
+    es_cash = bool(palabras & {"efectivo", "cash", "billetes"}) or (
+        "plata fisica" in nombre_norm
+    )
+    if not es_cash:
         return None
     if palabras & {"usd", "dolar", "dolares", "verdes", "u$s"}:
         return Moneda.USD
     if palabras & {"ars", "peso", "pesos"}:
         return Moneda.ARS
+    return None
+
+
+def _buscar_billetera_en_texto(
+    mensaje: str,
+    billeteras: list[Billetera],
+    excluir_efectivo: bool = True,
+    solo_con_preposicion: bool = False,
+) -> Billetera | None:
+    """Detecta una billetera nombrada por nombre o alias bancario en el mensaje."""
+    m_norm = normalizar_texto(mensaje)
+    if not m_norm or not billeteras:
+        return None
+    cand_pool = [
+        b
+        for b in billeteras
+        if not (excluir_efectivo and getattr(b, "es_efectivo", False))
+    ]
+    if not cand_pool:
+        return None
+
+    claves: list[str] = []
+    for b in cand_pool:
+        bn = normalizar_texto(b.nombre)
+        if bn and len(bn) >= 3:
+            claves.append(bn)
+    for alias, destino in ALIAS_BILLETERAS.items():
+        if destino == "efectivo" and excluir_efectivo:
+            continue
+        if len(alias) >= 2:
+            claves.append(alias)
+
+    prep_pref = (
+        r"(?:\b(?:de|desde|con|en|del|a|al)\s+"
+        r"(?:(?:el|la|mi)\s+)?(?:(?:cuenta|banco)\s+)?)"
+    )
+    coincidencias: list[Billetera] = []
+    for clave in sorted(set(claves), key=len, reverse=True):
+        if solo_con_preposicion:
+            pat = rf"{prep_pref}{re.escape(clave)}(?!\w)"
+        else:
+            pat = rf"(?<!\w){re.escape(clave)}(?!\w)"
+        if re.search(pat, m_norm):
+            b_match, _ = resolver_billetera_cascada(clave, cand_pool)
+            if b_match and b_match not in coincidencias:
+                coincidencias.append(b_match)
+
+    if len(coincidencias) == 1:
+        return coincidencias[0]
     return None
 
 
@@ -113,9 +169,14 @@ def resolver_billetera_cascada(
     alias_target = ALIAS_BILLETERAS.get(nombre_norm)
     if alias_target:
         alias_target_norm = normalizar_texto(alias_target)
-        coincidencias_alias = [
-            b for b in billeteras if normalizar_texto(b.nombre) == alias_target_norm
-        ]
+        if alias_target_norm == "efectivo":
+            coincidencias_alias = [
+                b for b in billeteras if getattr(b, "es_efectivo", False)
+            ]
+        else:
+            coincidencias_alias = [
+                b for b in billeteras if normalizar_texto(b.nombre) == alias_target_norm
+            ]
         if not coincidencias_alias:
             coincidencias_alias = [
                 b for b in billeteras if alias_target_norm in normalizar_texto(b.nombre)

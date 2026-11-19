@@ -155,7 +155,8 @@ RE_COMBUSTIBLE = _compilar_regex_palabras([
     "nafta", "combustible", "gnc", "gasoil", "ypf", "shell", "axion"
 ])
 RE_TRANSPORTE_PUBLICO = _compilar_regex_palabras([
-    "bondi", "colectivo", "subte", "tren", "transporte publico"
+    "bondi", "colectivo", "colectibo", "cole", "subte", "tren",
+    "sube", "carga de sube", "transporte publico", "trasporte publico",
 ])
 RE_PREPAGA = _compilar_regex_palabras([
     "prepaga", "obra social", "osde", "swiss medical", "galeno", "omint", "medife"

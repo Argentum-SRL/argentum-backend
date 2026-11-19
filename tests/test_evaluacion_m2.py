@@ -186,3 +186,129 @@ def test_te5_anonimizar():
         extraer_mensajes_reales.anonimizar("pagué 20.000 con la visa")
         == "pagué 20.000 con la visa"
     )
+
+
+def test_te6_clasificar_primera_respuesta():
+    """TE6: clasifica anoto_directo, pide_confirmacion u otra sobre primer mensaje."""
+    assert (
+        evaluar_bot.clasificar_primera_respuesta(["Listo, anoté $9.000 ..."])
+        == "anoto_directo"
+    )
+    assert (
+        evaluar_bot.clasificar_primera_respuesta(["¿Anoto $9.000 ...?"])
+        == "pide_confirmacion"
+    )
+    assert (
+        evaluar_bot.clasificar_primera_respuesta(["¿Lo anoto ...?"])
+        == "pide_confirmacion"
+    )
+    assert (
+        evaluar_bot.clasificar_primera_respuesta(["¿Las anoto ...?"])
+        == "pide_confirmacion"
+    )
+    assert (
+        evaluar_bot.clasificar_primera_respuesta(["¿Aporto $20.000 ...?"])
+        == "pide_confirmacion"
+    )
+    assert (
+        evaluar_bot.clasificar_primera_respuesta(["¿Lo dejo en ...?"])
+        == "pide_confirmacion"
+    )
+    assert (
+        evaluar_bot.clasificar_primera_respuesta(["No te entendí..."])
+        == "otra"
+    )
+    assert evaluar_bot.clasificar_primera_respuesta([]) == "otra"
+
+
+def test_te7_tabla_calibracion():
+    """TE7: tabla_calibracion sobre simples ARS sin cuotas."""
+    resultados = [
+        {
+            "funcion": "gasto",
+            "esperado": {"movimientos": [{"tipo": "egreso", "moneda": "ARS"}]},
+            "confianzas_ia": [0.6],
+            "comparacion": {"fallos": [], "campos_ok": {"monto": True}},
+        },
+        {
+            "funcion": "ingreso",
+            "esperado": {"movimientos": [{"tipo": "ingreso"}]},
+            "confianzas_ia": [0.9],
+            "comparacion": {"fallos": [], "campos_ok": {"monto": True}},
+        },
+        {
+            "funcion": "gasto",
+            "esperado": {"movimientos": [{"tipo": "egreso"}]},
+            "confianzas_ia": [0.6],
+            "comparacion": {"fallos": ["monto"], "campos_ok": {"monto": False}},
+        },
+        {
+            "funcion": "cuotas",
+            "esperado": {"movimientos": [{"tipo": "egreso", "cuotas": 6}]},
+            "confianzas_ia": [0.6],
+            "comparacion": {"fallos": ["monto"], "campos_ok": {"monto": False}},
+        },
+    ]
+    tabla = evaluar_bot.tabla_calibracion(resultados)
+    por_u = {round(f["umbral"], 2): f for f in tabla}
+    assert por_u[0.70]["preguntaria"] == 2
+    assert por_u[0.70]["errores_plata_atrapados"] == 1
+    assert por_u[0.70]["errores_plata_sin_atrapar"] == 0
+    assert por_u[0.50]["preguntaria"] == 0
+    assert por_u[0.50]["errores_plata_atrapados"] == 0
+    assert por_u[0.50]["errores_plata_sin_atrapar"] == 1
+
+
+def test_te8_proc_medido_guarda_confianza_e_intent(monkeypatch, tmp_path):
+    """TE8: _proc_medido guarda confianza e intent falsos en confianzas_ia e intents_ia."""
+    from scripts.regresion.suite import comun
+
+    tiempos: list[float] = []
+    estado = {
+        "costo": Decimal("0"),
+        "llamadas": 0,
+        "tiempos": [],
+        "errores": [],
+        "confianzas": [],
+        "intents_ia": [],
+    }
+
+    def _ia_falsa(mensaje, usuario, db, historial=None, estado_previo=None):
+        return {"intent": "registrar_transaccion", "confianza": Decimal("0.72")}
+
+    proc = evaluar_bot._crear_proc_medido(_ia_falsa, estado, tiempos)
+    res = proc("almuerzo 9 lucas", object(), object())
+    assert res["intent"] == "registrar_transaccion"
+    assert estado["confianzas"] == [0.72]
+    assert estado["intents_ia"] == ["registrar_transaccion"]
+    assert estado["llamadas"] == 1
+
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql://postgres:x@localhost:5433/argentum_local"
+    )
+    monkeypatch.setattr(evaluar_bot, "OUT_DIR", tmp_path)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "SI")
+    monkeypatch.setattr(comun, "_original_procesar_mensaje", _ia_falsa)
+
+    def _exec_fake(frase_cfg):
+        comun._original_procesar_mensaje("m", object(), object())
+        return {
+            "intent": "registrar_transaccion",
+            "movimientos": [],
+            "transferencias": [],
+            "mensajes_bot": ["Listo, anoté $9.000"],
+            "problemas_texto_ia": [],
+        }
+
+    monkeypatch.setattr(evaluar_bot, "_ejecutar_frase", _exec_fake)
+    rc = evaluar_bot.main(["--solo", "B001"])
+    assert rc == 0
+    json_files = list(tmp_path.glob("evaluar_bot_*.json"))
+    assert len(json_files) == 1
+    data = json.loads(json_files[0].read_text(encoding="utf-8"))
+    assert len(data["resultados"]) == 1
+    r0 = data["resultados"][0]
+    assert r0["confianzas_ia"] == [0.72]
+    assert r0["intents_ia"] == ["registrar_transaccion"]
+    assert r0["primera_respuesta"] == "anoto_directo"
+    assert "calibracion" in data

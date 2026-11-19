@@ -397,10 +397,18 @@ def _interpretar_transferencia(
                 ars_wallets[0],
             )
 
-        m_cot = re.search(r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\s*(?:d[oó]lares|verdes|usd)\s+a\s+(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)", m_norm)
-        if m_cot:
-            dolares = _parsear_monto_argentino(m_cot.group(1))
-            cotiz = _parsear_monto_argentino(m_cot.group(2))
+        m_usd = re.search(
+            r"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)\s*"
+            r"(?:d[oó]lares|verdes|usd)\b",
+            m_norm,
+        )
+        m_tasa = re.search(
+            r"\ba\s+(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*mil|\s*k)?)(?:\b|$)",
+            m_norm,
+        )
+        if m_usd and m_tasa:
+            dolares = _parsear_monto_argentino(m_usd.group(1))
+            cotiz = _parsear_monto_argentino(m_tasa.group(1))
             cot_ref = _obtener_cotizacion_referencia_usuario(usuario, db)
             if cot_ref is not None:
                 rango_min = (cot_ref * FACTOR_MIN_COTIZACION_DOLAR).quantize(Decimal("0.01"))

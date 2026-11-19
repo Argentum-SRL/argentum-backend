@@ -257,7 +257,7 @@ def _parece_intento_correccion(mensaje: str) -> bool:
         return True
     if re.search(r"\b(?:me\s+equivoque|corregi|corregilo|cambialo|cambia|en\s+realidad|eso\s+era)\b", norm):
         return True
-    if re.search(r"^(?:eso\s+era|era|en\s+realidad\s+era)\s+", norm):
+    if re.search(r"^(?:eso\s+era|eran?|en\s+realidad\s+era)\s+", norm):
         return True
     if re.search(r"^(?:fue\s+con|era\s+con|fue\s+en|era\s+en)\s+", norm):
         return True

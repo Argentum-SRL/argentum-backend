@@ -49,7 +49,7 @@ def _resolver_mencion_tarjeta_en_texto(
         for a in aliases:
             if a in genericas_norm:
                 continue
-            if a in m_norm:
+            if re.search(rf"(?<!\w){re.escape(a)}(?!\w)", m_norm):
                 coincidencias.append((len(a), a, t))
 
     if not coincidencias:
@@ -106,7 +106,11 @@ def _construir_propuesta_credito(
     usuario_id: UUID | None = None,
 ) -> str:
     """Construye la propuesta de consumo con tarjeta de crédito (D5)."""
-    moneda_enum = tarjeta.moneda
+    moneda_enum = (
+        Moneda.USD
+        if str(entidades.get("moneda") or "").upper() == "USD"
+        else tarjeta.moneda
+    )
     cuota_fmt = formatear_monto(float(monto_cuota), moneda_enum)
     total_fmt = formatear_monto(float(monto_total), moneda_enum, con_decimales=False)
     cat_disp = _resolver_cat_display_wpp(entidades.get("categoria"), db, usuario_id)

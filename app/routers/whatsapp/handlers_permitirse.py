@@ -23,6 +23,7 @@ from app.routers.whatsapp.permitirse_flujo import (
     buscar_pregunta_pendiente,
     leer_respuesta_pendiente,
 )
+from app.routers.whatsapp.regla_registro import FRASES_PREGUNTA_PLATA
 from app.services import tools_service, whatsapp_service
 from app.services.uso_service import registrar_evento
 from app.utils.texto import normalizar_texto
@@ -118,7 +119,16 @@ def analizar_consulta_permitirse(texto: str) -> dict | None:
     es_fuerte = any(f in norm for f in FRASES_FUERTES)
     es_debil = False
     if not es_fuerte:
-        es_debil = any(f in norm for f in FRASES_DEBILES)
+        sin_signos = re.sub(r"[^\w\s]", "", norm).strip()
+        termina_llego = bool(sin_signos and sin_signos.split()[-1] == "llego")
+        es_debil = (
+            any(f in norm for f in FRASES_DEBILES)
+            or any(
+                re.search(rf"(?<!\w){re.escape(f)}(?!\w)", norm)
+                for f in FRASES_PREGUNTA_PLATA
+            )
+            or termina_llego
+        )
 
     if not es_fuerte and not es_debil:
         return None

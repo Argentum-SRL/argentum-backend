@@ -87,7 +87,9 @@ ARBOL_CATEGORIAS: tuple[CategoriaCatalogo, ...] = (
         color="#0284C7",
         subcategorias=(
             SubcategoriaCatalogo("Transporte público", 0, False, "07", "colectivo, bondi, subte, tren, SUBE, carga de SUBE"),
-            SubcategoriaCatalogo("Taxi y apps", 1, False, "07", "taxi, remis, Uber, Cabify, DiDi"),
+            SubcategoriaCatalogo(
+                "Taxi y apps", 1, False, "07", "taxi, remis, Uber, uver, Cabify, DiDi"
+            ),
             SubcategoriaCatalogo("Combustible", 2, False, "07", "nafta, combustible, GNC, gasoil, YPF, Shell, Axion"),
             SubcategoriaCatalogo("Estacionamiento", 3, False, "07", "estacionamiento, cochera, parquímetro, garaje, trapito"),
             SubcategoriaCatalogo("Peajes", 4, False, "07", "peaje, TelePASE"),
@@ -116,7 +118,14 @@ ARBOL_CATEGORIAS: tuple[CategoriaCatalogo, ...] = (
         color="#8B5CF6",
         subcategorias=(
             SubcategoriaCatalogo("Limpieza", 0, False, "05", "artículos de limpieza, lavandina, detergente, lavandería, tintorería"),
-            SubcategoriaCatalogo("Muebles y electro", 1, False, "05", "muebles, colchón, heladera, lavarropas, microondas, decoración, bazar"),
+            SubcategoriaCatalogo(
+                "Muebles y electro",
+                1,
+                False,
+                "05",
+                "muebles, colchón, heladera, lavarropas, aire acondicionado, "
+                "microondas, cocina, electrodomésticos, decoración, bazar",
+            ),
             SubcategoriaCatalogo("Reparaciones", 2, False, "05", "plomero, electricista, gasista, cerrajero, pintor, arreglos de la casa, ferretería"),
             SubcategoriaCatalogo("Servicio doméstico", 3, False, "05", "empleada doméstica, mucama, niñera, señora o chica que limpia"),
         ),
@@ -194,7 +203,15 @@ ARBOL_CATEGORIAS: tuple[CategoriaCatalogo, ...] = (
             SubcategoriaCatalogo("Celular", 0, False, "08", "abono o recarga del celular, Personal, Claro, Movistar, plan de datos"),
             SubcategoriaCatalogo("Internet", 1, False, "08", "internet, wifi, fibra, cable, Fibertel, Telecentro, Flow, DirecTV"),
             SubcategoriaCatalogo("Apps y programas", 2, False, "09", "ChatGPT, Claude, iCloud, Google One, Microsoft 365, Canva, Notion, Dropbox, apps pagas"),
-            SubcategoriaCatalogo("Equipos", 3, False, "09", "celular nuevo, notebook, computadora, tablet, auriculares, televisor, consola, monitor"),
+            SubcategoriaCatalogo(
+                "Equipos",
+                3,
+                False,
+                "09",
+                "celular nuevo, notebook, computadora, tablet, auriculares, "
+                "televisor, consola, monitor "
+                "(heladera, lavarropas y aire van en Muebles y electro)",
+            ),
         ),
     ),
     CategoriaCatalogo(
@@ -254,9 +271,21 @@ ARBOL_CATEGORIAS: tuple[CategoriaCatalogo, ...] = (
         icono="salario",
         color="#16A34A",
         subcategorias=(
-            SubcategoriaCatalogo("Sueldo", 0, False, None, "sueldo, quincena, salario, recibo de sueldo"),
+            SubcategoriaCatalogo(
+                "Sueldo",
+                0,
+                False,
+                None,
+                "sueldo, quincena (es sueldo, no bono), salario, recibo de sueldo",
+            ),
             SubcategoriaCatalogo("Aguinaldo", 1, False, None, "aguinaldo, SAC"),
-            SubcategoriaCatalogo("Bonos y extras", 2, False, None, "bono, premio, horas extras, comisión, propina"),
+            SubcategoriaCatalogo(
+                "Bonos y extras",
+                2,
+                False,
+                None,
+                "bono, premio, horas extras, comisión, propina que te dejan",
+            ),
             SubcategoriaCatalogo("Freelance y changas", 3, False, None, "changa, trabajo particular, honorarios, factura de un trabajo"),
             SubcategoriaCatalogo("Ventas", 4, False, None, "venta de algo, vendí, Mercado Libre"),
         ),

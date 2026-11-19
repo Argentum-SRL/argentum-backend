@@ -61,6 +61,7 @@ from app.routers.whatsapp.parsers import (
 )
 from app.utils.fecha import hoy_argentina
 from app.routers.whatsapp.propuestas import _unir_items_multilinea
+from app.routers.whatsapp.regla_registro import cumple_regla_registro_directo
 from app.routers.whatsapp.resolvers_cascada import (
     _detectar_duplicados_en_lote,
     _entidades_completas,
@@ -155,7 +156,7 @@ def _registrar_item_batch(
         tarjeta, _ = resolver_tarjeta_cascada(tarjeta_nom, tarjetas_usuario)
 
     if tarjeta:
-        cant_cuotas = int(datos.get("cantidad_cuotas", 1))
+        cant_cuotas = int(datos.get("cantidad_cuotas") or 1)
         monto_total = Decimal(str(datos.get("monto_total", monto_decimal)))
         monto_cuota = Decimal(str(datos.get("monto_cuota", monto_total / cant_cuotas)))
         cat_id, subcat_id = _resolver_categoria_y_subcategoria(
@@ -170,7 +171,7 @@ def _registrar_item_batch(
         data_tx = TransaccionCreate(
             tipo=TipoTransaccion.EGRESO,
             monto=monto_total,
-            moneda=tarjeta.moneda,
+            moneda=Moneda.USD if datos.get("moneda") == "USD" else tarjeta.moneda,
             fecha=fecha_obj,
             descripcion=desc_final or _nombre_corto_categoria(datos.get("categoria")),
             metodo_pago=MetodoPago.CREDITO,
@@ -591,7 +592,7 @@ def _confirmar_propuesta_transaccion(
         if not tarjeta:
             return None, "No encontré esa tarjeta.", False
 
-        cant_cuotas = int(entidades.get("cantidad_cuotas", 1))
+        cant_cuotas = int(entidades.get("cantidad_cuotas") or 1)
         monto_total = Decimal(str(entidades.get("monto_total", monto_decimal)))
         monto_cuota = Decimal(str(entidades.get("monto_cuota", monto_total / cant_cuotas)))
 
@@ -611,10 +612,11 @@ def _confirmar_propuesta_transaccion(
         precio_contado_prop = (
             entidades.get("precio_contado") or _extraer_precio_contado(msg_contado)
         )
+        moneda_tx = Moneda.USD if entidades.get("moneda") == "USD" else tarjeta.moneda
         data_tx = TransaccionCreate(
             tipo=TipoTransaccion.EGRESO,
             monto=monto_total,
-            moneda=tarjeta.moneda,
+            moneda=moneda_tx,
             fecha=fecha_obj,
             descripcion=desc_final or _nombre_corto_categoria(entidades.get("categoria")),
             metodo_pago=MetodoPago.CREDITO,
@@ -661,14 +663,16 @@ def _confirmar_propuesta_transaccion(
         nom_t = nombre_tarjeta_wpp(tarjeta)
 
         if cant_cuotas > 1:
-            cuota_fmt = formatear_monto(float(monto_cuota), tarjeta.moneda)
+            cuota_fmt = formatear_monto(float(monto_cuota), moneda_tx)
             msg_resp = (
                 f"Listo, anoté {cant_cuotas} cuotas de {cuota_fmt} en {cat_disp} "
                 f"con la {nom_t}.\n"
                 f"La primera entra en el resumen de {venc_mes}."
             )
         else:
-            total_fmt = formatear_monto(float(monto_total), tarjeta.moneda, con_decimales=False)
+            total_fmt = formatear_monto(
+                float(monto_total), moneda_tx, con_decimales=False
+            )
             msg_resp = (
                 f"Listo, anoté {total_fmt} en {cat_disp} con la {nom_t}, en un pago.\n"
                 f"Entra en el resumen de {venc_mes}."
@@ -905,7 +909,7 @@ def _es_registro_directo(
         return False
     if es_credito or entidades.get("tarjeta_id") or entidades.get("tarjeta") or entidades.get("tarjeta_nombre"):
         return False
-    if entidades.get("cantidad_cuotas") and int(entidades.get("cantidad_cuotas", 1)) > 1:
+    if int(entidades.get("cantidad_cuotas") or 1) > 1:
         return False
     if entidades.get("medio_pago") == "tarjeta_credito":
         return False
@@ -945,7 +949,9 @@ def _es_registro_directo(
                 continue
             items_validos += 1
 
-        return items_validos > 0
+        if items_validos <= 0:
+            return False
+        return cumple_regla_registro_directo(fila, entidades)
 
     monto = entidades.get("monto")
     if monto is None:
@@ -964,7 +970,7 @@ def _es_registro_directo(
     if not categoria:
         return False
 
-    return True
+    return cumple_regla_registro_directo(fila, entidades)
 
 
 def _registrar_directo_si_corresponde(
@@ -1061,7 +1067,7 @@ def _registrar_movimiento_directo(
         if not tarjeta:
             return None, "No encontré esa tarjeta."
 
-        cant_cuotas = int(entidades.get("cantidad_cuotas", 1))
+        cant_cuotas = int(entidades.get("cantidad_cuotas") or 1)
         monto_total = Decimal(str(entidades.get("monto_total", monto_decimal)))
         monto_cuota = Decimal(str(entidades.get("monto_cuota", monto_total / cant_cuotas)))
 
@@ -1078,10 +1084,11 @@ def _registrar_movimiento_directo(
         precio_contado_dir = (
             entidades.get("precio_contado") or _extraer_precio_contado(msg_contado)
         )
+        moneda_tx = Moneda.USD if entidades.get("moneda") == "USD" else tarjeta.moneda
         data_tx = TransaccionCreate(
             tipo=TipoTransaccion.EGRESO,
             monto=monto_total,
-            moneda=tarjeta.moneda,
+            moneda=moneda_tx,
             fecha=fecha_obj,
             descripcion=desc_final or _nombre_corto_categoria(entidades.get("categoria")),
             metodo_pago=MetodoPago.CREDITO,
@@ -1126,14 +1133,16 @@ def _registrar_movimiento_directo(
         nom_t = nombre_tarjeta_wpp(tarjeta)
 
         if cant_cuotas > 1:
-            cuota_fmt = formatear_monto(float(monto_cuota), tarjeta.moneda)
+            cuota_fmt = formatear_monto(float(monto_cuota), moneda_tx)
             msg_resp = (
                 f"Listo, anoté {cant_cuotas} cuotas de {cuota_fmt} en {cat_disp} "
                 f"con la {nom_t}.\n"
                 f"La primera entra en el resumen de {venc_mes}."
             )
         else:
-            total_fmt = formatear_monto(float(monto_total), tarjeta.moneda, con_decimales=False)
+            total_fmt = formatear_monto(
+                float(monto_total), moneda_tx, con_decimales=False
+            )
             msg_resp = (
                 f"Listo, anoté {total_fmt} en {cat_disp} con la {nom_t}, en un pago.\n"
                 f"Entra en el resumen de {venc_mes}."

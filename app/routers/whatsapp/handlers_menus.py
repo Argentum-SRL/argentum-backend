@@ -142,7 +142,7 @@ Si no aplica, retorna False. Si aplica, persiste ConversacionWpp, envía la resp
             whatsapp_service.enviar_whatsapp(from_number, menu)
             return True
     if es_sel and tarjeta_elegida:
-        cant_cuotas = int(estado_prev_tarj.get('cantidad_cuotas', 1))
+        cant_cuotas = int(estado_prev_tarj.get("cantidad_cuotas") or 1)
         monto_total = Decimal(str(estado_prev_tarj.get('monto_total', estado_prev_tarj['monto'])))
         monto_cuota = Decimal(str(estado_prev_tarj.get('monto_cuota', monto_total / Decimal(str(cant_cuotas)))))
         fecha_obj, _ = _resolver_y_validar_fecha(estado_prev_tarj.get('fecha'))
@@ -191,7 +191,7 @@ Si no aplica, retorna False. Si aplica, persiste ConversacionWpp, envía la resp
         whatsapp_service.enviar_whatsapp(from_number, "Decime si es el total o cada cuota.")
         return True
     monto_base = Decimal(str(estado_prev_cuotas['monto']))
-    cant_cuotas = int(estado_prev_cuotas.get('cantidad_cuotas', 1))
+    cant_cuotas = int(estado_prev_cuotas.get("cantidad_cuotas") or 1)
     if es_total:
         monto_total = monto_base
         monto_cuota = round(monto_total / Decimal(str(cant_cuotas)), 2)
@@ -287,6 +287,14 @@ Si aplica y procesa la selección o error de rango/moneda, persiste y retorna Tr
                 whatsapp_service.enviar_whatsapp(from_number, menu)
                 return True
     if es_seleccion and billetera_elegida:
+        orig_txt = estado_previo_bill.get("mensaje_original") or (
+            conv_activa.transcripcion
+            if conv_activa.tipo_mensaje == TipoMensajeWpp.AUDIO
+            and conv_activa.transcripcion
+            else conv_activa.mensaje_usuario
+        )
+        if orig_txt:
+            estado_previo_bill["mensaje_original"] = orig_txt
         if estado_previo_bill.get('tipo_flujo') == 'lote_slot_filling':
             for op_idx in estado_previo_bill.get('ops_pendientes_ids', []):
                 for op in estado_previo_bill.get('operaciones', []):
@@ -329,6 +337,10 @@ Si aplica y procesa la selección o error de rango/moneda, persiste y retorna Tr
                 return True
             ops_todas = estado_previo_bill.get('operaciones', [])
             entidades_lote = dict(ops_todas[0])
+            if estado_previo_bill.get("mensaje_original"):
+                entidades_lote["mensaje_original"] = estado_previo_bill[
+                    "mensaje_original"
+                ]
             if estado_previo_bill.get("origen_imagen") or estado_previo_bill.get("es_imagen"):
                 entidades_lote["origen_imagen"] = True
             if estado_previo_bill.get("confianza_baja"):
@@ -532,6 +544,9 @@ def manejar_verificaciones_slot_filling(
             ):
                 return False
             srv_nom = conv_activa_dup.slot_filling_estado.get('servicio')
+            monto_guard = conv_activa_dup.slot_filling_estado.get('monto')
+            moneda_guard = conv_activa_dup.slot_filling_estado.get('moneda', 'ARS')
+            msg_orig_amb = conv_activa_dup.slot_filling_estado.get('mensaje_original')
             es_si_sub = _es_confirmacion(mensaje_texto) or any(
                 w in norm_amb
                 for w in [
@@ -548,6 +563,66 @@ def manejar_verificaciones_slot_filling(
             )
             if es_si_sub:
                 srv_cat = buscar_servicio_por_texto(srv_nom) if srv_nom else None
+                if monto_guard is not None:
+                    billetera_obj = db.query(Billetera).filter(
+                        Billetera.usuario_id == usuario.id,
+                        Billetera.es_principal == True,
+                    ).first()
+                    if not billetera_obj:
+                        billetera_obj = db.query(Billetera).filter(
+                            Billetera.usuario_id == usuario.id
+                        ).first()
+                    proximo_cobro = suscripcion_service.calcular_siguiente_cobro(
+                        hoy_argentina(), 'mensual'
+                    )
+                    fecha_fmt = proximo_cobro.strftime('%d/%m')
+                    mon_enum = Moneda.USD if moneda_guard == 'USD' else Moneda.ARS
+                    monto_fmt = formatear_monto(
+                        float(monto_guard), mon_enum, con_decimales=False
+                    )
+                    medio_pago_txt = f'desde {billetera_obj.nombre}' if billetera_obj else ''
+                    desde_suf = f' {medio_pago_txt}' if medio_pago_txt else ''
+                    propuesta_msg = (
+                        f'{srv_nom}: {monto_fmt} por mes{desde_suf}, '
+                        f'primer cobro el {fecha_fmt}.\n'
+                        '¿Anoto la suscripción?'
+                    )
+                    conv_activa_dup.slot_filling_activo = False
+                    conv_activa_dup.accion_ejecutada = 'propuesta_creada'
+                    db.flush()
+                    cat_sugerida = (
+                        srv_cat.get('categoria_sugerida')
+                        if srv_cat
+                        else 'Entretenimiento'
+                    )
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=propuesta_msg,
+                        intent_detectado='agregar_suscripcion',
+                        entidades={
+                            'servicio': srv_nom,
+                            'monto': float(monto_guard),
+                            'moneda': moneda_guard,
+                            'frecuencia': 'mensual',
+                            'billetera_id': str(billetera_obj.id) if billetera_obj else None,
+                            'medio_pago_txt': medio_pago_txt,
+                            'proximo_cobro': proximo_cobro.isoformat(),
+                            'categoria': cat_sugerida,
+                        },
+                        accion_ejecutada=None,
+                        confianza=Decimal('1.000'),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    whatsapp_service.enviar_whatsapp(from_number, propuesta_msg)
+                    return True
+
                 msg_frec = (
                     f'¿Cada cuánto se paga {srv_nom}? Mensual, bimestral, '
                     'trimestral, semestral o anual.'
@@ -555,13 +630,66 @@ def manejar_verificaciones_slot_filling(
                 if srv_cat and srv_cat.get('frecuencia_sugerida'):
                     frec_tipica = srv_cat['frecuencia_sugerida']
                     msg_frec = f'Lo habitual es {frec_tipica}.\n{msg_frec}'
-                conv_activa_dup.slot_filling_estado = {'tipo_flujo': 'crear_suscripcion_frecuencia', 'servicio': srv_nom, 'monto': conv_activa_dup.slot_filling_estado.get('monto'), 'moneda': conv_activa_dup.slot_filling_estado.get('moneda', 'ARS')}
+                conv_activa_dup.slot_filling_estado = {
+                    'tipo_flujo': 'crear_suscripcion_frecuencia',
+                    'servicio': srv_nom,
+                    'monto': monto_guard,
+                    'moneda': moneda_guard,
+                }
                 db.commit()
                 whatsapp_service.enviar_whatsapp(from_number, msg_frec)
                 return True
             elif es_no_gasto:
+                if monto_guard is not None:
+                    from app.routers.whatsapp.registro import _registrar_movimiento_directo
+
+                    srv_cat = buscar_servicio_por_texto(srv_nom) if srv_nom else None
+                    cat_gasto = (
+                        srv_cat.get('categoria_sugerida')
+                        if srv_cat and srv_cat.get('categoria_sugerida')
+                        else 'Otros'
+                    )
+                    ent_gasto = {
+                        'tipo': 'egreso',
+                        'monto': float(monto_guard),
+                        'moneda': moneda_guard,
+                        'categoria': cat_gasto,
+                        'descripcion': srv_nom,
+                    }
+                    conv_activa_dup.slot_filling_activo = False
+                    conv_activa_dup.accion_ejecutada = 'gasto_suelto'
+                    tx_gasto, msg_gasto = _registrar_movimiento_directo(
+                        usuario,
+                        ent_gasto,
+                        db,
+                        registrar_adicionales=False,
+                        mensaje_original=msg_orig_amb,
+                    )
+                    nueva_conv = ConversacionWpp(
+                        usuario_id=usuario.id,
+                        wamid=wamid,
+                        mensaje_usuario=mensaje_texto,
+                        tipo_mensaje=TipoMensajeWpp.TEXTO,
+                        transcripcion=None,
+                        mensaje_bot=msg_gasto,
+                        intent_detectado='registrar_transaccion',
+                        entidades=ent_gasto,
+                        accion_ejecutada=str(tx_gasto.id) if tx_gasto else None,
+                        confianza=Decimal('1.000'),
+                        slot_filling_activo=False,
+                        slot_filling_estado=None,
+                    )
+                    db.add(nueva_conv)
+                    db.commit()
+                    whatsapp_service.enviar_whatsapp(from_number, msg_gasto)
+                    return True
+
                 msg_monto = f'¿Cuánto gastaste en {srv_nom}?'
-                conv_activa_dup.slot_filling_estado = {'tipo_flujo': 'pedir_monto_gasto', 'concepto': srv_nom, 'categoria': 'Entretenimiento'}
+                conv_activa_dup.slot_filling_estado = {
+                    'tipo_flujo': 'pedir_monto_gasto',
+                    'concepto': srv_nom,
+                    'categoria': 'Entretenimiento',
+                }
                 db.commit()
                 whatsapp_service.enviar_whatsapp(from_number, msg_monto)
                 return True

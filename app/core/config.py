@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     OPENAI_MODEL_AUDIO: str = "whisper-1"
     # Esfuerzo de razonamiento (none|low|medium); se decide con scripts\evaluacion.
     OPENAI_RAZONAMIENTO: str = "none"
+    # Debajo de esto pide confirmación; se calibra con scripts\evaluacion\evaluar_bot.py.
+    UMBRAL_CONFIANZA_IA: float = 0.85
     IA_PRESUPUESTO_DIARIO_USD: float = 1.0
     IA_PRESUPUESTO_MENSUAL_USD: float = 10.0  # Tope mensual de OpenAI (V6, Sebastián 06/11/2026): mail al 50%, 80% y 100%; al 100% el bot deja de usar la IA hasta el 1° del mes siguiente.
     IA_MAX_MENSAJES_DIA_USUARIO: int = 150

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import re
 import structlog
 from sqlalchemy import select
 
@@ -17,6 +18,7 @@ from app.models.transaccion import (
     TipoTransaccion,
     Transaccion,
 )
+from app.core.jerga import monedas_dolares_rx
 from app.core.reglas_texto_wpp import nombre_tarjeta_wpp
 from app.models.usuario import Moneda
 from app.routers.whatsapp.contexto import ContextoMensaje
@@ -28,6 +30,7 @@ from app.routers.whatsapp.db_lookups import (
     _resolver_categoria_y_subcategoria,
 )
 from app.routers.whatsapp.detectors import _debe_bloquear_mezcla_lote
+from app.routers.whatsapp.regla_registro import confianza_ia_baja
 from app.routers.whatsapp.parsers import (
     _interpretar_cuotas,
     _nombre_corto_categoria,
@@ -40,7 +43,9 @@ from app.routers.whatsapp.propuestas import (
     _resolver_mencion_tarjeta_en_texto,
 )
 from app.routers.whatsapp.resolvers_cascada import (
+    ALIAS_BANCOS_ARGENTINOS,
     FORMAS_GENERICAS_TARJETA,
+    _buscar_billetera_en_texto,
     _detectar_duplicados_en_lote,
     _generar_menu_billeteras,
     _generar_menu_tarjetas,
@@ -61,7 +66,7 @@ MSG_NO_MEZCLAR_TRANSFERENCIAS = (
 )
 
 PALABRAS_FUERZAN_CREDITO = [
-    "credito", "crédito", "cuota", "cuotas", "en cuotas",
+    "credito", "crédito",
     "visa", "master", "mastercard", "amex", "american express", "american",
     "naranja", "cabal", "tarje", "la tarje", "la de credito", "la de crédito",
     "la credi", "tarjeta de credito", "tarjeta de crédito"
@@ -113,6 +118,7 @@ def _resolver_lote_movimientos(
         "fecha": entidades_actuales.get("fecha"),
         "billetera": entidades_actuales.get("billetera") or entidades_actuales.get("billetera_origen") or entidades_actuales.get("billetera_destino"),
         "tarjeta": entidades_actuales.get("tarjeta"),
+        "cantidad_cuotas": entidades_actuales.get("cantidad_cuotas"),
         "resuelta": False,
     }
     operaciones.append(op_0)
@@ -129,6 +135,7 @@ def _resolver_lote_movimientos(
                 "fecha": ad.get("fecha"),
                 "billetera": ad.get("billetera") or ad.get("billetera_origen") or ad.get("billetera_destino"),
                 "tarjeta": ad.get("tarjeta"),
+                "cantidad_cuotas": ad.get("cantidad_cuotas"),
                 "resuelta": False,
             }
             operaciones.append(op_ad)
@@ -251,7 +258,11 @@ def _resolver_lote_movimientos(
             op_dup_found = None
             for op in operaciones:
                 cat_id_chk, _ = _resolver_categoria_y_subcategoria(
-                    op.get("categoria"), usuario.id, db, tipo=op.get("tipo", "egreso")
+                    op.get("categoria"),
+                    usuario.id,
+                    db,
+                    tipo=op.get("tipo", "egreso"),
+                    detalle=op,
                 )
                 mon_chk = Moneda.USD if op.get("moneda") == "USD" else Moneda.ARS
                 m_chk = Decimal(str(op["monto"]))
@@ -290,7 +301,7 @@ def _resolver_lote_movimientos(
             else:
                 resultado_ia["intent"] = "registrar_transaccion"
                 resultado_ia["slot_filling"] = False
-                if confianza_ia_raw < 0.85:
+                if confianza_ia_baja(confianza_ia_raw):
                     entidades_actuales["confianza_baja"] = True
                 resultado_ia["confianza"] = max(float(resultado_ia.get("confianza", 0.0)), 0.85)
                 resultado_ia["_asumio_principal"] = bool(operaciones[0].get("se_asumio_principal", False))
@@ -333,6 +344,16 @@ def _resolver_tarjeta_y_cuotas(
         resultado_ia["slot_filling"] = False
         resultado_ia["datos_faltantes"] = []
     elif entidades_actuales.get("monto") is not None:
+        if (
+            re.search(rf"(?<!\w)(?:u\$s|{monedas_dolares_rx()})(?!\w)", m_norm)
+            or "u$s" in m_norm
+        ):
+            entidades_actuales["moneda"] = "USD"
+        moneda_cred = (
+            Moneda.USD
+            if str(entidades_actuales.get("moneda") or "").upper() == "USD"
+            else Moneda.ARS
+        )
         monto_actual_val = Decimal(str(entidades_actuales["monto"]))
         cant_cuotas, monto_cuota, monto_total, es_ambiguo, err_msg = _interpretar_cuotas(
             mensaje_texto, monto_actual_val
@@ -345,7 +366,7 @@ def _resolver_tarjeta_y_cuotas(
             resultado_ia["datos_faltantes"] = []
         elif es_ambiguo:
             m_fmt = formatear_monto(
-                float(monto_actual_val), Moneda.ARS, con_decimales=False
+                float(monto_actual_val), moneda_cred, con_decimales=False
             )
             resultado_ia["respuesta_usuario"] = f"¿Los {m_fmt} son el total o cada cuota?"
             resultado_ia["intent"] = "slot_filling"
@@ -420,7 +441,7 @@ def _resolver_tarjeta_y_cuotas(
                 )
                 resultado_ia["intent"] = "registrar_transaccion"
                 resultado_ia["slot_filling"] = False
-                if confianza_ia_raw < 0.85:
+                if confianza_ia_baja(confianza_ia_raw):
                     entidades_actuales["confianza_baja"] = True
                 resultado_ia["confianza"] = max(float(resultado_ia.get("confianza", 0.0)), 0.85)
                 resultado_ia["respuesta_usuario"] = propuesta_cred
@@ -465,13 +486,25 @@ def _resolver_billetera_y_duplicados(
         resultado_ia["slot_filling"] = False
         resultado_ia["datos_faltantes"] = []
     elif entidades_actuales.get("monto") is not None:
-        billetera_raw = entidades_actuales.get(clave_bill) or entidades_actuales.get(clave_otra)
+        billetera_raw = (
+            entidades_actuales.get(clave_bill)
+            or entidades_actuales.get("billetera")
+            or entidades_actuales.get(clave_otra)
+        )
         billetera_final = None
         se_asumio_principal = False
+        b_texto_nombrada = _buscar_billetera_en_texto(
+            ctx.mensaje_texto,
+            billeteras_moneda,
+            excluir_efectivo=False,
+            solo_con_preposicion=bool(billetera_raw),
+        )
 
         if billetera_raw:
             b_match, cands = resolver_billetera_cascada(billetera_raw, billeteras_moneda)
-            if b_match:
+            if b_texto_nombrada and (not b_match or b_match.id != b_texto_nombrada.id):
+                billetera_final = b_texto_nombrada
+            elif b_match:
                 billetera_final = b_match
             elif len(cands) > 1:
                 resultado_ia["intent"] = "slot_filling"
@@ -516,7 +549,10 @@ def _resolver_billetera_y_duplicados(
                         encabezado="No encontré esa cuenta. Elegí una:",
                     )
         else:
-            if len(billeteras_moneda) == 1:
+            if b_texto_nombrada:
+                billetera_final = b_texto_nombrada
+                se_asumio_principal = False
+            elif len(billeteras_moneda) == 1:
                 billetera_final = billeteras_moneda[0]
                 se_asumio_principal = False
             else:
@@ -587,8 +623,21 @@ def _resolver_billetera_y_duplicados(
                     resultado_ia["respuesta_usuario"] = aviso_dup_sub
                 else:
                     cat_id_chk, _ = _resolver_categoria_y_subcategoria(
-                        entidades_actuales.get("categoria"), usuario.id, db, tipo=tipo_act
+                        entidades_actuales.get("categoria"),
+                        usuario.id,
+                        db,
+                        tipo=tipo_act,
+                        detalle=entidades_actuales,
                     )
+                    for ad in entidades_actuales.get("transacciones_adicionales") or []:
+                        if isinstance(ad, dict):
+                            _resolver_categoria_y_subcategoria(
+                                ad.get("categoria"),
+                                usuario.id,
+                                db,
+                                tipo=ad.get("tipo", tipo_act),
+                                detalle=ad,
+                            )
                     tx_dup = _buscar_transaccion_duplicada_reciente(
                         usuario_id=usuario.id,
                         monto=Decimal(str(entidades_actuales["monto"])),
@@ -620,7 +669,7 @@ def _resolver_billetera_y_duplicados(
                     else:
                         resultado_ia["intent"] = "registrar_transaccion"
                         resultado_ia["slot_filling"] = False
-                        if confianza_ia_raw < 0.85:
+                        if confianza_ia_baja(confianza_ia_raw):
                             entidades_actuales["confianza_baja"] = True
                         resultado_ia["confianza"] = max(float(resultado_ia.get("confianza", 0.0)), 0.85)
                         resultado_ia["_asumio_principal"] = se_asumio_principal
@@ -673,7 +722,7 @@ def procesar_resolucion_billetera_y_propuestas(ctx: ContextoMensaje) -> None:
             _resolver_lote_movimientos(ctx, entidades_actuales, tarjetas_usuario, billeteras_todas, adicionales)
         else:
             es_debito_explicito = any(d in m_norm for d in PALABRAS_FUERZAN_DEBITO)
-            tiene_cuotas = any(c in m_norm for c in ["cuota", "cuotas", "en cuotas", "pagos"])
+            tiene_cuotas = bool(re.search(r"\b\d+\s*(?:cuotas?|pagos)\b", m_norm))
             tiene_palabras_credito = any(w in m_norm for w in PALABRAS_FUERZAN_CREDITO)
             tiene_mencion_tarjeta = any(g in m_norm for g in FORMAS_GENERICAS_TARJETA)
 
@@ -715,6 +764,61 @@ def procesar_resolucion_billetera_y_propuestas(ctx: ContextoMensaje) -> None:
                 )
                 ctx.es_credito = False
             else:
+                tiene_ult4_o_nombre_t = any(
+                    (
+                        normalizar_texto(t.nombre) in m_norm
+                        and not any(
+                            normalizar_texto(b.nombre) == normalizar_texto(t.nombre)
+                            for b in billeteras_todas
+                        )
+                    )
+                    or (
+                        getattr(t, "apodo", None)
+                        and normalizar_texto(t.apodo) in m_norm
+                    )
+                    or any(
+                        len(d) >= 4 and d[-4:] in m_norm
+                        for d in re.findall(r"\d+", t.nombre)
+                    )
+                    for t in tarjetas_usuario
+                )
+                tiene_modismo_la_del_banco = any(
+                    re.search(
+                        rf"\b(?:con\s+)?la\s+del?\s+{re.escape(bv)}(?!\w)",
+                        m_norm,
+                    )
+                    for t in tarjetas_usuario
+                    if t.billetera
+                    for bv in (
+                        [normalizar_texto(t.billetera.nombre)]
+                        + ALIAS_BANCOS_ARGENTINOS.get(
+                            normalizar_texto(t.billetera.nombre), []
+                        )
+                    )
+                    if bv
+                )
+                es_cred_texto = (
+                    tiene_cuotas
+                    or tiene_palabras_credito
+                    or tiene_mencion_tarjeta
+                    or bool(re.search(r"\btarjeta\b", m_norm))
+                    or tiene_ult4_o_nombre_t
+                    or tiene_modismo_la_del_banco
+                )
+                if (
+                    not es_debito_explicito
+                    and not es_cred_texto
+                    and _buscar_billetera_en_texto(
+                        ctx.mensaje_texto, billeteras_todas
+                    )
+                    is not None
+                ):
+                    tarjeta_match_mencion = None
+                    tarjeta_mencionada_cands = []
+                    entidades_actuales.pop("tarjeta", None)
+                    entidades_actuales.pop("tarjeta_id", None)
+                    entidades_actuales.pop("tarjeta_nombre", None)
+
                 es_credito = (not es_debito_explicito) and (
                     tiene_cuotas
                     or tiene_palabras_credito

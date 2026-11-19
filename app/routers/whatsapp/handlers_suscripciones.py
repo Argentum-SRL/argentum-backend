@@ -279,6 +279,10 @@ def manejar_ambiguedad_suscripcion(
     if not (es_amb and srv_amb):
         return False
 
+    monto_amb, mon_amb = _extraer_monto_y_moneda_suscripcion(mensaje_texto)
+    monto_val = float(monto_amb) if monto_amb is not None else None
+    moneda_val = mon_amb or "ARS"
+
     msg_pregunta = f"¿{srv_amb} lo pagás todos los meses?"
     nueva_conv = ConversacionWpp(
         usuario_id=usuario.id,
@@ -288,11 +292,21 @@ def manejar_ambiguedad_suscripcion(
         transcripcion=None,
         mensaje_bot=msg_pregunta,
         intent_detectado="ambiguedad_suscripcion",
-        entidades={"servicio": srv_amb},
+        entidades={
+            "servicio": srv_amb,
+            "monto": monto_val,
+            "moneda": moneda_val,
+        },
         accion_ejecutada=None,
         confianza=Decimal("1.000"),
         slot_filling_activo=True,
-        slot_filling_estado={"tipo_flujo": "ambiguedad_suscripcion", "servicio": srv_amb},
+        slot_filling_estado={
+            "tipo_flujo": "ambiguedad_suscripcion",
+            "servicio": srv_amb,
+            "monto": monto_val,
+            "moneda": moneda_val,
+            "mensaje_original": mensaje_texto,
+        },
     )
     db.add(nueva_conv)
     db.commit()

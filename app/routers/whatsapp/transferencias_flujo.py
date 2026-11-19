@@ -584,6 +584,7 @@ def manejar_transferencia_ia(
         "fecha": fecha_val,
         "aviso_fecha": aviso_fecha,
         "comision": comision,
+        "tasa_cambio": entidades.get("tasa_cambio") or entidades.get("cotizacion"),
         "tipo": "transferencia",
         "origen_ia": True,
     }

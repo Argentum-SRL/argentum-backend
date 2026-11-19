@@ -84,12 +84,13 @@ def _interpretar_cuotas(
     """
     m_norm = normalizar_texto(mensaje)
 
-    # Caso 1: "en X cuotas de M" o "X cuotas de M" -> M es por cuota
+    # Caso 1: "N cuotas de X", "N cuotas sin interés de X", "N cuotas fijas de X", "X por mes/cuota"
     suf_rx = sufijo_multiplicador_rx()
+    monto_rx = rf"\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*{suf_rx})?"
     pat_de = re.search(
-        rf"(?:en\s+)?(\d+)\s*(?:cuotas?|pagos?)\s+de\s+"
-        rf"(?:cada\s+una\s+de\s+)?"
-        rf"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*{suf_rx})?)(?:\b|$)",
+        rf"(?:en\s+)?(\d+)\s*(?:cuotas?|pagos?)"
+        rf"(?:\s+(?:sin\s+interes|fijas?))?\s+de\s+"
+        rf"(?:cada\s+una\s+de\s+)?({monto_rx})(?:\b|$)",
         m_norm,
     )
     if pat_de:
@@ -105,10 +106,68 @@ def _interpretar_cuotas(
             monto_total = Decimal(str(cant)) * monto_cuota
             return cant, monto_cuota, monto_total, False, None
 
-    # Caso 2: "M en X cuotas" o "M a pagar en X cuotas" -> M es el total
+    pat_gen = re.search(r"(?:en\s+)?(\d+)\s*(?:cuotas?|pagos?)", m_norm)
+    if pat_gen:
+        cant_gen = int(pat_gen.group(1))
+        pat_cada = re.search(
+            rf"({monto_rx})\s+(?:por\s+mes|cada\s+una|por\s+cuota)\b",
+            m_norm,
+        )
+        if pat_cada:
+            if cant_gen < 1 or cant_gen > 48:
+                return (
+                    cant_gen,
+                    None,
+                    None,
+                    False,
+                    "Las cuotas tienen que ser entre 1 y 48.",
+                )
+            m_val = _parsear_monto_texto_cuota(pat_cada.group(1).strip())
+            if m_val is None and monto_ia is not None:
+                m_val = monto_ia
+            if m_val is not None:
+                return (
+                    cant_gen,
+                    m_val,
+                    Decimal(str(cant_gen)) * m_val,
+                    False,
+                    None,
+                )
+
+    # Caso 2: "X en total", "total X", "por un total de X", "X en N cuotas" -> X es el total
+    if pat_gen:
+        cant_tot = int(pat_gen.group(1))
+        pat_tot_exp = re.search(
+            rf"({monto_rx})\s+en\s+total\b"
+            rf"|(?:por\s+un\s+total\s+de|total(?:\s+de)?)\s+({monto_rx})(?:\b|$)",
+            m_norm,
+        )
+        if pat_tot_exp:
+            if cant_tot < 1 or cant_tot > 48:
+                return (
+                    cant_tot,
+                    None,
+                    None,
+                    False,
+                    "Las cuotas tienen que ser entre 1 y 48.",
+                )
+            raw_tot = (pat_tot_exp.group(1) or pat_tot_exp.group(2) or "").strip()
+            m_val = _parsear_monto_texto_cuota(raw_tot)
+            if m_val is None and monto_ia is not None:
+                m_val = monto_ia
+            if m_val is not None:
+                return (
+                    cant_tot,
+                    round(m_val / Decimal(str(cant_tot)), 2),
+                    m_val,
+                    False,
+                    None,
+                )
+
     pat_en = re.search(
-        rf"(\$?\s*[0-9]+(?:[.,][0-9]+)?(?:\s*{suf_rx})?)\s+"
-        rf"(?:a\s+pagar\s+)?en\s+(\d+)\s*(?:cuotas?|pagos?)(?:\b|$)",
+        rf"({monto_rx})\s+"
+        rf"(?:(?:a\s+pagar|(?!por\s+mes|cada\s+una|por\s+cuota)[a-z0-9]+)\s+){{0,4}}?"
+        rf"en\s+(\d+)\s*(?:cuotas?|pagos?)(?:\b|$)",
         m_norm,
     )
     if pat_en:
@@ -125,7 +184,6 @@ def _interpretar_cuotas(
             return cant, monto_cuota, monto_total, False, None
 
     # Caso 3: Menciona cuotas ("X cuotas") pero sin encajar claramente en Caso 1 ni Caso 2
-    pat_gen = re.search(r"(?:en\s+)?(\d+)\s*(?:cuotas?|pagos?)", m_norm)
     if pat_gen:
         cant = int(pat_gen.group(1))
         if cant < 1 or cant > 48:

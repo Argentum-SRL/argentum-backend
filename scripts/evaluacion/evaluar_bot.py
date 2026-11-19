@@ -42,6 +42,15 @@ FUNCIONES_VALIDAS = (
 )
 FRASES_PATH = Path(__file__).resolve().parent / "frases_bot.json"
 OUT_DIR = Path(r"D:\Argentum\auditorias\raw\evaluacion_m2")
+UMBRALES_CALIBRACION = [round(0.50 + 0.05 * i, 2) for i in range(10)]
+_MARCADORES_CONFIRMACION = (
+    "¿Anoto",
+    "¿Lo anoto",
+    "¿Las anoto",
+    "¿Aporto",
+    "¿Lo dejo",
+)
+_CAMPOS_PLATA = ("tipo", "monto", "moneda", "cuenta")
 
 
 def supera_tope_corrida(costo_acumulado: Decimal) -> bool:
@@ -151,6 +160,81 @@ def comparar_resultado(esperado: dict[str, Any], obtenido: dict[str, Any]) -> di
         "fallos": fallos,
         "campos_ok": campos_ok,
     }
+
+
+def clasificar_primera_respuesta(mensajes_bot: list[str] | None) -> str:
+    """Clasifica el primer mensaje del bot: anoto_directo, pide_confirmacion u otra."""
+    if not mensajes_bot:
+        return "otra"
+    primer = str(mensajes_bot[0] or "").strip()
+    if primer.startswith("Listo"):
+        return "anoto_directo"
+    if any(m in primer for m in _MARCADORES_CONFIRMACION):
+        return "pide_confirmacion"
+    return "otra"
+
+
+def _es_resultado_simple_calibrable(res: dict[str, Any]) -> bool:
+    """Devuelve True si el resultado es gasto o ingreso simple (1 mov, sin cuotas, ARS)."""
+    if res.get("funcion") not in ("gasto", "ingreso"):
+        return False
+    esp = res.get("esperado") or {}
+    movs = esp.get("movimientos") or []
+    if len(movs) != 1:
+        return False
+    mov = movs[0]
+    if mov.get("cuotas") is not None or esp.get("cuotas") is not None:
+        return False
+    moneda = mov.get("moneda")
+    if moneda is not None and str(moneda).upper() != "ARS":
+        return False
+    return True
+
+
+def _tiene_error_plata(res: dict[str, Any]) -> bool:
+    """Devuelve True si hubo algún fallo en tipo, monto, moneda o cuenta."""
+    comp = res.get("comparacion") or {}
+    fallos = set(comp.get("fallos") or [])
+    campos_ok = comp.get("campos_ok") or {}
+    return any(
+        (c in fallos) or (campos_ok.get(c) is False)
+        for c in _CAMPOS_PLATA
+    )
+
+
+def tabla_calibracion(
+    resultados: list[dict[str, Any]],
+    umbrales: list[float] | None = None,
+) -> list[dict[str, Any]]:
+    """Calcula la tabla de calibración de confianza IA sobre frases simples en ARS."""
+    lista_umbrales = list(umbrales) if umbrales is not None else UMBRALES_CALIBRACION
+    simples: list[tuple[float, bool]] = []
+    for r in resultados:
+        if not _es_resultado_simple_calibrable(r):
+            continue
+        confs_validas = [
+            float(c) for c in (r.get("confianzas_ia") or []) if c is not None
+        ]
+        if not confs_validas:
+            continue
+        simples.append((min(confs_validas), _tiene_error_plata(r)))
+
+    tabla: list[dict[str, Any]] = []
+    for u in lista_umbrales:
+        u_f = round(float(u), 2)
+        preguntaria = sum(1 for conf, _ in simples if conf < u_f)
+        atrapados = sum(1 for conf, err in simples if conf < u_f and err)
+        sin_atrapar = sum(1 for conf, err in simples if conf >= u_f and err)
+        tabla.append(
+            {
+                "umbral": u_f,
+                "total_simples": len(simples),
+                "preguntaria": preguntaria,
+                "errores_plata_atrapados": atrapados,
+                "errores_plata_sin_atrapar": sin_atrapar,
+            }
+        )
+    return tabla
 
 
 def _ejecutar_frase(frase_cfg: dict[str, Any]) -> dict[str, Any]:
@@ -342,6 +426,22 @@ def _guardar_salidas(
     mediana_t = statistics.median(tiempos_ia) if tiempos_ia else 0.0
     p95_t = _percentil_95(tiempos_ia)
 
+    prim_tot = {"anoto_directo": 0, "pide_confirmacion": 0, "otra": 0}
+    prim_fn: dict[str, dict[str, int]] = {}
+    for r in resultados:
+        clase = r.get("primera_respuesta") or clasificar_primera_respuesta(
+            (r.get("obtenido") or {}).get("mensajes_bot")
+        )
+        if clase not in prim_tot:
+            clase = "otra"
+        prim_tot[clase] += 1
+        bucket = prim_fn.setdefault(
+            r["funcion"],
+            {"anoto_directo": 0, "pide_confirmacion": 0, "otra": 0},
+        )
+        bucket[clase] += 1
+    calibracion = tabla_calibracion(resultados)
+
     lineas.extend(
         [
             "",
@@ -363,8 +463,29 @@ def _guardar_salidas(
             f"Costo total (USD): {costo_total:.6f}",
             f"Tiempo por llamada IA: mediana={mediana_t:.3f}s | p95={p95_t:.3f}s",
             f"Modelo: {modelo} | Razonamiento: {razonamiento}",
+            (
+                "Primera respuesta: "
+                f"anoto_directo={prim_tot['anoto_directo']} "
+                f"pide_confirmacion={prim_tot['pide_confirmacion']} "
+                f"otra={prim_tot['otra']}"
+            ),
+            "Primera respuesta por función:",
         ]
     )
+    for fn, vals in sorted(prim_fn.items()):
+        lineas.append(
+            f"  - {fn}: anoto_directo={vals['anoto_directo']} "
+            f"pide_confirmacion={vals['pide_confirmacion']} "
+            f"otra={vals['otra']}"
+        )
+    lineas.append("Tabla de calibración:")
+    for row in calibracion:
+        lineas.append(
+            f"  - umbral={row['umbral']:.2f}: "
+            f"preguntaria={row['preguntaria']}/{row['total_simples']} "
+            f"errores_plata_atrapados={row['errores_plata_atrapados']} "
+            f"errores_plata_sin_atrapar={row['errores_plata_sin_atrapar']}"
+        )
 
     txt_path.write_text("\n".join(lineas) + "\n", encoding="utf-8", newline="\n")
     payload_json = {
@@ -375,6 +496,7 @@ def _guardar_salidas(
         "llamadas_ia": len(tiempos_ia),
         "tiempo_mediana_s": mediana_t,
         "tiempo_p95_s": p95_t,
+        "calibracion": calibracion,
         "resultados": resultados,
     }
     json_path.write_text(
@@ -383,6 +505,51 @@ def _guardar_salidas(
         newline="\n",
     )
     return txt_path, json_path
+
+
+def _crear_proc_medido(
+    orig_proc: Any,
+    frase_estado: dict[str, Any],
+    tiempos_globales: list[float],
+):
+    """Construye el wrapper _proc_medido que mide tiempos y registra confianza e intent IA."""
+
+    def _proc_medido(mensaje, usuario, db, historial=None, estado_previo=None):
+        t0 = time.perf_counter()
+        try:
+            res = orig_proc(
+                mensaje,
+                usuario,
+                db,
+                historial=historial,
+                estado_previo=estado_previo,
+            )
+            if isinstance(res, dict):
+                if res.get("error"):
+                    frase_estado["errores"].append("procesar_mensaje devolvió error")
+                raw_conf = res.get("confianza")
+                try:
+                    conf_val: float | None = (
+                        float(raw_conf) if raw_conf is not None else None
+                    )
+                except (TypeError, ValueError):
+                    conf_val = None
+                frase_estado["confianzas"].append(conf_val)
+                raw_int = res.get("intent")
+                frase_estado["intents_ia"].append(
+                    str(raw_int) if raw_int is not None else None
+                )
+            return res
+        except Exception as exc:
+            frase_estado["errores"].append(_limpiar_error_api(exc))
+            raise
+        finally:
+            dt = time.perf_counter() - t0
+            frase_estado["llamadas"] += 1
+            frase_estado["tiempos"].append(dt)
+            tiempos_globales.append(dt)
+
+    return _proc_medido
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -434,7 +601,14 @@ def main(argv: list[str] | None = None) -> int:
     import app.services.uso_ia_service as uso_mod
 
     orig_registrar = uso_mod.registrar_uso_ia
-    frase_estado = {"costo": Decimal("0"), "llamadas": 0, "tiempos": [], "errores": []}
+    frase_estado = {
+        "costo": Decimal("0"),
+        "llamadas": 0,
+        "tiempos": [],
+        "errores": [],
+        "confianzas": [],
+        "intents_ia": [],
+    }
 
     def _colector_uso(usuario_id, funcion, modelo, respuesta=None, segundos_audio=0):
         t_in, t_cache, t_out = _extraer_tokens_de_respuesta(respuesta)
@@ -448,28 +622,11 @@ def main(argv: list[str] | None = None) -> int:
         frase_estado["costo"] += c
 
     orig_proc = comun._original_procesar_mensaje
-
-    def _proc_medido(mensaje, usuario, db, historial=None, estado_previo=None):
-        t0 = time.perf_counter()
-        try:
-            res = orig_proc(
-                mensaje,
-                usuario,
-                db,
-                historial=historial,
-                estado_previo=estado_previo,
-            )
-            if isinstance(res, dict) and res.get("error"):
-                frase_estado["errores"].append("procesar_mensaje devolvió error")
-            return res
-        except Exception as exc:
-            frase_estado["errores"].append(_limpiar_error_api(exc))
-            raise
-        finally:
-            dt = time.perf_counter() - t0
-            frase_estado["llamadas"] += 1
-            frase_estado["tiempos"].append(dt)
-            tiempos_globales.append(dt)
+    _proc_medido = _crear_proc_medido(
+        orig_proc,
+        frase_estado,
+        tiempos_globales,
+    )
 
     with (
         patch("app.services.uso_ia_service.registrar_uso_ia", side_effect=_colector_uso),
@@ -486,10 +643,15 @@ def main(argv: list[str] | None = None) -> int:
                 frase_estado["llamadas"] = 0
                 frase_estado["tiempos"] = []
                 frase_estado["errores"] = []
+                frase_estado["confianzas"] = []
+                frase_estado["intents_ia"] = []
 
                 obtenido = _ejecutar_frase(frase_cfg)
                 costo_acumulado += frase_estado["costo"]
                 comp = comparar_resultado(frase_cfg["esperado"], obtenido)
+                prim_resp = clasificar_primera_respuesta(
+                    obtenido.get("mensajes_bot")
+                )
                 resultados.append(
                     {
                         "id": frase_cfg["id"],
@@ -497,6 +659,9 @@ def main(argv: list[str] | None = None) -> int:
                         "esperado": frase_cfg["esperado"],
                         "obtenido": obtenido,
                         "comparacion": comp,
+                        "primera_respuesta": prim_resp,
+                        "confianzas_ia": list(frase_estado["confianzas"]),
+                        "intents_ia": list(frase_estado["intents_ia"]),
                         "llamadas_ia": frase_estado["llamadas"],
                         "tiempos_s": list(frase_estado["tiempos"]),
                         "errores": list(frase_estado["errores"]),

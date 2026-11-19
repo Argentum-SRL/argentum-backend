@@ -47,6 +47,10 @@ _PATRON_CONTADO_DESPUES = re.compile(
 _PATRON_CONTADO_ANTES = re.compile(
     rf"\b(?:contado|en\s+efectivo)\s+(?:de\s+|a\s+)?({_MONTO_RX})"
 )
+_PATRON_CONTADO_CONTRA = re.compile(
+    rf"\b(?:contra|vs\.?|o)\s+(?:un\s+)?(?:contado\s+(?:de\s+)?)?"
+    rf"({_MONTO_RX})(?!\s*(?:cuotas?|pagos?|%))"
+)
 _PATRON_CUOTAS_DE = re.compile(
     rf"\b(\d{{1,3}})\s+(?:cuotas?\s+)?(?:sin\s+interes\s+)?de\s+({_MONTO_RX})"
 )
@@ -71,7 +75,11 @@ def analizar_consulta_conveniencia(texto: str) -> dict | None:
     if not any(t in norm for t in TRIGGERS_CONVENIENCIA):
         return None
 
-    m_contado = _PATRON_CONTADO_DESPUES.search(norm) or _PATRON_CONTADO_ANTES.search(norm)
+    m_contado = (
+        _PATRON_CONTADO_DESPUES.search(norm)
+        or _PATRON_CONTADO_ANTES.search(norm)
+        or _PATRON_CONTADO_CONTRA.search(norm)
+    )
     if not m_contado:
         return None
 
@@ -190,7 +198,15 @@ def _responder_conveniencia(ctx: ContextoMensaje, consulta: dict) -> bool:
         transcripcion=None,
         mensaje_bot=msg_resp,
         intent_detectado=INTENT_ORIGEN,
-        entidades={},
+        entidades={
+            "precio_contado": float(consulta["precio_contado"]),
+            "cantidad_cuotas": int(consulta["cantidad_cuotas"]),
+            "valor_cuota": (
+                float(consulta["valor_cuota"])
+                if consulta.get("valor_cuota") is not None
+                else None
+            ),
+        },
         accion_ejecutada="consulta",
         confianza=Decimal("1.000"),
         slot_filling_activo=estado_pregunta is not None,

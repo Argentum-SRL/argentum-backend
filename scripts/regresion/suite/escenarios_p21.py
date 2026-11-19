@@ -676,7 +676,7 @@ def p21_caso_8(datos):
         respuestas.clear()
         _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "no"), time.perf_counter())
         resp2 = respuestas[-1][1] if respuestas else ""
-        cancel_ok = resp2 == "Listo, cancelado."
+        cancel_ok = resp2 == "Listo, no lo anoto."
 
         db = Session()
         nuevas_txs = db.execute(select(Transaccion).where(Transaccion.usuario_id == u.id, Transaccion.id.not_in(tx_ids_antes))).scalars().all()
