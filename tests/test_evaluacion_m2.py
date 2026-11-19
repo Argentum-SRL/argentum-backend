@@ -115,7 +115,7 @@ def test_te2_validar_frases_bot_json():
     data = json.loads(ruta.read_text(encoding="utf-8"))
     assert data["version"] == 1
     frases = data["frases"]
-    assert len(frases) == 6
+    assert len(frases) >= 300
 
     catalogo_por_tipo: dict[str, dict[str, set[str]]] = {"egreso": {}, "ingreso": {}}
     for cat in ARBOL_CATEGORIAS:

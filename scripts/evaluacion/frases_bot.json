@@ -4,7 +4,9 @@
     {
       "id": "B001",
       "funcion": "gasto",
-      "mensajes": ["gasté 2 lucas en el chino"],
+      "mensajes": [
+        "gasté 2 lucas en el chino"
+      ],
       "confirmar": true,
       "esperado": {
         "movimientos": [
@@ -22,7 +24,9 @@
     {
       "id": "B002",
       "funcion": "ingreso",
-      "mensajes": ["cobré el sueldo, 850 mil"],
+      "mensajes": [
+        "cobré el sueldo, 850 mil"
+      ],
       "confirmar": true,
       "esperado": {
         "movimientos": [
@@ -39,7 +43,9 @@
     {
       "id": "B003",
       "funcion": "transferencia",
-      "mensajes": ["pasé 20 lucas de galicia a santander"],
+      "mensajes": [
+        "pasé 20 lucas de galicia a santander"
+      ],
       "confirmar": true,
       "esperado": {
         "transferencias": [
@@ -55,7 +61,9 @@
     {
       "id": "B004",
       "funcion": "gasto",
-      "mensajes": ["ayer nafta 35 mil"],
+      "mensajes": [
+        "ayer nafta 35 mil"
+      ],
       "confirmar": true,
       "esperado": {
         "movimientos": [
@@ -72,7 +80,9 @@
     {
       "id": "B005",
       "funcion": "gasto",
-      "mensajes": ["birra con los pibes 8500 en efectivo"],
+      "mensajes": [
+        "birra con los pibes 8500 en efectivo"
+      ],
       "confirmar": true,
       "esperado": {
         "movimientos": [
@@ -89,7 +99,6908 @@
     {
       "id": "B006",
       "funcion": "gasto",
-      "mensajes": ["3 gambas en el kiosco"],
+      "mensajes": [
+        "3 gambas en el kiosco"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B007",
+      "funcion": "gasto",
+      "mensajes": [
+        "fui al super, 45 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 45000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Supermercado",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B008",
+      "funcion": "gasto",
+      "mensajes": [
+        "compras del mes en el coto 180 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 180000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Supermercado",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B009",
+      "funcion": "gasto",
+      "mensajes": [
+        "supermecado 23.500"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 23500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Supermercado",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B010",
+      "funcion": "gasto",
+      "mensajes": [
+        "changomas 67k"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 67000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Supermercado",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B011",
+      "funcion": "gasto",
+      "mensajes": [
+        "almacén 3200"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 3200,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Supermercado",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B012",
+      "funcion": "gasto",
+      "mensajes": [
+        "Gaste 114.599 en supermercado"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 114599,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Supermercado",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B013",
+      "funcion": "gasto",
+      "mensajes": [
+        "verdu 8 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 8000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Verdulería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B014",
+      "funcion": "gasto",
+      "mensajes": [
+        "gaste 4500 en la verduleria"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 4500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Verdulería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B015",
+      "funcion": "gasto",
+      "mensajes": [
+        "frutas y verduras 6.300"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 6300,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Verdulería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B016",
+      "funcion": "gasto",
+      "mensajes": [
+        "carniceria 22 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 22000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Carnicería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B017",
+      "funcion": "gasto",
+      "mensajes": [
+        "asado para el domingo 38 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 38000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Carnicería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B018",
+      "funcion": "gasto",
+      "mensajes": [
+        "pollo 9500 en la pollería"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 9500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Carnicería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B019",
+      "funcion": "gasto",
+      "mensajes": [
+        "facturas 4 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 4000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Panadería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B020",
+      "funcion": "gasto",
+      "mensajes": [
+        "pan y medialunas 5200"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 5200,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Panadería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B021",
+      "funcion": "gasto",
+      "mensajes": [
+        "5000 panaderia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 5000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Panadería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B022",
+      "funcion": "gasto",
+      "mensajes": [
+        "kiosco 1200"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 1200,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Kiosco",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B023",
+      "funcion": "gasto",
+      "mensajes": [
+        "puchos 6000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 6000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Kiosco",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B024",
+      "funcion": "gasto",
+      "mensajes": [
+        "alfajores en el kiosko 2500"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 2500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Kiosco",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B025",
+      "funcion": "gasto",
+      "mensajes": [
+        "Gaste 19000 en golosinas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 19000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Kiosco",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B026",
+      "funcion": "gasto",
+      "mensajes": [
+        "fiambrería 15.960"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 15960,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B027",
+      "funcion": "gasto",
+      "mensajes": [
+        "vinoteca 25 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 25000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B028",
+      "funcion": "gasto",
+      "mensajes": [
+        "almuerzo 9 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 9000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Gastronomía",
+            "subcategoria": "Restaurantes",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B029",
+      "funcion": "gasto",
+      "mensajes": [
+        "cena en la parrilla 48 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 48000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Gastronomía",
+            "subcategoria": "Restaurantes",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B030",
+      "funcion": "gasto",
+      "mensajes": [
+        "34000 en restorant"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 34000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Gastronomía",
+            "subcategoria": "Restaurantes",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B031",
+      "funcion": "gasto",
+      "mensajes": [
+        "pedí sushi por rappi 27k"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 27000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Gastronomía",
+            "subcategoria": "Delivery",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B032",
+      "funcion": "gasto",
+      "mensajes": [
+        "delivery de empanadas 14500"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 14500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Gastronomía",
+            "subcategoria": "Delivery",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B033",
+      "funcion": "gasto",
+      "mensajes": [
+        "pizza por pedidos ya 18000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 18000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Gastronomía",
+            "subcategoria": "Delivery",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B034",
+      "funcion": "gasto",
+      "mensajes": [
+        "café con medialunas en el bar de la esquina 7 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 7000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Gastronomía",
+            "subcategoria": "Cafetería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B035",
+      "funcion": "gasto",
+      "mensajes": [
+        "2000 en heladeria"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 2000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Gastronomía",
+            "subcategoria": "Cafetería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B036",
+      "funcion": "gasto",
+      "mensajes": [
+        "merienda en starbucks 12 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 12000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Gastronomía",
+            "subcategoria": "Cafetería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B037",
+      "funcion": "gasto",
+      "mensajes": [
+        "Gaste 13000 en cafeteria"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 13000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Gastronomía",
+            "subcategoria": "Cafetería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B038",
+      "funcion": "gasto",
+      "mensajes": [
+        "cargué nafta 30 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 30000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Combustible",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B039",
+      "funcion": "gasto",
+      "mensajes": [
+        "gnc 12000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 12000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Combustible",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B040",
+      "funcion": "gasto",
+      "mensajes": [
+        "carge 40k de nafta en ypf"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 40000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Combustible",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B041",
+      "funcion": "gasto",
+      "mensajes": [
+        "colectibo 1200"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 1200,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Transporte público",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B042",
+      "funcion": "gasto",
+      "mensajes": [
+        "cargué 10 lucas en la sube"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 10000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Transporte público",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B043",
+      "funcion": "gasto",
+      "mensajes": [
+        "gasté 5.445 en subte"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 5445,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Transporte público",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B044",
+      "funcion": "gasto",
+      "mensajes": [
+        "24410 en pasajes de cole"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 24410,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Transporte público",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B045",
+      "funcion": "gasto",
+      "mensajes": [
+        "10000 en trasporte publico"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 10000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Transporte público",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B046",
+      "funcion": "gasto",
+      "mensajes": [
+        "uber 5600"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 5600,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Taxi y apps",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B047",
+      "funcion": "gasto",
+      "mensajes": [
+        "uver 4800"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 4800,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Taxi y apps",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B048",
+      "funcion": "gasto",
+      "mensajes": [
+        "didi 3200"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 3200,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Taxi y apps",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B049",
+      "funcion": "gasto",
+      "mensajes": [
+        "remis al aeropuerto 25 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 25000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Taxi y apps",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B050",
+      "funcion": "gasto",
+      "mensajes": [
+        "estacionamiento 4000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 4000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Estacionamiento",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B051",
+      "funcion": "gasto",
+      "mensajes": [
+        "cochera del mes 60 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 60000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Estacionamiento",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B052",
+      "funcion": "gasto",
+      "mensajes": [
+        "peaje 2300"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 2300,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Peajes",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B053",
+      "funcion": "gasto",
+      "mensajes": [
+        "service del auto 150 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 150000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Auto",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B054",
+      "funcion": "gasto",
+      "mensajes": [
+        "cambio de aceite 45k"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 45000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Auto",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B055",
+      "funcion": "gasto",
+      "mensajes": [
+        "gomería 8000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 8000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Auto",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B056",
+      "funcion": "gasto",
+      "mensajes": [
+        "pagué el alquiler 450 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 450000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Vivienda",
+            "subcategoria": "Alquiler",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B057",
+      "funcion": "gasto",
+      "mensajes": [
+        "expensas 120 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 120000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Vivienda",
+            "subcategoria": "Expensas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B058",
+      "funcion": "gasto",
+      "mensajes": [
+        "16526.77 en la luz"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 16526.77,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Vivienda",
+            "subcategoria": "Luz",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B059",
+      "funcion": "gasto",
+      "mensajes": [
+        "pagué edenor 32.400"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 32400,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Vivienda",
+            "subcategoria": "Luz",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B060",
+      "funcion": "gasto",
+      "mensajes": [
+        "factura de gas 18 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 18000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Vivienda",
+            "subcategoria": "Gas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B061",
+      "funcion": "gasto",
+      "mensajes": [
+        "garrafa 15000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 15000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Vivienda",
+            "subcategoria": "Gas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B062",
+      "funcion": "gasto",
+      "mensajes": [
+        "agua 9800"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 9800,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Vivienda",
+            "subcategoria": "Agua",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B063",
+      "funcion": "gasto",
+      "mensajes": [
+        "aysa 11.200"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 11200,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Vivienda",
+            "subcategoria": "Agua",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B064",
+      "funcion": "gasto",
+      "mensajes": [
+        "lavandina y detergente 7500"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 7500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Hogar",
+            "subcategoria": "Limpieza",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B065",
+      "funcion": "gasto",
+      "mensajes": [
+        "lavandería 9 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 9000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Hogar",
+            "subcategoria": "Limpieza",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B066",
+      "funcion": "gasto",
+      "mensajes": [
+        "compré un colchón 350 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 350000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Hogar",
+            "subcategoria": "Muebles y electro",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B067",
+      "funcion": "gasto",
+      "mensajes": [
+        "microondas 180 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 180000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Hogar",
+            "subcategoria": "Muebles y electro",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B068",
+      "funcion": "gasto",
+      "mensajes": [
+        "plomero 40 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 40000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Hogar",
+            "subcategoria": "Reparaciones",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B069",
+      "funcion": "gasto",
+      "mensajes": [
+        "ferretería 6500"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 6500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Hogar",
+            "subcategoria": "Reparaciones",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B070",
+      "funcion": "gasto",
+      "mensajes": [
+        "le pagué a la señora que limpia 30 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 30000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Hogar",
+            "subcategoria": "Servicio doméstico",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B071",
+      "funcion": "gasto",
+      "mensajes": [
+        "niñera 25 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 25000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Hogar",
+            "subcategoria": "Servicio doméstico",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B072",
+      "funcion": "gasto",
+      "mensajes": [
+        "prepaga 95 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 95000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Salud",
+            "subcategoria": "Prepaga y obra social",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B073",
+      "funcion": "gasto",
+      "mensajes": [
+        "pague 12 mil de la prepga"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 12000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Salud",
+            "subcategoria": "Prepaga y obra social",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B074",
+      "funcion": "gasto",
+      "mensajes": [
+        "osde 140.000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 140000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Salud",
+            "subcategoria": "Prepaga y obra social",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B075",
+      "funcion": "gasto",
+      "mensajes": [
+        "consulta con el médico 20 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 20000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Salud",
+            "subcategoria": "Médico",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B076",
+      "funcion": "gasto",
+      "mensajes": [
+        "análisis de sangre 15000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 15000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Salud",
+            "subcategoria": "Médico",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B077",
+      "funcion": "gasto",
+      "mensajes": [
+        "farmasia 8900"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 8900,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Salud",
+            "subcategoria": "Farmacia",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B078",
+      "funcion": "gasto",
+      "mensajes": [
+        "remedios 12.300"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 12300,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Salud",
+            "subcategoria": "Farmacia",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B079",
+      "funcion": "gasto",
+      "mensajes": [
+        "30484 en farmacia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 30484,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Salud",
+            "subcategoria": "Farmacia",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B080",
+      "funcion": "gasto",
+      "mensajes": [
+        "dentista 35 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 35000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Salud",
+            "subcategoria": "Dentista",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B081",
+      "funcion": "gasto",
+      "mensajes": [
+        "psicólogo 28000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 28000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Salud",
+            "subcategoria": "Terapias",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B082",
+      "funcion": "gasto",
+      "mensajes": [
+        "kinesiólogo 18k"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 18000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Salud",
+            "subcategoria": "Terapias",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B083",
+      "funcion": "gasto",
+      "mensajes": [
+        "me corté el pelo 15000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 15000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Cuidado personal",
+            "subcategoria": "Peluquería y belleza",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B084",
+      "funcion": "gasto",
+      "mensajes": [
+        "Gasté 33.000 en peluquería."
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 33000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Cuidado personal",
+            "subcategoria": "Peluquería y belleza",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B085",
+      "funcion": "gasto",
+      "mensajes": [
+        "uñas 12 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 12000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Cuidado personal",
+            "subcategoria": "Peluquería y belleza",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B086",
+      "funcion": "gasto",
+      "mensajes": [
+        "barbería 9000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 9000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Cuidado personal",
+            "subcategoria": "Peluquería y belleza",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B087",
+      "funcion": "gasto",
+      "mensajes": [
+        "perfume 85 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 85000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Cuidado personal",
+            "subcategoria": "Perfumería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B088",
+      "funcion": "gasto",
+      "mensajes": [
+        "shampoo y crema 11000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 11000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Cuidado personal",
+            "subcategoria": "Perfumería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B089",
+      "funcion": "gasto",
+      "mensajes": [
+        "entrada al recital 60 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 60000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Ocio",
+            "subcategoria": "Salidas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B090",
+      "funcion": "gasto",
+      "mensajes": [
+        "cine 12000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 12000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Ocio",
+            "subcategoria": "Salidas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B091",
+      "funcion": "gasto",
+      "mensajes": [
+        "Gaste 18850 en entrada al teatro"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 18850,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Ocio",
+            "subcategoria": "Salidas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B092",
+      "funcion": "gasto",
+      "mensajes": [
+        "boliche 20 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 20000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Ocio",
+            "subcategoria": "Salidas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B093",
+      "funcion": "gasto",
+      "mensajes": [
+        "tragos 14k"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 14000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Ocio",
+            "subcategoria": "Salidas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B094",
+      "funcion": "gasto",
+      "mensajes": [
+        "Gaste 17000 en salidas con amigos"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 17000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Ocio",
+            "subcategoria": "Salidas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B095",
+      "funcion": "gasto",
+      "mensajes": [
+        "juego en steam 9.268,60"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 9268.6,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Ocio",
+            "subcategoria": "Hobbies y juegos",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B096",
+      "funcion": "gasto",
+      "mensajes": [
+        "una novela para leer 22 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 22000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Ocio",
+            "subcategoria": "Hobbies y juegos",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B097",
+      "funcion": "gasto",
+      "mensajes": [
+        "pádel 8000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 8000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Ocio",
+            "subcategoria": "Deportes y gimnasio",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B098",
+      "funcion": "gasto",
+      "mensajes": [
+        "cuota del club 25 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 25000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Ocio",
+            "subcategoria": "Deportes y gimnasio",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B099",
+      "funcion": "gasto",
+      "mensajes": [
+        "pasajes a córdoba 90 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 90000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Ocio",
+            "subcategoria": "Viajes",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B100",
+      "funcion": "gasto",
+      "mensajes": [
+        "60300 en pasajes de viajes"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 60300,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Ocio",
+            "subcategoria": "Viajes",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B101",
+      "funcion": "gasto",
+      "mensajes": [
+        "hotel en mar del plata 120 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 120000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Ocio",
+            "subcategoria": "Viajes",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B102",
+      "funcion": "gasto",
+      "mensajes": [
+        "cuota de la facu 80 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 80000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Educación",
+            "subcategoria": "Colegio y facultad",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B103",
+      "funcion": "gasto",
+      "mensajes": [
+        "matrícula del colegio 150000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 150000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Educación",
+            "subcategoria": "Colegio y facultad",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B104",
+      "funcion": "gasto",
+      "mensajes": [
+        "curso de inglés 40 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 40000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Educación",
+            "subcategoria": "Cursos",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B105",
+      "funcion": "gasto",
+      "mensajes": [
+        "fotocopias 3500"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 3500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Educación",
+            "subcategoria": "Libros y útiles",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B106",
+      "funcion": "gasto",
+      "mensajes": [
+        "útiles escolares 28 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 28000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Educación",
+            "subcategoria": "Libros y útiles",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B107",
+      "funcion": "gasto",
+      "mensajes": [
+        "remera 25 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 25000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Indumentaria",
+            "subcategoria": "Ropa",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B108",
+      "funcion": "gasto",
+      "mensajes": [
+        "jean 55k"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 55000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Indumentaria",
+            "subcategoria": "Ropa",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B109",
+      "funcion": "gasto",
+      "mensajes": [
+        "zapatillas 120 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 120000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Indumentaria",
+            "subcategoria": "Calzado",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B110",
+      "funcion": "gasto",
+      "mensajes": [
+        "ojotas 15000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 15000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Indumentaria",
+            "subcategoria": "Calzado",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B111",
+      "funcion": "gasto",
+      "mensajes": [
+        "mochila 45 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 45000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Indumentaria",
+            "subcategoria": "Accesorios",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B112",
+      "funcion": "gasto",
+      "mensajes": [
+        "anteojos de sol 60000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 60000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Indumentaria",
+            "subcategoria": "Accesorios",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B113",
+      "funcion": "gasto",
+      "mensajes": [
+        "recargué el celu 5000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 5000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Tecnología",
+            "subcategoria": "Celular",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B114",
+      "funcion": "gasto",
+      "mensajes": [
+        "abono de personal 18 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 18000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Tecnología",
+            "subcategoria": "Celular",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B115",
+      "funcion": "gasto",
+      "mensajes": [
+        "internet 22000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 22000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Tecnología",
+            "subcategoria": "Internet",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B116",
+      "funcion": "gasto",
+      "mensajes": [
+        "fibertel 25 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 25000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Tecnología",
+            "subcategoria": "Internet",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B117",
+      "funcion": "gasto",
+      "mensajes": [
+        "Gasté $19.940 en Github."
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 19940,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Tecnología",
+            "subcategoria": "Apps y programas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B118",
+      "funcion": "gasto",
+      "mensajes": [
+        "canva pro 9 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 9000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Tecnología",
+            "subcategoria": "Apps y programas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B119",
+      "funcion": "gasto",
+      "mensajes": [
+        "auriculares 70 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 70000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Tecnología",
+            "subcategoria": "Equipos",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B120",
+      "funcion": "gasto",
+      "mensajes": [
+        "notebook 1,2 palos"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 1200000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Tecnología",
+            "subcategoria": "Equipos",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B121",
+      "funcion": "gasto",
+      "mensajes": [
+        "ABL 15 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 15000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Impuestos",
+            "subcategoria": "ABL e inmobiliario",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B122",
+      "funcion": "gasto",
+      "mensajes": [
+        "rentas 22000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 22000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Impuestos",
+            "subcategoria": "ABL e inmobiliario",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B123",
+      "funcion": "gasto",
+      "mensajes": [
+        "patente del auto 48 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 48000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Impuestos",
+            "subcategoria": "Patente",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B124",
+      "funcion": "gasto",
+      "mensajes": [
+        "pagué el monotributo 30000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 30000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Impuestos",
+            "subcategoria": "Monotributo",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B125",
+      "funcion": "gasto",
+      "mensajes": [
+        "comisión por mantenimiento de cuenta 4500"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 4500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Banco",
+            "subcategoria": "Comisiones",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B126",
+      "funcion": "gasto",
+      "mensajes": [
+        "cuota del préstamo 85 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 85000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Banco",
+            "subcategoria": "Préstamos",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B127",
+      "funcion": "gasto",
+      "mensajes": [
+        "seguro del celular 6000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 6000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Banco",
+            "subcategoria": "Seguros",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B128",
+      "funcion": "gasto",
+      "mensajes": [
+        "20340 en regalo"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 20340,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "subcategoria": "Regalos",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B129",
+      "funcion": "gasto",
+      "mensajes": [
+        "regalo para el cumple de juan 30 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 30000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "subcategoria": "Regalos",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B130",
+      "funcion": "gasto",
+      "mensajes": [
+        "veterinaria 18000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 18000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "subcategoria": "Mascotas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B131",
+      "funcion": "gasto",
+      "mensajes": [
+        "alimento para el perro 32 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 32000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "subcategoria": "Mascotas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B132",
+      "funcion": "gasto",
+      "mensajes": [
+        "le pasé 50 mil a mi vieja"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 50000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "subcategoria": "Ayuda familiar",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B133",
+      "funcion": "gasto",
+      "mensajes": [
+        "sarasa 5000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 5000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B134",
+      "funcion": "gasto",
+      "mensajes": [
+        "un coso cuántico intergaláctico 7000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 7000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B135",
+      "funcion": "gasto",
+      "mensajes": [
+        "gasté 5000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 5000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B136",
+      "funcion": "gasto",
+      "mensajes": [
+        "5000 en otros, ponele como descripción seña vinilo"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 5000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B137",
+      "funcion": "gasto",
+      "mensajes": [
+        "gasté 2 lucas y media en el kiosco"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 2500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Kiosco",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B138",
+      "funcion": "gasto",
+      "mensajes": [
+        "medio palo en el dentista"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 500000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Salud",
+            "subcategoria": "Dentista",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B139",
+      "funcion": "gasto",
+      "mensajes": [
+        "una luca de pan"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 1000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Panadería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B140",
+      "funcion": "gasto",
+      "mensajes": [
+        "15 mil mangos de nafta"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 15000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Combustible",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B141",
+      "funcion": "gasto",
+      "mensajes": [
+        "dos mil quinientos en el colectivo"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 2500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Transporte público",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B142",
+      "funcion": "gasto",
+      "mensajes": [
+        "veinte mil en la farmacia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 20000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Salud",
+            "subcategoria": "Farmacia",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B143",
+      "funcion": "gasto",
+      "mensajes": [
+        "$ 12.500,50 en el súper"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 12500.5,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Supermercado",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B144",
+      "funcion": "gasto",
+      "mensajes": [
+        "12.5k de uber"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 12500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Taxi y apps",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B145",
+      "funcion": "gasto",
+      "mensajes": [
+        "un melón en una heladera nueva"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 1000000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Hogar",
+            "subcategoria": "Muebles y electro",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B146",
+      "funcion": "gasto",
+      "mensajes": [
+        "cien lucas en ropa"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 100000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Indumentaria",
+            "subcategoria": "Ropa",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B147",
+      "funcion": "gasto",
+      "mensajes": [
+        "mil quinientos de caramelos"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 1500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Kiosco",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B148",
+      "funcion": "gasto",
+      "mensajes": [
+        "1,5 palos de alquiler"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 1500000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Vivienda",
+            "subcategoria": "Alquiler",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B149",
+      "funcion": "gasto",
+      "mensajes": [
+        "80k de expensas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 80000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Vivienda",
+            "subcategoria": "Expensas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B150",
+      "funcion": "gasto",
+      "mensajes": [
+        "4.500 de santander, compras supermercado"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 4500,
+            "moneda": "ARS",
+            "cuenta": "Santander",
+            "categoria": "Alimentación",
+            "subcategoria": "Supermercado",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B151",
+      "funcion": "gasto",
+      "mensajes": [
+        "almuerzo $8000 con santander"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 8000,
+            "moneda": "ARS",
+            "cuenta": "Santander",
+            "categoria": "Gastronomía",
+            "subcategoria": "Restaurantes",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B152",
+      "funcion": "gasto",
+      "mensajes": [
+        "pagué 7000 con el rio en la farmacia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 7000,
+            "moneda": "ARS",
+            "cuenta": "Santander",
+            "categoria": "Salud",
+            "subcategoria": "Farmacia",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B153",
+      "funcion": "gasto",
+      "mensajes": [
+        "kiosco 3000 en efectivo"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 3000,
+            "moneda": "ARS",
+            "cuenta": "Efectivo Pesos",
+            "categoria": "Alimentación",
+            "subcategoria": "Kiosco",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B154",
+      "funcion": "gasto",
+      "mensajes": [
+        "verdulería 6 lucas cash"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 6000,
+            "moneda": "ARS",
+            "cuenta": "Efectivo Pesos",
+            "categoria": "Alimentación",
+            "subcategoria": "Verdulería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B155",
+      "funcion": "gasto",
+      "mensajes": [
+        "nafta 25 mil con débito del galicia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 25000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Combustible",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B156",
+      "funcion": "gasto",
+      "mensajes": [
+        "gasté 5000 con la tarjeta de débito en el kiosco"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 5000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Kiosco",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B157",
+      "funcion": "gasto",
+      "mensajes": [
+        "egreso de 15.300 de santander uber"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 15300,
+            "moneda": "ARS",
+            "cuenta": "Santander",
+            "categoria": "Transporte",
+            "subcategoria": "Taxi y apps",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B158",
+      "funcion": "gasto",
+      "mensajes": [
+        "10.588 en supermercado con santander"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 10588,
+            "moneda": "ARS",
+            "cuenta": "Santander",
+            "categoria": "Alimentación",
+            "subcategoria": "Supermercado",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B159",
+      "funcion": "gasto",
+      "mensajes": [
+        "pan 2500 desde gali"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 2500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Panadería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B160",
+      "funcion": "gasto",
+      "mensajes": [
+        "pagué la luz desde santander, 21 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 21000,
+            "moneda": "ARS",
+            "cuenta": "Santander",
+            "categoria": "Vivienda",
+            "subcategoria": "Luz",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B161",
+      "funcion": "gasto",
+      "mensajes": [
+        "helado 4000 con plata física"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 4000,
+            "moneda": "ARS",
+            "cuenta": "Efectivo Pesos",
+            "categoria": "Gastronomía",
+            "subcategoria": "Cafetería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B162",
+      "funcion": "gasto",
+      "mensajes": [
+        "taxi 6500 en efectivo"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 6500,
+            "moneda": "ARS",
+            "cuenta": "Efectivo Pesos",
+            "categoria": "Transporte",
+            "subcategoria": "Taxi y apps",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B163",
+      "funcion": "gasto",
+      "mensajes": [
+        "anteayer gasté 12000 en la farmacia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 12000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Salud",
+            "subcategoria": "Farmacia",
+            "dias": -2
+          }
+        ]
+      }
+    },
+    {
+      "id": "B164",
+      "funcion": "gasto",
+      "mensajes": [
+        "hace 3 días pagué 20 lucas de luz"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 20000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Vivienda",
+            "subcategoria": "Luz",
+            "dias": -3
+          }
+        ]
+      }
+    },
+    {
+      "id": "B165",
+      "funcion": "gasto",
+      "mensajes": [
+        "hoy 4500 de pan"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 4500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Panadería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B166",
+      "funcion": "gasto",
+      "mensajes": [
+        "ayer fui al cine, 12 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 12000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Ocio",
+            "subcategoria": "Salidas",
+            "dias": -1
+          }
+        ]
+      }
+    },
+    {
+      "id": "B167",
+      "funcion": "gasto",
+      "mensajes": [
+        "Gaste 3.880 pesos en Uber el 31 de agosto."
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 3880,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Taxi y apps"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B168",
+      "funcion": "gasto",
+      "mensajes": [
+        "el 29/08 pagué el gas 18000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 18000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Vivienda",
+            "subcategoria": "Gas"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B169",
+      "funcion": "gasto",
+      "mensajes": [
+        "almuerzo de ayer 11 mil con santander"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 11000,
+            "moneda": "ARS",
+            "cuenta": "Santander",
+            "categoria": "Gastronomía",
+            "subcategoria": "Restaurantes",
+            "dias": -1
+          }
+        ]
+      }
+    },
+    {
+      "id": "B170",
+      "funcion": "gasto",
+      "mensajes": [
+        "gasté 5000 en el kiosco, 3000 en la panadería y 4000 en la verdulería"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 5000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Kiosco",
+            "dias": 0
+          },
+          {
+            "tipo": "egreso",
+            "monto": 3000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Panadería",
+            "dias": 0
+          },
+          {
+            "tipo": "egreso",
+            "monto": 4000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Verdulería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B171",
+      "funcion": "gasto",
+      "mensajes": [
+        "Gasté $3,500 en mi kiosco y en la verdurería $4,577.25"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 3500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Kiosco",
+            "dias": 0
+          },
+          {
+            "tipo": "egreso",
+            "monto": 4577.25,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Verdulería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B172",
+      "funcion": "gasto",
+      "mensajes": [
+        "ayer 5000 de kiosco y hoy 8000 de verdulería"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 5000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Kiosco",
+            "dias": -1
+          },
+          {
+            "tipo": "egreso",
+            "monto": 8000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Verdulería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B173",
+      "funcion": "gasto",
+      "mensajes": [
+        "uber 2800 y otro uber 1953"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 2800,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Taxi y apps",
+            "dias": 0
+          },
+          {
+            "tipo": "egreso",
+            "monto": 1953,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Taxi y apps",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B174",
+      "funcion": "gasto",
+      "mensajes": [
+        "egreso de 12.000 pesos en la cuenta de santander del supermercado y 8.000 de futbol"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 12000,
+            "moneda": "ARS",
+            "cuenta": "Santander",
+            "categoria": "Alimentación",
+            "subcategoria": "Supermercado",
+            "dias": 0
+          },
+          {
+            "tipo": "egreso",
+            "monto": 8000,
+            "moneda": "ARS",
+            "categoria": "Ocio",
+            "subcategoria": "Deportes y gimnasio"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B175",
+      "funcion": "gasto",
+      "mensajes": [
+        "gasté 800 en la panadería, me corté el pelo 15000 y cobré la jubilación 400000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 800,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Panadería",
+            "dias": 0
+          },
+          {
+            "tipo": "egreso",
+            "monto": 15000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Cuidado personal",
+            "subcategoria": "Peluquería y belleza",
+            "dias": 0
+          },
+          {
+            "tipo": "ingreso",
+            "monto": 400000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Jubilación y AUH",
+            "subcategoria": "Jubilación o pensión",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B176",
+      "funcion": "gasto",
+      "mensajes": [
+        "nafta 30 lucas y peaje 2300"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 30000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Combustible",
+            "dias": 0
+          },
+          {
+            "tipo": "egreso",
+            "monto": 2300,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Transporte",
+            "subcategoria": "Peajes",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B177",
+      "funcion": "gasto",
+      "mensajes": [
+        "super 50 mil con santander, kiosco 2000 y farmacia 9 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 50000,
+            "moneda": "ARS",
+            "cuenta": "Santander",
+            "categoria": "Alimentación",
+            "subcategoria": "Supermercado",
+            "dias": 0
+          },
+          {
+            "tipo": "egreso",
+            "monto": 2000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Kiosco",
+            "dias": 0
+          },
+          {
+            "tipo": "egreso",
+            "monto": 9000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Salud",
+            "subcategoria": "Farmacia",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B178",
+      "funcion": "gasto",
+      "mensajes": [
+        "gasté 5000 en el kiosco y 30000 en zapatillas con la amex"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 5000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Kiosco",
+            "dias": 0
+          },
+          {
+            "tipo": "egreso",
+            "monto": 30000,
+            "moneda": "ARS",
+            "cuenta": "•••• 2745",
+            "categoria": "Indumentaria",
+            "subcategoria": "Calzado",
+            "dias": 0,
+            "cuotas": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "B179",
+      "funcion": "gasto",
+      "mensajes": [
+        "almuerzo 4500, cena 12 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 4500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Gastronomía",
+            "subcategoria": "Restaurantes",
+            "dias": 0
+          },
+          {
+            "tipo": "egreso",
+            "monto": 12000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Gastronomía",
+            "subcategoria": "Restaurantes",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B180",
+      "funcion": "gasto",
+      "mensajes": [
+        "le transferí 3000 a juan, me corté el pelo 15000 y pagué el monotributo 30000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 3000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "subcategoria": "Pagos a personas",
+            "dias": 0
+          },
+          {
+            "tipo": "egreso",
+            "monto": 15000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Cuidado personal",
+            "subcategoria": "Peluquería y belleza",
+            "dias": 0
+          },
+          {
+            "tipo": "egreso",
+            "monto": 30000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Impuestos",
+            "subcategoria": "Monotributo",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B181",
+      "funcion": "gasto",
+      "mensajes": [
+        "café 3000, diario 1500 y alfajor 1200"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 3000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Gastronomía",
+            "subcategoria": "Cafetería",
+            "dias": 0
+          },
+          {
+            "tipo": "egreso",
+            "monto": 1500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "dias": 0
+          },
+          {
+            "tipo": "egreso",
+            "monto": 1200,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Kiosco",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B182",
+      "funcion": "ingreso",
+      "mensajes": [
+        "me depositaron el aguinaldo 420 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 420000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Trabajo",
+            "subcategoria": "Aguinaldo",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B183",
+      "funcion": "ingreso",
+      "mensajes": [
+        "me entró la quincena 300k"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 300000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Trabajo",
+            "subcategoria": "Sueldo",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B184",
+      "funcion": "ingreso",
+      "mensajes": [
+        "me depositaron 1 palo de sueldo en galicia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 1000000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Trabajo",
+            "subcategoria": "Sueldo",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B185",
+      "funcion": "ingreso",
+      "mensajes": [
+        "cobré 45 lucas de una changa"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 45000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Trabajo",
+            "subcategoria": "Freelance y changas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B186",
+      "funcion": "ingreso",
+      "mensajes": [
+        "me pagaron 80 mil por unas clases particulares"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 80000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Trabajo",
+            "subcategoria": "Freelance y changas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B187",
+      "funcion": "ingreso",
+      "mensajes": [
+        "vendí la bici en mercado libre por 120 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 120000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Trabajo",
+            "subcategoria": "Ventas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B188",
+      "funcion": "ingreso",
+      "mensajes": [
+        "me pagaron el bono 200000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 200000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Trabajo",
+            "subcategoria": "Bonos y extras",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B189",
+      "funcion": "ingreso",
+      "mensajes": [
+        "propina 5000 en efectivo"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 5000,
+            "moneda": "ARS",
+            "cuenta": "Efectivo Pesos",
+            "categoria": "Trabajo",
+            "subcategoria": "Bonos y extras",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B190",
+      "funcion": "ingreso",
+      "mensajes": [
+        "cobré la auh 90 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 90000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Jubilación y AUH",
+            "subcategoria": "AUH y asignaciones",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B191",
+      "funcion": "ingreso",
+      "mensajes": [
+        "cobré la jubilación 400000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 400000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Jubilación y AUH",
+            "subcategoria": "Jubilación o pensión",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B192",
+      "funcion": "ingreso",
+      "mensajes": [
+        "me cayó la jubilación 380000 en el santander"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 380000,
+            "moneda": "ARS",
+            "cuenta": "Santander",
+            "categoria": "Jubilación y AUH",
+            "subcategoria": "Jubilación o pensión",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B193",
+      "funcion": "ingreso",
+      "mensajes": [
+        "intereses del plazo fijo 15.300"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 15300,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Inversiones",
+            "subcategoria": "Intereses",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B194",
+      "funcion": "ingreso",
+      "mensajes": [
+        "cobré el alquiler del depto 350 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 350000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Inversiones",
+            "subcategoria": "Alquileres",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B195",
+      "funcion": "ingreso",
+      "mensajes": [
+        "me regalaron 20 mil para mi cumple"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 20000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "subcategoria": "Regalos",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B196",
+      "funcion": "ingreso",
+      "mensajes": [
+        "Mi mamá me regaló 5.000 pesos."
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 5000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "subcategoria": "Ayuda familiar",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B197",
+      "funcion": "ingreso",
+      "mensajes": [
+        "me transfirió mi vieja 50 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 50000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "subcategoria": "Ayuda familiar",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B198",
+      "funcion": "ingreso",
+      "mensajes": [
+        "juan me pasó 8000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 8000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "subcategoria": "Cobros de personas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B199",
+      "funcion": "ingreso",
+      "mensajes": [
+        "ingreso de $8.000 en santander"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 8000,
+            "moneda": "ARS",
+            "cuenta": "Santander",
+            "categoria": "Otros",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B200",
+      "funcion": "ingreso",
+      "mensajes": [
+        "me pagaron 300 dólares por un trabajo"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 300,
+            "moneda": "USD",
+            "cuenta": "Efectivo Dólares",
+            "categoria": "Trabajo",
+            "subcategoria": "Freelance y changas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B201",
+      "funcion": "ingreso",
+      "mensajes": [
+        "cobré 1000 usd de sueldo"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 1000,
+            "moneda": "USD",
+            "cuenta": "Efectivo Dólares",
+            "categoria": "Trabajo",
+            "subcategoria": "Sueldo",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B202",
+      "funcion": "ingreso",
+      "mensajes": [
+        "me entraron 10000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 10000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B203",
+      "funcion": "ingreso",
+      "mensajes": [
+        "ayer cobré 250 lucas de sueldo"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 250000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Trabajo",
+            "subcategoria": "Sueldo",
+            "dias": -1
+          }
+        ]
+      }
+    },
+    {
+      "id": "B204",
+      "funcion": "transferencia",
+      "mensajes": [
+        "transferí 15000 de santander a galicia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "transferencias": [
+          {
+            "origen": "Santander",
+            "destino": "Galicia",
+            "monto": 15000,
+            "moneda": "ARS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B205",
+      "funcion": "transferencia",
+      "mensajes": [
+        "moví 50k del galicia al efectivo"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "transferencias": [
+          {
+            "origen": "Galicia",
+            "destino": "Efectivo Pesos",
+            "monto": 50000,
+            "moneda": "ARS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B206",
+      "funcion": "transferencia",
+      "mensajes": [
+        "saqué 30 mil del cajero del santander"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "transferencias": [
+          {
+            "origen": "Santander",
+            "destino": "Efectivo Pesos",
+            "monto": 30000,
+            "moneda": "ARS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B207",
+      "funcion": "transferencia",
+      "mensajes": [
+        "fui al cajero y saqué 20 lucas de galicia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "transferencias": [
+          {
+            "origen": "Galicia",
+            "destino": "Efectivo Pesos",
+            "monto": 20000,
+            "moneda": "ARS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B208",
+      "funcion": "transferencia",
+      "mensajes": [
+        "pasar 5.000 pesos de santander a galicia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "transferencias": [
+          {
+            "origen": "Santander",
+            "destino": "Galicia",
+            "monto": 5000,
+            "moneda": "ARS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B209",
+      "funcion": "transferencia",
+      "mensajes": [
+        "pasé los 20.000 de santander a la cuenta de galicia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "transferencias": [
+          {
+            "origen": "Santander",
+            "destino": "Galicia",
+            "monto": 20000,
+            "moneda": "ARS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B210",
+      "funcion": "transferencia",
+      "mensajes": [
+        "pasé 1,5 palos de galicia a santander"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "transferencias": [
+          {
+            "origen": "Galicia",
+            "destino": "Santander",
+            "monto": 1500000,
+            "moneda": "ARS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B211",
+      "funcion": "transferencia",
+      "mensajes": [
+        "mandé 25000 al efectivo desde galicia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "transferencias": [
+          {
+            "origen": "Galicia",
+            "destino": "Efectivo Pesos",
+            "monto": 25000,
+            "moneda": "ARS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B212",
+      "funcion": "transferencia",
+      "mensajes": [
+        "ayer pasé 30 mil de santander a galicia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "transferencias": [
+          {
+            "origen": "Santander",
+            "destino": "Galicia",
+            "monto": 30000,
+            "moneda": "ARS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B213",
+      "funcion": "transferencia",
+      "mensajes": [
+        "transferí 20k a santander desde galicia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "transferencias": [
+          {
+            "origen": "Galicia",
+            "destino": "Santander",
+            "monto": 20000,
+            "moneda": "ARS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B214",
+      "funcion": "transferencia",
+      "mensajes": [
+        "deposité 40 lucas del efectivo en el galicia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "transferencias": [
+          {
+            "origen": "Efectivo Pesos",
+            "destino": "Galicia",
+            "monto": 40000,
+            "moneda": "ARS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B215",
+      "funcion": "transferencia",
+      "mensajes": [
+        "pase 100000 de galisia a santnder"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "transferencias": [
+          {
+            "origen": "Galicia",
+            "destino": "Santander",
+            "monto": 100000,
+            "moneda": "ARS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B216",
+      "funcion": "transferencia",
+      "mensajes": [
+        "me transferí 20000 a santander",
+        "galicia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "transferencias": [
+          {
+            "origen": "Galicia",
+            "destino": "Santander",
+            "monto": 20000,
+            "moneda": "ARS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B217",
+      "funcion": "transferencia",
+      "mensajes": [
+        "saqué 50000 del cajero",
+        "santander"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "transferencias": [
+          {
+            "origen": "Santander",
+            "destino": "Efectivo Pesos",
+            "monto": 50000,
+            "moneda": "ARS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B218",
+      "funcion": "transferencia",
+      "mensajes": [
+        "Transferí $6.000 a pedro el 29/08"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 6000,
+            "moneda": "ARS",
+            "categoria": "Otros",
+            "subcategoria": "Pagos a personas"
+          }
+        ],
+        "transferencias": []
+      }
+    },
+    {
+      "id": "B219",
+      "funcion": "transferencia",
+      "mensajes": [
+        "le transferí 6000 a juan"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 6000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "subcategoria": "Pagos a personas",
+            "dias": 0
+          }
+        ],
+        "transferencias": []
+      }
+    },
+    {
+      "id": "B220",
+      "funcion": "transferencia",
+      "mensajes": [
+        "le pasé 10 lucas a mi hermano"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 10000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "dias": 0
+          }
+        ],
+        "transferencias": []
+      }
+    },
+    {
+      "id": "B221",
+      "funcion": "transferencia",
+      "mensajes": [
+        "le mandé 12 mil a caro por la cena"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 12000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Gastronomía",
+            "subcategoria": "Restaurantes",
+            "dias": 0
+          }
+        ],
+        "transferencias": []
+      }
+    },
+    {
+      "id": "B222",
+      "funcion": "transferencia",
+      "mensajes": [
+        "pasé 20k de galicia a macro"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": []
+      }
+    },
+    {
+      "id": "B223",
+      "funcion": "transferencia",
+      "mensajes": [
+        "pasé 20 lucas de galicia a galicia"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": []
+      }
+    },
+    {
+      "id": "B224",
+      "funcion": "transferencia",
+      "mensajes": [
+        "pasé 10k de galicia a santander y gasté 5000 en el kiosco"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": []
+      }
+    },
+    {
+      "id": "B225",
+      "funcion": "transferencia",
+      "mensajes": [
+        "pasé 10k a santander"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": []
+      }
+    },
+    {
+      "id": "B226",
+      "funcion": "transferencia",
+      "mensajes": [
+        "pasé 20 lucas de galicia a santander",
+        "borrá eso"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": []
+      }
+    },
+    {
+      "id": "B227",
+      "funcion": "cuotas",
+      "mensajes": [
+        "gasté 30000 con la amex"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 30000,
+            "moneda": "ARS",
+            "cuenta": "•••• 2745",
+            "dias": 0,
+            "cuotas": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "B228",
+      "funcion": "cuotas",
+      "mensajes": [
+        "gasté 30000 con la visa del santander"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 30000,
+            "moneda": "ARS",
+            "cuenta": "•••• 5077",
+            "dias": 0,
+            "cuotas": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "B229",
+      "funcion": "cuotas",
+      "mensajes": [
+        "gasté 5000 con la visa del galicia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 5000,
+            "moneda": "ARS",
+            "cuenta": "•••• 1506",
+            "dias": 0,
+            "cuotas": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "B230",
+      "funcion": "cuotas",
+      "mensajes": [
+        "gasté 30000 con la visa",
+        "1"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 30000,
+            "moneda": "ARS",
+            "cuenta": "•••• 1506",
+            "dias": 0,
+            "cuotas": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "B231",
+      "funcion": "cuotas",
+      "mensajes": [
+        "compré una campera con la visa, 85 lucas",
+        "la del santander"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 85000,
+            "moneda": "ARS",
+            "cuenta": "•••• 5077",
+            "categoria": "Indumentaria",
+            "subcategoria": "Ropa",
+            "dias": 0,
+            "cuotas": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "B232",
+      "funcion": "cuotas",
+      "mensajes": [
+        "zapatillas en 3 cuotas de 40 lucas con la amex"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 120000,
+            "moneda": "ARS",
+            "cuenta": "•••• 2745",
+            "categoria": "Indumentaria",
+            "subcategoria": "Calzado",
+            "dias": 0,
+            "cuotas": 3
+          }
+        ]
+      }
+    },
+    {
+      "id": "B233",
+      "funcion": "cuotas",
+      "mensajes": [
+        "heladera 900 mil en 12 cuotas con la visa santander"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 900000,
+            "moneda": "ARS",
+            "cuenta": "•••• 5077",
+            "categoria": "Hogar",
+            "subcategoria": "Muebles y electro",
+            "dias": 0,
+            "cuotas": 12
+          }
+        ]
+      }
+    },
+    {
+      "id": "B234",
+      "funcion": "cuotas",
+      "mensajes": [
+        "celular en 6 cuotas sin interés de 25000 con la amex"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 150000,
+            "moneda": "ARS",
+            "cuenta": "•••• 2745",
+            "categoria": "Tecnología",
+            "subcategoria": "Equipos",
+            "dias": 0,
+            "cuotas": 6
+          }
+        ]
+      }
+    },
+    {
+      "id": "B235",
+      "funcion": "cuotas",
+      "mensajes": [
+        "compré pasajes en 6 cuotas, 300 lucas en total, con la visa del galicia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 300000,
+            "moneda": "ARS",
+            "cuenta": "•••• 1506",
+            "categoria": "Ocio",
+            "subcategoria": "Viajes",
+            "dias": 0,
+            "cuotas": 6
+          }
+        ]
+      }
+    },
+    {
+      "id": "B236",
+      "funcion": "cuotas",
+      "mensajes": [
+        "notebook 18 cuotas de 85 mil con la amex"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 1530000,
+            "moneda": "ARS",
+            "cuenta": "•••• 2745",
+            "categoria": "Tecnología",
+            "subcategoria": "Equipos",
+            "dias": 0,
+            "cuotas": 18
+          }
+        ]
+      }
+    },
+    {
+      "id": "B237",
+      "funcion": "cuotas",
+      "mensajes": [
+        "colchón en 3 pagos de 100 mil con la amex"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 300000,
+            "moneda": "ARS",
+            "cuenta": "•••• 2745",
+            "categoria": "Hogar",
+            "subcategoria": "Muebles y electro",
+            "dias": 0,
+            "cuotas": 3
+          }
+        ]
+      }
+    },
+    {
+      "id": "B238",
+      "funcion": "cuotas",
+      "mensajes": [
+        "la tele salió 600 mil en 6 cuotas con la amex, de contado era 520 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 600000,
+            "moneda": "ARS",
+            "cuenta": "•••• 2745",
+            "categoria": "Tecnología",
+            "subcategoria": "Equipos",
+            "dias": 0,
+            "cuotas": 6
+          }
+        ]
+      }
+    },
+    {
+      "id": "B239",
+      "funcion": "cuotas",
+      "mensajes": [
+        "super 50 lucas con la amex en 1 pago"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 50000,
+            "moneda": "ARS",
+            "cuenta": "•••• 2745",
+            "categoria": "Alimentación",
+            "subcategoria": "Supermercado",
+            "dias": 0,
+            "cuotas": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "B240",
+      "funcion": "cuotas",
+      "mensajes": [
+        "cargué nafta con la credi de santander, 40 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 40000,
+            "moneda": "ARS",
+            "cuenta": "•••• 5077",
+            "categoria": "Transporte",
+            "subcategoria": "Combustible",
+            "dias": 0,
+            "cuotas": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "B241",
+      "funcion": "cuotas",
+      "mensajes": [
+        "pagué la cena con la amex 45k"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 45000,
+            "moneda": "ARS",
+            "cuenta": "•••• 2745",
+            "categoria": "Gastronomía",
+            "subcategoria": "Restaurantes",
+            "dias": 0,
+            "cuotas": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "B242",
+      "funcion": "cuotas",
+      "mensajes": [
+        "pagué el seguro del auto con la visa santander 70 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 70000,
+            "moneda": "ARS",
+            "cuenta": "•••• 5077",
+            "categoria": "Transporte",
+            "subcategoria": "Auto",
+            "dias": 0,
+            "cuotas": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "B243",
+      "funcion": "cuotas",
+      "mensajes": [
+        "gasté 100 mil en la amex en 4 cuotas en el super"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 100000,
+            "moneda": "ARS",
+            "cuenta": "•••• 2745",
+            "categoria": "Alimentación",
+            "subcategoria": "Supermercado",
+            "dias": 0,
+            "cuotas": 4
+          }
+        ]
+      }
+    },
+    {
+      "id": "B244",
+      "funcion": "cuotas",
+      "mensajes": [
+        "compré una tele en 12 cuotas de 80000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 960000,
+            "moneda": "ARS",
+            "categoria": "Tecnología",
+            "subcategoria": "Equipos",
+            "dias": 0,
+            "cuotas": 12
+          }
+        ]
+      }
+    },
+    {
+      "id": "B245",
+      "funcion": "cuotas",
+      "mensajes": [
+        "gasté 80000 en 12 cuotas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 80000,
+            "moneda": "ARS",
+            "dias": 0,
+            "cuotas": 12
+          }
+        ]
+      }
+    },
+    {
+      "id": "B246",
+      "funcion": "cuotas",
+      "mensajes": [
+        "compré un aire acondicionado en 10 cuotas de 90 lucas"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 900000,
+            "moneda": "ARS",
+            "categoria": "Hogar",
+            "subcategoria": "Muebles y electro",
+            "dias": 0,
+            "cuotas": 10
+          }
+        ]
+      }
+    },
+    {
+      "id": "B247",
+      "funcion": "cuotas",
+      "mensajes": [
+        "lavarropas 3 cuotas de 150 mil con la tarjeta"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 450000,
+            "moneda": "ARS",
+            "categoria": "Hogar",
+            "subcategoria": "Muebles y electro",
+            "dias": 0,
+            "cuotas": 3
+          }
+        ]
+      }
+    },
+    {
+      "id": "B248",
+      "funcion": "cuotas",
+      "mensajes": [
+        "pagué el resumen de la tarjeta"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": []
+      }
+    },
+    {
+      "id": "B249",
+      "funcion": "cuotas",
+      "mensajes": [
+        "pagué el resumen de la amex, 350 mil"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": []
+      }
+    },
+    {
+      "id": "B250",
+      "funcion": "cuotas",
+      "mensajes": [
+        "gasté 45000 con la amex",
+        "no"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B251",
+      "funcion": "cuotas",
+      "mensajes": [
+        "compré una play en 12 cuotas"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B252",
+      "funcion": "dolares",
+      "mensajes": [
+        "pagué 30 usd de un curso online"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 30,
+            "moneda": "USD",
+            "cuenta": "Efectivo Dólares",
+            "categoria": "Educación",
+            "subcategoria": "Cursos",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B253",
+      "funcion": "dolares",
+      "mensajes": [
+        "gasté 80 verdes en ropa en el free shop"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 80,
+            "moneda": "USD",
+            "cuenta": "Efectivo Dólares",
+            "categoria": "Indumentaria",
+            "subcategoria": "Ropa",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B254",
+      "funcion": "dolares",
+      "mensajes": [
+        "cena 60 dólares"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 60,
+            "moneda": "USD",
+            "cuenta": "Efectivo Dólares",
+            "categoria": "Gastronomía",
+            "subcategoria": "Restaurantes",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B255",
+      "funcion": "dolares",
+      "mensajes": [
+        "hotel 120 usd"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 120,
+            "moneda": "USD",
+            "cuenta": "Efectivo Dólares",
+            "categoria": "Ocio",
+            "subcategoria": "Viajes",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B256",
+      "funcion": "dolares",
+      "mensajes": [
+        "uber 15 dólares"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 15,
+            "moneda": "USD",
+            "cuenta": "Efectivo Dólares",
+            "categoria": "Transporte",
+            "subcategoria": "Taxi y apps",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B257",
+      "funcion": "dolares",
+      "mensajes": [
+        "pagué 20 dolares de chatgpt"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 20,
+            "moneda": "USD",
+            "cuenta": "Efectivo Dólares",
+            "categoria": "Tecnología",
+            "subcategoria": "Apps y programas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B258",
+      "funcion": "dolares",
+      "mensajes": [
+        "gasté u$s 45 en un regalo"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 45,
+            "moneda": "USD",
+            "cuenta": "Efectivo Dólares",
+            "categoria": "Otros",
+            "subcategoria": "Regalos",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B259",
+      "funcion": "dolares",
+      "mensajes": [
+        "gasté 20 dólares con la amex en una app"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 20,
+            "moneda": "USD",
+            "cuenta": "•••• 2745",
+            "categoria": "Tecnología",
+            "subcategoria": "Apps y programas",
+            "dias": 0,
+            "cuotas": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "B260",
+      "funcion": "dolares",
+      "mensajes": [
+        "compré 100 dólares a 1500"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": [
+          {
+            "origen": "Galicia",
+            "destino": "Efectivo Dólares"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B261",
+      "funcion": "dolares",
+      "mensajes": [
+        "compré 300 usd con el santander a 1470"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": [
+          {
+            "origen": "Santander",
+            "destino": "Efectivo Dólares"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B262",
+      "funcion": "dolares",
+      "mensajes": [
+        "compré 200 verdes a 1450"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": [
+          {
+            "origen": "Galicia",
+            "destino": "Efectivo Dólares"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B263",
+      "funcion": "dolares",
+      "mensajes": [
+        "vendí 50 dólares a 1400"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": [
+          {
+            "origen": "Efectivo Dólares",
+            "destino": "Galicia"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B264",
+      "funcion": "dolares",
+      "mensajes": [
+        "vendí 100 usd a 1420 y los puse en santander"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": [
+          {
+            "origen": "Efectivo Dólares",
+            "destino": "Santander"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B265",
+      "funcion": "dolares",
+      "mensajes": [
+        "compré 100 dólares",
+        "a 1480"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": [
+          {
+            "origen": "Galicia",
+            "destino": "Efectivo Dólares"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B266",
+      "funcion": "dolares",
+      "mensajes": [
+        "compré 50 dólares",
+        "pagué 74 mil pesos"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": [
+          {
+            "origen": "Galicia",
+            "destino": "Efectivo Dólares"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B267",
+      "funcion": "dolares",
+      "mensajes": [
+        "pasé 50000 de galicia a efectivo dólares",
+        "a 1250"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": [
+          {
+            "origen": "Galicia",
+            "destino": "Efectivo Dólares"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B268",
+      "funcion": "dolares",
+      "mensajes": [
+        "pasé 50 de efectivo dólares a galicia",
+        "a 1400"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": [
+          {
+            "origen": "Efectivo Dólares",
+            "destino": "Galicia"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B269",
+      "funcion": "dolares",
+      "mensajes": [
+        "compré 100 dólares a 5"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": [],
+        "transferencias": []
+      }
+    },
+    {
+      "id": "B270",
+      "funcion": "dolares",
+      "mensajes": [
+        "a cuánto está el dólar"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_cotizacion",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B271",
+      "funcion": "dolares",
+      "mensajes": [
+        "cuanto esta el blue hoy"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_cotizacion",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B272",
+      "funcion": "permitirse",
+      "mensajes": [
+        "me da para una tele de 300 mil?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "puede_permitirse",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B273",
+      "funcion": "permitirse",
+      "mensajes": [
+        "me puedo permitir unas zapas de 150 lucas?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "puede_permitirse",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B274",
+      "funcion": "permitirse",
+      "mensajes": [
+        "puedo comprarme un celu de 600 mil en 6 cuotas?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "puede_permitirse",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B275",
+      "funcion": "permitirse",
+      "mensajes": [
+        "me puedo comprar una heladera en 12 cuotas de 50 lucas?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "puede_permitirse",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B276",
+      "funcion": "permitirse",
+      "mensajes": [
+        "¿me lo puedo permitir?",
+        "300 mil"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "puede_permitirse",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B277",
+      "funcion": "permitirse",
+      "mensajes": [
+        "me puedo permitir un viaje de 1000 dólares?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "puede_permitirse",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B278",
+      "funcion": "permitirse",
+      "mensajes": [
+        "me puedo permitir pagar el gimnasio de 40 mil por mes?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "puede_permitirse",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B279",
+      "funcion": "permitirse",
+      "mensajes": [
+        "da para salir a cenar 40 lucas este finde?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "puede_permitirse",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B280",
+      "funcion": "permitirse",
+      "mensajes": [
+        "puedo gastar 80k en un regalo?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "puede_permitirse",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B281",
+      "funcion": "permitirse",
+      "mensajes": [
+        "me banco una play de 1,2 palos?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "puede_permitirse",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B282",
+      "funcion": "permitirse",
+      "mensajes": [
+        "si me compro un aire de 900 lucas, llego?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "puede_permitirse",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B283",
+      "funcion": "permitirse",
+      "mensajes": [
+        "tengo para unas vacaciones de 2 palos?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "puede_permitirse",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B284",
+      "funcion": "permitirse",
+      "mensajes": [
+        "me puedo dar el gusto de unas zapatillas de 180000?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "puede_permitirse",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B285",
+      "funcion": "permitirse",
+      "mensajes": [
+        "puedo comprar una bici de 400 mil?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "puede_permitirse",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B286",
+      "funcion": "conveniencia",
+      "mensajes": [
+        "¿me conviene 500 mil contado o 12 de 50 mil?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "cuotas_vs_contado",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B287",
+      "funcion": "conveniencia",
+      "mensajes": [
+        "que conviene, pagar 300 lucas de contado o 6 cuotas de 55 mil?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "cuotas_vs_contado",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B288",
+      "funcion": "conveniencia",
+      "mensajes": [
+        "contado 900k o 18 cuotas de 60k, qué me conviene?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "cuotas_vs_contado",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B289",
+      "funcion": "conveniencia",
+      "mensajes": [
+        "12 cuotas de 25 mil o 270 mil contado, qué conviene?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "cuotas_vs_contado",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B290",
+      "funcion": "conveniencia",
+      "mensajes": [
+        "la tele sale 1 palo contado o 12 cuotas de 95 lucas, cual conviene"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "cuotas_vs_contado",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B291",
+      "funcion": "conveniencia",
+      "mensajes": [
+        "conviene en 3 cuotas de 40000 o 110000 en efectivo?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "cuotas_vs_contado",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B292",
+      "funcion": "conveniencia",
+      "mensajes": [
+        "zapatillas: 200 mil de contado o 6 de 36 mil, qué hago?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "cuotas_vs_contado",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B293",
+      "funcion": "conveniencia",
+      "mensajes": [
+        "¿cuotas o contado? 24 cuotas de 50k contra 900k"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "cuotas_vs_contado",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B294",
+      "funcion": "consulta",
+      "mensajes": [
+        "cuánto tengo?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_saldo",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B295",
+      "funcion": "consulta",
+      "mensajes": [
+        "cuanta plata tengo en banco santander"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_saldo",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B296",
+      "funcion": "consulta",
+      "mensajes": [
+        "mi saldo"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_saldo",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B297",
+      "funcion": "consulta",
+      "mensajes": [
+        "cuanto tengo en el galicia?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_saldo",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B298",
+      "funcion": "consulta",
+      "mensajes": [
+        "cómo voy este mes"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_balance",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B299",
+      "funcion": "consulta",
+      "mensajes": [
+        "como viene mi balance?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_balance",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B300",
+      "funcion": "consulta",
+      "mensajes": [
+        "llego a fin de mes?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_proyeccion",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B301",
+      "funcion": "consulta",
+      "mensajes": [
+        "como termino el mes?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_proyeccion",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B302",
+      "funcion": "consulta",
+      "mensajes": [
+        "cuánto gasté hoy"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_gastos",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B303",
+      "funcion": "consulta",
+      "mensajes": [
+        "cuanto gaste en el super este mes"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_gastos",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B304",
+      "funcion": "consulta",
+      "mensajes": [
+        "cuánto se me fue en salidas"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_gastos",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B305",
+      "funcion": "consulta",
+      "mensajes": [
+        "cuánto gasté en uber la semana pasada"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_gastos",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B306",
+      "funcion": "consulta",
+      "mensajes": [
+        "cuánto gasté en pizza esta semana"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_gastos",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B307",
+      "funcion": "consulta",
+      "mensajes": [
+        "cuanto gaste este ciclo"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_gastos",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B308",
+      "funcion": "consulta",
+      "mensajes": [
+        "cómo va mi presupuesto"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_presupuesto",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B309",
+      "funcion": "consulta",
+      "mensajes": [
+        "cuánto me queda del presupuesto de indumentaria"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_presupuesto",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B310",
+      "funcion": "consulta",
+      "mensajes": [
+        "qué suscripciones tengo"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_suscripciones",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B311",
+      "funcion": "consulta",
+      "mensajes": [
+        "cuánto pago por mes en suscripciones"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_suscripciones",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B312",
+      "funcion": "consulta",
+      "mensajes": [
+        "cómo va mi meta del viaje"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_meta",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B313",
+      "funcion": "consulta",
+      "mensajes": [
+        "cuánto me falta para bariloche?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "consultar_meta",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B314",
+      "funcion": "correccion",
+      "mensajes": [
+        "gasté 30000 en el super",
+        "eran 3.000 no 30.000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 3000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Supermercado",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B315",
+      "funcion": "correccion",
+      "mensajes": [
+        "gasté 5000 en el kiosco",
+        "borrá eso"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B316",
+      "funcion": "correccion",
+      "mensajes": [
+        "almuerzo 12 lucas",
+        "eso fue con santander"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 12000,
+            "moneda": "ARS",
+            "cuenta": "Santander",
+            "categoria": "Gastronomía",
+            "subcategoria": "Restaurantes",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B317",
+      "funcion": "correccion",
+      "mensajes": [
+        "gasté 8000 en la farmacia",
+        "fue ayer"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 8000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Salud",
+            "subcategoria": "Farmacia",
+            "dias": -1
+          }
+        ]
+      }
+    },
+    {
+      "id": "B318",
+      "funcion": "correccion",
+      "mensajes": [
+        "15000 en la verdu",
+        "no, 1500"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 1500,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Verdulería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B319",
+      "funcion": "correccion",
+      "mensajes": [
+        "gasté 20000 en el chino",
+        "eso era kiosco"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 20000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Kiosco",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B320",
+      "funcion": "correccion",
+      "mensajes": [
+        "pagué 25000 de luz",
+        "me equivoqué, borralo"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B321",
+      "funcion": "correccion",
+      "mensajes": [
+        "cobré 300 mil de sueldo",
+        "eran 350 mil"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 350000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Trabajo",
+            "subcategoria": "Sueldo",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B322",
+      "funcion": "correccion",
+      "mensajes": [
+        "nafta 40 lucas",
+        "anulá eso"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B323",
+      "funcion": "correccion",
+      "mensajes": [
+        "gasté 9000 en uber",
+        "fue en efectivo"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 9000,
+            "moneda": "ARS",
+            "cuenta": "Efectivo Pesos",
+            "categoria": "Transporte",
+            "subcategoria": "Taxi y apps",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B324",
+      "funcion": "correccion",
+      "mensajes": [
+        "gasté 6000 en el kiosco",
+        "eso estaba mal"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B325",
+      "funcion": "correccion",
+      "mensajes": [
+        "2500 de pan",
+        "fue con el santander"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 2500,
+            "moneda": "ARS",
+            "cuenta": "Santander",
+            "categoria": "Alimentación",
+            "subcategoria": "Panadería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B326",
+      "funcion": "correccion",
+      "mensajes": [
+        "gasté 70000 en zapatillas",
+        "eran 75 lucas y con santander"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 75000,
+            "moneda": "ARS",
+            "cuenta": "Santander",
+            "categoria": "Indumentaria",
+            "subcategoria": "Calzado",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B327",
+      "funcion": "correccion",
+      "mensajes": [
+        "gasté 12000 en la carnicería",
+        "fue anteayer"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 12000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Carnicería",
+            "dias": -2
+          }
+        ]
+      }
+    },
+    {
+      "id": "B328",
+      "funcion": "correccion",
+      "mensajes": [
+        "gasté 10 lucas en un regalo",
+        "no era 10, eran 15"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 15000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Otros",
+            "subcategoria": "Regalos",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B329",
+      "funcion": "correccion",
+      "mensajes": [
+        "cobré 50000 de una changa",
+        "fue a santander"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "ingreso",
+            "monto": 50000,
+            "moneda": "ARS",
+            "cuenta": "Santander",
+            "categoria": "Trabajo",
+            "subcategoria": "Freelance y changas",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B330",
+      "funcion": "correccion",
+      "mensajes": [
+        "gasté 7000 en el kiosco",
+        "borrá eso",
+        "sí",
+        "gasté 7000 en la panadería"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 7000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Panadería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B331",
+      "funcion": "correccion",
+      "mensajes": [
+        "gasté 18000 en el super",
+        "eso era verdulería"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 18000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Verdulería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B332",
+      "funcion": "correccion",
+      "mensajes": [
+        "gasté 30000 con la amex",
+        "sí",
+        "borrá eso"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B333",
+      "funcion": "correccion",
+      "mensajes": [
+        "gasté 5000 en el kiosco",
+        "gasté 12000 en la verdulería"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 5000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Kiosco",
+            "dias": 0
+          },
+          {
+            "tipo": "egreso",
+            "monto": 12000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Alimentación",
+            "subcategoria": "Verdulería",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B334",
+      "funcion": "correccion",
+      "mensajes": [
+        "borrá eso"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B335",
+      "funcion": "meta",
+      "mensajes": [
+        "aporté 20 lucas a la meta de bariloche"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "aportar_meta",
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 20000,
+            "moneda": "ARS",
+            "categoria": "Ahorro"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B336",
+      "funcion": "meta",
+      "mensajes": [
+        "puse 50 mil para el fondo de emergencia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "aportar_meta",
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 50000,
+            "moneda": "ARS",
+            "categoria": "Ahorro"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B337",
+      "funcion": "meta",
+      "mensajes": [
+        "guardé 15000 para mi meta del viaje"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "aportar_meta",
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 15000,
+            "moneda": "ARS",
+            "categoria": "Ahorro"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B338",
+      "funcion": "meta",
+      "mensajes": [
+        "separé 100k para la meta",
+        "fondo de emergencia"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "aportar_meta",
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 100000,
+            "moneda": "ARS",
+            "categoria": "Ahorro"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B339",
+      "funcion": "meta",
+      "mensajes": [
+        "mandé 25 lucas a la meta de bariloche desde santander"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "aportar_meta",
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 25000,
+            "moneda": "ARS",
+            "cuenta": "Santander",
+            "categoria": "Ahorro"
+          }
+        ]
+      }
+    },
+    {
+      "id": "B340",
+      "funcion": "meta",
+      "mensajes": [
+        "aporté 30 mil a la meta del auto"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "aportar_meta",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B341",
+      "funcion": "meta",
+      "mensajes": [
+        "aporté 10 mil a la meta de bariloche",
+        "no"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "aportar_meta",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B342",
+      "funcion": "meta",
+      "mensajes": [
+        "aporté 20 lucas a bariloche",
+        "sí",
+        "borrá eso"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "aportar_meta",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B343",
+      "funcion": "suscripcion",
+      "mensajes": [
+        "me suscribí a Disney+ por 9000 por mes"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "agregar_suscripcion",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B344",
+      "funcion": "suscripcion",
+      "mensajes": [
+        "empecé a pagar 5000 de paramount",
+        "por mes"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "agregar_suscripcion",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B345",
+      "funcion": "suscripcion",
+      "mensajes": [
+        "me aboné a youtube premium, 4500 mensual"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "agregar_suscripcion",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B346",
+      "funcion": "suscripcion",
+      "mensajes": [
+        "contraté chatgpt plus, 20 dólares por mes"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "agregar_suscripcion",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B347",
+      "funcion": "suscripcion",
+      "mensajes": [
+        "pago todos los meses 12 lucas de crunchyroll"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "agregar_suscripcion",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B348",
+      "funcion": "suscripcion",
+      "mensajes": [
+        "di de baja HBO Max"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "dar_baja_suscripcion",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B349",
+      "funcion": "suscripcion",
+      "mensajes": [
+        "ya no pago más spotify"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "dar_baja_suscripcion",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B350",
+      "funcion": "suscripcion",
+      "mensajes": [
+        "cancelé netflix"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "dar_baja_suscripcion",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B351",
+      "funcion": "suscripcion",
+      "mensajes": [
+        "aumentó netflix, ahora son 15000"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "cambiar_precio_suscripcion",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B352",
+      "funcion": "suscripcion",
+      "mensajes": [
+        "spotify subió a 4200"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "intent": "cambiar_precio_suscripcion",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B353",
+      "funcion": "suscripcion",
+      "mensajes": [
+        "di de baja amazon prime"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B354",
+      "funcion": "suscripcion",
+      "mensajes": [
+        "me suscribí a netflix por 9000 por mes"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B355",
+      "funcion": "suscripcion",
+      "mensajes": [
+        "pagué el youtube premium"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B356",
+      "funcion": "suscripcion",
+      "mensajes": [
+        "gasté 5000 en Disney+"
+      ],
+      "confirmar": true,
+      "esperado": {
+        "movimientos": [
+          {
+            "tipo": "egreso",
+            "monto": 5000,
+            "moneda": "ARS",
+            "cuenta": "Galicia",
+            "categoria": "Ocio",
+            "subcategoria": "Streaming",
+            "dias": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "B357",
+      "funcion": "otro",
+      "mensajes": [
+        "hola"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "saludo",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B358",
+      "funcion": "otro",
+      "mensajes": [
+        "buenas, cómo andás?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "intent": "saludo",
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B359",
+      "funcion": "otro",
+      "mensajes": [
+        "gracias"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B360",
+      "funcion": "otro",
+      "mensajes": [
+        "gasté 2 gambas en el remis"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B361",
+      "funcion": "otro",
+      "mensajes": [
+        "gasté en el kiosco"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B362",
+      "funcion": "otro",
+      "mensajes": [
+        "Se me hielo en Kioko."
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B363",
+      "funcion": "otro",
+      "mensajes": [
+        "puse 5000"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B364",
+      "funcion": "otro",
+      "mensajes": [
+        "No gasté nada hoy"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B365",
+      "funcion": "otro",
+      "mensajes": [
+        "mañana tengo que pagar la luz"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B366",
+      "funcion": "otro",
+      "mensajes": [
+        "qué podés hacer?"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B367",
+      "funcion": "otro",
+      "mensajes": [
+        "jajaja"
+      ],
+      "confirmar": false,
+      "esperado": {
+        "movimientos": []
+      }
+    },
+    {
+      "id": "B368",
+      "funcion": "otro",
+      "mensajes": [
+        "cancelar"
+      ],
       "confirmar": false,
       "esperado": {
         "movimientos": []
