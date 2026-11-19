@@ -1,6 +1,6 @@
 {
   "escenario_id": "P9.5",
-  "fecha_grabacion": "2026-09-15T14:46:10.718311+00:00",
+  "fecha_grabacion": "2026-11-19T06:08:24.226777+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,8 +11,8 @@
           "monto": 80000,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": null,
-          "descripcion": "Cuotas",
+          "categoria": "Otros",
+          "descripcion": "Gasto",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
@@ -27,15 +27,15 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.7,
+        "confianza": 0.72,
         "slot_filling": true,
         "datos_faltantes": [
-          "¿Qué compraste?",
-          "¿Desde qué billetera?"
+          "tarjeta"
         ],
-        "respuesta_usuario": "¿Qué compraste y desde qué billetera?"
+        "respuesta_usuario": "¿Con qué tarjeta fue?"
       }
     }
   ]

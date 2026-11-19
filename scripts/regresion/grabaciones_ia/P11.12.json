@@ -1,6 +1,6 @@
 {
   "escenario_id": "P11.12",
-  "fecha_grabacion": "2026-10-01T13:03:41.570465+00:00",
+  "fecha_grabacion": "2026-11-19T06:09:36.064512+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,17 +11,17 @@
           "monto": 50000,
           "moneda": "ARS",
           "tipo": "ingreso",
-          "categoria": "Trabajo independiente",
-          "descripcion": "Arreglo de compu",
+          "categoria": "Freelance y changas",
+          "descripcion": "Arreglo de la compu",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
           "billetera_origen": null,
           "billetera_destino": null,
           "cantidad_cuotas": null,
-          "fecha": null,
+          "fecha": "2026-11-19",
           "destinatario": null,
-          "persona": null,
+          "persona": "Amiga",
           "tasa_cambio": null,
           "monto_destino": null,
           "monto_comision": null,
@@ -37,27 +37,27 @@
               "descripcion": "Verdulería",
               "billetera": null,
               "tarjeta": null,
-              "fecha": null
+              "fecha": "2026-11-19"
             },
             {
               "monto": 4500,
               "moneda": "ARS",
               "tipo": "egreso",
-              "categoria": "Otros",
+              "categoria": "Carnicería",
               "descripcion": "Maple de huevos",
               "billetera": null,
               "tarjeta": null,
-              "fecha": null
+              "fecha": "2026-11-19"
             },
             {
               "monto": 10000,
               "moneda": "ARS",
               "tipo": "egreso",
               "categoria": "Carnicería",
-              "descripcion": "Carnicería",
+              "descripcion": "Pechugas de pollo",
               "billetera": null,
               "tarjeta": null,
-              "fecha": null
+              "fecha": "2026-11-19"
             },
             {
               "monto": 2790,
@@ -67,14 +67,14 @@
               "descripcion": "Chocolate",
               "billetera": null,
               "tarjeta": null,
-              "fecha": null
+              "fecha": "2026-11-19"
             }
           ]
         },
-        "confianza": 0.9,
+        "confianza": 0.88,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. Se registraron las transacciones."
+        "respuesta_usuario": "Listo, registré el ingreso de $50.000 por el arreglo de la compu y los cuatro gastos."
       }
     }
   ]

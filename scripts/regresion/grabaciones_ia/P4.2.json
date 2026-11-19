@@ -1,6 +1,6 @@
 {
   "escenario_id": "P4.2",
-  "fecha_grabacion": "2026-09-15T14:37:17.862170+00:00",
+  "fecha_grabacion": "2026-11-19T06:06:48.867243+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -27,6 +27,7 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": [],
           "datos_faltantes": [
             "billetera_origen"
@@ -37,7 +38,7 @@
         "datos_faltantes": [
           "billetera_origen"
         ],
-        "respuesta_usuario": "¿Desde qué billetera salió la plata?\n\n1. Efectivo ARS\n2. Galicia\n3. Santander"
+        "respuesta_usuario": "¿De qué cuenta salió?\n1. Efectivo Pesos\n2. Galicia\n3. Santander"
       }
     },
     {
@@ -65,12 +66,15 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
         "confianza": 0.9,
-        "slot_filling": false,
-        "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $12.000 en Verdulería. Además, ya tengo registrado un gasto de $5.000 en Kiosco. ¿Confirmás?"
+        "slot_filling": true,
+        "datos_faltantes": [
+          "billetera_origen"
+        ],
+        "respuesta_usuario": "¿Desde qué billetera?"
       }
     }
   ]

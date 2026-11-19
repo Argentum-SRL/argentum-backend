@@ -470,9 +470,11 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
         },
         {
             "id": "P7.4", "punto": "Punto 7", "match": "exacto",
-            "nombre": "Prepaga -> Obra social / Prepaga (jerga argentina + descripción)",
-            "ejecutar": lambda: p7_ejecutar_caso(datos, "pagué 12000 de la prepaga", "Obra social / Prepaga", "Prepaga"),
-            "esperado": "Cat: Obra social / Prepaga | Desc: Prepaga",
+            "nombre": "Prepaga -> Prepaga y obra social (jerga argentina + descripción)",
+            "ejecutar": lambda: p7_ejecutar_caso(
+                datos, "pagué 12000 de la prepaga", "Prepaga y obra social", "Prepaga",
+            ),
+            "esperado": "Cat: Prepaga y obra social | Desc: Prepaga",
         },
         {
             "id": "P7.5", "punto": "Punto 7", "match": "exacto",
@@ -482,9 +484,14 @@ def obtener_catalogo(datos: dict, hoy=None, ayer=None) -> list[dict]:
         },
         {
             "id": "P7.6", "punto": "Punto 7", "match": "exacto",
-            "nombre": "Corte de pelo -> Cuidado personal (jerga argentina + descripción preservada)",
-            "ejecutar": lambda: p7_ejecutar_caso(datos, "me corté el pelo, 15000", "Cuidado personal", "Corte de pelo"),
-            "esperado": "Cat: Cuidado personal | Desc: Corte de pelo",
+            "nombre": (
+                "Corte de pelo -> Peluquería y belleza "
+                "(jerga argentina + descripción preservada)"
+            ),
+            "ejecutar": lambda: p7_ejecutar_caso(
+                datos, "me corté el pelo, 15000", "Peluquería y belleza", "Corte de pelo",
+            ),
+            "esperado": "Cat: Peluquería y belleza | Desc: Corte de pelo",
         },
         {
             "id": "P7.7", "punto": "Punto 7", "match": "exacto",

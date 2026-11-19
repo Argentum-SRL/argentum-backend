@@ -27,11 +27,12 @@ def test_tf16_textos_catalogo_y_system_prompt(db):
         "taxi, remis, Uber, uver, Cabify, DiDi",
         (
             "muebles, colchón, heladera, lavarropas, aire acondicionado, "
-            "microondas, cocina, electrodomésticos, decoración, bazar"
+            "microondas, cocina, electrodomésticos (la tele va en Equipos), "
+            "decoración, bazar"
         ),
         (
             "celular nuevo, notebook, computadora, tablet, auriculares, "
-            "televisor, consola, monitor "
+            "televisor, tele, smart TV, consola, monitor "
             "(heladera, lavarropas y aire van en Muebles y electro)"
         ),
     ]

@@ -1,6 +1,6 @@
 {
   "escenario_id": "P17.9",
-  "fecha_grabacion": "2026-10-01T12:44:36.403105+00:00",
+  "fecha_grabacion": "2026-11-19T06:11:46.785974+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,16 +11,16 @@
           "monto": 100000.0,
           "moneda": "ARS",
           "tipo": "ingreso",
-          "categoria": "Otros",
-          "descripcion": "Ingreso de mamá",
+          "categoria": "Ayuda familiar",
+          "descripcion": "Plata de mi mamá",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
-          "billetera_destino": "Efectivo ARS",
+          "billetera_destino": "Galicia",
           "cantidad_cuotas": null,
           "fecha": "2026-09-22",
           "destinatario": null,
-          "persona": null,
+          "persona": "mamá",
           "tasa_cambio": null,
           "monto_destino": null,
           "monto_comision": null,
@@ -31,9 +31,11 @@
         },
         "confianza": 0.9,
         "slot_filling": false,
-        "datos_faltantes": [],
-        "respuesta_usuario": "Listo. Ingreso de $100.000 en Otros a Efectivo ARS (el 22 de septiembre) — registrado.",
-        "_asumio_principal": false
+        "datos_faltantes": [
+          "billetera"
+        ],
+        "respuesta_usuario": "Listo, anoté un ingreso de $100.000 en Galicia (Ayuda familiar, 22/09).",
+        "_asumio_principal": true
       }
     },
     {
@@ -42,20 +44,20 @@
       "respuesta": {
         "intent": "registrar_transaccion",
         "entidades": {
-          "monto": 100000.0,
+          "monto": 100000,
           "moneda": "ARS",
           "tipo": "ingreso",
-          "categoria": "Otros",
-          "descripcion": "Ingreso de mamá",
+          "categoria": "Ayuda familiar",
+          "descripcion": "Plata de mi mamá",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
-          "billetera_origen": "Efectivo ARS",
-          "billetera_destino": "Efectivo ARS",
+          "billetera_origen": null,
+          "billetera_destino": null,
           "cantidad_cuotas": null,
-          "fecha": "2026-09-30",
+          "fecha": "2026-11-18",
           "destinatario": null,
-          "persona": null,
+          "persona": "mamá",
           "tasa_cambio": null,
           "monto_destino": null,
           "monto_comision": null,
@@ -65,9 +67,11 @@
           "transacciones_adicionales": []
         },
         "confianza": 0.9,
-        "slot_filling": false,
-        "datos_faltantes": [],
-        "respuesta_usuario": "Listo. Ingreso de $100.000 en Otros a Efectivo ARS (ayer) — registrado."
+        "slot_filling": true,
+        "datos_faltantes": [
+          "billetera"
+        ],
+        "respuesta_usuario": "¿A qué billetera?"
       }
     }
   ]

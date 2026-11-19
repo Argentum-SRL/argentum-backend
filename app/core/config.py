@@ -26,15 +26,16 @@ class Settings(BaseSettings):
 
     # OpenAI
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4o-mini-2024-07-18"
-    # Modelo para leer fotos y PDF; se cambia tras medir con scripts\evaluacion.
-    OPENAI_MODEL_DOCUMENTOS: str = "gpt-4o"
-    # Modelo para transcribir audios; se cambia tras medir con scripts\evaluacion.
-    OPENAI_MODEL_AUDIO: str = "whisper-1"
-    # Esfuerzo de razonamiento (none|low|medium); se decide con scripts\evaluacion.
+    # Medido el 18-19/11/2026 con scripts\evaluacion; para volver atrás, variable en Railway.
+    OPENAI_MODEL: str = "gpt-6-luna"
+    # Medido el 18-19/11/2026 con scripts\evaluacion; para volver atrás, variable en Railway.
+    OPENAI_MODEL_DOCUMENTOS: str = "gpt-6-luna"
+    # Medido el 18-19/11/2026 con scripts\evaluacion; para volver atrás, variable en Railway.
+    OPENAI_MODEL_AUDIO: str = "gpt-transcribe"
+    # Medido el 18-19/11/2026 con scripts\evaluacion; para volver atrás, variable en Railway.
     OPENAI_RAZONAMIENTO: str = "none"
-    # Debajo de esto pide confirmación; se calibra con scripts\evaluacion\evaluar_bot.py.
-    UMBRAL_CONFIANZA_IA: float = 0.85
+    # Calibrado para gpt-6-luna (384 frases); volver atrás por variable en Railway.
+    UMBRAL_CONFIANZA_IA: float = 0.70
     IA_PRESUPUESTO_DIARIO_USD: float = 1.0
     IA_PRESUPUESTO_MENSUAL_USD: float = 10.0  # Tope mensual de OpenAI (V6, Sebastián 06/11/2026): mail al 50%, 80% y 100%; al 100% el bot deja de usar la IA hasta el 1° del mes siguiente.
     IA_MAX_MENSAJES_DIA_USUARIO: int = 150

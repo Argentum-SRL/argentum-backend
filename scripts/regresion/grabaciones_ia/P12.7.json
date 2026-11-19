@@ -1,6 +1,6 @@
 {
   "escenario_id": "P12.7",
-  "fecha_grabacion": "2026-09-21T12:00:00.000000+00:00",
+  "fecha_grabacion": "2026-11-19T06:09:58.502693+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -27,12 +27,13 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 1.0,
+        "confianza": 0.99,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "LLM_INVENTADO_999"
+        "respuesta_usuario": "Voy a revisar tu proyección financiera."
       }
     }
   ]

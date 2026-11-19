@@ -1,6 +1,6 @@
 {
   "escenario_id": "P12.1",
-  "fecha_grabacion": "2026-09-17T18:52:58.158952+00:00",
+  "fecha_grabacion": "2026-11-19T06:09:42.053548+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -27,12 +27,13 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 1.0,
+        "confianza": 0.99,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Tu balance actual es de $1.925.995,66."
+        "respuesta_usuario": "Voy a consultar cómo venís este mes."
       }
     }
   ]

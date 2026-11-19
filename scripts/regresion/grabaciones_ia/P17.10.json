@@ -1,6 +1,6 @@
 {
   "escenario_id": "P17.10",
-  "fecha_grabacion": "2026-10-01T12:45:43.580209+00:00",
+  "fecha_grabacion": "2026-11-19T06:11:53.275055+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,7 +11,7 @@
           "monto": 4131,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": "Taxi / Apps",
+          "categoria": "Taxi y apps",
           "descripcion": "Uber",
           "servicio": null,
           "frecuencia": null,
@@ -33,8 +33,8 @@
               "monto": 9000,
               "moneda": "ARS",
               "tipo": "ingreso",
-              "categoria": "Otros",
-              "descripcion": "Ingreso de amigo",
+              "categoria": "Cobros de personas",
+              "descripcion": "Plata de un amigo",
               "billetera": null,
               "tarjeta": null,
               "fecha": null
@@ -43,8 +43,8 @@
               "monto": 9000,
               "moneda": "ARS",
               "tipo": "ingreso",
-              "categoria": "Otros",
-              "descripcion": "Ingreso de amiga",
+              "categoria": "Cobros de personas",
+              "descripcion": "Plata de una amiga",
               "billetera": null,
               "tarjeta": null,
               "fecha": null
@@ -54,7 +54,7 @@
         "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. Registré el gasto de $4.131 en Uber y los ingresos de $9.000 de tu amigo y $9.000 de tu amiga."
+        "respuesta_usuario": "Listo, registré el gasto de Uber y los dos ingresos."
       }
     }
   ]

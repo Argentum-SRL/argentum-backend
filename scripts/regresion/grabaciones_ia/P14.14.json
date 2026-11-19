@@ -1,6 +1,6 @@
 {
   "escenario_id": "P14.14",
-  "fecha_grabacion": "2026-10-01T14:19:04.375291+00:00",
+  "fecha_grabacion": "2026-11-19T06:11:09.525357+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,7 +11,7 @@
           "monto": 50,
           "moneda": "USD",
           "tipo": "egreso",
-          "categoria": "Otros",
+          "categoria": "Hobbies y juegos",
           "descripcion": "Libro",
           "servicio": null,
           "frecuencia": null,
@@ -33,7 +33,7 @@
               "monto": 20,
               "moneda": "USD",
               "tipo": "egreso",
-              "categoria": "Otros",
+              "categoria": "Cafetería",
               "descripcion": "Café",
               "billetera": null,
               "tarjeta": null,
@@ -41,10 +41,10 @@
             }
           ]
         },
-        "confianza": 0.9,
+        "confianza": 0.98,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. $50 en un libro y $20 en café — registrados."
+        "respuesta_usuario": "Listo. Registré 50 USD en Libro y 20 USD en Café."
       }
     }
   ]

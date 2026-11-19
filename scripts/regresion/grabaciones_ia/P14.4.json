@@ -1,6 +1,6 @@
 {
   "escenario_id": "P14.4",
-  "fecha_grabacion": "2026-09-15T14:46:02.067228+00:00",
+  "fecha_grabacion": "2026-11-19T06:10:42.486888+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,8 +11,8 @@
           "monto": 960000,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": "Otros",
-          "descripcion": "Televisor",
+          "categoria": "Equipos",
+          "descripcion": "Tele",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
@@ -27,12 +27,15 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.85,
-        "slot_filling": false,
-        "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $960.000 en Otros en 12 cuotas desde tu billetera. ¿Va?"
+        "confianza": 0.8,
+        "slot_filling": true,
+        "datos_faltantes": [
+          "tarjeta"
+        ],
+        "respuesta_usuario": "¿Con qué tarjeta fue la compra?"
       }
     }
   ]

@@ -539,6 +539,10 @@ def _crear_proc_medido(
                 frase_estado["intents_ia"].append(
                     str(raw_int) if raw_int is not None else None
                 )
+                # Entidades crudas de la IA, para diagnosticar fallas (M2d2).
+                frase_estado.setdefault("entidades_ia", []).append(
+                    res.get("entidades")
+                )
             return res
         except Exception as exc:
             frase_estado["errores"].append(_limpiar_error_api(exc))
@@ -662,6 +666,7 @@ def main(argv: list[str] | None = None) -> int:
                         "primera_respuesta": prim_resp,
                         "confianzas_ia": list(frase_estado["confianzas"]),
                         "intents_ia": list(frase_estado["intents_ia"]),
+                        "entidades_ia": frase_estado.pop("entidades_ia", []),
                         "llamadas_ia": frase_estado["llamadas"],
                         "tiempos_s": list(frase_estado["tiempos"]),
                         "errores": list(frase_estado["errores"]),

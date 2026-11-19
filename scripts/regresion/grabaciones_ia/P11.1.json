@@ -1,6 +1,6 @@
 {
   "escenario_id": "P11.1",
-  "fecha_grabacion": "2026-09-15T14:51:55.540309+00:00",
+  "fecha_grabacion": "2026-11-19T06:08:58.203836+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -27,6 +27,7 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": [
             {
               "monto": 8000,
@@ -40,10 +41,10 @@
             }
           ]
         },
-        "confianza": 0.9,
+        "confianza": 0.99,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $5.000 en Kiosco desde Galicia y $8.000 en Verdulería desde Santander. ¿Va?"
+        "respuesta_usuario": "Listo. $5.000 en Kiosco desde Galicia y $8.000 en Verdulería desde Santander — registrados."
       }
     }
   ]

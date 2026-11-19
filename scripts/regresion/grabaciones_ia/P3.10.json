@@ -1,6 +1,6 @@
 {
   "escenario_id": "P3.10",
-  "fecha_grabacion": "2026-09-15T14:36:56.407198+00:00",
+  "fecha_grabacion": "2026-11-19T06:06:43.907102+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -27,12 +27,13 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.9,
+        "confianza": 0.55,
         "slot_filling": true,
         "datos_faltantes": [
-          "¿Desde qué billetera?"
+          "billetera"
         ],
         "respuesta_usuario": "¿Desde qué billetera?"
       }

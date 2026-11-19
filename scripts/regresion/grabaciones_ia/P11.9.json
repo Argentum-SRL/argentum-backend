@@ -1,6 +1,6 @@
 {
   "escenario_id": "P11.9",
-  "fecha_grabacion": "2026-10-01T13:00:53.840056+00:00",
+  "fecha_grabacion": "2026-11-19T06:09:25.034919+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -41,10 +41,10 @@
             }
           ]
         },
-        "confianza": 0.9,
+        "confianza": 0.95,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. $5.000 en Kiosco — registrado. $5.000 en Kiosco — registrado."
+        "respuesta_usuario": "Listo. Dos gastos de $5.000 en Kiosco — registrados."
       }
     }
   ]

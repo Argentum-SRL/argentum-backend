@@ -1,6 +1,6 @@
 {
   "escenario_id": "P11.13",
-  "fecha_grabacion": "2026-10-01T13:04:59.213183+00:00",
+  "fecha_grabacion": "2026-11-19T06:09:39.386131+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -8,11 +8,11 @@
       "respuesta": {
         "intent": "registrar_transaccion",
         "entidades": {
-          "monto": 3000,
+          "monto": 5000,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": "Kiosco",
-          "descripcion": "Kiosco",
+          "categoria": "Ayuda familiar",
+          "descripcion": "Transferencia a mi hermano",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
@@ -20,7 +20,7 @@
           "billetera_destino": null,
           "cantidad_cuotas": null,
           "fecha": null,
-          "destinatario": null,
+          "destinatario": "mi hermano",
           "persona": null,
           "tasa_cambio": null,
           "monto_destino": null,
@@ -30,21 +30,21 @@
           "meta": null,
           "transacciones_adicionales": [
             {
-              "monto": 5000,
+              "monto": 3000,
               "moneda": "ARS",
               "tipo": "egreso",
-              "categoria": "Otros",
-              "descripcion": "Transferencia a mi hermano",
+              "categoria": "Kiosco",
+              "descripcion": "Kiosco",
               "billetera": null,
               "tarjeta": null,
               "fecha": null
             }
           ]
         },
-        "confianza": 0.85,
+        "confianza": 0.96,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. $3.000 en Kiosco — registrado. $5.000 a tu hermano — registrado como un gasto."
+        "respuesta_usuario": "Listo. Registré $5.000 para tu hermano y $3.000 en el kiosco."
       }
     }
   ]

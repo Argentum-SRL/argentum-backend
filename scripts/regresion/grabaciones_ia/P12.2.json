@@ -1,6 +1,6 @@
 {
   "escenario_id": "P12.2",
-  "fecha_grabacion": "2026-09-17T18:54:26.067919+00:00",
+  "fecha_grabacion": "2026-11-19T06:09:45.104542+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -9,7 +9,7 @@
         "intent": "consultar_cotizacion",
         "entidades": {
           "monto": null,
-          "moneda": null,
+          "moneda": "USD",
           "tipo": null,
           "categoria": null,
           "descripcion": null,
@@ -27,12 +27,13 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 1.0,
+        "confianza": 0.99,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "No tengo la cotización del dólar en este momento."
+        "respuesta_usuario": "¿Qué cotización querés consultar: oficial, blue o MEP?"
       }
     }
   ]

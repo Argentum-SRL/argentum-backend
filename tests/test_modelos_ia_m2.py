@@ -240,6 +240,8 @@ def entorno_ia(monkeypatch):
 
 def test_tm1_kwargs_iguales_a_head_en_las_ocho_llamadas(entorno_ia, monkeypatch):
     """TM1: con los defaults, las 8 llamadas mandan los mismos kwargs que HEAD."""
+    monkeypatch.setattr(settings, "OPENAI_MODEL", "gpt-4o-mini-2024-07-18")
+    monkeypatch.setattr(settings, "OPENAI_MODEL_DOCUMENTOS", "gpt-4o")
     # 1. procesar_mensaje con Structured Outputs
     ai_service.procesar_mensaje("hola", entorno_ia.usuario, entorno_ia.db)
     kw1 = entorno_ia.llamadas_chat[-1]

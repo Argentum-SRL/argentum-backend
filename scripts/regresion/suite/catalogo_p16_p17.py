@@ -82,7 +82,7 @@ def entradas_p16_p17(datos: dict[str, Any]) -> list[dict[str, Any]]:
         },
         {
             "id": "P14.6", "punto": "Punto 14", "match": "exacto",
-            "nombre": "confianza 0.70: resultado idéntico a HEAD y 0 txs",
+            "nombre": "confianza 0.65 (debajo del umbral): propuesta y 0 txs",
             "ejecutar": lambda: p14_caso_6(datos),
             "esperado": "Coincide con HEAD: True | Txs creadas: 0",
         },

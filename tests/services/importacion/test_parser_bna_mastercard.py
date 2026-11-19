@@ -136,8 +136,14 @@ N° de Socio 099-0123456-0-1
     mock_response.choices = [mock_choice]
     mock_client.chat.completions.create.return_value = mock_response
 
-    with patch("pdfplumber.open", return_value=mock_pdf), \
-         patch("app.services.importacion.parser_bna_mastercard.get_openai_client", return_value=mock_client):
+    with (
+        patch("pdfplumber.open", return_value=mock_pdf),
+        patch(
+            "app.services.importacion.parser_bna_mastercard.get_openai_client",
+            return_value=mock_client,
+        ),
+        patch.object(settings, "OPENAI_MODEL", "gpt-4o-mini-2024-07-18"),
+    ):
         
         res = parsear_bna_mastercard(b"dummy pdf bytes")
         

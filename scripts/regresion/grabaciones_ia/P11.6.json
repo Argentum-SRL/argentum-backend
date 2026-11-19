@@ -1,6 +1,6 @@
 {
   "escenario_id": "P11.6",
-  "fecha_grabacion": "2026-10-01T12:59:03.998647+00:00",
+  "fecha_grabacion": "2026-11-19T06:09:16.482052+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -33,7 +33,7 @@
               "monto": 30000,
               "moneda": "ARS",
               "tipo": "egreso",
-              "categoria": "Indumentaria",
+              "categoria": "Calzado",
               "descripcion": "Zapatillas",
               "billetera": null,
               "tarjeta": "•••• 2745",
@@ -41,10 +41,10 @@
             }
           ]
         },
-        "confianza": 0.85,
+        "confianza": 0.98,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. $5.000 en Kiosco desde Galicia — registrado. $30.000 en Zapatillas con la Amex — registrado."
+        "respuesta_usuario": "Listo. Registré $5.000 en Kiosco desde Galicia y $30.000 en Zapatillas con la Amex."
       }
     }
   ]

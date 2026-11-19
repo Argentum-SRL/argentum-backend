@@ -1,6 +1,6 @@
 {
   "escenario_id": "P3.9",
-  "fecha_grabacion": "2026-09-15T14:36:44.149461+00:00",
+  "fecha_grabacion": "2026-11-19T06:06:41.219825+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -27,12 +27,13 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 1.0,
+        "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $800.000 como ingreso de sueldo. ¿Va?"
+        "respuesta_usuario": "Listo. $800.000 de sueldo — registrado."
       }
     }
   ]

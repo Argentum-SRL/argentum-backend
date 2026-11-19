@@ -1,6 +1,6 @@
 {
   "escenario_id": "P7.2",
-  "fecha_grabacion": "2026-09-15T14:41:26.391939+00:00",
+  "fecha_grabacion": "2026-11-19T06:07:32.574227+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -27,12 +27,15 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
         "confianza": 0.9,
-        "slot_filling": false,
-        "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $8.000 en Verdulería. ¿Va?"
+        "slot_filling": true,
+        "datos_faltantes": [
+          "billetera"
+        ],
+        "respuesta_usuario": "¿Desde qué billetera?"
       }
     }
   ]

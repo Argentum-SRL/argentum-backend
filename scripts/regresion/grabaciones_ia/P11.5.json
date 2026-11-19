@@ -1,6 +1,6 @@
 {
   "escenario_id": "P11.5",
-  "fecha_grabacion": "2026-09-15T14:52:52.868746+00:00",
+  "fecha_grabacion": "2026-11-19T06:09:13.219146+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -27,6 +27,7 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": [
             {
               "monto": 30000,
@@ -40,10 +41,10 @@
             }
           ]
         },
-        "confianza": 0.85,
+        "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $100.000 en Sueldo y $30.000 en Alquiler. ¿Va?"
+        "respuesta_usuario": "Listo, registré el sueldo de $100.000 y el alquiler de $30.000."
       }
     }
   ]

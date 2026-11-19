@@ -1,6 +1,6 @@
 {
   "escenario_id": "P11.8",
-  "fecha_grabacion": "2026-10-01T12:59:58.859805+00:00",
+  "fecha_grabacion": "2026-11-19T22:20:04.506428+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -33,7 +33,7 @@
               "monto": 50,
               "moneda": "USD",
               "tipo": "egreso",
-              "categoria": "Otros",
+              "categoria": "Hobbies y juegos",
               "descripcion": "Libro",
               "billetera": null,
               "tarjeta": null,
@@ -41,10 +41,10 @@
             }
           ]
         },
-        "confianza": 0.85,
+        "confianza": 0.95,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. $5.000 en Kiosco y 50 dólares en un libro — registrado."
+        "respuesta_usuario": "Listo, registré los dos gastos."
       }
     }
   ]

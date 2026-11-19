@@ -1,6 +1,6 @@
 {
   "escenario_id": "P12.3",
-  "fecha_grabacion": "2026-09-21T12:00:00.000000+00:00",
+  "fecha_grabacion": "2026-11-19T06:09:47.845924+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -27,12 +27,13 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
         "confianza": 1.0,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "LLM_INVENTADO_999"
+        "respuesta_usuario": "Tenés $4.370.800,87 en tus billeteras en pesos y USD 388 en dólares."
       }
     }
   ]

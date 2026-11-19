@@ -1,6 +1,6 @@
 {
   "escenario_id": "P9.1",
-  "fecha_grabacion": "2026-09-15T14:45:28.815095+00:00",
+  "fecha_grabacion": "2026-11-19T06:08:13.770343+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,8 +11,8 @@
           "monto": 30000,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": null,
-          "descripcion": "Amex",
+          "categoria": "Otros",
+          "descripcion": "Gasto",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
@@ -27,14 +27,13 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": "•••• 2745",
+          "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.7,
-        "slot_filling": true,
-        "datos_faltantes": [
-          "¿Qué fue el gasto?"
-        ],
-        "respuesta_usuario": "¿Qué fue el gasto?"
+        "confianza": 0.9,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Listo. $30.000 con la Amex — registrado."
       }
     }
   ]

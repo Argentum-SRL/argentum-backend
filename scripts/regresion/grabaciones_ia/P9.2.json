@@ -1,6 +1,6 @@
 {
   "escenario_id": "P9.2",
-  "fecha_grabacion": "2026-09-15T14:45:44.600798+00:00",
+  "fecha_grabacion": "2026-11-19T06:08:16.509602+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,14 +11,14 @@
           "monto": 30000,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": null,
+          "categoria": "Otros",
           "descripcion": "Gasto",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
           "billetera_origen": null,
           "billetera_destino": null,
-          "cantidad_cuotas": null,
+          "cantidad_cuotas": 1,
           "fecha": null,
           "destinatario": null,
           "persona": null,
@@ -27,12 +27,13 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": "•••• 1506",
+          "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.85,
+        "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $30.000 en Gasto desde la tarjeta Visa. ¿Va?"
+        "respuesta_usuario": "Listo. $30.000 de gasto con la Visa — registrado."
       }
     }
   ]

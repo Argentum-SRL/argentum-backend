@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import re
 from uuid import UUID
 from sqlalchemy.orm import Session
 from app.models.billetera import Billetera
@@ -55,11 +56,28 @@ from app.routers.whatsapp.parsers import (
     _extraer_nombre_servicio,
 )
 from app.services import calendario_tarjeta_service, suscripcion_service, whatsapp_service
+from app.core.catalogo_categorias import ARBOL_CATEGORIAS
 from app.core.catalogo_suscripciones import buscar_servicio_por_texto
 from app.core.reglas_texto_wpp import ejemplo_wpp
 from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
 from app.utils.formato import formatear_monto
 from app.utils.texto import normalizar_texto
+
+
+def _categoria_servicio_catalogo(servicio: str | None) -> str | None:
+    """Devuelve 'Categoria > Subcategoria' si la descripción del catálogo nombra al servicio."""
+    serv_norm = normalizar_texto(servicio)
+    if not serv_norm:
+        return None
+    patron = re.compile(rf"(?<!\w){re.escape(serv_norm)}(?!\w)")
+    for cat in ARBOL_CATEGORIAS:
+        if cat.tipo != "egreso":
+            continue
+        for sub in cat.subcategorias:
+            desc_norm = normalizar_texto(sub.descripcion)
+            if desc_norm and patron.search(desc_norm):
+                return f"{cat.nombre} > {sub.nombre}"
+    return None
 
 
 def manejar_numero_aislado(
@@ -643,11 +661,12 @@ def manejar_verificaciones_slot_filling(
                 if monto_guard is not None:
                     from app.routers.whatsapp.registro import _registrar_movimiento_directo
 
+                    cat_catalogo = _categoria_servicio_catalogo(srv_nom)
                     srv_cat = buscar_servicio_por_texto(srv_nom) if srv_nom else None
-                    cat_gasto = (
-                        srv_cat.get('categoria_sugerida')
-                        if srv_cat and srv_cat.get('categoria_sugerida')
-                        else 'Otros'
+                    cat_gasto = cat_catalogo or (
+                        srv_cat.get("categoria_sugerida")
+                        if srv_cat and srv_cat.get("categoria_sugerida")
+                        else "Otros"
                     )
                     ent_gasto = {
                         'tipo': 'egreso',

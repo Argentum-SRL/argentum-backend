@@ -1,6 +1,6 @@
 {
   "escenario_id": "P8.4",
-  "fecha_grabacion": "2026-09-15T14:43:01.228349+00:00",
+  "fecha_grabacion": "2026-11-19T06:07:55.058459+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -27,14 +27,15 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.9,
+        "confianza": 0.72,
         "slot_filling": true,
         "datos_faltantes": [
           "billetera"
         ],
-        "respuesta_usuario": "¿Desde qué billetera registramos el gasto de $30.000 en Supermercado?"
+        "respuesta_usuario": "¿Desde qué billetera?"
       }
     }
   ]

@@ -1,6 +1,6 @@
 {
   "escenario_id": "P10.10",
-  "fecha_grabacion": "2026-09-15T14:51:31.740036+00:00",
+  "fecha_grabacion": "2026-11-19T06:08:54.537568+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,7 +11,7 @@
           "monto": 9000,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": "Otros",
+          "categoria": "Streaming",
           "descripcion": "Netflix",
           "servicio": null,
           "frecuencia": null,
@@ -27,12 +27,13 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.85,
+        "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $9.000 en Otros desde la billetera que elijas. ¿Va?"
+        "respuesta_usuario": "Listo. $9.000 en Netflix — registrado."
       }
     }
   ]

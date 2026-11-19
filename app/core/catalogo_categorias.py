@@ -124,7 +124,8 @@ ARBOL_CATEGORIAS: tuple[CategoriaCatalogo, ...] = (
                 False,
                 "05",
                 "muebles, colchón, heladera, lavarropas, aire acondicionado, "
-                "microondas, cocina, electrodomésticos, decoración, bazar",
+                "microondas, cocina, electrodomésticos (la tele va en Equipos), "
+                "decoración, bazar",
             ),
             SubcategoriaCatalogo("Reparaciones", 2, False, "05", "plomero, electricista, gasista, cerrajero, pintor, arreglos de la casa, ferretería"),
             SubcategoriaCatalogo("Servicio doméstico", 3, False, "05", "empleada doméstica, mucama, niñera, señora o chica que limpia"),
@@ -209,7 +210,7 @@ ARBOL_CATEGORIAS: tuple[CategoriaCatalogo, ...] = (
                 False,
                 "09",
                 "celular nuevo, notebook, computadora, tablet, auriculares, "
-                "televisor, consola, monitor "
+                "televisor, tele, smart TV, consola, monitor "
                 "(heladera, lavarropas y aire van en Muebles y electro)",
             ),
         ),
@@ -286,7 +287,14 @@ ARBOL_CATEGORIAS: tuple[CategoriaCatalogo, ...] = (
                 None,
                 "bono, premio, horas extras, comisión, propina que te dejan",
             ),
-            SubcategoriaCatalogo("Freelance y changas", 3, False, None, "changa, trabajo particular, honorarios, factura de un trabajo"),
+            SubcategoriaCatalogo(
+                "Freelance y changas",
+                3,
+                False,
+                None,
+                "changa, trabajo particular, clases particulares, honorarios, "
+                "factura de un trabajo",
+            ),
             SubcategoriaCatalogo("Ventas", 4, False, None, "venta de algo, vendí, Mercado Libre"),
         ),
     ),

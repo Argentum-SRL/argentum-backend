@@ -1,6 +1,6 @@
 {
   "escenario_id": "P9.3",
-  "fecha_grabacion": "2026-09-15T14:45:52.931553+00:00",
+  "fecha_grabacion": "2026-11-19T06:08:19.183187+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,7 +11,7 @@
           "monto": 30000,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": null,
+          "categoria": "Otros",
           "descripcion": "Gasto",
           "servicio": null,
           "frecuencia": null,
@@ -27,14 +27,13 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.7,
-        "slot_filling": true,
-        "datos_faltantes": [
-          "categoria"
-        ],
-        "respuesta_usuario": "¿Qué categoría corresponde a este gasto?"
+        "confianza": 0.95,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Listo. $30.000 desde Santander — registrado."
       }
     }
   ]

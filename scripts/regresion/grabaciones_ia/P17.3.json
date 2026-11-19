@@ -1,6 +1,6 @@
 {
   "escenario_id": "P17.3",
-  "fecha_grabacion": "2026-10-01T12:39:11.801025+00:00",
+  "fecha_grabacion": "2026-11-19T06:11:27.056408+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -32,7 +32,7 @@
         "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. $1.000 en Kiosco desde Galicia — registrado.\nSi fue con otra, decime cuál.",
+        "respuesta_usuario": "Listo, anoté $1.000 en Kiosco desde Galicia.",
         "_asumio_principal": true
       }
     },
@@ -42,15 +42,15 @@
       "respuesta": {
         "intent": "registrar_transaccion",
         "entidades": {
-          "monto": 10097.0,
+          "monto": 10097,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": "Taxi / Apps",
+          "categoria": "Taxi y apps",
           "descripcion": "Uber",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
-          "billetera_origen": "Galicia",
+          "billetera_origen": null,
           "billetera_destino": null,
           "cantidad_cuotas": null,
           "fecha": "2026-09-27",
@@ -64,7 +64,7 @@
           "meta": null,
           "transacciones_adicionales": [
             {
-              "monto": 45144.0,
+              "monto": 45144,
               "moneda": "ARS",
               "tipo": "egreso",
               "categoria": "Supermercado",
@@ -78,7 +78,7 @@
         "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. $10.097 en Uber y $45.144 en el chino — registrado."
+        "respuesta_usuario": "Listo, registré $10.097 en Uber y $45.144 en el chino, ambos del 27 de septiembre."
       }
     }
   ]

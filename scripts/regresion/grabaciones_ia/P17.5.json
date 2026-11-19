@@ -1,6 +1,6 @@
 {
   "escenario_id": "P17.5",
-  "fecha_grabacion": "2026-10-01T12:41:15.313572+00:00",
+  "fecha_grabacion": "2026-11-19T06:11:36.362064+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,12 +11,12 @@
           "monto": 2200,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": "Taxi / Apps",
+          "categoria": "Taxi y apps",
           "descripcion": "Uber",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
-          "billetera_origen": "Santander",
+          "billetera_origen": null,
           "billetera_destino": null,
           "cantidad_cuotas": null,
           "fecha": "2026-09-13",
@@ -33,18 +33,18 @@
               "monto": 14400,
               "moneda": "ARS",
               "tipo": "egreso",
-              "categoria": "Otros",
-              "descripcion": "Transferencia a amiga",
+              "categoria": "Pagos a personas",
+              "descripcion": "Transferencia a una amiga",
               "billetera": null,
               "tarjeta": null,
               "fecha": "2026-09-13"
             }
           ]
         },
-        "confianza": 0.85,
+        "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. $2.200 en Uber y $14.400 transferidos a tu amiga — registrados."
+        "respuesta_usuario": "Listo, registré los dos gastos del 13 de septiembre."
       }
     }
   ]

@@ -1,6 +1,6 @@
 {
   "escenario_id": "P7.5",
-  "fecha_grabacion": "2026-09-15T14:41:42.055231+00:00",
+  "fecha_grabacion": "2026-11-19T06:07:41.390374+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -27,12 +27,15 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
         "confianza": 0.9,
-        "slot_filling": false,
-        "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $4.000 en Transporte público. ¿Va?"
+        "slot_filling": true,
+        "datos_faltantes": [
+          "billetera"
+        ],
+        "respuesta_usuario": "¿Desde qué billetera?"
       }
     }
   ]

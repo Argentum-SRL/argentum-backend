@@ -1,6 +1,6 @@
 {
   "escenario_id": "P9.7",
-  "fecha_grabacion": "2026-09-15T14:46:36.563169+00:00",
+  "fecha_grabacion": "2026-11-19T06:08:30.334014+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,14 +11,14 @@
           "monto": 5000,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": null,
+          "categoria": "Otros",
           "descripcion": "Gasto",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
           "billetera_origen": null,
           "billetera_destino": null,
-          "cantidad_cuotas": null,
+          "cantidad_cuotas": 1,
           "fecha": null,
           "destinatario": null,
           "persona": null,
@@ -27,12 +27,13 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": "•••• 1506",
+          "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.85,
+        "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $5.000 en Gasto desde la tarjeta Visa del Galicia. ¿Va?"
+        "respuesta_usuario": "Listo. $5.000 con la Visa de Galicia — registrado."
       }
     }
   ]

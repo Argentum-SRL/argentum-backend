@@ -1,6 +1,6 @@
 {
   "escenario_id": "P17.4",
-  "fecha_grabacion": "2026-10-01T12:40:14.891464+00:00",
+  "fecha_grabacion": "2026-11-19T06:11:32.680294+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,17 +11,17 @@
           "monto": 300000,
           "moneda": "ARS",
           "tipo": "ingreso",
-          "categoria": null,
-          "descripcion": "Transferencia de mamá",
+          "categoria": "Ayuda familiar",
+          "descripcion": "Transferencia de mi mamá",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
           "billetera_origen": null,
-          "billetera_destino": "Efectivo ARS",
+          "billetera_destino": null,
           "cantidad_cuotas": null,
           "fecha": null,
           "destinatario": null,
-          "persona": null,
+          "persona": "mamá",
           "tasa_cambio": null,
           "monto_destino": null,
           "monto_comision": null,
@@ -31,9 +31,11 @@
           "transacciones_adicionales": []
         },
         "confianza": 0.9,
-        "slot_filling": false,
-        "datos_faltantes": [],
-        "respuesta_usuario": "Listo. $300.000 de ingreso registrado como transferencia de mamá."
+        "slot_filling": true,
+        "datos_faltantes": [
+          "billetera"
+        ],
+        "respuesta_usuario": "¿A qué billetera?"
       }
     }
   ]

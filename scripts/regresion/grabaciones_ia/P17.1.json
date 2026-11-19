@@ -1,6 +1,6 @@
 {
   "escenario_id": "P17.1",
-  "fecha_grabacion": "2026-10-01T03:24:35.382620+00:00",
+  "fecha_grabacion": "2026-11-19T06:11:15.630118+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -32,7 +32,7 @@
         "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. $1.000 en Kiosco desde Galicia — registrado.\nSi fue con otra, decime cuál.",
+        "respuesta_usuario": "Listo, anoté $1.000 en Kiosco desde Galicia.",
         "_asumio_principal": true
       }
     },
@@ -42,10 +42,10 @@
       "respuesta": {
         "intent": "registrar_transaccion",
         "entidades": {
-          "monto": 5456.0,
+          "monto": 5456,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": "Taxi / Apps",
+          "categoria": "Taxi y apps",
           "descripcion": "Uber",
           "servicio": null,
           "frecuencia": null,
@@ -64,10 +64,10 @@
           "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 1.0,
+        "confianza": 0.95,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. $5.456 en Uber — registrado."
+        "respuesta_usuario": "Listo, $5.456 en Uber del 23 de septiembre quedó registrado."
       }
     }
   ]

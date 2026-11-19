@@ -1,6 +1,6 @@
 {
   "escenario_id": "P12.12",
-  "fecha_grabacion": "2026-09-21T12:00:00.000000+00:00",
+  "fecha_grabacion": "2026-11-19T06:10:15.034761+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -27,12 +27,13 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 1.0,
+        "confianza": 0.95,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "LLM_INVENTADO_999"
+        "respuesta_usuario": "Tenés dos metas activas: Fondo de Emergencia, con $1.411.229,78 de $3.500.000, y Viaje a Bariloche, con $650.000 de $1.400.000."
       }
     }
   ]

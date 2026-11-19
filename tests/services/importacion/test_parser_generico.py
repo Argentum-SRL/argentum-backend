@@ -127,8 +127,14 @@ def test_parsear_generico_with_mock():
     mock_response.choices = [mock_choice]
     mock_client.chat.completions.create.return_value = mock_response
 
-    with patch("pdfplumber.open", return_value=mock_pdf), \
-         patch("app.services.importacion.parser_generico.get_openai_client", return_value=mock_client):
+    with (
+        patch("pdfplumber.open", return_value=mock_pdf),
+        patch(
+            "app.services.importacion.parser_generico.get_openai_client",
+            return_value=mock_client,
+        ),
+        patch.object(settings, "OPENAI_MODEL", "gpt-4o-mini-2024-07-18"),
+    ):
         
         # Debemos usar un binario simulado de más de 100 caracteres para pasar el control de tamaño
         dummy_bytes = b"dummy bytes to simulate a sufficiently large PDF file " * 5

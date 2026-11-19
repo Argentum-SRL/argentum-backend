@@ -1,6 +1,6 @@
 {
   "escenario_id": "P11.10",
-  "fecha_grabacion": "2026-10-01T13:01:38.316761+00:00",
+  "fecha_grabacion": "2026-11-19T06:09:27.955494+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -44,7 +44,7 @@
         "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. $5.000 en Kiosco y $8.000 en Verdulería — registrado."
+        "respuesta_usuario": "Listo. Registré $5.000 en Kiosco y $8.000 en Verdulería."
       }
     }
   ]

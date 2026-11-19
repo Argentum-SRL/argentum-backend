@@ -1,0 +1,40 @@
+{
+  "escenario_id": "P22.2",
+  "llamadas": [
+    {
+      "call_idx": 0,
+      "mensaje": "gasté 20 dólares en steam con débito de galicia",
+      "respuesta": {
+        "intent": "registrar_transaccion",
+        "entidades": {
+          "monto": 20,
+          "moneda": "USD",
+          "tipo": "egreso",
+          "categoria": "Hobbies y juegos",
+          "descripcion": "Steam",
+          "servicio": null,
+          "frecuencia": null,
+          "billetera": "Galicia",
+          "billetera_origen": null,
+          "billetera_destino": null,
+          "cantidad_cuotas": null,
+          "fecha": null,
+          "destinatario": null,
+          "persona": null,
+          "tasa_cambio": null,
+          "monto_destino": null,
+          "monto_comision": null,
+          "confirmado": null,
+          "tarjeta": null,
+          "meta": null,
+          "transacciones_adicionales": []
+        },
+        "confianza": 0.95,
+        "slot_filling": false,
+        "datos_faltantes": [],
+        "respuesta_usuario": "Listo. USD 20 en Steam desde Galicia — registrado."
+      }
+    }
+  ],
+  "fecha_grabacion": "2026-11-19T06:12:21.373530+00:00"
+}

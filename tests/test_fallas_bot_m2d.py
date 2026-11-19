@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.catalogo_categorias import ARBOL_CATEGORIAS
+from app.core.config import settings
 from app.models.billetera import Billetera, EstadoBilletera
 from app.models.categoria import Categoria, EstadoCategoria, TipoCategoria
 from app.models.conversacion_wpp import ConversacionWpp
@@ -27,7 +28,11 @@ from app.models.usuario import (
     Usuario,
 )
 from app.routers.whatsapp_ia import _procesar_mensaje_whatsapp_background
-from app.services import ai_service, openai_client
+from app.services import (
+    ai_service,
+    clasificador_concepto_service,
+    openai_client,
+)
 from app.utils.fecha import TZ_ARGENTINA
 from app.utils.telefono import normalizar_telefono_ar
 from tests.wpp_familias_helpers import (
@@ -817,6 +822,7 @@ def test_tf11_b318_b321_b322_correccion_y_anulacion_sobre_propuesta(
     db, monkeypatch
 ):
     """TF11: corrección/anulación dentro de 30m aplica a la propuesta pendiente."""
+    monkeypatch.setattr(settings, "UMBRAL_CONFIANZA_IA", 0.85)
     esc = _crear_usuario_completo(db)
     u = esc["usuario"]
     enviados = instalar_enviados(monkeypatch)
@@ -1034,3 +1040,226 @@ def test_tf15_b257_b369_ambiguedad_suscripcion_y_gasto_suelto(db, monkeypatch):
     _enviar(u.telefono, "pagué el youtube premium")
     _enviar(u.telefono, "sí")
     assert "¿Cada cuánto se paga" in enviados[-1]
+
+
+def test_tf17_b219_a_persona_no_abre_menu_cuentas(db, monkeypatch):
+    """TF17 (B219): 'a juan' nunca abre menú; 'a santander' sigue resolviendo Santander."""
+    esc = _crear_usuario_completo(db)
+    u = esc["usuario"]
+    enviados = instalar_enviados(monkeypatch)
+    actual = {}
+    monkeypatch.setattr(ai_service, "procesar_mensaje", lambda *_a, **_kw: actual)
+
+    # 1. Medición B219 sin billetera -> anota en Galicia
+    actual = _resp_tx(6000, "Otros > Pagos a personas", confianza=0.90)
+    _enviar(u.telefono, "le transferí 6000 a juan")
+    assert "No encontré esa cuenta" not in enviados[-1]
+    assert "Listo, anoté $6.000 en Pagos a personas desde Galicia." in enviados[-1]
+
+    # 2. Si IA devuelve el nombre de persona como destino/billetera tampoco abre menú
+    for prev in db.execute(select(Transaccion)).scalars().all():
+        db.delete(prev)
+    db.commit()
+    actual = _resp_tx(6000, "Otros > Pagos a personas", confianza=0.90)
+    actual["entidades"]["billetera_destino"] = "Juan"
+    _enviar(u.telefono, "le transferí 6000 a juan")
+    assert "No encontré esa cuenta" not in enviados[-1]
+    assert "Listo, anoté $6.000 en Pagos a personas desde Galicia." in enviados[-1]
+
+    # 3. 'le pasé 5000 a santander' sigue resolviendo Santander como en M2d1
+    actual = _resp_tx(5000, "Otros > Pagos a personas", confianza=0.90)
+    _enviar(u.telefono, "le pasé 5000 a santander")
+    assert "Santander" in enviados[-1]
+    txs = (
+        db.execute(select(Transaccion).order_by(Transaccion.monto.asc()))
+        .scalars()
+        .all()
+    )
+    assert len(txs) == 2
+    assert txs[0].billetera_id == esc["santander"].id
+    assert txs[1].billetera_id == esc["galicia"].id
+
+
+def test_tf18_b338_meta_generica_pregunta_cual(db, monkeypatch):
+    """TF18 (B338): 'para la meta' pregunta cuál; luego propone y confirma aporte."""
+    esc = _crear_usuario_completo(db)
+    u = esc["usuario"]
+    enviados = instalar_enviados(monkeypatch)
+
+    _enviar(u.telefono, "separé 100k para la meta")
+    assert "No encontré la meta" not in enviados[-1]
+    assert "¿A cuál meta?" in enviados[-1]
+    assert "Fondo de Emergencia" in enviados[-1]
+
+    _enviar(u.telefono, "fondo de emergencia")
+    assert (
+        "¿Aporto $100.000 a tu meta Fondo de Emergencia desde Galicia?"
+        == enviados[-1]
+    )
+
+    _enviar(u.telefono, "sí")
+    assert "Listo, aporté $100.000 a tu meta Fondo de Emergencia." in enviados[-1]
+    cat_ahorro = (
+        db.execute(select(Categoria).where(Categoria.nombre == "Ahorro"))
+        .scalars()
+        .first()
+    )
+    txs = db.execute(select(Transaccion)).scalars().all()
+    assert len(txs) == 1
+    assert txs[0].monto == Decimal("100000")
+    assert txs[0].categoria_id == cat_ahorro.id
+
+    # B336 sigue funcionando igual
+    _enviar(u.telefono, "puse 50 mil para el fondo de emergencia")
+    assert (
+        "¿Aporto $50.000 a tu meta Fondo de Emergencia desde Galicia?"
+        == enviados[-1]
+    )
+
+
+def test_tf19_b369_chatgpt_gasto_unico_subcategoria_catalogo(db, monkeypatch):
+    """TF19 (B369): ChatGPT una vez anota US$20 en Tecnología > Apps y programas sin IA."""
+    esc = _crear_usuario_completo(db)
+    u = esc["usuario"]
+    enviados = instalar_enviados(monkeypatch)
+    llamadas_ia = []
+    monkeypatch.setattr(
+        ai_service,
+        "procesar_mensaje",
+        lambda *_a, **_kw: llamadas_ia.append(1) or {},
+    )
+
+    _enviar(u.telefono, "pagué 20 dolares de chatgpt")
+    assert enviados[-1] == "¿ChatGPT lo pagás todos los meses?"
+    _enviar(u.telefono, "no, fue una vez")
+
+    assert len(llamadas_ia) == 0
+    assert "US$20" in enviados[-1]
+    assert "Apps y programas" in enviados[-1]
+    assert "Efectivo Dólares" in enviados[-1]
+
+    cat_tec = (
+        db.execute(select(Categoria).where(Categoria.nombre == "Tecnología"))
+        .scalars()
+        .first()
+    )
+    sub_apps = (
+        db.execute(select(Subcategoria).where(Subcategoria.nombre == "Apps y programas"))
+        .scalars()
+        .first()
+    )
+    txs = db.execute(select(Transaccion)).scalars().all()
+    assert len(txs) == 1
+    assert txs[0].monto == Decimal("20")
+    assert txs[0].moneda == Moneda.USD
+    assert txs[0].billetera_id == esc["efectivo_usd"].id
+    assert txs[0].categoria_id == cat_tec.id
+    assert txs[0].subcategoria_id == sub_apps.id
+
+
+def test_tf20_lote_monto_no_numerico_no_rompe(db):
+    """TF20 (D-M6): 'USD 50' se lee; '' y None se descartan sin InvalidOperation."""
+    from app.routers.whatsapp.contexto import ContextoMensaje
+    from app.routers.whatsapp.etapa_resolucion import _resolver_lote_movimientos
+
+    esc = _crear_usuario_completo(db)
+    u = esc["usuario"]
+    billeteras = [
+        esc["galicia"],
+        esc["santander"],
+        esc["efectivo_ars"],
+        esc["efectivo_usd"],
+    ]
+    tarjetas = [esc["visa_galicia"], esc["amex_galicia"], esc["visa_santander"]]
+
+    entidades = {
+        "tipo": "egreso",
+        "monto": "USD 50",
+        "moneda": "USD",
+        "categoria": "Tecnología > Apps y programas",
+        "descripcion": "App",
+        "billetera": None,
+        "tarjeta": None,
+        "transacciones_adicionales": [
+            {
+                "tipo": "egreso",
+                "monto": "",
+                "moneda": "ARS",
+                "categoria": "Alimentación > Kiosco",
+                "descripcion": "Alfajor",
+                "billetera": None,
+                "tarjeta": None,
+            },
+            {
+                "tipo": "egreso",
+                "monto": None,
+                "moneda": "ARS",
+                "categoria": "Transporte > Taxi y apps",
+                "descripcion": "Viaje",
+                "billetera": None,
+                "tarjeta": None,
+            },
+        ],
+    }
+    ctx = ContextoMensaje(
+        datos_mensaje={},
+        msg={},
+        wamid=None,
+        from_number=u.telefono,
+        msg_type="text",
+        t_inicio=0.0,
+        db=db,
+        usuario=u,
+        mensaje_texto="50 dolares en app, algo en alfajor y viaje",
+        resultado_ia={
+            "intent": "registrar_transaccion",
+            "confianza": 0.95,
+            "entidades": entidades,
+        },
+        confianza_ia_raw=0.95,
+    )
+    _resolver_lote_movimientos(
+        ctx,
+        entidades,
+        tarjetas,
+        billeteras,
+        entidades["transacciones_adicionales"],
+    )
+    resp = ctx.resultado_ia["respuesta_usuario"]
+    assert entidades["monto"] == 50.0
+    assert "US$50" in resp
+    assert resp.count("el monto no está claro") == 2
+
+
+def test_tf21_descripciones_dm7_en_prompts(db):
+    """TF21: D-M7 descripciones actualizadas llegan al bot y al clasificador."""
+    esc = _crear_usuario_completo(db)
+    assert esc["usuario"] is not None
+    ai_service.invalidar_cache_schema()
+    clasificador_concepto_service.limpiar_caches_clasificador()
+
+    prompt_bot = ai_service._construir_system_prompt_completo(db)
+    prompt_eg = clasificador_concepto_service.construir_system_prompt(db, "egreso")
+    prompt_in = clasificador_concepto_service.construir_system_prompt(db, "ingreso")
+
+    frases_egreso = [
+        (
+            "muebles, colchón, heladera, lavarropas, aire acondicionado, "
+            "microondas, cocina, electrodomésticos (la tele va en Equipos), "
+            "decoración, bazar"
+        ),
+        (
+            "celular nuevo, notebook, computadora, tablet, auriculares, "
+            "televisor, tele, smart TV, consola, monitor "
+            "(heladera, lavarropas y aire van en Muebles y electro)"
+        ),
+    ]
+    frase_ingreso = (
+        "changa, trabajo particular, clases particulares, "
+        "honorarios, factura de un trabajo"
+    )
+    for frase in frases_egreso:
+        assert frase in prompt_bot
+        assert frase in prompt_eg
+    assert frase_ingreso in prompt_bot
+    assert frase_ingreso in prompt_in

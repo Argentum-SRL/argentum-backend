@@ -1,6 +1,6 @@
 {
   "escenario_id": "P9.11",
-  "fecha_grabacion": "2026-09-15T14:47:23.729149+00:00",
+  "fecha_grabacion": "2026-11-19T06:08:39.085366+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,14 +11,14 @@
           "monto": 5000,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": null,
+          "categoria": "Otros",
           "descripcion": "Gasto",
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
           "billetera_origen": null,
           "billetera_destino": null,
-          "cantidad_cuotas": null,
+          "cantidad_cuotas": 1,
           "fecha": null,
           "destinatario": null,
           "persona": null,
@@ -27,14 +27,16 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.0,
+        "confianza": 0.7,
         "slot_filling": true,
         "datos_faltantes": [
-          "¿Desde qué billetera?"
+          "concepto",
+          "tarjeta"
         ],
-        "respuesta_usuario": "¿Desde qué billetera?"
+        "respuesta_usuario": "¿En qué fue el gasto y con qué tarjeta?"
       }
     }
   ]

@@ -393,6 +393,7 @@ def test_td4_flujo_completo_regla_registro(db, monkeypatch):
     assert len(db.execute(select(Transaccion)).scalars().all()) == 2
 
     # 6. Confianza 0.70 con UMBRAL 0.85 -> pide confirmación
+    monkeypatch.setattr(settings, "UMBRAL_CONFIANZA_IA", 0.85)
     resp_actual = _respuesta_ia(7000, "Gastronomía", confianza=0.70)
     _enviar(u.telefono, "merienda 7 lucas")
     assert "¿Anoto" in enviados[-1]
@@ -429,4 +430,4 @@ def test_td5_control_estatico_umbral_confianza():
         "confianza_ia_baja("
     )
     assert total_llamadas == 4
-    assert settings.UMBRAL_CONFIANZA_IA == 0.85
+    assert settings.UMBRAL_CONFIANZA_IA == 0.70

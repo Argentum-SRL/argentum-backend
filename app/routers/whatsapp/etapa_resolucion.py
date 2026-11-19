@@ -8,7 +8,7 @@ Etapa de resolución de billeteras, tarjetas, cuotas, lotes y propuestas para Wh
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import re
 import structlog
 from sqlalchemy import select
@@ -18,6 +18,7 @@ from app.models.transaccion import (
     TipoTransaccion,
     Transaccion,
 )
+from app.core.entidades import entidad_de_texto
 from app.core.jerga import monedas_dolares_rx
 from app.core.reglas_texto_wpp import nombre_tarjeta_wpp
 from app.models.usuario import Moneda
@@ -30,7 +31,7 @@ from app.routers.whatsapp.db_lookups import (
     _resolver_categoria_y_subcategoria,
 )
 from app.routers.whatsapp.detectors import _debe_bloquear_mezcla_lote
-from app.routers.whatsapp.regla_registro import confianza_ia_baja
+from app.routers.whatsapp.regla_registro import confianza_ia_baja, montos_del_texto
 from app.routers.whatsapp.parsers import (
     _interpretar_cuotas,
     _nombre_corto_categoria,
@@ -44,6 +45,7 @@ from app.routers.whatsapp.propuestas import (
 )
 from app.routers.whatsapp.resolvers_cascada import (
     ALIAS_BANCOS_ARGENTINOS,
+    ALIAS_BILLETERAS,
     FORMAS_GENERICAS_TARJETA,
     _buscar_billetera_en_texto,
     _detectar_duplicados_en_lote,
@@ -76,6 +78,30 @@ PALABRAS_FUERZAN_DEBITO = [
     "debito", "débito", "tarjeta de debito", "tarjeta de débito",
     "debito automatico", "débito automático"
 ]
+
+
+def _parsear_monto_ia(valor: object) -> Decimal | None:
+    """Convierte un monto de la IA a Decimal positivo o None si no es claro."""
+    if valor is None or isinstance(valor, bool):
+        return None
+    if isinstance(valor, (int, float, Decimal)):
+        try:
+            d = Decimal(str(valor))
+        except (InvalidOperation, ValueError, TypeError):
+            return None
+        return d if d.is_finite() and d > 0 else None
+    texto = str(valor).strip()
+    if not texto:
+        return None
+    try:
+        d = Decimal(texto)
+        return d if d.is_finite() and d > 0 else None
+    except (InvalidOperation, ValueError, TypeError):
+        pass
+    montos = montos_del_texto(texto)
+    if len(montos) == 1 and montos[0] > 0:
+        return montos[0]
+    return None
 
 
 def _resolver_lote_movimientos(
@@ -141,6 +167,8 @@ def _resolver_lote_movimientos(
             operaciones.append(op_ad)
 
     for op in operaciones:
+        m_norm_ia = _parsear_monto_ia(op.get("monto"))
+        op["monto"] = float(m_norm_ia) if m_norm_ia is not None else None
         if op.get("tarjeta") and tarjetas_usuario:
             t_match, _ = resolver_tarjeta_cascada(op["tarjeta"], tarjetas_usuario)
             if t_match:
@@ -194,16 +222,23 @@ def _resolver_lote_movimientos(
             pend_ids = [op["id"] for op in unresolved]
         else:
             op_u = unresolved[0]
-            m_fmt = formatear_monto(
-                float(op_u["monto"]),
-                Moneda.USD if mon_r == "USD" else Moneda.ARS,
-                con_decimales=False,
-            )
-            c_disp = _nombre_corto_categoria(op_u.get("categoria"))
-            if tipo_r == "ingreso":
-                enc = f"¿A qué cuenta entraron los {m_fmt} de {c_disp}?"
+            if op_u.get("monto") is not None:
+                m_fmt = formatear_monto(
+                    float(op_u["monto"]),
+                    Moneda.USD if mon_r == "USD" else Moneda.ARS,
+                    con_decimales=False,
+                )
+                c_disp = _nombre_corto_categoria(op_u.get("categoria"))
+                if tipo_r == "ingreso":
+                    enc = f"¿A qué cuenta entraron los {m_fmt} de {c_disp}?"
+                else:
+                    enc = f"¿De qué cuenta salieron los {m_fmt} de {c_disp}?"
             else:
-                enc = f"¿De qué cuenta salieron los {m_fmt} de {c_disp}?"
+                enc = (
+                    "¿A qué cuenta entró?"
+                    if tipo_r == "ingreso"
+                    else "¿De qué cuenta salió?"
+                )
             pregunta = _generar_menu_billeteras(bills_r, tipo=tipo_r, encabezado=enc)
             pend_ids = [op_u["id"]]
 
@@ -218,6 +253,7 @@ def _resolver_lote_movimientos(
         entidades_actuales["moneda"] = mon_r
         entidades_actuales["tipo"] = tipo_r
     else:
+        entidades_actuales["monto"] = operaciones[0].get("monto")
         entidades_actuales["billetera"] = operaciones[0].get("billetera")
         entidades_actuales["tarjeta"] = operaciones[0].get("tarjeta")
         entidades_actuales["transacciones_adicionales"] = [dict(o) for o in operaciones[1:]]
@@ -265,7 +301,9 @@ def _resolver_lote_movimientos(
                     detalle=op,
                 )
                 mon_chk = Moneda.USD if op.get("moneda") == "USD" else Moneda.ARS
-                m_chk = Decimal(str(op["monto"]))
+                m_chk = _parsear_monto_ia(op.get("monto"))
+                if m_chk is None:
+                    continue
                 f_op = _resolver_fecha_transaccion(op.get("fecha"))
                 tipo_op_enum = TipoTransaccion.INGRESO if op.get("tipo") == "ingreso" else TipoTransaccion.EGRESO
                 for th in txs_hist:
@@ -354,7 +392,17 @@ def _resolver_tarjeta_y_cuotas(
             if str(entidades_actuales.get("moneda") or "").upper() == "USD"
             else Moneda.ARS
         )
-        monto_actual_val = Decimal(str(entidades_actuales["monto"]))
+        monto_actual_val = _parsear_monto_ia(entidades_actuales.get("monto"))
+        if monto_actual_val is None:
+            entidades_actuales["monto"] = None
+            resultado_ia["respuesta_usuario"] = _construir_propuesta_transaccion(
+                entidades_actuales, db=db, usuario_id=usuario.id
+            )
+            resultado_ia["intent"] = "desconocido"
+            resultado_ia["slot_filling"] = False
+            resultado_ia["datos_faltantes"] = []
+            return
+        entidades_actuales["monto"] = float(monto_actual_val)
         cant_cuotas, monto_cuota, monto_total, es_ambiguo, err_msg = _interpretar_cuotas(
             mensaje_texto, monto_actual_val
         )
@@ -447,6 +495,32 @@ def _resolver_tarjeta_y_cuotas(
                 resultado_ia["respuesta_usuario"] = propuesta_cred
 
 
+def _es_mencion_persona_no_cuenta(
+    billetera_raw: str,
+    mensaje_texto: str,
+    billeteras_todas: list,
+    vino_de_otra_clave: bool,
+) -> bool:
+    """True si billetera_raw refiere a una persona ('a juan') y no a una cuenta."""
+    b_match, cands = resolver_billetera_cascada(billetera_raw, billeteras_todas)
+    if b_match or cands:
+        return False
+    norm_raw = normalizar_texto(billetera_raw)
+    if not norm_raw:
+        return True
+    if norm_raw in ALIAS_BILLETERAS or entidad_de_texto(billetera_raw):
+        return False
+    if vino_de_otra_clave:
+        return True
+    m_norm = normalizar_texto(mensaje_texto)
+    return bool(
+        re.search(
+            rf"\b(?:a|al|para)\s+(?:el\s+|la\s+)?{re.escape(norm_raw)}(?!\w)",
+            m_norm,
+        )
+    )
+
+
 def _resolver_billetera_y_duplicados(
     ctx: ContextoMensaje,
     entidades_actuales: dict,
@@ -486,11 +560,21 @@ def _resolver_billetera_y_duplicados(
         resultado_ia["slot_filling"] = False
         resultado_ia["datos_faltantes"] = []
     elif entidades_actuales.get("monto") is not None:
-        billetera_raw = (
-            entidades_actuales.get(clave_bill)
-            or entidades_actuales.get("billetera")
-            or entidades_actuales.get(clave_otra)
+        bill_principal = entidades_actuales.get(clave_bill) or entidades_actuales.get(
+            "billetera"
         )
+        bill_otra = entidades_actuales.get(clave_otra)
+        billetera_raw = bill_principal or bill_otra
+        if billetera_raw and _es_mencion_persona_no_cuenta(
+            str(billetera_raw),
+            ctx.mensaje_texto,
+            billeteras_todas,
+            vino_de_otra_clave=not bool(bill_principal),
+        ):
+            billetera_raw = None
+            entidades_actuales.pop(clave_bill, None)
+            entidades_actuales.pop("billetera", None)
+            entidades_actuales.pop(clave_otra, None)
         billetera_final = None
         se_asumio_principal = False
         b_texto_nombrada = _buscar_billetera_en_texto(
@@ -595,12 +679,21 @@ def _resolver_billetera_y_duplicados(
                 entidades_actuales["billetera_resuelta_nombre"] = billetera_final.nombre
                 resultado_ia["respuesta_usuario"] = pregunta_lote
             else:
+                monto_act_val = _parsear_monto_ia(entidades_actuales.get("monto"))
+                entidades_actuales["monto"] = (
+                    float(monto_act_val) if monto_act_val is not None else None
+                )
                 sub_cobrada, tx_cobrada = (None, None)
-                if tipo_act == "egreso":
+                if tipo_act == "egreso" and monto_act_val is not None:
                     sub_cobrada, tx_cobrada = _buscar_suscripcion_cobrada_periodo_actual(
                         usuario_id=usuario.id,
-                        monto=Decimal(str(entidades_actuales["monto"])),
-                        nombre_servicio_o_concepto=entidades_actuales.get("servicio") or entidades_actuales.get("descripcion") or entidades_actuales.get("concepto") or mensaje_texto,
+                        monto=monto_act_val,
+                        nombre_servicio_o_concepto=(
+                            entidades_actuales.get("servicio")
+                            or entidades_actuales.get("descripcion")
+                            or entidades_actuales.get("concepto")
+                            or mensaje_texto
+                        ),
                         db=db,
                     )
                 if sub_cobrada and tx_cobrada:
@@ -638,15 +731,19 @@ def _resolver_billetera_y_duplicados(
                                 tipo=ad.get("tipo", tipo_act),
                                 detalle=ad,
                             )
-                    tx_dup = _buscar_transaccion_duplicada_reciente(
-                        usuario_id=usuario.id,
-                        monto=Decimal(str(entidades_actuales["monto"])),
-                        moneda=moneda_sol,
-                        categoria_id=cat_id_chk,
-                        db=db,
-                        fecha=_resolver_fecha_transaccion(entidades_actuales.get("fecha")),
-                        tipo=tipo_act,
-                    )
+                    tx_dup = None
+                    if monto_act_val is not None:
+                        tx_dup = _buscar_transaccion_duplicada_reciente(
+                            usuario_id=usuario.id,
+                            monto=monto_act_val,
+                            moneda=moneda_sol,
+                            categoria_id=cat_id_chk,
+                            db=db,
+                            fecha=_resolver_fecha_transaccion(
+                                entidades_actuales.get("fecha")
+                            ),
+                            tipo=tipo_act,
+                        )
                     if tx_dup:
                         hora_dup = tx_dup.fecha_creacion.astimezone(TZ_ARGENTINA).strftime("%H:%M")
                         cat_disp = _nombre_corto_categoria(entidades_actuales.get("categoria"))

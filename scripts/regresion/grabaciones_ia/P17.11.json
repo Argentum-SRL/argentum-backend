@@ -1,6 +1,6 @@
 {
   "escenario_id": "P17.11",
-  "fecha_grabacion": "2026-10-01T12:46:37.092849+00:00",
+  "fecha_grabacion": "2026-11-19T06:11:55.891650+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -31,9 +31,11 @@
           "transacciones_adicionales": []
         },
         "confianza": 0.9,
-        "slot_filling": false,
-        "datos_faltantes": [],
-        "respuesta_usuario": "Listo. $5.000 en Kiosco — registrado."
+        "slot_filling": true,
+        "datos_faltantes": [
+          "billetera"
+        ],
+        "respuesta_usuario": "¿Desde qué billetera?"
       }
     }
   ]

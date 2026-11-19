@@ -1,6 +1,6 @@
 {
   "escenario_id": "P12.8",
-  "fecha_grabacion": "2026-09-21T12:00:00.000000+00:00",
+  "fecha_grabacion": "2026-11-19T06:10:04.008886+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -9,7 +9,7 @@
         "intent": "consultar_cotizacion",
         "entidades": {
           "monto": null,
-          "moneda": null,
+          "moneda": "USD",
           "tipo": null,
           "categoria": null,
           "descripcion": null,
@@ -27,12 +27,13 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 1.0,
+        "confianza": 0.99,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "LLM_INVENTADO_999"
+        "respuesta_usuario": "Consulto la cotización del dólar de hoy."
       }
     }
   ]

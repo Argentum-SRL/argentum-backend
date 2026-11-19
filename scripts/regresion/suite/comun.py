@@ -58,9 +58,9 @@ ESCENARIOS_IA_REAL = {
     "P7.1",  # Golosinas -> Kiosco (jerga argentina + descripción)
     "P7.2",  # Verdulería -> Verdulería (jerga argentina + descripción)
     "P7.3",  # Nafta -> Combustible (jerga argentina + descripción)
-    "P7.4",  # Prepaga -> Obra social / Prepaga (jerga argentina + descripción)
+    "P7.4",  # Prepaga -> Prepaga y obra social (jerga argentina + descripción)
     "P7.5",  # Bondi -> Transporte público (jerga argentina + descripción)
-    "P7.6",  # Corte de pelo -> Cuidado personal (jerga argentina + descripción preservada)
+    "P7.6",  # Corte de pelo -> Peluquería y belleza (jerga argentina + descripción preservada)
     "P7.7",  # Concepto raro -> Otros (prohibición de categorías inventadas + descripción)
 }
 

@@ -1,6 +1,6 @@
 {
   "escenario_id": "P17.7",
-  "fecha_grabacion": "2026-10-01T12:42:47.147395+00:00",
+  "fecha_grabacion": "2026-11-19T06:11:38.992894+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,7 +11,7 @@
           "monto": 3200,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": "Taxi / Apps",
+          "categoria": "Taxi y apps",
           "descripcion": "Didi",
           "servicio": null,
           "frecuencia": null,

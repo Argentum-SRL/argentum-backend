@@ -1,6 +1,6 @@
 {
   "escenario_id": "P9.12",
-  "fecha_grabacion": "2026-09-15T14:47:32.193248+00:00",
+  "fecha_grabacion": "2026-11-19T06:08:41.627733+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -9,9 +9,9 @@
         "intent": "registrar_transaccion",
         "entidades": {
           "monto": null,
-          "moneda": null,
+          "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": "Taxi / Apps",
+          "categoria": "Taxi y apps",
           "descripcion": "Remis",
           "servicio": null,
           "frecuencia": null,
@@ -27,14 +27,16 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.0,
+        "confianza": 0.55,
         "slot_filling": true,
         "datos_faltantes": [
-          "¿Cuánto fue?"
+          "monto",
+          "billetera"
         ],
-        "respuesta_usuario": "¿Cuánto fue?"
+        "respuesta_usuario": "¿Cuánto fue y desde qué billetera?"
       }
     }
   ]

@@ -1,6 +1,6 @@
 {
   "escenario_id": "P11.11",
-  "fecha_grabacion": "2026-10-01T13:02:43.602582+00:00",
+  "fecha_grabacion": "2026-11-19T06:09:31.418521+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -43,7 +43,7 @@
               "monto": 3000,
               "moneda": "ARS",
               "tipo": "egreso",
-              "categoria": "Peajes",
+              "categoria": "Panadería",
               "descripcion": "Panadería",
               "billetera": null,
               "tarjeta": null,
@@ -51,10 +51,10 @@
             }
           ]
         },
-        "confianza": 0.85,
+        "confianza": 0.98,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Listo. Registrados los gastos: $5.000 en Kiosco, $8.000 en Verdulería y $3.000 en Panadería."
+        "respuesta_usuario": "Listo. Registré los tres gastos."
       }
     }
   ]

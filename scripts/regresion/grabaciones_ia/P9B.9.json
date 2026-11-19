@@ -1,6 +1,6 @@
 {
   "escenario_id": "P9B.9",
-  "fecha_grabacion": "2026-10-01T12:54:48.470978+00:00",
+  "fecha_grabacion": "2026-11-19T06:08:45.053570+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,16 +11,16 @@
           "monto": 5000,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": null,
+          "categoria": "Ayuda familiar",
           "descripcion": "Transferencia a mi hermano",
           "servicio": null,
           "frecuencia": null,
-          "billetera": null,
-          "billetera_origen": "Santander",
+          "billetera": "Santander",
+          "billetera_origen": null,
           "billetera_destino": null,
           "cantidad_cuotas": null,
           "fecha": null,
-          "destinatario": null,
+          "destinatario": "mi hermano",
           "persona": null,
           "tasa_cambio": null,
           "monto_destino": null,
@@ -30,10 +30,12 @@
           "meta": null,
           "transacciones_adicionales": []
         },
-        "confianza": 0.9,
-        "slot_filling": false,
-        "datos_faltantes": [],
-        "respuesta_usuario": "Listo. Transferencia de $5.000 a tu hermano registrada."
+        "confianza": 0.7,
+        "slot_filling": true,
+        "datos_faltantes": [
+          "billetera"
+        ],
+        "respuesta_usuario": "¿Desde qué billetera?"
       }
     }
   ]

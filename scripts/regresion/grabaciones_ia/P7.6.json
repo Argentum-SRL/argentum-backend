@@ -1,6 +1,6 @@
 {
   "escenario_id": "P7.6",
-  "fecha_grabacion": "2026-09-15T14:41:48.999680+00:00",
+  "fecha_grabacion": "2026-11-19T06:07:43.976253+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -11,7 +11,7 @@
           "monto": 15000,
           "moneda": "ARS",
           "tipo": "egreso",
-          "categoria": "Cuidado personal",
+          "categoria": "Peluquería y belleza",
           "descripcion": "Corte de pelo",
           "servicio": null,
           "frecuencia": null,
@@ -27,12 +27,13 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
         "confianza": 0.9,
         "slot_filling": false,
         "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $15.000 en Cuidado personal. ¿Va?"
+        "respuesta_usuario": "Listo. $15.000 en Corte de pelo — registrado."
       }
     }
   ]

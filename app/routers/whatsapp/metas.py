@@ -419,6 +419,14 @@ def manejar_aporte_meta(
             meta_name,
             flags=re.IGNORECASE,
         ).strip()
+        if normalizar_texto(meta_name) in (
+            "meta",
+            "metas",
+            "la meta",
+            "mi meta",
+            "una meta",
+        ):
+            meta_name = None
 
     if not tiene_senal_meta and not meta_name:
         return False

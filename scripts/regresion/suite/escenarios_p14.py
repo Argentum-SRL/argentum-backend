@@ -210,7 +210,7 @@ def p14_caso_5(datos):
 
 
 def p14_caso_6(datos):
-    """P14.6 confianza 0.70: resultado idéntico a HEAD y 0 transacciones"""
+    """P14.6 confianza 0.65 (debajo del umbral): propuesta y 0 txs"""
     u = datos[USUARIO_PRUEBAS_EMAIL]["usuario"]
     def test(conn, Session, respuestas):
         conn.execute(text("UPDATE billeteras SET es_principal = (nombre = 'Galicia') WHERE usuario_id = :uid"), {"uid": u.id})
@@ -218,8 +218,21 @@ def p14_caso_6(datos):
 
         tx_antes = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()
 
+        orig_proc = ai_service.procesar_mensaje
+
+        def _con_confianza_065(*args, **kwargs):
+            res = dict(orig_proc(*args, **kwargs))
+            res["confianza"] = 0.65
+            return res
+
         respuestas.clear()
-        _procesar_webhook_whatsapp_sync(make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"), time.perf_counter())
+        with patch.object(
+            ai_service, "procesar_mensaje", side_effect=_con_confianza_065,
+        ):
+            _procesar_webhook_whatsapp_sync(
+                make_payload(TELEFONO_TEST, "gasté 5000 en el kiosco"),
+                time.perf_counter(),
+            )
         resp = respuestas[-1][1] if respuestas else ""
 
         tx_despues = conn.execute(select(func.count(Transaccion.id)).where(Transaccion.usuario_id == u.id)).scalar()

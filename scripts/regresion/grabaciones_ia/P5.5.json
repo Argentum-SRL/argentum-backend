@@ -1,6 +1,6 @@
 {
   "escenario_id": "P5.5",
-  "fecha_grabacion": "2026-09-15T14:39:57.374024+00:00",
+  "fecha_grabacion": "2026-11-19T06:07:15.897870+00:00",
   "llamadas": [
     {
       "call_idx": 0,
@@ -26,12 +26,15 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
         "confianza": 0.9,
         "slot_filling": false,
-        "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $5.000 en Kiosco desde Galicia. ¿Va?\nSi fue con otra, decime cuál.",
+        "datos_faltantes": [
+          "billetera"
+        ],
+        "respuesta_usuario": "Listo, anoté $5.000 en Kiosco desde Galicia.",
         "_asumio_principal": true
       }
     },
@@ -49,7 +52,7 @@
           "servicio": null,
           "frecuencia": null,
           "billetera": null,
-          "billetera_origen": "Galicia",
+          "billetera_origen": null,
           "billetera_destino": null,
           "cantidad_cuotas": null,
           "fecha": null,
@@ -60,12 +63,15 @@
           "monto_comision": null,
           "confirmado": null,
           "tarjeta": null,
+          "meta": null,
           "transacciones_adicionales": []
         },
         "confianza": 0.9,
-        "slot_filling": false,
-        "datos_faltantes": [],
-        "respuesta_usuario": "Voy a anotar $5.000 en Farmacia desde Galicia. ¿Va? Si fue con otra, decime cuál."
+        "slot_filling": true,
+        "datos_faltantes": [
+          "billetera"
+        ],
+        "respuesta_usuario": "¿Desde qué billetera?"
       }
     }
   ]
