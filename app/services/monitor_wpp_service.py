@@ -4,7 +4,7 @@ Calcula métricas de calidad de intents, desglose de costos, topes diarios y sal
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -14,11 +14,18 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.conversacion_wpp import ConversacionWpp
+from app.models.mensaje_whatsapp_procesado import MensajeWhatsappProcesado
 from app.models.notificacion import Notificacion
 from app.models.rate_limit import RateLimit
 from app.models.uso_ia import UsoIA
 from app.models.usuario import Usuario
-from app.services import salientes_wpp_service
+from app.services import (
+    admin_registro_service,
+    cola_wpp_service,
+    costos_service,
+    openai_costos_service,
+    salientes_wpp_service,
+)
 from app.utils.fecha import TZ_ARGENTINA, hoy_argentina
 
 
@@ -37,6 +44,25 @@ def obtener_ventana_desde(dias: int) -> datetime:
     hoy = hoy_argentina()
     dia_inicio = hoy - timedelta(days=dias - 1)
     return datetime(dia_inicio.year, dia_inicio.month, dia_inicio.day, 0, 0, 0, tzinfo=TZ_ARGENTINA)
+
+
+def ventana_de_rango(desde: date, hasta: date) -> tuple[datetime, datetime]:
+    """
+    Devuelve (inicio, fin) en hora de Argentina para un rango inclusive:
+    inicio = desde 00:00 AR; fin = hasta + 1 día 00:00 AR (fin exclusivo).
+    """
+    inicio = datetime(desde.year, desde.month, desde.day, 0, 0, 0, tzinfo=TZ_ARGENTINA)
+    dia_siguiente = hasta + timedelta(days=1)
+    fin = datetime(
+        dia_siguiente.year,
+        dia_siguiente.month,
+        dia_siguiente.day,
+        0,
+        0,
+        0,
+        tzinfo=TZ_ARGENTINA,
+    )
+    return inicio, fin
 
 
 def _categorizar_conversacion(
@@ -71,15 +97,20 @@ def _categorizar_conversacion(
 def _obtener_conversaciones_con_siguiente(
     db: Session,
     desde: datetime,
+    hasta_fin: datetime | None = None,
 ) -> list[tuple[ConversacionWpp, str]]:
     """
     Obtiene todas las conversaciones de la ventana y calcula su categoría,
     buscando el siguiente mensaje de cada usuario sin límite de ventana.
     """
+    conds = [ConversacionWpp.fecha >= desde]
+    if hasta_fin is not None:
+        conds.append(ConversacionWpp.fecha < hasta_fin)
+
     # 1. Traer todas las conversaciones de la ventana ordenadas por usuario y fecha ascendente
     convs_ventana = db.scalars(
         select(ConversacionWpp)
-        .where(ConversacionWpp.fecha >= desde)
+        .where(*conds)
         .order_by(ConversacionWpp.usuario_id, ConversacionWpp.fecha.asc())
     ).all()
 
@@ -134,15 +165,37 @@ def calcular_percentil(valores: list[int], p: float) -> int | float:
     return int(val) if val.is_integer() else round(val, 2)
 
 
-def obtener_resumen_monitor(db: Session, dias: int) -> dict[str, Any]:
+def obtener_resumen_monitor(
+    db: Session,
+    dias: int | None = None,
+    hoy: date | None = None,
+    desde: date | None = None,
+    hasta: date | None = None,
+    ahora: datetime | None = None,
+) -> dict[str, Any]:
     """
     Genera el resumen integral para el monitor de WhatsApp y costos de IA.
     """
-    desde = obtener_ventana_desde(dias)
-    ahora_utc = datetime.now(timezone.utc)
+    hoy_ref = hoy if hoy is not None else hoy_argentina()
+    ahora_utc = ahora if ahora is not None else datetime.now(timezone.utc)
+    if ahora_utc.tzinfo is None:
+        ahora_utc = ahora_utc.replace(tzinfo=timezone.utc)
+
+    if desde is not None and hasta is not None:
+        ventana_inicio, ventana_fin = ventana_de_rango(desde, hasta)
+        fecha_desde_costos = desde
+        fecha_hasta_costos = hasta
+        dias_salientes = max(1, (hoy_ref - desde).days + 1)
+    else:
+        dias_eff = dias if dias is not None else 1
+        ventana_inicio = obtener_ventana_desde(dias_eff)
+        ventana_fin = None
+        fecha_desde_costos = hoy_ref - timedelta(days=dias_eff - 1)
+        fecha_hasta_costos = hoy_ref
+        dias_salientes = dias_eff
 
     # 1. Calidad de entendimiento
-    convs_con_cat = _obtener_conversaciones_con_siguiente(db, desde)
+    convs_con_cat = _obtener_conversaciones_con_siguiente(db, ventana_inicio, ventana_fin)
     conteo_cat: dict[str, int] = {
         "entendido_primera": 0,
         "no_entendido": 0,
@@ -175,9 +228,12 @@ def obtener_resumen_monitor(db: Session, dias: int) -> dict[str, Any]:
     }
 
     # 2. Costo de IA (de uso_ia)
+    conds_uso = [UsoIA.fecha >= ventana_inicio]
+    if ventana_fin is not None:
+        conds_uso.append(UsoIA.fecha < ventana_fin)
     usos = db.scalars(
         select(UsoIA)
-        .where(UsoIA.fecha >= desde)
+        .where(*conds_uso)
         .order_by(UsoIA.fecha.asc())
     ).all()
 
@@ -221,17 +277,60 @@ def obtener_resumen_monitor(db: Session, dias: int) -> dict[str, Any]:
         for uid, c_usd in top_usuarios_sorted
     ]
 
+    costos_mes = costos_service.costo_mes_por_usuario(db, hoy_ref)
+    top_mes = sorted(
+        ((uid, c) for uid, c in costos_mes.items() if c.total_ars > 0),
+        key=lambda item: (item[1].total_ars, item[1].ia_usd, str(item[0])),
+        reverse=True,
+    )[:10]
+    nombres_mes: dict[UUID, str] = {}
+    if top_mes:
+        uids_mes = [uid for uid, _ in top_mes]
+        usuarios_mes = db.scalars(select(Usuario).where(Usuario.id.in_(uids_mes))).all()
+        for u_m in usuarios_mes:
+            nombres_mes[u_m.id] = admin_registro_service.nombre_visible(u_m)
+
+    por_usuario_mes_list = [
+        {
+            "usuario_id": uid,
+            "nombre": nombres_mes.get(uid, "Sin nombre"),
+            "total_ars": c.total_ars,
+            "ia_usd": c.ia_usd,
+            "whatsapp_cobrados": c.whatsapp_cobrados,
+        }
+        for uid, c in top_mes
+    ]
+
+    openai_datos = openai_costos_service.costos_por_dia(
+        fecha_desde_costos, fecha_hasta_costos, ahora_utc
+    )
+    openai_estado = openai_costos_service.estado_openai(openai_datos)
+    if openai_datos is not None:
+        valores_rango = {
+            d: monto
+            for d, monto in openai_datos.items()
+            if fecha_desde_costos <= d <= fecha_hasta_costos
+        }
+        openai_usd: Decimal | None = sum(valores_rango.values(), Decimal("0"))
+        openai_hasta: date | None = max(valores_rango.keys()) if valores_rango else None
+    else:
+        openai_usd = None
+        openai_hasta = None
+
     costo_dict = {
         "total_usd": total_costo_usd,
         "por_funcion": por_funcion,
         "por_dia": por_dia_list,
         "por_usuario": por_usuario_list,
+        "por_usuario_mes": por_usuario_mes_list,
         "sin_usuario_usd": sin_usuario_usd,
+        "openai_usd": openai_usd,
+        "openai_estado": openai_estado,
+        "openai_hasta": openai_hasta,
     }
 
     # 3. Topes de hoy
-    hoy = hoy_argentina()
-    inicio_hoy_ar = datetime(hoy.year, hoy.month, hoy.day, 0, 0, 0, tzinfo=TZ_ARGENTINA)
+    inicio_hoy_ar = datetime(hoy_ref.year, hoy_ref.month, hoy_ref.day, 0, 0, 0, tzinfo=TZ_ARGENTINA)
     gasto_hoy_usd = db.scalar(
         select(func.coalesce(func.sum(UsoIA.costo_usd), 0)).where(UsoIA.fecha >= inicio_hoy_ar)
     )
@@ -288,21 +387,41 @@ def obtener_resumen_monitor(db: Session, dias: int) -> dict[str, Any]:
         mediana_ms = None
         p90_ms = None
 
-    avisos_enviados = db.scalar(
-        select(func.count(Notificacion.id)).where(
-            Notificacion.created_at >= desde,
-            Notificacion.canal_whatsapp == True,
-            Notificacion.enviada_whatsapp == True,
-        )
-    ) or 0
+    conds_notif_env = [
+        Notificacion.created_at >= ventana_inicio,
+        Notificacion.canal_whatsapp == True,
+        Notificacion.enviada_whatsapp == True,
+    ]
+    if ventana_fin is not None:
+        conds_notif_env.append(Notificacion.created_at < ventana_fin)
+    avisos_enviados = db.scalar(select(func.count(Notificacion.id)).where(*conds_notif_env)) or 0
 
-    avisos_sin_enviar = db.scalar(
-        select(func.count(Notificacion.id)).where(
-            Notificacion.created_at >= desde,
-            Notificacion.canal_whatsapp == True,
-            Notificacion.enviada_whatsapp == False,
-        )
-    ) or 0
+    conds_notif_sin = [
+        Notificacion.created_at >= ventana_inicio,
+        Notificacion.canal_whatsapp == True,
+        Notificacion.enviada_whatsapp == False,
+    ]
+    if ventana_fin is not None:
+        conds_notif_sin.append(Notificacion.created_at < ventana_fin)
+    avisos_sin_enviar = db.scalar(select(func.count(Notificacion.id)).where(*conds_notif_sin)) or 0
+
+    estados_cola = (
+        cola_wpp_service.FALLO,
+        cola_wpp_service.INTERRUMPIDO,
+        cola_wpp_service.VENCIDO,
+    )
+    conds_cola = [
+        MensajeWhatsappProcesado.fecha_recepcion >= ventana_inicio,
+        MensajeWhatsappProcesado.estado.in_(estados_cola),
+    ]
+    if ventana_fin is not None:
+        conds_cola.append(MensajeWhatsappProcesado.fecha_recepcion < ventana_fin)
+    cola_rows = db.execute(
+        select(MensajeWhatsappProcesado.estado, func.count(MensajeWhatsappProcesado.id))
+        .where(*conds_cola)
+        .group_by(MensajeWhatsappProcesado.estado)
+    ).all()
+    cola_map = {est: int(cnt) for est, cnt in cola_rows}
 
     salud_dict = {
         "tiempo_respuesta_mediana_ms": mediana_ms,
@@ -310,6 +429,9 @@ def obtener_resumen_monitor(db: Session, dias: int) -> dict[str, Any]:
         "mensajes_con_tiempo": mensajes_con_tiempo,
         "avisos_whatsapp_enviados": avisos_enviados,
         "avisos_whatsapp_sin_enviar": avisos_sin_enviar,
+        "wpp_fallados": cola_map.get(cola_wpp_service.FALLO, 0),
+        "wpp_interrumpidos": cola_map.get(cola_wpp_service.INTERRUMPIDO, 0),
+        "wpp_vencidos": cola_map.get(cola_wpp_service.VENCIDO, 0),
     }
 
     return {
@@ -317,22 +439,28 @@ def obtener_resumen_monitor(db: Session, dias: int) -> dict[str, Any]:
         "costo": costo_dict,
         "topes_hoy": topes_hoy_dict,
         "salud": salud_dict,
-        "whatsapp_salientes": salientes_wpp_service.resumen_salientes(db, dias),
+        "whatsapp_salientes": salientes_wpp_service.resumen_salientes(db, dias_salientes),
     }
 
 
 def obtener_conversaciones_monitor(
     db: Session,
-    dias: int,
+    dias: int | None = None,
     categoria: str | None = None,
     pagina: int = 1,
+    desde: date | None = None,
+    hasta: date | None = None,
 ) -> dict[str, Any]:
     """
     Obtiene las conversaciones de la ventana paginadas de a 50 de la más nueva a la más vieja,
     con filtro opcional por categoría y ocultando textos si el usuario no otorgó consentimiento.
     """
-    desde = obtener_ventana_desde(dias)
-    convs_con_cat = _obtener_conversaciones_con_siguiente(db, desde)
+    if desde is not None and hasta is not None:
+        ventana_inicio, ventana_fin = ventana_de_rango(desde, hasta)
+    else:
+        ventana_inicio = obtener_ventana_desde(dias if dias is not None else 1)
+        ventana_fin = None
+    convs_con_cat = _obtener_conversaciones_con_siguiente(db, ventana_inicio, ventana_fin)
 
     # Filtrar por categoría si se especificó y no es vacía
     if categoria and categoria.strip():

@@ -260,6 +260,15 @@ tests/test_reglas_texto_web*.py en backend, y reglasTextoWeb.ts y textosCartelit
 - La tarea `rescatar_mensajes_wpp` (cada 2 minutos) procesa los `pendiente` con más de 60 segundos y menos de 1 hora de atraso.
 - El SSE (`/notificaciones/sse`) consulta novedades en un hilo aparte con `_leer_novedades_sse` usando cursores de `created_at`; `eventos_actualizacion` se purga a partir de 1 día en `_job_limpiar_tokens`.
 
+### Panel de admin (fase_j3b_panel_admin)
+- Costos (1A): `costos_service` es la única fuente del costo mensual por usuario (`CostoUsuarioMes`, `costo_mes_por_usuario`, `expresion_costo_mes_ars`, `costo_mes_total_ars`: IA en USD al dólar oficial vendedor + Meta a `WHATSAPP_TARIFA_SERVICIO_ARS`).
+- Reautenticación (2B): `reautenticacion_service` exige contraseña actual o credencial Google (`iat <= 5 min`, bloqueo 429 tras 5 fallas en 15 min) antes de cambiar rol admin o eliminar cuenta.
+- Registro (3A): `admin_registro_service` persiste cada acción en `acciones_admin` (`GET /v1/admin/registro`), con purga anual en `_job_limpiar_tokens`.
+- Uso y limpieza (4A): `admin_uso_service` separa web vs WhatsApp derivando `EVENTOS_WHATSAPP` desde `uso_service.EVENTOS`; se eliminó el reseteo de onboarding.
+- Estados de uso y movimientos (fase_j3b2_panel_admin): `admin_uso_service.estado_visible` y `expresion_estado_visible` clasifican en orden `suspendida`, `sin_verificar`, `sin_empezar` (`not onboarding_completo`), `nuevo` (`<= 7` días desde registro), `activo` (`<= 7` días desde último uso), `poco_uso` (`<= 30` días) y `en_desuso`. `movimientos_mes` cuenta transacciones cargadas (`MANUAL`, `IA_WPP`, `IA_PDF`), sin `es_cuota_hija` ni `tipo_espejo`, desde `inicio_mes_ar`.
+- Costo real de OpenAI (`openai_costos_service`): consulta `/v1/organization/costs` agrupado por proyecto con `OPENAI_ADMIN_KEY` y `OPENAI_PROJECT_ID` en Railway (cache 15 min; nunca se loguean). Sin clave, todo sigue estimado y el admin lo informa; el total del mes combina días cerrados reales + hoy estimado (`costo_ia_mes_usd`). Las pruebas de la PC usan otro proyecto de OpenAI.
+- Plan pago futuro: cuando se sume un plan pago, basta extender `costos_service` e incorporarlo en la ficha de usuario y en el orden de costos sin reescribir endpoints ni registro.
+
 ### Restaurar un backup
 1. Actions del repo privado `Argentum-SRL/argentum-backups` -> descargar el artifact del día.
 2. `gpg --decrypt` con la contraseña que guarda Sebastián.

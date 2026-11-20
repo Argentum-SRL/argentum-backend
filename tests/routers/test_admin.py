@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from app.main import app
 from app.core.database import Base, get_db
 from app.core.auth import get_current_admin_user
+from app.core.security import get_password_hash
 from app.models.usuario import Usuario, RolUsuario, EstadoUsuario, AuthProvider, Moneda
 
 # Override JSONB type compilation for SQLite so that the test schema constructs successfully
@@ -88,6 +89,8 @@ def admin_user(db_session):
         estado=EstadoUsuario.ACTIVO,
         moneda_principal=Moneda.ARS,
         is_admin=True,
+        password_hash=get_password_hash("ClaveAdmin123"),
+        password_configurada=True,
     )
     db_session.add(admin)
     db_session.commit()
@@ -117,7 +120,7 @@ def test_hacer_admin_y_quitar_admin(client, admin_user, regular_user, db_session
     # 1. Promover regular_user a admin
     response = client.patch(
         f"/v1/admin/usuarios/{regular_user.id}/admin",
-        json={"is_admin": True}
+        json={"is_admin": True, "password_actual": "ClaveAdmin123"}
     )
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -133,7 +136,7 @@ def test_hacer_admin_y_quitar_admin(client, admin_user, regular_user, db_session
     # 2. Revocar rol de admin
     response2 = client.patch(
         f"/v1/admin/usuarios/{regular_user.id}/admin",
-        json={"is_admin": False}
+        json={"is_admin": False, "password_actual": "ClaveAdmin123"}
     )
     assert response2.status_code == status.HTTP_200_OK
     data2 = response2.json()
@@ -165,7 +168,7 @@ def test_eliminar_usuario_exitoso(client, admin_user, regular_user, db_session):
     response = client.request(
         "DELETE",
         f"/v1/admin/usuarios/{target_id}",
-        json={"email_confirmacion": target_email}
+        json={"email_confirmacion": target_email, "password_actual": "ClaveAdmin123"}
     )
     assert response.status_code == status.HTTP_200_OK
     data = response.json()

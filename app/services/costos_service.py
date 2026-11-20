@@ -6,16 +6,19 @@ Misión: Notifica al 50%, 80% y 100% del tope mensual estimado de gasto sin inte
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
-from decimal import Decimal
+from dataclasses import dataclass
+from datetime import date, datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
+from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import Numeric, func, literal, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.mensaje_saliente_wpp import MensajeSalienteWpp
 from app.models.uso_ia import UsoIA
+from app.services import dolar_service, openai_costos_service
 from app.services.email_service import _enviar_email
 from app.services.rate_limit_service import verificar_rate_limit
 from app.services.reporte_uso_service import destinatarios_reporte
@@ -178,4 +181,223 @@ def vigilar_costos(db: Session, hoy: date) -> None:
     gasto_meta = gasto_meta_mes_ars(db, hoy)
     tope_meta = settings.META_TOPE_MENSUAL_ARS
     avisar_costo_si_corresponde("Meta", gasto_meta, tope_meta, "ARS", hoy)
+
+
+@dataclass(frozen=True)
+class CostoUsuarioMes:
+    ia_usd: Decimal
+    ia_ars: int | None
+    whatsapp_cobrados: int
+    whatsapp_ars: int
+    total_ars: int
+    dolar_oficial: Decimal | None
+    dolar_fecha: date | None
+    sin_dolar: bool
+
+
+def dolar_oficial_venta(db: Session, hoy: date) -> tuple[Decimal | None, date | None]:
+    """Devuelve (venta, fecha) del dólar oficial vigente para la fecha dada, o (None, None)."""
+    cot = dolar_service.obtener_cotizacion_por_fecha(db, "oficial", hoy)
+    if cot is None or cot.venta is None:
+        return None, None
+    return Decimal(str(cot.venta)), cot.fecha
+
+
+def costo_mes_por_usuario(
+    db: Session,
+    hoy: date,
+    usuario_ids: list[UUID] | None = None,
+) -> dict[UUID, CostoUsuarioMes]:
+    """
+    Calcula el costo estimado del mes (IA en dólares pasada a pesos + WhatsApp cobrados por Meta)
+    para cada usuario pedido (o para todos los que tuvieron consumo este mes).
+    """
+    if usuario_ids is not None and not usuario_ids:
+        return {}
+
+    inicio = inicio_mes_ar(hoy)
+
+    stmt_ia = (
+        select(
+            UsoIA.usuario_id,
+            func.coalesce(func.sum(UsoIA.costo_usd), 0),
+        )
+        .where(
+            UsoIA.fecha >= inicio,
+            UsoIA.usuario_id.is_not(None),
+        )
+        .group_by(UsoIA.usuario_id)
+    )
+    if usuario_ids is not None:
+        stmt_ia = stmt_ia.where(UsoIA.usuario_id.in_(usuario_ids))
+    ia_map: dict[UUID, Decimal] = {
+        uid: Decimal(str(total or 0))
+        for uid, total in db.execute(stmt_ia).all()
+        if uid is not None
+    }
+
+    stmt_wpp = (
+        select(
+            MensajeSalienteWpp.usuario_id,
+            func.count(MensajeSalienteWpp.id),
+        )
+        .where(
+            MensajeSalienteWpp.fecha >= inicio,
+            MensajeSalienteWpp.enviado == True,
+            MensajeSalienteWpp.tipo_cobro == "regular",
+            MensajeSalienteWpp.usuario_id.is_not(None),
+        )
+        .group_by(MensajeSalienteWpp.usuario_id)
+    )
+    if usuario_ids is not None:
+        stmt_wpp = stmt_wpp.where(MensajeSalienteWpp.usuario_id.in_(usuario_ids))
+    wpp_map: dict[UUID, int] = {
+        uid: int(cnt or 0)
+        for uid, cnt in db.execute(stmt_wpp).all()
+        if uid is not None
+    }
+
+    venta, dolar_fecha = dolar_oficial_venta(db, hoy)
+    tarifa = settings.WHATSAPP_TARIFA_SERVICIO_ARS
+
+    if usuario_ids is not None:
+        ids_destino = list(dict.fromkeys(usuario_ids))
+    else:
+        ids_destino = list(dict.fromkeys([*ia_map.keys(), *wpp_map.keys()]))
+
+    resultado: dict[UUID, CostoUsuarioMes] = {}
+    for uid in ids_destino:
+        ia_raw = ia_map.get(uid, Decimal("0"))
+        cobrados = wpp_map.get(uid, 0)
+        ia_usd = ia_raw.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        whatsapp_exact = Decimal(cobrados) * tarifa
+        whatsapp_ars = int(whatsapp_exact.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+        if venta is not None:
+            ia_exact = ia_raw * venta
+            ia_ars = int(ia_exact.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+            total_dec = ia_exact + whatsapp_exact
+            total_ars = int(total_dec.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+            sin_dolar = False
+        else:
+            ia_ars = None
+            total_ars = whatsapp_ars
+            sin_dolar = True
+
+        resultado[uid] = CostoUsuarioMes(
+            ia_usd=ia_usd,
+            ia_ars=ia_ars,
+            whatsapp_cobrados=cobrados,
+            whatsapp_ars=whatsapp_ars,
+            total_ars=total_ars,
+            dolar_oficial=venta,
+            dolar_fecha=dolar_fecha,
+            sin_dolar=sin_dolar,
+        )
+
+    return resultado
+
+
+def expresion_costo_mes_ars(hoy: date, venta: Decimal | None):
+    """
+    Devuelve (subq_ia, subq_wpp, expr_total_ars) para ordenar usuarios por costo en SQL.
+    Tiene que dar el mismo orden que costo_mes_por_usuario (lo controla el test C4).
+    """
+    inicio = inicio_mes_ar(hoy)
+    subq_ia = (
+        select(
+            UsoIA.usuario_id.label("usuario_id"),
+            func.coalesce(func.sum(UsoIA.costo_usd), 0).label("ia_usd"),
+        )
+        .where(
+            UsoIA.fecha >= inicio,
+            UsoIA.usuario_id.is_not(None),
+        )
+        .group_by(UsoIA.usuario_id)
+        .subquery()
+    )
+    subq_wpp = (
+        select(
+            MensajeSalienteWpp.usuario_id.label("usuario_id"),
+            func.count(MensajeSalienteWpp.id).label("wpp_cobrados"),
+        )
+        .where(
+            MensajeSalienteWpp.fecha >= inicio,
+            MensajeSalienteWpp.enviado == True,
+            MensajeSalienteWpp.tipo_cobro == "regular",
+            MensajeSalienteWpp.usuario_id.is_not(None),
+        )
+        .group_by(MensajeSalienteWpp.usuario_id)
+        .subquery()
+    )
+
+    expr_wpp = (
+        func.coalesce(subq_wpp.c.wpp_cobrados, 0)
+        * literal(settings.WHATSAPP_TARIFA_SERVICIO_ARS, type_=Numeric(18, 6))
+    )
+    if venta is not None:
+        expr_ia = (
+            func.coalesce(subq_ia.c.ia_usd, 0)
+            * literal(venta, type_=Numeric(18, 6))
+        )
+        expr_total = expr_ia + expr_wpp
+    else:
+        expr_total = expr_wpp
+
+    return subq_ia, subq_wpp, expr_total
+
+
+def costo_mes_total_ars(db: Session, hoy: date) -> tuple[int, bool]:
+    """Devuelve (total_ars, sin_dolar) del mes calendario actual para todo Argentum."""
+    ia_usd = gasto_ia_mes_usd(db, hoy)
+    meta_ars = gasto_meta_mes_ars(db, hoy)
+    venta, _ = dolar_oficial_venta(db, hoy)
+    if venta is not None:
+        total_dec = ia_usd * venta + meta_ars
+        return int(total_dec.quantize(Decimal("1"), rounding=ROUND_HALF_UP)), False
+    return int(meta_ars.quantize(Decimal("1"), rounding=ROUND_HALF_UP)), True
+
+
+def costo_ia_mes_usd(
+    db: Session,
+    hoy: date,
+    ahora: datetime,
+) -> tuple[Decimal, str]:
+    """
+    Devuelve (costo_usd, fuente) del mes actual.
+    El día de hoy de OpenAI todavía no está cerrado; el borde del mes se toma en UTC
+    (3 horas de diferencia con Argentina).
+    """
+    primer_dia = date(hoy.year, hoy.month, 1)
+    dias = openai_costos_service.costos_por_dia(primer_dia, hoy, ahora)
+    if dias is None:
+        return gasto_ia_mes_usd(db, hoy), "estimado"
+
+    real = sum((monto for dia, monto in dias.items() if dia < hoy), Decimal("0"))
+    inicio_hoy_utc = datetime(hoy.year, hoy.month, hoy.day, 0, 0, 0, tzinfo=timezone.utc)
+    hoy_estimado_raw = db.scalar(
+        select(func.coalesce(func.sum(UsoIA.costo_usd), 0)).where(
+            UsoIA.fecha >= inicio_hoy_utc
+        )
+    )
+    hoy_estimado = Decimal(str(hoy_estimado_raw or 0))
+    return real + hoy_estimado, "openai"
+
+
+def costo_mes_total_con_fuente(
+    db: Session,
+    hoy: date,
+    ahora: datetime,
+) -> tuple[int, bool, str]:
+    """
+    Calcula el total mensual en pesos con la mejor fuente disponible ("openai" o "estimado").
+    Devuelve (total_ars, sin_dolar, fuente).
+    """
+    ia_usd, fuente = costo_ia_mes_usd(db, hoy, ahora)
+    meta_ars = gasto_meta_mes_ars(db, hoy)
+    venta, _ = dolar_oficial_venta(db, hoy)
+    if venta is not None:
+        total_dec = ia_usd * venta + meta_ars
+        return int(total_dec.quantize(Decimal("1"), rounding=ROUND_HALF_UP)), False, fuente
+    return int(meta_ars.quantize(Decimal("1"), rounding=ROUND_HALF_UP)), True, fuente
 

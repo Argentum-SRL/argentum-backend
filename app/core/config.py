@@ -26,6 +26,10 @@ class Settings(BaseSettings):
 
     # OpenAI
     OPENAI_API_KEY: str = ""
+    OPENAI_ADMIN_KEY: str = ""
+    # Clave de administrador de OpenAI solo para leer costos; nunca se loguea.
+    OPENAI_PROJECT_ID: str = ""
+    # Id del proyecto de producción de OpenAI para filtrar costos.
     # Medido el 18-19/11/2026 con scripts\evaluacion; para volver atrás, variable en Railway.
     OPENAI_MODEL: str = "gpt-6-luna"
     # Medido el 18-19/11/2026 con scripts\evaluacion; para volver atrás, variable en Railway.

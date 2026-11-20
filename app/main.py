@@ -47,6 +47,7 @@ from datetime import datetime, timezone
 from app.core.database import SessionLocal, db_query_duration_var
 from app.core.auth import limpiar_tokens_expirados
 from app.services import cola_wpp_service
+from app.services.admin_registro_service import purgar_acciones_admin
 from app.services.evento_service import purgar_eventos_actualizacion
 from app.services.rate_limit_service import (
     limpiar_codigos_y_rate_limits_expirados,
@@ -265,6 +266,10 @@ def _job_limpiar_tokens():
         eventos_borrados = purgar_eventos_actualizacion(db)
         if eventos_borrados:
             logger.info("Eventos de actualización antiguos eliminados: %s", eventos_borrados)
+
+        acciones_borradas = purgar_acciones_admin(db, ahora=datetime.now(timezone.utc))
+        if acciones_borradas:
+            logger.info("Acciones de admin de más de 1 año eliminadas: %s", acciones_borradas)
     except Exception:
         logger.exception("Error en job limpiar_tokens")
         raise

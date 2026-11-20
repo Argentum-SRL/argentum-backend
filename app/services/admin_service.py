@@ -1,17 +1,19 @@
 from __future__ import annotations
 import secrets
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, ROUND_HALF_UP
 from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import select, or_, func, update
+from sqlalchemy import case, select, or_, func, update
 
 from app.models.usuario import Usuario, EstadoUsuario, AuthProvider, RolUsuario
 from app.models.refresh_token import RefreshToken
 from app.services.email_service import enviar_reset_password_email
-from app.services import usuario_service
+from app.services import admin_uso_service, costos_service, usuario_service
 from app.core.config import settings
+from app.utils.fecha import hoy_argentina
 
 
 def listar_usuarios(
@@ -20,20 +22,25 @@ def listar_usuarios(
     limit: int = 20,
     search: str | None = None,
     estado: str | None = None,
-    onboarding: str | None = None,
-    wpp: str | None = None,
+    orden: str = "ultimo_uso",
+    hoy: date | None = None,
+    ahora: datetime | None = None,
 ) -> dict:
     page = max(1, page)
     limit = max(1, min(limit, 100))
     offset = (page - 1) * limit
+    hoy_ref = hoy if hoy is not None else hoy_argentina()
+    ahora_ref = ahora if ahora is not None else datetime.now(timezone.utc)
+    if ahora_ref.tzinfo is None:
+        ahora_ref = ahora_ref.replace(tzinfo=timezone.utc)
 
-    conditions = []
+    search_conditions = []
 
     # 1. Búsqueda por texto (nombre, apellido, nombre completo, email, teléfono)
     if search and search.strip():
         sanitized_search = search.strip()[:150]
         search_term = f"%{sanitized_search}%"
-        conditions.append(
+        search_conditions.append(
             or_(
                 Usuario.nombre.ilike(search_term),
                 Usuario.apellido.ilike(search_term),
@@ -44,38 +51,76 @@ def listar_usuarios(
             )
         )
 
-    # 2. Filtro por estado
+    # 2. Conteos por estado_visible sobre los usuarios que coinciden con la búsqueda
+    subq_web_est, subq_wpp_est, expr_estado = admin_uso_service.expresion_estado_visible(ahora_ref)
+    conteos_rows = db.execute(
+        select(expr_estado, func.count(Usuario.id))
+        .select_from(Usuario)
+        .outerjoin(subq_web_est, subq_web_est.c.usuario_id == Usuario.id)
+        .outerjoin(subq_wpp_est, subq_wpp_est.c.usuario_id == Usuario.id)
+        .where(*search_conditions)
+        .group_by(expr_estado)
+    ).all()
+    conteos_estado: dict[str, int] = {
+        "todos": 0,
+        **{k: 0 for k in admin_uso_service.ESTADOS_VISIBLES},
+    }
+    for est_val, cnt in conteos_rows:
+        cnt_int = int(cnt or 0)
+        conteos_estado["todos"] += cnt_int
+        if est_val in conteos_estado:
+            conteos_estado[est_val] = cnt_int
+
+    # 3. Filtro por estado visible y total
+    stmt = select(Usuario).where(*search_conditions)
     if estado:
-        if estado == "activo":
-            conditions.append(Usuario.estado == EstadoUsuario.ACTIVO)
-        elif estado == "inactivo":
-            conditions.append(Usuario.estado == EstadoUsuario.INACTIVO)
-        elif estado == "bloqueado":
-            conditions.append(Usuario.estado == EstadoUsuario.PENDIENTE_VERIFICACION)
+        stmt = (
+            stmt.outerjoin(subq_web_est, subq_web_est.c.usuario_id == Usuario.id)
+            .outerjoin(subq_wpp_est, subq_wpp_est.c.usuario_id == Usuario.id)
+            .where(expr_estado == estado)
+        )
+        total = conteos_estado.get(estado, 0)
+    else:
+        total = conteos_estado["todos"]
 
-    # 3. Filtro por onboarding
-    if onboarding:
-        if onboarding == "completo":
-            conditions.append(Usuario.onboarding_completo == True)
-        elif onboarding == "incompleto":
-            conditions.append(Usuario.onboarding_completo == False)
+    # 4. Ordenamiento
+    if orden == "costo_mes":
+        venta, _ = costos_service.dolar_oficial_venta(db, hoy_ref)
+        subq_ia, subq_wpp_c, expr_costo = costos_service.expresion_costo_mes_ars(hoy_ref, venta)
+        stmt = (
+            stmt.outerjoin(subq_ia, subq_ia.c.usuario_id == Usuario.id)
+            .outerjoin(subq_wpp_c, subq_wpp_c.c.usuario_id == Usuario.id)
+            .order_by(expr_costo.desc(), Usuario.fecha_registro.desc())
+        )
+    elif orden == "movimientos":
+        subq_mov, expr_mov = admin_uso_service.expresion_movimientos_mes(hoy_ref)
+        stmt = stmt.outerjoin(subq_mov, subq_mov.c.usuario_id == Usuario.id).order_by(
+            expr_mov.desc(),
+            Usuario.fecha_registro.desc(),
+        )
+    elif orden == "registro":
+        stmt = stmt.order_by(Usuario.fecha_registro.desc())
+    else:
+        subq_web, subq_wpp, expr_ultimo = admin_uso_service.expresiones_ultimo_uso()
+        stmt = (
+            stmt.outerjoin(subq_web, subq_web.c.usuario_id == Usuario.id)
+            .outerjoin(subq_wpp, subq_wpp.c.usuario_id == Usuario.id)
+            .order_by(
+                case((expr_ultimo.is_(None), 1), else_=0).asc(),
+                expr_ultimo.desc(),
+                Usuario.fecha_registro.desc(),
+            )
+        )
 
-    # 4. Filtro por WhatsApp (telefono_verificado)
-    if wpp:
-        if wpp == "vinculado":
-            conditions.append(Usuario.telefono_verificado == True)
-        elif wpp == "no_vinculado":
-            conditions.append(Usuario.telefono_verificado == False)
-
-    # Construir queries
-    base_query = select(Usuario).where(*conditions)
-    
-    # Contar total
-    total = db.scalar(select(func.count()).select_from(base_query.subquery()))
-
-    # Ejecutar consulta paginada ordenada por fecha de registro descendente
-    stmt = base_query.order_by(Usuario.fecha_registro.desc()).offset(offset).limit(limit)
-    usuarios = db.scalars(stmt).all()
+    usuarios = list(db.scalars(stmt.offset(offset).limit(limit)).all())
+    uids = [u.id for u in usuarios]
+    usos = admin_uso_service.ultimos_usos(db, uids)
+    costos = costos_service.costo_mes_por_usuario(db, hoy_ref, usuario_ids=uids)
+    movimientos = admin_uso_service.movimientos_mes(db, uids, hoy_ref)
+    estados_visibles = {
+        u.id: admin_uso_service.estado_visible(u, usos[u.id]["ultimo_uso"], ahora_ref)
+        for u in usuarios
+    }
 
     pages = (total + limit - 1) // limit if total > 0 else 0
 
@@ -84,7 +129,12 @@ def listar_usuarios(
         "page": page,
         "limit": limit,
         "pages": pages,
+        "conteos_estado": conteos_estado,
         "usuarios": usuarios,
+        "usos": usos,
+        "costos": costos,
+        "estados_visibles": estados_visibles,
+        "movimientos": movimientos,
     }
 
 
@@ -134,7 +184,7 @@ def cambiar_estado_usuario(
     return user
 
 
-def enviar_reset_password(db: Session, usuario_id: UUID, frontend_url: str) -> None:
+def enviar_reset_password(db: Session, usuario_id: UUID, frontend_url: str) -> Usuario:
     user = obtener_usuario(db, usuario_id)
 
     if user.auth_provider == AuthProvider.GOOGLE:
@@ -189,8 +239,10 @@ def enviar_reset_password(db: Session, usuario_id: UUID, frontend_url: str) -> N
             },
         )
 
+    return user
 
-def revocar_sesiones(db: Session, usuario_id: UUID, admin_id: UUID) -> None:
+
+def revocar_sesiones(db: Session, usuario_id: UUID, admin_id: UUID) -> Usuario:
     user = obtener_usuario(db, usuario_id)
 
     if usuario_id == admin_id:
@@ -214,6 +266,7 @@ def revocar_sesiones(db: Session, usuario_id: UUID, admin_id: UUID) -> None:
         .values(revocado=True)
     )
     db.commit()
+    return user
 
 
 def desconectar_wpp(db: Session, usuario_id: UUID) -> Usuario:
@@ -232,27 +285,6 @@ def desconectar_wpp(db: Session, usuario_id: UUID) -> Usuario:
         )
 
     user.telefono_verificado = False
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-def resetear_onboarding(db: Session, usuario_id: UUID) -> Usuario:
-    user = obtener_usuario(db, usuario_id)
-
-    if not user.onboarding_completo:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "ONBOARDING_ALREADY_INCOMPLETE",
-                    "message": "El onboarding de este usuario ya está incompleto.",
-                },
-            },
-        )
-
-    user.onboarding_completo = False
     db.commit()
     db.refresh(user)
     return user
@@ -282,9 +314,10 @@ def cambiar_rol_admin(
     return user
 
 
-def eliminar_usuario_admin(
-    db: Session, usuario_id: UUID, email_confirmacion: str, admin_id: UUID, commit: bool = True
-) -> dict:
+def validar_eliminacion_admin(
+    db: Session, usuario_id: UUID, email_confirmacion: str, admin_id: UUID
+) -> Usuario:
+    """Valida auto-eliminación, existencia y coincidencia de email antes de verificar identidad."""
     if usuario_id == admin_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -313,18 +346,34 @@ def eliminar_usuario_admin(
                 },
             },
         )
+    return user
+
+
+def eliminar_usuario_admin(
+    db: Session, usuario_id: UUID, email_confirmacion: str, admin_id: UUID, commit: bool = True
+) -> dict:
+    user = validar_eliminacion_admin(db, usuario_id, email_confirmacion, admin_id)
     return usuario_service.eliminar_usuario(db, user, commit=commit)
 
 
-def obtener_estadisticas(db: Session) -> dict:
+def obtener_estadisticas(
+    db: Session,
+    ahora: datetime | None = None,
+    hoy: date | None = None,
+) -> dict:
+    ahora_ref = ahora if ahora is not None else datetime.now(timezone.utc)
+    if ahora_ref.tzinfo is None:
+        ahora_ref = ahora_ref.replace(tzinfo=timezone.utc)
+    hoy_ref = hoy if hoy is not None else hoy_argentina()
+
     total = db.scalar(select(func.count(Usuario.id))) or 0
     activos = db.scalar(select(func.count(Usuario.id)).where(Usuario.estado == EstadoUsuario.ACTIVO)) or 0
     onboarding_completo = db.scalar(select(func.count(Usuario.id)).where(Usuario.onboarding_completo == True)) or 0
     wpp_vinculados = db.scalar(select(func.count(Usuario.id)).where(Usuario.telefono_verificado == True)) or 0
 
     # Grupo 1: Actividad reciente
-    inicio_hoy_utc = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    hace_7_dias = datetime.now(timezone.utc) - timedelta(days=7)
+    inicio_hoy_utc = ahora_ref.replace(hour=0, minute=0, second=0, microsecond=0)
+    hace_7_dias = ahora_ref - timedelta(days=7)
 
     nuevos_hoy = db.scalar(
         select(func.count(Usuario.id)).where(Usuario.fecha_registro >= inicio_hoy_utc)
@@ -338,6 +387,43 @@ def obtener_estadisticas(db: Session) -> dict:
             Usuario.ultimo_acceso >= hace_7_dias
         )
     ) or 0
+
+    subq_web, subq_wpp, expr_ultimo = admin_uso_service.expresiones_ultimo_uso()
+    usaron_7_dias = int(
+        db.scalar(
+            select(func.count(Usuario.id))
+            .select_from(Usuario)
+            .outerjoin(subq_web, subq_web.c.usuario_id == Usuario.id)
+            .outerjoin(subq_wpp, subq_wpp.c.usuario_id == Usuario.id)
+            .where(expr_ultimo.is_not(None), expr_ultimo >= hace_7_dias)
+        )
+        or 0
+    )
+
+    costo_mes_ars, costo_mes_sin_dolar, costo_mes_fuente = costos_service.costo_mes_total_con_fuente(
+        db, hoy_ref, ahora_ref
+    )
+
+    subq_web_est, subq_wpp_est, expr_estado = admin_uso_service.expresion_estado_visible(ahora_ref)
+    en_desuso = int(
+        db.scalar(
+            select(func.count(Usuario.id))
+            .select_from(Usuario)
+            .outerjoin(subq_web_est, subq_web_est.c.usuario_id == Usuario.id)
+            .outerjoin(subq_wpp_est, subq_wpp_est.c.usuario_id == Usuario.id)
+            .where(expr_estado == "en_desuso")
+        )
+        or 0
+    )
+    if total > 0:
+        activos_pct = int(
+            (Decimal(usaron_7_dias) * Decimal("100") / Decimal(total)).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        )
+    else:
+        activos_pct = 0
+
     admins_total = db.scalar(
         select(func.count(Usuario.id)).where(Usuario.is_admin == True)
     ) or 0
@@ -369,6 +455,12 @@ def obtener_estadisticas(db: Session) -> dict:
         "nuevos_hoy": nuevos_hoy,
         "nuevos_7_dias": nuevos_7_dias,
         "activos_7_dias": activos_7_dias,
+        "usaron_7_dias": usaron_7_dias,
+        "en_desuso": en_desuso,
+        "activos_pct": activos_pct,
+        "costo_mes_ars": costo_mes_ars,
+        "costo_mes_sin_dolar": costo_mes_sin_dolar,
+        "costo_mes_fuente": costo_mes_fuente,
         "admins_total": admins_total,
         "por_proveedor": por_proveedor,
     }

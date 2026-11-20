@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Path, Request
 from sqlalchemy import func
@@ -17,7 +17,7 @@ from app.schemas.admin import (
     CambiarEstadoRequest,
     CambiarRolAdminRequest,
     EliminarCuentaAdminRequest,
-    ResetearOnboardingRequest,
+    CostoUsuarioMesSchema,
     AdminStatsResponse,
     JobSchedulerItem,
     SchedulerResponse,
@@ -25,10 +25,18 @@ from app.schemas.admin import (
     MonitorWppResumenResponse,
     PaginatedConversacionesMonitorResponse,
 )
-from app.core.jobs_catalogo import JOBS_CATALOGO, JOBS_MANUALES_PERMITIDOS
+from app.core.jobs_catalogo import JOBS_CATALOGO, JOBS_MANUALES_PERMITIDOS, JOBS_POR_ID
 from app.core.registro_jobs import calcular_estado_job
-from app.services import admin_service, monitor_wpp_service
+from app.services import (
+    admin_registro_service,
+    admin_service,
+    admin_uso_service,
+    costos_service,
+    monitor_wpp_service,
+    reautenticacion_service,
+)
 from app.core.config import settings
+from app.utils.fecha import hoy_argentina
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +45,77 @@ router = APIRouter(
     tags=["admin"],
     dependencies=[Depends(get_current_admin_user)],
 )
+
+ACCION_REGISTRO_VALIDA = Literal[
+    "suspender",
+    "reactivar",
+    "mail_contrasena",
+    "cerrar_sesiones",
+    "desconectar_whatsapp",
+    "hacer_admin",
+    "quitar_admin",
+    "eliminar_cuenta",
+    "correr_tarea",
+    "verificacion_fallida",
+]
+
+
+def ahora_utc() -> datetime:
+    """Devuelve la fecha y hora actual en UTC (facilita pruebas determinísticas)."""
+    return datetime.now(timezone.utc)
+
+
+def _registrar_y_commit(
+    db: Session,
+    admin: Usuario,
+    accion: str,
+    usuario: Usuario | None = None,
+    detalle: str | None = None,
+) -> None:
+    try:
+        admin_registro_service.registrar_accion(
+            db, admin, accion, usuario=usuario, detalle=detalle
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("No se pudo registrar la acción de admin.")
+
+
+def _armar_usuario_detalle(
+    db: Session,
+    user: Usuario,
+    hoy,
+    ahora: datetime | None = None,
+) -> UsuarioAdminResponse:
+    ahora_ref = ahora if ahora is not None else ahora_utc()
+    uso = admin_uso_service.ultimos_usos(db, [user.id])[user.id]
+    costo = costos_service.costo_mes_por_usuario(db, hoy, usuario_ids=[user.id])[user.id]
+    movimientos = admin_uso_service.movimientos_mes(db, [user.id], hoy).get(user.id, 0)
+    user_data = UsuarioAdminResponse.model_validate(user)
+    user_data.paso_onboarding_actual = _map_onboarding_step(user)
+    user_data.estado_cuenta = admin_uso_service.estado_cuenta(user)
+    user_data.estado_visible = admin_uso_service.estado_visible(
+        user, uso["ultimo_uso"], ahora_ref
+    )
+    user_data.movimientos_mes = movimientos
+    user_data.ultimo_uso = uso["ultimo_uso"]
+    user_data.ultimo_uso_canal = uso["ultimo_uso_canal"]
+    user_data.ultimo_uso_web = uso["ultimo_uso_web"]
+    user_data.ultimo_uso_whatsapp = uso["ultimo_uso_whatsapp"]
+    user_data.tiene_contrasena = reautenticacion_service.usa_contrasena(user)
+    user_data.costo_mes_ars = costo.total_ars
+    user_data.costo_mes = CostoUsuarioMesSchema(
+        ia_usd=costo.ia_usd,
+        ia_ars=costo.ia_ars,
+        whatsapp_cobrados=costo.whatsapp_cobrados,
+        whatsapp_ars=costo.whatsapp_ars,
+        total_ars=costo.total_ars,
+        dolar_oficial=costo.dolar_oficial,
+        dolar_fecha=costo.dolar_fecha,
+        sin_dolar=costo.sin_dolar,
+    )
+    return user_data
 
 
 def _map_onboarding_step(user: Usuario) -> str | None:
@@ -57,25 +136,59 @@ def get_usuarios(
     page: int = Query(1, ge=1, description="Número de página"),
     limit: int = Query(20, ge=1, le=100, description="Cantidad de usuarios por página"),
     search: str | None = Query(None, max_length=150, description="Término de búsqueda"),
-    estado: Literal["activo", "inactivo", "bloqueado"] | None = Query(None, description="Filtro por estado de cuenta"),
-    onboarding: Literal["completo", "incompleto"] | None = Query(None, description="Filtro por estado de onboarding"),
-    wpp: Literal["vinculado", "no_vinculado"] | None = Query(None, description="Filtro por vinculación de WhatsApp"),
+    estado: Literal[
+        "activo",
+        "nuevo",
+        "poco_uso",
+        "en_desuso",
+        "sin_empezar",
+        "suspendida",
+        "sin_verificar",
+    ] | None = Query(None, description="Filtro por estado visible de uso"),
+    orden: Literal["ultimo_uso", "movimientos", "costo_mes", "registro"] = Query(
+        "ultimo_uso", description="Criterio de orden"
+    ),
     db: Session = Depends(get_db),
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Lista paginada y filtrada de usuarios. Excluye datos financieros."""
     logger.info("[ADMIN] Admin %s listó usuarios. page=%s limit=%s", admin.id, page, limit)
+    hoy = hoy_argentina()
+    ahora = ahora_utc()
     res = admin_service.listar_usuarios(
-        db, page=page, limit=limit, search=search, estado=estado, onboarding=onboarding, wpp=wpp
+        db,
+        page=page,
+        limit=limit,
+        search=search,
+        estado=estado,
+        orden=orden,
+        hoy=hoy,
+        ahora=ahora,
     )
-    
-    # Mapear a formato de respuesta estándar
-    usuarios_mapped = [UsuarioAdminListResponse.model_validate(u) for u in res["usuarios"]]
+
+    usos = res["usos"]
+    costos = res["costos"]
+    estados_visibles = res["estados_visibles"]
+    movimientos = res["movimientos"]
+    usuarios_mapped = []
+    for u in res["usuarios"]:
+        item = UsuarioAdminListResponse.model_validate(u)
+        uso_u = usos.get(u.id, {})
+        costo_u = costos.get(u.id)
+        item.estado_cuenta = admin_uso_service.estado_cuenta(u)
+        item.estado_visible = estados_visibles.get(u.id, "en_desuso")
+        item.movimientos_mes = movimientos.get(u.id, 0)
+        item.ultimo_uso = uso_u.get("ultimo_uso")
+        item.ultimo_uso_canal = uso_u.get("ultimo_uso_canal")
+        item.costo_mes_ars = costo_u.total_ars if costo_u else 0
+        usuarios_mapped.append(item)
+
     data = PaginatedUsuariosResponse(
         total=res["total"],
         page=res["page"],
         limit=res["limit"],
         pages=res["pages"],
+        conteos_estado=res["conteos_estado"],
         usuarios=usuarios_mapped,
     )
     return {
@@ -94,10 +207,8 @@ def get_usuario_detalle(
     """Detalle operativo de un usuario específico."""
     logger.info("[ADMIN] Admin %s solicitó detalle de usuario %s", admin.id, usuario_id)
     user = admin_service.obtener_usuario(db, usuario_id)
-    
-    user_data = UsuarioAdminResponse.model_validate(user)
-    user_data.paso_onboarding_actual = _map_onboarding_step(user)
-    
+    user_data = _armar_usuario_detalle(db, user, hoy_argentina())
+
     return {
         "success": True,
         "data": user_data.model_dump(mode="json"),
@@ -115,10 +226,15 @@ def cambiar_estado(
     """Activar o desactivar cuenta de usuario."""
     logger.info("[ADMIN] Admin %s cambió estado de usuario %s a %s", admin.id, usuario_id, body.is_active)
     user = admin_service.cambiar_estado_usuario(db, usuario_id, is_active=body.is_active, admin_id=admin.id)
-    
-    user_data = UsuarioAdminResponse.model_validate(user)
-    user_data.paso_onboarding_actual = _map_onboarding_step(user)
-    
+    _registrar_y_commit(
+        db,
+        admin,
+        "reactivar" if body.is_active else "suspender",
+        usuario=user,
+    )
+
+    user_data = _armar_usuario_detalle(db, user, hoy_argentina())
+
     return {
         "success": True,
         "data": user_data.model_dump(mode="json"),
@@ -134,7 +250,8 @@ def reset_password(
 ):
     """Envía email de recuperación de contraseña."""
     logger.info("[ADMIN] Admin %s solicitó reset de contraseña para usuario %s", admin.id, usuario_id)
-    admin_service.enviar_reset_password(db, usuario_id, settings.FRONTEND_URL)
+    user = admin_service.enviar_reset_password(db, usuario_id, settings.FRONTEND_URL)
+    _registrar_y_commit(db, admin, "mail_contrasena", usuario=user)
     return {
         "success": True,
         "message": "Email de restablecimiento de contraseña enviado correctamente."
@@ -149,7 +266,8 @@ def revocar_sesiones_usuario(
 ):
     """Fuerza cierre de todas las sesiones de un usuario."""
     logger.info("[ADMIN] Admin %s revocó sesiones del usuario %s", admin.id, usuario_id)
-    admin_service.revocar_sesiones(db, usuario_id, admin_id=admin.id)
+    user = admin_service.revocar_sesiones(db, usuario_id, admin_id=admin.id)
+    _registrar_y_commit(db, admin, "cerrar_sesiones", usuario=user)
     return {
         "success": True,
         "message": "Sesiones del usuario revocadas exitosamente."
@@ -165,48 +283,14 @@ def desconectar_whatsapp(
     """Desconecta WhatsApp de un usuario."""
     logger.info("[ADMIN] Admin %s desconectó WhatsApp para usuario %s", admin.id, usuario_id)
     user = admin_service.desconectar_wpp(db, usuario_id)
-    
-    user_data = UsuarioAdminResponse.model_validate(user)
-    user_data.paso_onboarding_actual = _map_onboarding_step(user)
-    
+    _registrar_y_commit(db, admin, "desconectar_whatsapp", usuario=user)
+
+    user_data = _armar_usuario_detalle(db, user, hoy_argentina())
+
     return {
         "success": True,
         "data": user_data.model_dump(mode="json"),
         "message": "WhatsApp desconectado correctamente."
-    }
-
-
-@router.post("/usuarios/{usuario_id}/resetear-onboarding", response_model=dict)
-def resetear_onboarding_usuario(
-    usuario_id: UUID = Path(..., description="Identificador único del usuario"),
-    body: ResetearOnboardingRequest = ...,
-    db: Session = Depends(get_db),
-    admin: Usuario = Depends(get_current_admin_user),
-):
-    """Resetea estado de onboarding del usuario."""
-    logger.info("[ADMIN] Admin %s reseteó onboarding para usuario %s", admin.id, usuario_id)
-    
-    if not body.confirmar:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "CONFIRMATION_REQUIRED",
-                    "message": "Confirmá que querés reiniciar la configuración inicial.",
-                },
-            },
-        )
-        
-    user = admin_service.resetear_onboarding(db, usuario_id)
-    
-    user_data = UsuarioAdminResponse.model_validate(user)
-    user_data.paso_onboarding_actual = _map_onboarding_step(user)
-    
-    return {
-        "success": True,
-        "data": user_data.model_dump(mode="json"),
-        "message": "Onboarding reseteado correctamente."
     }
 
 
@@ -218,12 +302,43 @@ def cambiar_rol_admin(
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Promueve o revoca permisos de administrador a un usuario."""
-    logger.info("[ADMIN] Admin %s cambió rol admin de usuario %s a %s", admin.id, usuario_id, body.is_admin)
+    logger.info(
+        "[ADMIN] Admin %s cambió rol admin de usuario %s a %s",
+        admin.id,
+        usuario_id,
+        body.is_admin,
+    )
+    admin_service.obtener_usuario(db, usuario_id)
+    if usuario_id == admin.id and not body.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "ADMIN_CANNOT_DEMOTE_SELF",
+                    "message": "No podés revocar tus propios permisos de administrador.",
+                },
+            },
+        )
+
+    reautenticacion_service.verificar_identidad_admin(
+        db,
+        admin,
+        body.password_actual,
+        body.google_credential,
+        datetime.now(timezone.utc),
+    )
+
     user = admin_service.cambiar_rol_admin(db, usuario_id, is_admin=body.is_admin, admin_id=admin.id)
-    
-    user_data = UsuarioAdminResponse.model_validate(user)
-    user_data.paso_onboarding_actual = _map_onboarding_step(user)
-    
+    _registrar_y_commit(
+        db,
+        admin,
+        "hacer_admin" if body.is_admin else "quitar_admin",
+        usuario=user,
+    )
+
+    user_data = _armar_usuario_detalle(db, user, hoy_argentina())
+
     return {
         "success": True,
         "data": user_data.model_dump(mode="json"),
@@ -240,9 +355,23 @@ def eliminar_usuario_admin(
 ):
     """Elimina permanentemente una cuenta de usuario y todos sus datos."""
     logger.info("[ADMIN] Admin %s solicitó eliminación de usuario %s", admin.id, usuario_id)
+    admin_service.validar_eliminacion_admin(
+        db,
+        usuario_id,
+        email_confirmacion=body.email_confirmacion,
+        admin_id=admin.id,
+    )
+    reautenticacion_service.verificar_identidad_admin(
+        db,
+        admin,
+        body.password_actual,
+        body.google_credential,
+        datetime.now(timezone.utc),
+    )
     res = admin_service.eliminar_usuario_admin(
         db, usuario_id, email_confirmacion=body.email_confirmacion, admin_id=admin.id
     )
+    _registrar_y_commit(db, admin, "eliminar_cuenta")
     return {
         "success": True,
         "message": "Usuario y todos sus datos fueron eliminados correctamente.",
@@ -257,12 +386,48 @@ def get_stats(
 ):
     """Obtiene estadísticas generales para el panel de administración."""
     logger.info("[ADMIN] Admin %s solicitó estadísticas generales.", admin.id)
-    stats = admin_service.obtener_estadisticas(db)
+    stats = admin_service.obtener_estadisticas(
+        db, ahora=ahora_utc(), hoy=hoy_argentina()
+    )
     stats_data = AdminStatsResponse.model_validate(stats)
     return {
         "success": True,
         "data": stats_data.model_dump(mode="json"),
         "message": "Estadísticas obtenidas correctamente."
+    }
+
+
+@router.get("/registro", response_model=dict)
+def get_registro_admin(
+    page: int = Query(1, ge=1, description="Número de página"),
+    limit: int = Query(20, ge=1, le=100, description="Cantidad de items por página"),
+    accion: ACCION_REGISTRO_VALIDA | None = Query(None, description="Filtro por tipo de acción"),
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_current_admin_user),
+):
+    """Lista las acciones registradas en el panel de administración."""
+    res = admin_registro_service.listar_acciones(db, page=page, limit=limit, accion=accion)
+    items_iso = [
+        {
+            **item,
+            "fecha": (
+                item["fecha"].isoformat()
+                if isinstance(item["fecha"], datetime)
+                else item["fecha"]
+            ),
+        }
+        for item in res["items"]
+    ]
+    return {
+        "success": True,
+        "data": {
+            "total": res["total"],
+            "page": res["page"],
+            "limit": res["limit"],
+            "pages": res["pages"],
+            "items": items_iso,
+        },
+        "message": "Registro obtenido.",
     }
 
 
@@ -273,7 +438,6 @@ async def refresh_feriados_admin(
 ):
     """Fuerza la recarga de feriados de un año desde la API externa y actualiza BD y caché."""
     from app.services.dias_habiles_service import recargar_feriados_anio
-    from app.utils.fecha import hoy_argentina
 
     target_anio = anio or hoy_argentina().year
     logger.info("[ADMIN] Admin %s solicitó refresh de feriados para año %s", admin.id, target_anio)
@@ -598,6 +762,7 @@ def listar_scheduler(
 def correr_job_scheduler(
     job_id: str = Path(..., description="ID de la tarea a ejecutar"),
     request: Request = ...,
+    db: Session = Depends(get_db),
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Ejecuta una tarea automática de forma manual si está permitida."""
@@ -625,41 +790,101 @@ def correr_job_scheduler(
 
     ahora = datetime.now(timezone.utc)
     job_obj.modify(next_run_time=ahora)
+    _registrar_y_commit(
+        db,
+        admin,
+        "correr_tarea",
+        detalle=JOBS_POR_ID[job_id].nombre,
+    )
 
     return {"mensaje": "Se va a correr en unos segundos."}
 
 
-@router.get("/monitor-wpp/resumen", response_model=MonitorWppResumenResponse)
-def monitor_wpp_resumen(
-    dias: int = Query(1, description="Ventana de días (1, 7 o 30)"),
-    db: Session = Depends(get_db),
-    admin: Usuario = Depends(get_current_admin_user),
-):
-    """Devuelve métricas agregadas de calidad, costos de IA, topes y salud para el monitor de WhatsApp."""
+def _resolver_periodo_monitor(
+    dias: int | None,
+    desde: date | None,
+    hasta: date | None,
+    hoy: date,
+) -> tuple[int | None, date | None, date | None]:
+    if dias is None and desde is None and hasta is None:
+        return 1, None, None
+    if dias is not None and (desde is not None or hasta is not None):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Elegí un período o un rango de fechas.",
+        )
+    if (desde is None) != (hasta is None):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Elegí las dos fechas.",
+        )
+    if desde is not None and hasta is not None:
+        if desde > hasta:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="La fecha de inicio tiene que ser anterior a la de fin.",
+            )
+        if hasta > hoy:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="La fecha de fin no puede ser posterior a hoy.",
+            )
+        if (hasta - desde).days > 89:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Elegí un rango de hasta 90 días.",
+            )
+        return None, desde, hasta
+
     if dias not in (1, 7, 30):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Elegí 1, 7 o 30 días.",
         )
-    return monitor_wpp_service.obtener_resumen_monitor(db, dias=dias)
+    return dias, None, None
+
+
+@router.get("/monitor-wpp/resumen", response_model=MonitorWppResumenResponse)
+def monitor_wpp_resumen(
+    dias: int | None = Query(None, description="Ventana de días (1, 7 o 30)"),
+    desde: date | None = Query(None, description="Fecha inicial del rango (YYYY-MM-DD)"),
+    hasta: date | None = Query(None, description="Fecha final del rango (YYYY-MM-DD)"),
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_current_admin_user),
+):
+    """Devuelve métricas agregadas de calidad, costos de IA, topes y salud para el monitor de WhatsApp."""
+    hoy = hoy_argentina()
+    dias_res, desde_res, hasta_res = _resolver_periodo_monitor(dias, desde, hasta, hoy)
+    return monitor_wpp_service.obtener_resumen_monitor(
+        db,
+        dias=dias_res,
+        hoy=hoy,
+        desde=desde_res,
+        hasta=hasta_res,
+        ahora=ahora_utc(),
+    )
 
 
 @router.get("/monitor-wpp/conversaciones", response_model=PaginatedConversacionesMonitorResponse)
 def monitor_wpp_conversaciones(
-    dias: int = Query(1, description="Ventana de días (1, 7 o 30)"),
+    dias: int | None = Query(None, description="Ventana de días (1, 7 o 30)"),
+    desde: date | None = Query(None, description="Fecha inicial del rango (YYYY-MM-DD)"),
+    hasta: date | None = Query(None, description="Fecha final del rango (YYYY-MM-DD)"),
     categoria: str = Query("", description="Filtro opcional por categoría"),
     pagina: int = Query(1, ge=1, description="Número de página"),
     db: Session = Depends(get_db),
     admin: Usuario = Depends(get_current_admin_user),
 ):
     """Lista conversaciones paginadas de a 50 con filtro opcional de categoría y protección de privacidad."""
-    if dias not in (1, 7, 30):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Elegí 1, 7 o 30 días.",
-        )
+    hoy = hoy_argentina()
+    dias_res, desde_res, hasta_res = _resolver_periodo_monitor(dias, desde, hasta, hoy)
     return monitor_wpp_service.obtener_conversaciones_monitor(
-        db, dias=dias, categoria=categoria, pagina=pagina
+        db,
+        dias=dias_res,
+        categoria=categoria,
+        pagina=pagina,
+        desde=desde_res,
+        hasta=hasta_res,
     )
 
 

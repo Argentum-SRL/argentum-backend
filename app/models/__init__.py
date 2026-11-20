@@ -46,8 +46,10 @@ from app.models.clave_idempotencia import ClaveIdempotencia
 from app.models.evento_uso import EventoUso
 from app.models.consejo import ConsejoEmitido, ConsejoSilenciado
 from app.models.informe_personalizado import InformePersonalizado
+from app.models.accion_admin import AccionAdmin
 
 __all__ = [
+    "AccionAdmin",
     "ConsejoEmitido",
     "ConsejoSilenciado",
     "InformePersonalizado",
