@@ -166,9 +166,31 @@ def _resolver_lote_movimientos(
             }
             operaciones.append(op_ad)
 
+    es_img_doc = (
+        ctx.es_imagen
+        or ctx.es_pdf
+        or bool(entidades_actuales.get("origen_imagen"))
+        or bool(entidades_actuales.get("es_imagen"))
+    )
+    es_debito_lote = any(
+        d in normalizar_texto(mensaje_texto) for d in PALABRAS_FUERZAN_DEBITO
+    )
+    if not es_debito_lote and tarjetas_usuario:
+        _, cands_tarj_lote = _resolver_mencion_tarjeta_en_texto(
+            mensaje_texto, tarjetas_usuario
+        )
+    else:
+        cands_tarj_lote = []
+
     for op in operaciones:
         m_norm_ia = _parsear_monto_ia(op.get("monto"))
         op["monto"] = float(m_norm_ia) if m_norm_ia is not None else None
+        if op.get("tarjeta") and tarjetas_usuario and not es_img_doc:
+            t_chk, _ = resolver_tarjeta_cascada(op["tarjeta"], tarjetas_usuario)
+            if es_debito_lote or not t_chk or not any(
+                c.id == t_chk.id for c in cands_tarj_lote
+            ):
+                op["tarjeta"] = None
         if op.get("tarjeta") and tarjetas_usuario:
             t_match, _ = resolver_tarjeta_cascada(op["tarjeta"], tarjetas_usuario)
             if t_match:
@@ -179,6 +201,11 @@ def _resolver_lote_movimientos(
 
         mon_op = Moneda.USD if op.get("moneda") == "USD" else Moneda.ARS
         bills_mon = [b for b in billeteras_todas if b.moneda == mon_op]
+
+        if op.get("billetera") and not _billetera_ia_permitida(
+            op["billetera"], ctx, billeteras_todas, bills_mon, op_id=op.get("id")
+        ):
+            op["billetera"] = None
 
         if op.get("billetera"):
             b_match, _ = resolver_billetera_cascada(op["billetera"], bills_mon)
@@ -255,6 +282,8 @@ def _resolver_lote_movimientos(
     else:
         entidades_actuales["monto"] = operaciones[0].get("monto")
         entidades_actuales["billetera"] = operaciones[0].get("billetera")
+        entidades_actuales.pop("billetera_origen", None)
+        entidades_actuales.pop("billetera_destino", None)
         entidades_actuales["tarjeta"] = operaciones[0].get("tarjeta")
         entidades_actuales["transacciones_adicionales"] = [dict(o) for o in operaciones[1:]]
 
@@ -435,7 +464,18 @@ def _resolver_tarjeta_y_cuotas(
                 t_match = None
                 cands_res = tarjeta_mencionada_cands
             else:
-                if tiene_mencion_tarjeta or "tarjeta" in m_norm:
+                estado_prev = ctx.estado_previo if isinstance(ctx.estado_previo, dict) else {}
+                dfs_prev = estado_prev.get("datos_faltantes") or []
+                en_menu_tarj = any("tarjeta" in str(d) for d in dfs_prev)
+                t_ia_menu = None
+                if en_menu_tarj and entidades_actuales.get("tarjeta"):
+                    t_ia_menu, _ = resolver_tarjeta_cascada(
+                        str(entidades_actuales.get("tarjeta")), tarjetas_usuario
+                    )
+                if t_ia_menu:
+                    t_match = t_ia_menu
+                    cands_res = [t_ia_menu]
+                elif tiene_mencion_tarjeta or "tarjeta" in m_norm:
                     if len(tarjetas_usuario) == 1:
                         t_match = tarjetas_usuario[0]
                         cands_res = tarjetas_usuario
@@ -521,6 +561,104 @@ def _es_mencion_persona_no_cuenta(
     )
 
 
+def _billetera_ia_permitida(
+    billetera_raw: str | None,
+    ctx: ContextoMensaje,
+    billeteras_todas: list,
+    billeteras_moneda: list,
+    op_id: int | None = None,
+) -> bool:
+    """True si la billetera devuelta por IA fue nombrada, responde menú o viene de estado_previo."""
+    if not billetera_raw:
+        return False
+    ents = (ctx.resultado_ia or {}).get("entidades") or {}
+    if ctx.es_imagen or ctx.es_pdf or ents.get("origen_imagen") or ents.get("es_imagen"):
+        return True
+
+    estado_prev = ctx.estado_previo if isinstance(ctx.estado_previo, dict) else None
+    if estado_prev:
+        dfs = estado_prev.get("datos_faltantes") or []
+        es_preg_bill = estado_prev.get("tipo_flujo") == "lote_slot_filling" or any(
+            d in ("billetera_origen", "billetera_destino", "billetera", "billetera_lote")
+            for d in dfs
+        )
+        if es_preg_bill:
+            return True
+
+        b_obj, _ = resolver_billetera_cascada(str(billetera_raw), billeteras_todas)
+        b_prev_noms: list[str] = []
+        for k in (
+            "billetera_resuelta_nombre",
+            "billetera",
+            "billetera_origen",
+            "billetera_destino",
+        ):
+            if estado_prev.get(k):
+                b_prev_noms.append(str(estado_prev[k]))
+        if op_id is not None:
+            for o_p in estado_prev.get("operaciones") or []:
+                if isinstance(o_p, dict) and o_p.get("id") == op_id and o_p.get("billetera"):
+                    b_prev_noms.append(str(o_p["billetera"]))
+        for b_p_nom in b_prev_noms:
+            b_prev, _ = resolver_billetera_cascada(b_p_nom, billeteras_todas)
+            if (b_obj and b_prev and b_obj.id == b_prev.id) or (
+                normalizar_texto(str(billetera_raw)) == normalizar_texto(b_p_nom)
+            ):
+                return True
+
+    # Condición D-C1(a): el mensaje actual nombra la misma billetera (nombre o alias)
+    b_obj, cands_obj = resolver_billetera_cascada(str(billetera_raw), billeteras_moneda)
+    if not b_obj and not cands_obj:
+        b_obj, cands_obj = resolver_billetera_cascada(str(billetera_raw), billeteras_todas)
+    if not b_obj and not cands_obj:
+        raw_norm = normalizar_texto(str(billetera_raw))
+        msg_norm = normalizar_texto(ctx.mensaje_texto)
+        return bool(raw_norm and re.search(rf"(?<!\w){re.escape(raw_norm)}(?!\w)", msg_norm))
+
+    objetivos = [b_obj] if b_obj else list(cands_obj)
+    objetivo_ids = {b.id for b in objetivos}
+    pool_txt = (
+        billeteras_moneda
+        if all(b in billeteras_moneda for b in objetivos)
+        else billeteras_todas
+    )
+
+    b_txt = _buscar_billetera_en_texto(
+        ctx.mensaje_texto,
+        pool_txt,
+        excluir_efectivo=False,
+        solo_con_preposicion=False,
+    )
+    if b_txt and b_txt.id in objetivo_ids:
+        return True
+
+    palabras_ignorar = {
+        "peso", "pesos", "dolar", "dolares", "pago", "pagos", "pague",
+        "cuenta", "cuentas", "banco", "bancos", "tarjeta", "tarjetas",
+        "debito", "credito", "cuota", "cuotas", "transferencia",
+        "transferi", "compre", "gaste", "mande", "envie", "pase",
+        "desde", "para", "sobre", "entre", "plata", "dinero",
+    }
+    m_norm = normalizar_texto(ctx.mensaje_texto)
+    tokens = [t for t in m_norm.split() if len(t) >= 2]
+    cands_tok = list(tokens) + [
+        f"{tokens[i]} {tokens[i + 1]}" for i in range(len(tokens) - 1)
+    ]
+    nombres_exactos = {normalizar_texto(b.nombre) for b in pool_txt}
+    for tok in cands_tok:
+        if (
+            tok in palabras_ignorar
+            and tok not in nombres_exactos
+            and tok not in ALIAS_BILLETERAS
+        ):
+            continue
+        b_tok, _ = resolver_billetera_cascada(tok, pool_txt)
+        if b_tok and b_tok.id in objetivo_ids:
+            return True
+
+    return False
+
+
 def _resolver_billetera_y_duplicados(
     ctx: ContextoMensaje,
     entidades_actuales: dict,
@@ -538,6 +676,15 @@ def _resolver_billetera_y_duplicados(
 
     moneda_sol_str = entidades_actuales.get("moneda")
     moneda_sol = Moneda.USD if moneda_sol_str == "USD" else Moneda.ARS
+    billeteras_moneda = [b for b in billeteras_todas if b.moneda == moneda_sol]
+
+    # D-C1: descartar billeteras devueltas por IA que no fueron nombradas ni resueltas antes
+    for clave_b in (clave_bill, "billetera", clave_otra):
+        val_b = entidades_actuales.get(clave_b)
+        if val_b and not _billetera_ia_permitida(
+            str(val_b), ctx, billeteras_todas, billeteras_moneda
+        ):
+            entidades_actuales.pop(clave_b, None)
 
     # Gasto en dólares desde billetera en pesos (Decisión 2, fase_f2a)
     if tipo_act == "egreso" and moneda_sol == Moneda.USD and entidades_actuales.get("monto") is not None:
@@ -550,7 +697,6 @@ def _resolver_billetera_y_duplicados(
             armar_propuesta_usd_pesos(ctx, entidades_actuales, b_pesos, clave_bill, clave_otra)
             return
 
-    billeteras_moneda = [b for b in billeteras_todas if b.moneda == moneda_sol]
     if not billeteras_moneda:
         nom_moneda = "dólares" if moneda_sol == Moneda.USD else "pesos"
         resultado_ia["respuesta_usuario"] = (
@@ -915,6 +1061,33 @@ def procesar_resolucion_billetera_y_propuestas(ctx: ContextoMensaje) -> None:
                     entidades_actuales.pop("tarjeta", None)
                     entidades_actuales.pop("tarjeta_id", None)
                     entidades_actuales.pop("tarjeta_nombre", None)
+
+                es_img_doc = (
+                    ctx.es_imagen
+                    or ctx.es_pdf
+                    or bool(entidades_actuales.get("origen_imagen"))
+                    or bool(entidades_actuales.get("es_imagen"))
+                )
+                if entidades_actuales.get("tarjeta") is not None and not es_img_doc:
+                    estado_p = ctx.estado_previo if isinstance(ctx.estado_previo, dict) else {}
+                    dfs_p = estado_p.get("datos_faltantes") or []
+                    en_menu_t = any("tarjeta" in str(d) for d in dfs_p)
+                    tarj_prev = estado_p.get("tarjeta") or estado_p.get("tarjeta_nombre")
+                    t_ia, _ = resolver_tarjeta_cascada(
+                        str(entidades_actuales.get("tarjeta")), tarjetas_usuario
+                    )
+                    nombrada_tarj = bool(
+                        not es_debito_explicito
+                        and (
+                            (
+                                tarjeta_match_mencion
+                                and (t_ia is None or t_ia.id == tarjeta_match_mencion.id)
+                            )
+                            or (t_ia and any(t.id == t_ia.id for t in tarjeta_mencionada_cands))
+                        )
+                    )
+                    if not nombrada_tarj and not en_menu_t and not tarj_prev:
+                        entidades_actuales.pop("tarjeta", None)
 
                 es_credito = (not es_debito_explicito) and (
                     tiene_cuotas
