@@ -855,13 +855,13 @@ def test_job_consejos_diarios_aviso_fin_de_mes(db: Session, monkeypatch):
     assert u_lanza_emitir.id in usuarios_emitir
     assert u_lanza_emitir.id in usuarios_avisar
 
-    # Catálogo: que_hace de consejos_diarios es el texto de E-C y len(JOBS_CATALOGO) sigue en 24
+    # Catálogo: que_hace de consejos_diarios es el texto de E-C y len(JOBS_CATALOGO) es 25 (fase_j3a_cola_sse)
     item = next(j for j in JOBS_CATALOGO if j.job_id == "consejos_diarios")
     assert item.que_hace == (
         "Elige el consejo del día de cada persona (tarjeta «Un dato para vos» del inicio), "
         "marca los vencidos, mide si sirvieron y avisa una vez por ciclo si lo que tiene no alcanza para lo que vence."
     )
-    assert len(JOBS_CATALOGO) == 24
+    assert len(JOBS_CATALOGO) == 25
 
 
 def test_aislamiento_estatico_aviso_fin_de_mes_y_scheduler():

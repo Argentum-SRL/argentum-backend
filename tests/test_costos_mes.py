@@ -615,4 +615,4 @@ def test_jobs_catalogo_vigilar_tareas():
         "Revisa el estado de todas las tareas y alerta por email si alguna falla o se atrasa; "
         "además avisa cuando el gasto del mes en OpenAI o en WhatsApp llega al 50%, 80% o 100% del tope."
     )
-    assert len(JOBS_CATALOGO) == 24
+    assert len(JOBS_CATALOGO) == 25

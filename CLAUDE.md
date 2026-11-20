@@ -253,3 +253,17 @@ Plan vigente (único): Project de Claude.ai, claude/PLAN_VIGENTE_12-11.md (versi
 Textos de la web (cartelitos y campanita): siguen REGLAS_TEXTOS_WEB.md. Un texto nuevo se
 escribe primero en ese archivo. Lo controlan app/core/reglas_texto_web.py y
 tests/test_reglas_texto_web*.py en backend, y reglasTextoWeb.ts y textosCartelitos.test.ts.
+
+### Cola de WhatsApp (fase_j3a_cola_sse)
+- La fila de `mensajes_whatsapp_procesados` es la cola durable del webhook (estados `pendiente`, `procesando`, `listo`, `fallo`, `interrumpido`, `vencido`); `payload` guarda el mensaje solo hasta terminar y luego queda en `NULL`.
+- El webhook procesa en el grupo propio de 8 hilos (`cola_wpp_service.POOL_WPP`); lo que ya empezó (`procesando`) nunca se repite.
+- La tarea `rescatar_mensajes_wpp` (cada 2 minutos) procesa los `pendiente` con más de 60 segundos y menos de 1 hora de atraso.
+- El SSE (`/notificaciones/sse`) consulta novedades en un hilo aparte con `_leer_novedades_sse` usando cursores de `created_at`; `eventos_actualizacion` se purga a partir de 1 día en `_job_limpiar_tokens`.
+
+### Restaurar un backup
+1. Actions del repo privado `Argentum-SRL/argentum-backups` -> descargar el artifact del día.
+2. `gpg --decrypt` con la contraseña que guarda Sebastián.
+3. `pg_restore --no-owner --no-acl` en una base NUEVA, nunca sobre producción.
+4. Comparar conteos tabla por tabla contra la base de referencia.
+5. Recién entonces apuntar la app a la base restaurada.
+- En la PC, la prueba de restauración (TJ.8) se corre con `venv\Scripts\python.exe scripts\local\con_base_local.py venv\Scripts\python.exe scripts\local\probar_restauracion.py`: restaura `argentum_prod.dump` en `argentum_restauracion_prueba`, compara tablas contra `argentum_local`, corre humo sobre `/salud` y borra la base temporal (última línea esperada: `RESTAURACIÓN: BIEN`).

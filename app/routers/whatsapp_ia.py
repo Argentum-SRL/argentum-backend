@@ -201,6 +201,7 @@ from app.schemas.suscripcion import ActualizarPrecioRequest, SuscripcionCreate
 from app.schemas.transaccion import InfoCuotas, TransaccionCreate, TransaccionUpdate
 from app.schemas.transferencia_interna import TransferenciaInternaCreate
 from app.services import (
+    cola_wpp_service,
     meta_service,
     presupuesto_service,
     rate_limit_service,
@@ -381,6 +382,12 @@ def _preprocesar_webhook_whatsapp_sync(
                     wamid=wamid,
                     telefono=from_number,
                     tipo_mensaje=msg_type,
+                    estado=cola_wpp_service.PENDIENTE,
+                    payload=cola_wpp_service.payload_de({
+                        "msg": msg,
+                        "from_number": from_number,
+                        "msg_type": msg_type,
+                    }),
                 )
                 db.add(registro_wamid)
                 db.commit()
@@ -646,13 +653,42 @@ def _procesar_mensaje_whatsapp_background(datos_mensaje: dict) -> None:
             db.close()
 
 
+def _procesar_desde_cola(datos_mensaje: dict) -> None:
+    """
+    Toma el mensaje en la cola durable, ejecuta el procesamiento de fondo
+    y cierra la fila dejando el payload en NULL para que nunca se repita.
+    """
+    wamid = datos_mensaje.get("wamid")
+    if not wamid:
+        _procesar_mensaje_whatsapp_background(datos_mensaje)
+        return
+
+    db = SessionLocal()
+    try:
+        tomado = cola_wpp_service.tomar_mensaje(db, wamid, datetime.now(timezone.utc))
+        if not tomado:
+            logger.info("whatsapp_mensaje_ya_tomado", wamid=wamid)
+            return
+
+        try:
+            _procesar_mensaje_whatsapp_background(datos_mensaje)
+            estado = cola_wpp_service.LISTO
+        except Exception:
+            logger.exception("Falló el procesamiento de un mensaje de WhatsApp.")
+            estado = cola_wpp_service.FALLO
+
+        cola_wpp_service.cerrar_mensaje(db, wamid, estado)
+    finally:
+        db.close()
+
+
 def _procesar_webhook_whatsapp_sync(body_bytes: bytes, t_inicio: float) -> PlainTextResponse:
     """
     Wrapper de compatibilidad para suites de regresión que ejecutan de forma síncrona.
     """
     resp, datos_mensaje = _preprocesar_webhook_whatsapp_sync(body_bytes, t_inicio)
     if datos_mensaje:
-        _procesar_mensaje_whatsapp_background(datos_mensaje)
+        _procesar_desde_cola(datos_mensaje)
     return resp
 
 
@@ -665,7 +701,8 @@ async def whatsapp_webhook(
     Webhook de WhatsApp Cloud API (Meta Graph API).
     Valida firma HMAC-SHA256 en el event loop, ejecuta la deduplicación de forma síncrona
     en thread worker (Parte A) respondiendo inmediatamente HTTP 200, y delega el procesamiento
-    pesado de IA, transcripción y envío (Parte B) a BackgroundTasks.
+    al grupo propio de 8 hilos de WhatsApp usando la fila de mensajes_whatsapp_procesados
+    como cola durable (fase_j3a_cola_sse).
     """
     t_inicio = time.perf_counter()
     body_bytes = await request.body()
@@ -704,5 +741,9 @@ async def whatsapp_webhook(
         _preprocesar_webhook_whatsapp_sync, body_bytes, t_inicio
     )
     if datos_mensaje:
-        background_tasks.add_task(_procesar_mensaje_whatsapp_background, datos_mensaje)
+        background_tasks.add_task(
+            cola_wpp_service.ejecutar_en_pool_wpp,
+            _procesar_desde_cola,
+            datos_mensaje,
+        )
     return resp

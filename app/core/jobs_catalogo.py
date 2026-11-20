@@ -36,7 +36,7 @@ JOBS_CATALOGO: list[JobCatalogoItem] = [
     JobCatalogoItem(
         job_id="limpiar_refresh_tokens",
         nombre="Limpieza de sesiones y tokens",
-        que_hace="Elimina tokens vencidos, códigos de verificación, mensajes antiguos de WhatsApp y registros de costo de la IA de más de 400 días.",
+        que_hace="Elimina tokens vencidos, códigos de verificación, mensajes antiguos de WhatsApp, avisos de cambios de más de 1 día y registros de costo de la IA de más de 400 días.",
         periodo_esperado_minutos=360,
         puede_correr_ahora=True,
     ),
@@ -121,6 +121,13 @@ JOBS_CATALOGO: list[JobCatalogoItem] = [
         job_id="reintentar_avisos_inmediatos",
         nombre="Reintento de avisos inmediatos",
         que_hace="Reintenta el envío de notificaciones urgentes que no pudieron entregarse.",
+        periodo_esperado_minutos=2,
+        puede_correr_ahora=False,
+    ),
+    JobCatalogoItem(
+        job_id="rescatar_mensajes_wpp",
+        nombre="Mensajes de WhatsApp sin responder",
+        que_hace="Responde los mensajes de WhatsApp que llegaron justo cuando el servidor se reiniciaba (hasta 1 hora de atraso).",
         periodo_esperado_minutos=2,
         puede_correr_ahora=False,
     ),

@@ -43,8 +43,11 @@ logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 # APScheduler — limpieza periódica de refresh tokens expirados/revocados
 # ---------------------------------------------------------------------------
 import time
+from datetime import datetime, timezone
 from app.core.database import SessionLocal, db_query_duration_var
 from app.core.auth import limpiar_tokens_expirados
+from app.services import cola_wpp_service
+from app.services.evento_service import purgar_eventos_actualizacion
 from app.services.rate_limit_service import (
     limpiar_codigos_y_rate_limits_expirados,
     purgar_conversaciones_wpp_antiguas,
@@ -258,12 +261,46 @@ def _job_limpiar_tokens():
         claves_eliminadas = purgar_claves_idempotencia(db)
         if claves_eliminadas:
             logger.info("Registros de claves_idempotencia antiguos eliminados: %s", claves_eliminadas)
+
+        eventos_borrados = purgar_eventos_actualizacion(db)
+        if eventos_borrados:
+            logger.info("Eventos de actualización antiguos eliminados: %s", eventos_borrados)
     except Exception:
         logger.exception("Error en job limpiar_tokens")
         raise
     finally:
         if lock_adquirido:
             liberar_lock_job(db, "_job_limpiar_tokens")
+        db.close()
+
+
+def _job_rescatar_mensajes_wpp():
+    """Tarea programada cada 2 minutos: rescata mensajes de WhatsApp pendientes tras reinicios."""
+    from app.routers import whatsapp_ia
+
+    db = SessionLocal()
+    lock_adquirido = False
+    try:
+        if not intentar_tomar_lock_job(db, "_job_rescatar_mensajes_wpp"):
+            struct_logger.info(
+                "Job omitido: ya se está ejecutando en otra instancia",
+                job="_job_rescatar_mensajes_wpp",
+            )
+            return
+        lock_adquirido = True
+        res = cola_wpp_service.rescatar_pendientes(
+            db,
+            procesar=whatsapp_ia._procesar_mensaje_whatsapp_background,
+            ahora=datetime.now(timezone.utc),
+        )
+        if any(v > 0 for v in res.values()):
+            logger.info("Cola de WhatsApp: %s", res)
+    except Exception:
+        logger.exception("Error en job _job_rescatar_mensajes_wpp")
+        raise
+    finally:
+        if lock_adquirido:
+            liberar_lock_job(db, "_job_rescatar_mensajes_wpp")
         db.close()
 
 
@@ -812,6 +849,15 @@ async def lifespan(app: FastAPI):
             "interval",
             minutes=2,
             id="reintentar_avisos_inmediatos",
+            misfire_grace_time=60,
+            max_instances=1,
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            registrar_ejecucion("rescatar_mensajes_wpp", _job_rescatar_mensajes_wpp),
+            "interval",
+            minutes=2,
+            id="rescatar_mensajes_wpp",
             misfire_grace_time=60,
             max_instances=1,
             replace_existing=True,

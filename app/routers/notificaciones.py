@@ -4,8 +4,10 @@ import logging
 from datetime import datetime, timezone
 from uuid import UUID
 from typing import List
+import anyio
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal, get_db
@@ -209,6 +211,103 @@ def autenticar_sse(request: Request) -> tuple[UUID, datetime | None]:
     return usuario_id, iat_dt
 
 
+def _leer_novedades_sse(
+    usuario_id: UUID,
+    iat_dt: datetime | None,
+    desde_notif: datetime,
+    desde_eventos: datetime,
+) -> dict:
+    """
+    Consulta notificaciones nuevas y eventos de actualización fuera del event loop.
+    Avanza los cursores con el mayor created_at devuelto para que una notificación creada
+    durante la consulta no se pierda.
+    """
+    db_session = None
+    try:
+        db_session = SessionLocal()
+        if iat_dt:
+            iat_utc = iat_dt.replace(tzinfo=timezone.utc) if iat_dt.tzinfo is None else iat_dt
+            u_live = db_session.get(Usuario, usuario_id)
+            rev_at = u_live.tokens_revocados_at if u_live else None
+            if rev_at and rev_at.tzinfo is None:
+                rev_at = rev_at.replace(tzinfo=timezone.utc)
+            if not u_live or (rev_at and iat_utc < rev_at):
+                return {
+                    "revocada": True,
+                    "notificaciones": [],
+                    "entidades": [],
+                    "desde_notif": desde_notif,
+                    "desde_eventos": desde_eventos,
+                }
+
+        nuevas = (
+            db_session.query(Notificacion)
+            .filter(
+                Notificacion.usuario_id == usuario_id,
+                Notificacion.created_at > desde_notif,
+                Notificacion.leida == False,
+                Notificacion.archivada == False,
+                (Notificacion.silenciada_hasta == None) | (Notificacion.silenciada_hasta < func.now()),
+            )
+            .order_by(Notificacion.created_at.asc())
+            .all()
+        )
+
+        notificaciones_out = []
+        nuevo_desde_notif = desde_notif if desde_notif.tzinfo is not None else desde_notif.replace(tzinfo=timezone.utc)
+        for n in nuevas:
+            n_created = n.created_at.replace(tzinfo=timezone.utc) if n.created_at.tzinfo is None else n.created_at
+            if n_created > nuevo_desde_notif:
+                nuevo_desde_notif = n_created
+            notificaciones_out.append({
+                "id": str(n.id),
+                "tipo": n.tipo.value,
+                "nivel": n.nivel.value,
+                "mensaje": limpiar_mensaje_web(n.mensaje),
+                "leida": n.leida,
+                "archivada": n.archivada,
+                "deep_link": n.deep_link,
+                "created_at": n_created.isoformat(),
+            })
+
+        nuevos_eventos = (
+            db_session.query(EventoActualizacion)
+            .filter(
+                EventoActualizacion.usuario_id == usuario_id,
+                EventoActualizacion.created_at > desde_eventos,
+            )
+            .order_by(EventoActualizacion.created_at.asc())
+            .all()
+        )
+
+        entidades_out = [ev.entidad for ev in nuevos_eventos]
+        nuevo_desde_eventos = desde_eventos if desde_eventos.tzinfo is not None else desde_eventos.replace(tzinfo=timezone.utc)
+        for ev in nuevos_eventos:
+            ev_created = ev.created_at.replace(tzinfo=timezone.utc) if ev.created_at.tzinfo is None else ev.created_at
+            if ev_created > nuevo_desde_eventos:
+                nuevo_desde_eventos = ev_created
+
+        return {
+            "revocada": False,
+            "notificaciones": notificaciones_out,
+            "entidades": entidades_out,
+            "desde_notif": nuevo_desde_notif,
+            "desde_eventos": nuevo_desde_eventos,
+        }
+    except Exception as e:
+        logger.error("Error en generador SSE de notificaciones: %s", e)
+        return {
+            "revocada": False,
+            "notificaciones": [],
+            "entidades": [],
+            "desde_notif": desde_notif,
+            "desde_eventos": desde_eventos,
+        }
+    finally:
+        if db_session is not None:
+            db_session.close()
+
+
 @router.get("/sse")
 async def sse_notificaciones(
     request: Request,
@@ -217,7 +316,7 @@ async def sse_notificaciones(
     Endpoint SSE para streaming en vivo de notificaciones nuevas sin leer.
     Se autentica solo con la cookie httpOnly access_token.
     """
-    usuario_id, iat_dt = autenticar_sse(request)
+    usuario_id, iat_dt = await anyio.to_thread.run_sync(autenticar_sse, request)
 
     async def event_generator():
         # Enviar primer mensaje de conexión exitosa
@@ -228,71 +327,26 @@ async def sse_notificaciones(
         while True:
             await asyncio.sleep(5)
 
-            # Creamos una sesión nueva para cada iteración para evitar cruces
-            from app.core.database import SessionLocal
-            db_session = SessionLocal()
-            try:
-                # Verificar si la sesión fue revocada durante el stream abierto
-                if iat_dt:
-                    u_live = db_session.get(Usuario, usuario_id)
-                    if not u_live or (u_live.tokens_revocados_at and iat_dt < u_live.tokens_revocados_at):
-                        yield "data: {\"event\": \"revoked\"}\n\n"
-                        break
+            nov = await anyio.to_thread.run_sync(_leer_novedades_sse, usuario_id, iat_dt, ultimo_check, ultimo_check_eventos)
+            if nov["revocada"]:
+                yield "data: {\"event\": \"revoked\"}\n\n"
+                break
 
-                # Buscar notificaciones nuevas creadas después de ultimo_check
-                nuevas = (
-                    db_session.query(Notificacion)
-                    .filter(
-                        Notificacion.usuario_id == usuario_id,
-                        Notificacion.created_at > ultimo_check,
-                        Notificacion.leida == False,
-                        Notificacion.archivada == False,
-                        (Notificacion.silenciada_hasta == None) | (Notificacion.silenciada_hasta < datetime.now(timezone.utc))
-                    )
-                    .all()
-                )
+            ultimo_check = nov["desde_notif"]
+            ultimo_check_eventos = nov["desde_eventos"]
 
-                if nuevas:
-                    ultimo_check = datetime.now(timezone.utc)
-                    for n in nuevas:
-                        data_json = {
-                            "id": str(n.id),
-                            "tipo": n.tipo.value,
-                            "nivel": n.nivel.value,
-                            "mensaje": limpiar_mensaje_web(n.mensaje),
-                            "leida": n.leida,
-                            "archivada": n.archivada,
-                            "deep_link": n.deep_link,
-                            "created_at": n.created_at.isoformat(),
-                        }
-                        yield f"data: {json.dumps(data_json)}\n\n"
+            for data_json in nov["notificaciones"]:
+                yield f"data: {json.dumps(data_json)}\n\n"
 
-                # Buscar eventos de actualización de datos creados después de ultimo_check_eventos
-                nuevos_eventos = (
-                    db_session.query(EventoActualizacion)
-                    .filter(
-                        EventoActualizacion.usuario_id == usuario_id,
-                        EventoActualizacion.created_at > ultimo_check_eventos,
-                    )
-                    .order_by(EventoActualizacion.created_at.asc())
-                    .all()
-                )
+            for entidad in nov["entidades"]:
+                data_json = {
+                    "event": "data_update",
+                    "entidad": entidad,
+                }
+                yield f"data: {json.dumps(data_json)}\n\n"
 
-                if nuevos_eventos:
-                    ultimo_check_eventos = datetime.now(timezone.utc)
-                    for ev in nuevos_eventos:
-                        data_json = {
-                            "event": "data_update",
-                            "entidad": ev.entidad,
-                        }
-                        yield f"data: {json.dumps(data_json)}\n\n"
-
-                if not nuevas and not nuevos_eventos:
-                    # Heartbeat
-                    yield ": ping\n\n"
-            except Exception as e:
-                logger.error("Error en generador SSE de notificaciones: %s", e)
-            finally:
-                db_session.close()
+            if not nov["notificaciones"] and not nov["entidades"]:
+                # Heartbeat
+                yield ": ping\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
